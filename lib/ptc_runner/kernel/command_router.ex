@@ -1,10 +1,12 @@
 defmodule PtcRunner.Kernel.CommandRouter do
   @moduledoc false
 
+  alias PtcRunner.CLIProgress
   alias PtcRunner.Dotenv
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandEntry
   alias PtcRunner.Kernel.CommandFrontend
+  alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandPresentation
   alias PtcRunner.Kernel.CommandRenderer
   alias PtcRunner.Kernel.CommandRuntime
@@ -13,13 +15,16 @@ defmodule PtcRunner.Kernel.CommandRouter do
 
   @type bootstrap :: CommandFrontend.bootstrap()
   @type one_shot_runner :: (PtcRunner.Kernel.CommandArguments.t(), CommandRuntime.t() ->
-                              :ok | {:error, binary()} | {:error, atom(), binary()})
+                              :ok
+                              | {:ok, map()}
+                              | {:error, binary()}
+                              | {:error, atom(), binary()})
 
-  @spec execute([binary()], :standalone | :mix, bootstrap(), one_shot_runner()) ::
+  @spec execute([binary()], :standalone | :mix, bootstrap(), one_shot_runner(), keyword()) ::
           CommandPresentation.t()
-  def execute(argv, frontend, bootstrap, repl_runner)
+  def execute(argv, frontend, bootstrap, repl_runner, frontend_opts \\ [])
       when is_list(argv) and frontend in [:standalone, :mix] and is_function(bootstrap, 1) and
-             is_function(repl_runner, 2) do
+             is_function(repl_runner, 2) and is_list(frontend_opts) do
     case CommandEntry.open(argv, frontend) do
       {:error, %CommandEntry{rejection: %{command: command}} = entry}
       when command in @frontend_commands ->
@@ -32,8 +37,33 @@ defmodule PtcRunner.Kernel.CommandRouter do
       when command in @frontend_commands ->
         run_one_shot(entry, bootstrap, repl_runner)
 
+      {:ok, %CommandEntry{arguments: %{command: :run} = arguments} = entry} ->
+        with_progress(arguments, frontend_opts, fn progress ->
+          present_run(entry, bootstrap, progress)
+        end)
+
       {:ok, %CommandEntry{} = entry} ->
         CommandFrontend.present_entry(entry, bootstrap)
+    end
+  end
+
+  defp present_run(entry, bootstrap, progress) do
+    presentation =
+      CommandFrontend.present_entry(entry, fn parsed ->
+        with {:ok, runtime} <- bootstrap.(parsed),
+             do: CLIProgress.attach(runtime, progress)
+      end)
+
+    CLIProgress.finish(progress, presentation)
+    presentation
+  end
+
+  defp with_progress(arguments, frontend_opts, fun) do
+    if Keyword.get(arguments.frontend_options, :progress, false) do
+      progress = CLIProgress.start(arguments, frontend_opts)
+      fun.(progress)
+    else
+      fun.(nil)
     end
   end
 
@@ -57,6 +87,10 @@ defmodule PtcRunner.Kernel.CommandRouter do
         case runner.(entry.arguments, runtime) do
           :ok ->
             presentation(nil, "", "", 0)
+
+          {:ok, result} when entry.arguments.command == :transcript and is_map(result) ->
+            outcome = CommandOutcome.success(:transcript, entry.run_ref, result)
+            CommandFrontend.present_outcome(entry, outcome)
 
           {:error, code, message} ->
             presentation(

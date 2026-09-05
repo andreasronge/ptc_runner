@@ -49,59 +49,21 @@ The focused tests use only a loopback raw HTTP fixture and no credentials.
 `deps/`, `_build/`, and `priv/plts/` (root, Viewer, and launcher), then runs
 `scripts/worktree.sh init` so the checkout is ready for tests. Initialization
 installs the shared Git hooks, installs the pinned toolchain through `mise`,
-fetches root/Viewer/launcher dependencies, and compiles the root project. It
-removes unsafe write permissions from checkout directories and uses a `0022`
-umask so Linux cloud agents do not retain or create group-writable directory
-trees that fail private-destination safety tests. Pass `new --no-init` only
-when deliberately deferring that work, then run `scripts/worktree.sh init
-<dir>` before editing or testing.
+fetches root/Viewer/launcher dependencies, compiles the root project, and
+removes group-write permissions under a `0022` umask so Linux cloud agents do
+not create directory trees that fail private-destination safety tests. Pass
+`new --no-init` only when deliberately deferring that work, then run
+`scripts/worktree.sh init <dir>` before editing or testing.
 
-Seeding makes initialization incremental instead of cold. It prints one line
-per artifact saying whether it was seeded or why not — copy skipped, source
-not built, already present, or pinned by a file that differs from the main
-checkout's copy.
-
-That last key is per artifact, not per seed: every artifact is pinned by
-`mise.toml`, and each project's artifacts additionally by that project's own
-lockfile. A branch that bumps the root `mix.lock` therefore keeps seeding
-`ptc_viewer/` and `ptc_runner_launcher/` — projects it never touched — while a
-diverged `ptc_viewer/mix.lock` skips only the Viewer's two artifacts. The root
-lockfile covers the nested projects' Hex dependencies as well, because Mix
-converges a path dependency's requirements into the parent lock.
-
-For build staleness the seed is never an authority: Mix revalidates `deps/`
-and `_build/` against `mix.lock` and source digests, and dialyxir revalidates
-the project PLT against the module set, so a stale seed costs a rebuild
-rather than a wrong answer. The launcher's native executable is covered by
-this rule only because repository checkouts force elixir_make's build path
-(`force_build?/0` in `ptc_runner_launcher/mix.exs`): the precompiler flow
-otherwise trusts any artifact already present in priv, which once let a
-seeded pre-change binary answer `--publish-directory-noreplace` with a usage
-error through every warm build. Forced make runs honor `MIX_QUIET=1`, keeping
-machine-readable command stdout free of make's up-to-date chatter. The seeded
-PLT's dialyxir hash file is
-deliberately not copied (the first `mix dialyzer` run must re-check the PLT
-instead of trusting the hash), and each copied PLT must fully decode as an
-external term before promotion, so a torn copy taken while a concurrent
-dialyzer run was rewriting the source is discarded rather than promoted.
-The decode proves the copy is whole, not that the PLT is current: a project
-PLT left stale by a toolchain bump seeds as-is and fails in the worktree
-exactly as it would have in the main checkout — the remedy in the section
-above applies unchanged.
-Copies are staged under a per-process gitignored directory and promoted with
-atomic no-replace renames — neither an interrupted seed nor two concurrent
-ones can leave a half-copied artifact that later runs mistake for a built
-one — and each worktree owns its copies, so concurrent gates never share a
-writable artifact. Copies use copy-on-write clones where the filesystem
-supports it (APFS/btrfs).
-
-The one thing the seed takes on faith is dependency *fidelity*: it copies the
-main checkout's `deps/` trees as they are, so a locally edited dependency
-travels with the seed. This is a deliberate trust boundary — it is the same
-trust you accept when running gates in the main checkout itself, no tool
-rescans dependency sources against compiled artifacts anyway, and CI always
-builds from pristine dependencies. If you have edited a dependency in the
-main checkout, do not seed from it.
+The seed is a cache, never an authority: Mix and dialyxir revalidate every
+copied artifact, so a stale seed costs a rebuild rather than a wrong answer.
+It prints one line per artifact saying whether it was seeded or why not, and
+skips an artifact whose pinning files (`mise.toml` plus that project's own
+`mix.lock`) differ from the main checkout. The one thing it takes on faith is
+dependency fidelity: a locally edited dependency in the main checkout travels
+with the seed, so do not seed from a checkout whose `deps/` you have edited.
+The staging, atomic promotion, and PLT rules are documented in the seeding
+section of `scripts/worktree.sh`.
 
 To warm the cache, keep the main checkout built: `mix compile` and
 `mix dialyzer` there make every subsequent worktree cheap. To fill gaps in an
@@ -278,3 +240,33 @@ export PTC_TEST_GITHUB_TOKEN=replace-with-repository-read-token
 bash test/support/mcp_go_stateless/with_server.sh \
   mix test --include e2e --trace
 ```
+
+## Headless Linux VMs
+
+Notes for Cursor Cloud and similar agents that run in a fresh Linux VM. The
+toolchain, hooks, and standard commands above apply unchanged.
+
+- **The toolchain lives under `mise`.** Erlang/Elixir/Java are pinned in
+  `mise.toml` and installed at `~/.local/bin/mise`. Interactive shells activate
+  it through `~/.bashrc`; in a non-interactive script prefix commands with
+  `~/.local/bin/mise exec -- …` so the pinned tools resolve.
+- **Cloud shells default to a group-writable umask.** `scripts/worktree.sh init`
+  repairs existing checkout directories but cannot change its caller's umask,
+  so prefix later build and test commands with `umask 0022;`.
+- **Reinstalling dependencies does not rebuild.** A startup script that only
+  runs `mix deps.get` leaves the build stale; run `mix compile` yourself after
+  pulling changes. The launcher's C binary is rebuilt by `mix compile` through
+  `elixir_make` and needs a C compiler.
+- **Smoke test offline.** `mix ptc run
+  examples/kernel-tutorial/01-orders.ptc-project.json` and `mix ptc run
+  examples/llm-replay/ptc-project.json` need no network or credential.
+- **Maintainer labs live in `scripts/labs/`.** `scripts/labs/viewer-demo/run.sh`
+  produces varied Viewer traces against a live model, and
+  `mix run scripts/labs/inspection-lab/run.exs` produces trace and inspection
+  pairs without a credential. Neither is a shipped example.
+- **The Viewer must be started explicitly.** `mix ptc viewer <project.json>`
+  binds `127.0.0.1` on a free port and tries to open a browser; in a headless
+  VM pass `--port <PORT> --listen 127.0.0.1` and open the printed URL. It shows
+  only runs that already produced a trace.
+- **The latin1 locale warning is harmless.** Export `LANG=C.UTF-8` (or
+  `ELIXIR_ERL_OPTIONS="+fnu"`) to silence the BEAM's encoding warning.

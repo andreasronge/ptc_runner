@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [{"id": "tutorial.cost-budget", "path": "request.clj"}],
+    "entry": "tutorial.cost-budget/run"
+  },
+  "input": {"value": {"prompt": "Reply with the word ready."}},
+  "limits": {"llm_cost_microusd": 1},
+  "providers": {"workflow": [{"name": "deepseek"}]},
+  "labels": {
+    "name": "tutorial-cost-budget-refusal",
+    "model": "openrouter:deepseek/deepseek-v4-flash",
+    "provider": "openrouter",
+    "tags": {"mode": "direct", "stage": "failed"}
+  }
+}

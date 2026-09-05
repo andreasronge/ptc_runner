@@ -87,9 +87,11 @@ Building agents.">
 <li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
 <li><a href="/reference/host-installation/">Host-configuration reference</a></li>
 <li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/examples/">Examples reference</a></li>
 <li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
 <li><a href="/reference/mcp/">MCP reference</a></li>
 <li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/viewer/">Viewer reference</a></li>
 <li><a href="/reference/repl/">REPL reference</a></li>
 <li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
 <li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
@@ -165,15 +167,35 @@ generated programs on that returned outcome. Omitted or <code class="inline">nil
 above. When set, every returned outcome — including subject and provider
 failures after earlier evaluations — also includes <code class="inline">:programs</code> and
 <code class="inline">:programs-omitted</code>. Entries are ordered by one-based global turn and contain
-only <code class="inline">:turn</code>, <code class="inline">:mission</code>, and exact <code class="inline">:source</code>. Retention keeps the newest
-complete entries that fit both the requested count and a fixed 2,000,000
-UTF-8-byte source ceiling; an individual admitted program larger than that
-ceiling is omitted in full. Protocol errors and source rejected before
-evaluation are not retained. Host and infrastructure failures that abort the
-outer workflow still have no outcome to annotate.</p><p><code class="inline">kind</code> and <code class="inline">reason</code> are facts. This entry does not add a runtime
+<code class="inline">:turn</code>, <code class="inline">:mission</code>, exact <code class="inline">:source</code>, and a bounded <code class="inline">:execution</code> summary. A
+continued execution includes its model-visible observation preview and whether
+that preview was truncated; a returned execution records only <code class="inline">:returned</code>
+because the outcome already carries its value. Failed executions retain their
+closed outcome, a bounded message, and the <code class="inline">:kind</code> and <code class="inline">:reason</code> classifiers
+of the evaluation or of the closed error envelope an explicit or capability
+failure carries as its value. A classifier is retained only when its name is 1 to
+128 characters of letters, digits, <code class="inline">.</code>, <code class="inline">_</code>, <code class="inline">:</code>, <code class="inline">/</code>, or <code class="inline">-</code>, whether it
+arrives as a keyword or a string; anything else is omitted rather than
+disclosed, and the raw evaluation value is never retained. Each retained
+observation is independently capped at 2,048 characters.</p><p>Enabling retention explicitly discloses these model-visible observations to
+the calling workflow. A later reviewer may omit rolled-back failures when all
+granted effects are read-only, as in the DABStep example. A workflow with write
+or otherwise irreversible effects must not assume that a failed evaluation had
+no external effect.</p><p>Retention keeps the newest complete entries that fit both the requested count
+and a fixed 2,000,000 UTF-8-byte source ceiling; an individual admitted program
+larger than that ceiling is omitted in full. Protocol errors and source
+rejected before evaluation are not retained. Host and infrastructure failures
+that abort the outer workflow still have no outcome to annotate.</p><p>The envelope keys are PTC-Lisp keywords. The values of <code class="inline">:status</code>, <code class="inline">:kind</code>, and
+<code class="inline">:reason</code> are also keywords; the value of the <code class="inline">:retryable?</code> field is a boolean.
+The table spells keyword values with their leading <code class="inline">:</code> to preserve their
+in-workflow types. Comparing one of these values with its JSON-projected name
+string is false: use <code class="inline">(= :limit_exceeded (get response :kind))</code>, not
+<code class="inline">(= &quot;limit_exceeded&quot; (get response :kind))</code>.</p><p><code class="inline">:kind</code> and <code class="inline">:reason</code> are facts. This entry does not add a runtime
 <code class="inline">recovery: retry | choose-alternate | abort</code> axis; the workflow chooses a
 disposition. Restarting with another alias starts another agent loop. It does
-not resume the previous transcript.</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Observation</th><th style="text-align: left;">Envelope <code class="inline">kind</code></th><th style="text-align: left;">Envelope <code class="inline">reason</code></th><th style="text-align: left;">Typical policy</th></tr></thead><tbody><tr><td style="text-align: left;">Transient transport or provider failure</td><td style="text-align: left;"><code class="inline">provider-error</code></td><td style="text-align: left;"><code class="inline">timeout</code>, <code class="inline">unavailable</code>, <code class="inline">rate-limited</code>, or <code class="inline">transport-error</code> with <code class="inline">retryable?</code> true</td><td style="text-align: left;">retry the same alias</td></tr><tr><td style="text-align: left;">Whole-call live LLM deadline</td><td style="text-align: left;"><code class="inline">timeout</code></td><td style="text-align: left;"><code class="inline">llm-request-timeout</code> / <code class="inline">llm_request_timeout</code> with <code class="inline">retryable?</code> true</td><td style="text-align: left;">retry the same alias or choose another</td></tr><tr><td style="text-align: left;">Permanent per-alias provider refusal</td><td style="text-align: left;"><code class="inline">provider-error</code></td><td style="text-align: left;"><code class="inline">authentication-failed</code>, <code class="inline">payment-required</code>, <code class="inline">denied</code>, <code class="inline">not-found</code>, <code class="inline">invalid-request</code>, <code class="inline">tool-calling-unsupported</code>, and other non-retryable provider reasons</td><td style="text-align: left;">try another alias or abort</td></tr><tr><td style="text-align: left;">Per-alias <code class="inline">max_calls</code> exhaustion</td><td style="text-align: left;"><code class="inline">limit-exceeded</code></td><td style="text-align: left;"><code class="inline">capability-quota</code> with <code class="inline">details.limit</code> <code class="inline">max-calls</code></td><td style="text-align: left;">another alias may still run</td></tr><tr><td style="text-align: left;">Global LLM capability quota</td><td style="text-align: left;"><code class="inline">limit-exceeded</code></td><td style="text-align: left;"><code class="inline">capability-quota</code> with a workflow or mission capability-call limit</td><td style="text-align: left;">no selected alias can run</td></tr><tr><td style="text-align: left;">Aggregate LLM token or cost budget</td><td style="text-align: left;"><code class="inline">limit-exceeded</code></td><td style="text-align: left;"><code class="inline">llm-total-tokens</code> or <code class="inline">llm-cost-microusd</code> with the refused reservation</td><td style="text-align: left;">inspect remaining, raise the limit, or abort</td></tr><tr><td style="text-align: left;">Invalid or unknown alias</td><td style="text-align: left;"><code class="inline">protocol-error</code></td><td style="text-align: left;"><code class="inline">unknown-model-alias</code>, <code class="inline">invalid-model-alias</code>, or <code class="inline">model-alias-required</code></td><td style="text-align: left;">correct the request; no provider attempt occurred</td></tr></tbody></table></div><p>A spent per-alias <code class="inline">max_calls</code> is a named quota refusal, not a subject failure
+not resume the previous transcript. Subject failures that require authenticated
+later propagation include an opaque <code class="inline">:failure-token</code>; pass the original outcome
+to <code class="inline">fail-outcome</code> rather than reconstructing it.</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Observation</th><th style="text-align: left;">Envelope <code class="inline">:kind</code> value</th><th style="text-align: left;">Envelope <code class="inline">:reason</code> value</th><th style="text-align: left;">Typical policy</th></tr></thead><tbody><tr><td style="text-align: left;">Transient transport or provider failure</td><td style="text-align: left;"><code class="inline">:provider_error</code></td><td style="text-align: left;"><code class="inline">:timeout</code>, <code class="inline">:unavailable</code>, <code class="inline">:rate_limited</code>, or <code class="inline">:transport_error</code> with boolean <code class="inline">:retryable?</code> value <code class="inline">true</code></td><td style="text-align: left;">retry the same alias</td></tr><tr><td style="text-align: left;">Whole-call live LLM deadline</td><td style="text-align: left;"><code class="inline">:timeout</code></td><td style="text-align: left;"><code class="inline">:llm_request_timeout</code> with boolean <code class="inline">:retryable?</code> value <code class="inline">true</code></td><td style="text-align: left;">retry the same alias or choose another</td></tr><tr><td style="text-align: left;">Permanent per-alias provider refusal</td><td style="text-align: left;"><code class="inline">:provider_error</code></td><td style="text-align: left;"><code class="inline">:authentication_failed</code>, <code class="inline">:payment_required</code>, <code class="inline">:denied</code>, <code class="inline">:not_found</code>, <code class="inline">:invalid_request</code>, <code class="inline">:tool_calling_unsupported</code>, and other non-retryable provider reasons</td><td style="text-align: left;">try another alias or abort</td></tr><tr><td style="text-align: left;">Per-alias <code class="inline">max_calls</code> exhaustion</td><td style="text-align: left;"><code class="inline">:limit_exceeded</code></td><td style="text-align: left;"><code class="inline">:capability_quota</code> with <code class="inline">:details</code> field <code class="inline">:limit</code> value <code class="inline">:max_calls</code></td><td style="text-align: left;">another alias may still run</td></tr><tr><td style="text-align: left;">Global LLM capability quota</td><td style="text-align: left;"><code class="inline">:limit_exceeded</code></td><td style="text-align: left;"><code class="inline">:capability_quota</code> with a workflow or mission capability-call limit</td><td style="text-align: left;">no selected alias can run</td></tr><tr><td style="text-align: left;">Aggregate LLM token or cost budget</td><td style="text-align: left;"><code class="inline">:limit_exceeded</code></td><td style="text-align: left;"><code class="inline">:llm_total_tokens</code> or <code class="inline">:llm_cost_microusd</code> with the refused reservation</td><td style="text-align: left;">inspect remaining, raise the limit, or abort</td></tr><tr><td style="text-align: left;">Invalid or unknown alias</td><td style="text-align: left;"><code class="inline">:protocol_error</code></td><td style="text-align: left;"><code class="inline">:unknown_model_alias</code>, <code class="inline">:invalid_model_alias</code>, or <code class="inline">:model_alias_required</code></td><td style="text-align: left;">correct the request; no provider attempt occurred</td></tr></tbody></table></div><p>A spent per-alias <code class="inline">max_calls</code> is a named quota refusal, not a subject failure
 and not a transport error. <code class="inline">run-value</code>, <code class="inline">run-result-value</code>, <code class="inline">run-phased-result-value</code>,
 <code class="inline">agent.core/run</code>, and <code class="inline">agent.main</code> still fail-fast on every <code class="inline">:provider-failure</code>.
 When one of those fail-fast paths propagates an installation <code class="inline">max_calls</code> or a
@@ -185,7 +207,16 @@ fail-fast entries then report <code class="inline">execution/runtime_limit_excee
 refused reservation, not <code class="inline">workflow_failed</code>. <code class="inline">agent.core/run-outcome</code> still
 returns that envelope as a provider-failure value. Do not infer the terminal
 cause from <code class="inline">llm_budget.refused &gt; 0</code>: a later unrelated failure is not the
-earlier budget refusal.</p><h3 id="agent-core-run-result-value"><code class="inline">agent.core/run-result-value</code></h3><pre><code class="clojure language-clojure">(agent.core/run-result-value task config)</code></pre><p>Runs the same loop, validates every raw model-authored terminal candidate
+earlier budget refusal.</p><h3 id="agent-core-fail-outcome"><code class="inline">agent.core/fail-outcome</code></h3><pre><code class="clojure language-clojure">(agent.core/fail-outcome outcome)</code></pre><p>Use this after inspecting a <code class="inline">run-outcome</code> result and deciding to abort rather
+than retry or select another model. A <code class="inline">:returned</code> outcome is returned unchanged,
+including any retained programs, so callers can then read its <code class="inline">:value</code>. A
+subject or provider failure aborts with the same authenticated Kernel diagnostic
+as the fail-fast agent entries:</p><pre><code class="clojure language-clojure">(let [outcome (agent.core/run-outcome task config)]
+  ;; Inspect outcome here and retry or select another model when appropriate.
+  (get (agent.core/fail-outcome outcome) :value))</code></pre><p>The operation does not infer diagnostics from arbitrary nested maps. Only a
+canonical outcome carrying evidence retained by the Kernel can produce a
+specialized public diagnostic; forged maps and ordinary <code class="inline">fail</code> values remain
+private <code class="inline">execution/explicit_failure</code> errors.</p><h3 id="agent-core-run-result-value"><code class="inline">agent.core/run-result-value</code></h3><pre><code class="clojure language-clojure">(agent.core/run-result-value task config)</code></pre><p>Runs the same loop, validates every raw model-authored terminal candidate
 against the manifest result contract, and returns the contract-valid value to
 its PTC-Lisp caller. Use this when that raw value is itself the final
 contract-shaped application result. Invalid candidates receive bounded
@@ -290,12 +321,17 @@ selected router alias. When the adapter can authenticate the effective
 also names that cap and its bindings. It describes the cap as request metadata:
 a provider may silently enforce a lower ceiling. If ReqLLM rewrites, removes,
 or ambiguously resolves the cap, the response and terminal diagnostic omit the
-unprovable cap metadata while preserving the terminal truncation result.</p><p>The cap's <code class="inline">bindings</code> list is closed and canonically ordered:
-<code class="inline">configured</code>, <code class="inline">adapter_default</code>, <code class="inline">model_output_limit</code>, and
-<code class="inline">remaining_context</code>. Every tied constraint is retained. The remedy follows the
-binding: raise the host installation's <code class="inline">params.max_tokens</code> when configured,
-choose a model with a larger output/context limit when catalog metadata binds,
-or reduce the requested output or retained transcript.</p><p>The canonical failed <code class="inline">run-stopped</code> event retains the bounded <code class="inline">agent_turns</code>
+unprovable cap metadata while preserving the terminal truncation result.</p><p>The cap's <code class="inline">bindings</code> list is closed and canonically ordered. Live Kernel
+requests preserve <code class="inline">application_limit</code> for the effective
+<code class="inline">limits.llm_request_output_tokens</code>,
+<code class="inline">installation_param</code> for installation <code class="inline">params.max_tokens</code>, or both when their
+values tie. Direct adapter callers use <code class="inline">configured</code>; computed defaults use
+<code class="inline">adapter_default</code>, <code class="inline">model_output_limit</code>, and <code class="inline">remaining_context</code>. Every tied
+constraint is retained. The remedy follows the binding: raise the manifest
+limit (and its installed host ceiling if lower), the installation parameter,
+or both; increase the direct adapter option for <code class="inline">configured</code>; choose a model
+with a larger output/context limit when catalog metadata binds; or reduce the
+requested output or retained transcript.</p><p>The canonical failed <code class="inline">run-stopped</code> event retains the bounded <code class="inline">agent_turns</code>
 limit name, its value, and the same <code class="inline">limit_reason</code>, so trace consumers can
 present the same cause.</p><p>Before dispatch, the loop JSON-encodes the complete prospective request:
 system prompt, accumulated messages, tool schema, and optional model alias. A
@@ -336,11 +372,13 @@ definitions and history.</p><h2 id="feedback-bounds-and-disclosure">Feedback bou
 chronological <code class="inline">println</code> output. Preview traversal has independent collection,
 depth, node, string, character, and UTF-8 byte ceilings; it does not first
 serialize the complete value. The default pass preserves sibling shape under a
-small per-string ceiling. When the shape pass reports only the string cap and
-no explicit string ceiling was supplied, one bounded greedy pass may replace
-the preview with an exact rendering, but only when the complete compact
-representation fits every active ceiling. An incomplete retry is discarded in
-favor of the original shape-preserving preview.</p><p>Feedback distinguishes value-preview truncation from <code class="inline">println</code> output omitted
+small per-string ceiling. When the shape pass reports truncation only from
+implicit ceilings, one bounded greedy pass raises the item and depth ceilings
+to larger internal traversal bounds and the node and string ceilings to the
+output budget. It replaces the preview only when the complete compact
+representation fits every active ceiling; an incomplete retry is discarded in
+favor of the original shape-preserving preview. Explicit traversal ceilings
+never trigger this adaptive pass.</p><p>Feedback distinguishes value-preview truncation from <code class="inline">println</code> output omitted
 while assembling the bounded observation. For an ordinary successful result,
 the exact retained value is available as <code class="inline">*1</code>, so feedback advises reusing it
 instead of repeating a capability call. An explicit return does not advance

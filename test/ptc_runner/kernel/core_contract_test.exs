@@ -949,8 +949,8 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert_receive {:DOWN, ^provider_ref, :process, ^provider, :killed}, 1_000
   end
 
-  test "normal event sinks drop while private event sinks fail closed" do
-    {:ok, limits} = Limits.new(normal_event_count: 3, normal_event_bytes: 10_000)
+  test "normal event sinks drop while private event sinks name capacity exhaustion" do
+    {:ok, limits} = Limits.new(normal_event_count: 4)
 
     {:ok, normal} =
       EventSink.start(:normal, limits,
@@ -964,12 +964,15 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert :ok = EventSink.emit(normal, "run-progress", %{"safe" => true})
     assert :ok = EventSink.emit(normal, "run-stopped", %{"safe" => true})
     assert :ok = EventSink.emit(normal, "after-stop", %{"safe" => true})
-    assert %{"after-stop" => 1} = EventSink.dropped(normal)
+    assert :ok = EventSink.emit(normal, "overflow", %{"safe" => true})
+    assert %{"overflow" => 1} = EventSink.dropped(normal)
 
     assert :ok = EventSink.emit(private, "run-started", %{"safe" => true})
     assert :ok = EventSink.emit(private, "run-progress", %{"safe" => true})
     assert :ok = EventSink.emit(private, "run-stopped", %{"safe" => true})
-    assert {:error, :event_sink_error} = EventSink.emit(private, "after-stop", %{"safe" => true})
+
+    assert {:error, {:event_capture_limit_exceeded, :normal_event_count, 4}} =
+             EventSink.emit(private, "after-stop", %{"safe" => true})
   end
 
   test "stopped event sinks are contained according to their policy" do
@@ -1008,28 +1011,6 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert {:error, %{kind: :event_sink_error, reason: :event_sink_error}} =
              Kernel.run("(return 42)", private_config)
-  end
-
-  test "private event sink exhaustion is a terminal event-sink error" do
-    {:ok, workflow} = WorkflowEnvironment.new([])
-    {:ok, mission} = MissionEnvironment.new([])
-    {:ok, limits} = Limits.new(normal_event_count: 3, normal_event_bytes: 10_000)
-    {:ok, sink} = EventSink.start(:private, limits, run_id: "private-run")
-
-    {:ok, config} =
-      RunConfig.new(
-        workflow_environment: workflow,
-        missions: %{"default" => mission},
-        input: %{},
-        limits: limits,
-        event_sink: sink
-      )
-
-    assert :ok = EventSink.emit(sink, "occupied-one", %{})
-    assert :ok = EventSink.emit(sink, "occupied-two", %{})
-
-    assert {:error, %{kind: :event_sink_error, reason: :event_sink_error}} =
-             Kernel.run("(return 42)", config)
   end
 
   test "normal Runner finalization reserves and freezes the terminal envelope" do
@@ -1852,7 +1833,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
   test "failed subordinate evaluation start retains no unattempted inspection source" do
     {:ok, mission} = MissionEnvironment.new([])
-    {:ok, limits} = Limits.new(normal_event_count: 3, normal_event_bytes: 20_000)
+    {:ok, limits} = Limits.new(normal_event_count: 3)
     {:ok, state} = RunState.start(limits)
     {:ok, event_sink} = EventSink.start(:private, limits, run_id: "full-before-evaluation")
 
@@ -1862,7 +1843,6 @@ defmodule PtcRunner.Kernel.CoreContractTest do
         trace_id: "full-before-evaluation"
       )
 
-    assert :ok = EventSink.emit(event_sink, "occupied", %{})
     assert :ok = EventSink.emit(event_sink, "occupied", %{})
     assert :ok = EventSink.emit(event_sink, "occupied", %{})
 
@@ -1881,6 +1861,35 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert :ok = InspectionSink.stop(inspection_sink)
     assert :ok = EventSink.stop(event_sink)
     assert :ok = RunState.stop(state)
+  end
+
+  test "private event capacity terminalizes as a named limit with its retained trace" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(normal_event_count: 3)
+    {:ok, sink} = EventSink.start(:private, limits, run_id: "private-event-capacity")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {{:error, error}, {:ok, events}} = Kernel.run_and_events("(return 42)", config)
+    assert error.kind == :limit_exceeded
+    assert error.reason == :event_capture_limit_exceeded
+    assert error.details == %{limit: :normal_event_count, limit_value: 3}
+
+    assert Enum.map(events, & &1.type) == [
+             "run-started",
+             "evaluation-started",
+             "run-stopped"
+           ]
+
+    assert List.last(events).data.reason == :event_capture_limit_exceeded
   end
 
   test "Kernel rejects public projection collisions instead of losing entries" do
@@ -3697,8 +3706,8 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert {:ok, %{kind: :arithmetic_error}} = RunState.last_evaluator_failure(state)
 
-    assert %{outcome: :evaluation_error, kind: :type_error} =
-             Evaluation.evaluate_source(state, "default", mission, "(> nil 1)", 1_000)
+    assert %{outcome: :evaluation_error, kind: :unbound_var} =
+             Evaluation.evaluate_source(state, "default", mission, "missing", 1_000)
 
     assert :error = RunState.last_evaluator_failure(state)
   end

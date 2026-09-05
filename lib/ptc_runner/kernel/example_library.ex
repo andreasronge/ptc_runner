@@ -11,26 +11,31 @@ defmodule PtcRunner.Kernel.ExampleLibrary do
 
   A tree is embedded from its checked-in files. `.env` stubs are generated from
   host credential declarations when a project names an `env_file`, and a
-  `.gitignore` is generated when the tree has none, so a materialized copy can
-  run without a checkout. Paths inside the tree stay valid because nothing is
-  rewritten and nothing is flattened.
+  `.gitignore` and an `AGENTS.md` routing card are generated when the tree has
+  none, so a materialized copy can run without a checkout and a coding agent
+  finds the same card the scaffold ships. Paths inside the tree stay valid
+  because nothing is rewritten and nothing is flattened.
   """
+
+  alias PtcRunner.Kernel.AgentsCard
 
   @root Path.expand("../../..", __DIR__)
 
   # One entry per self-contained walkthrough. A tree is the unit rather than a
   # single project because these walkthroughs are multi-project by design: the
   # debug example's host document reads the trace directory the failing project
-  # writes, and the tutorial's five steps share one host document.
+  # writes, and the tutorial's live success steps share one host document.
   @catalog [
     {"kernel-tutorial", "examples/kernel-tutorial",
-     "Five numbered projects: deterministic workflow, model extraction, file agent, multi-turn agent, signature feedback"},
+     "Seven numbered projects: deterministic workflow, structured model extraction, file agent, multi-turn agent, signature feedback, deliberate cost-budget refusal, parallel model fan-out"},
     {"support-triage", "examples/support-triage",
      "Three numbered projects growing one support-inbox scenario: one bounded question, a triage policy as a mission API, two specialist missions with a result contract"},
     {"debug-a-failed-run", "examples/debug-a-failed-run",
      "A failing project plus the deterministic and agent debuggers that read its evidence"},
     {"llm-replay", "examples/llm-replay",
-     "A frozen-model project with the replay fixture its host document selects"}
+     "A frozen-model project with the replay fixture its host document selects"},
+    {"named-mission-reader-writer", "examples/named-mission-reader-writer",
+     "One workflow coordinating a reader agent and a writer agent that hold different filesystem authority"}
   ]
 
   # Everything under an example tree ships, except artifacts a run produces and
@@ -81,8 +86,8 @@ defmodule PtcRunner.Kernel.ExampleLibrary do
       "# Local environment for this example.\n"
 
     names ->
-      "# Local credentials for this example. Fill in values; do not commit secrets.\n" <>
-        Enum.map_join(names, "", &"#{&1}=\n")
+      "# Local credentials for this example. Export them or add non-empty assignments here; do not commit secrets.\n" <>
+        Enum.map_join(names, "", &"# #{&1}\n")
   end
 
   with_generated_files = fn files ->
@@ -90,6 +95,11 @@ defmodule PtcRunner.Kernel.ExampleLibrary do
       if Map.has_key?(files, ".gitignore"),
         do: files,
         else: Map.put(files, ".gitignore", @gitignore)
+
+    files =
+      if Map.has_key?(files, "AGENTS.md"),
+        do: files,
+        else: Map.put(files, "AGENTS.md", AgentsCard.example())
 
     stub = env_stub.(credential_env_names.(files))
 

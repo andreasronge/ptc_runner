@@ -11,7 +11,8 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
 
   @examples Path.expand("../../../examples/kernel-tutorial", __DIR__)
   @host Path.join(@examples, "ptc-host.json")
-  @viewer_examples Path.expand("../../../examples/viewer-demo", __DIR__)
+  @cost_budget_host Path.join(@examples, "ptc-host-cost-budget.json")
+  @viewer_examples Path.expand("../../../scripts/labs/viewer-demo", __DIR__)
   @replay_example Path.expand("../../../examples/llm-replay", __DIR__)
 
   test "the deterministic tutorial manifest returns the documented value" do
@@ -37,7 +38,7 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
     assert {:ok, host} = HostConfig.load(@host)
     assert host.install |> Map.keys() |> Enum.sort() == ["deepseek", "workspace"]
 
-    for example <- ["02-deepseek-extract", "03-file-agent", "04-multi-turn-agent"] do
+    for example <- ~w(02-deepseek-extract 03-file-agent 04-multi-turn-agent 07-parallel-fan-out) do
       assert {:ok, manifest} = Manifest.load(path(example))
       assert manifest.entry =~ "/"
 
@@ -50,9 +51,24 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
     end
   end
 
+  test "the cost-budget tutorial installs and requests the deliberate one-microUSD ceiling" do
+    assert {:ok, host} = HostConfig.load(@cost_budget_host)
+    assert host.limits.llm_cost_microusd == 1
+
+    installation = host.install["deepseek"]
+
+    assert installation.reservation_tariff == %{
+             currency: "USD",
+             id: "openrouter-model-pricing-v1"
+           }
+
+    assert {:ok, manifest} = Manifest.load(path("06-cost-budget"), host.limits)
+    assert manifest.limits.llm_cost_microusd == 1
+  end
+
   test "every tutorial project strictly resolves its application and local artifact root" do
     examples =
-      ~w(01-orders 02-deepseek-extract 03-file-agent 04-multi-turn-agent 05-signature-feedback)
+      ~w(01-orders 02-deepseek-extract 03-file-agent 04-multi-turn-agent 05-signature-feedback 06-cost-budget 07-parallel-fan-out)
 
     for example <- examples do
       project_path = Path.join(@examples, "#{example}.ptc-project.json")
@@ -64,8 +80,9 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
       assert project.artifacts == %{trace: true, inspection: true, result: false, envelope: true}
       assert project.viewer == %{port: 0, open: true, repl: true, private: true}
 
-      if example in ~w(02-deepseek-extract 03-file-agent 04-multi-turn-agent) do
-        assert project.host == @host
+      if example in ~w(02-deepseek-extract 03-file-agent 04-multi-turn-agent 06-cost-budget 07-parallel-fan-out) do
+        expected_host = if example == "06-cost-budget", do: @cost_budget_host, else: @host
+        assert project.host == expected_host
         assert project.env_file == Path.join(@examples, ".env")
       else
         assert project.host == nil

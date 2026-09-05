@@ -67,6 +67,19 @@ defmodule PtcRunner.Kernel.ViewerAdapter do
     end
   end
 
+  @spec result(inspection_grant(), binary()) :: {:ok, map()} | {:error, atom()}
+  @doc "Returns the pinned run's authorized terminal application result."
+  def result({:inspection_v4, granted_run_id, snapshot, _trace_snapshot}, run_id)
+      when is_binary(granted_run_id) and is_binary(run_id) do
+    cond do
+      not InspectionSnapshot.valid?(snapshot) -> {:error, :invalid_inspection_query}
+      granted_run_id != run_id -> {:error, :inspection_run_mismatch}
+      true -> InspectionSnapshot.query(snapshot, :result, %{"run_id" => run_id})
+    end
+  end
+
+  def result(_grant, _run_id), do: {:error, :invalid_inspection_query}
+
   @spec preludes(inspection_grant(), binary()) :: {:ok, map()} | {:error, atom()}
   @doc "Returns the pinned run's exact effective prelude sources."
   def preludes(grant, run_id), do: inspection_collection(grant, run_id, :effective_preludes)

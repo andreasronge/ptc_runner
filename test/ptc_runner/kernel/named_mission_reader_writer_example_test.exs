@@ -11,7 +11,7 @@ defmodule PtcRunner.Kernel.NamedMissionReaderWriterExampleTest do
     assert {:ok, project} = ProjectConfig.load(Path.join(@example, "ptc-project.json"))
     assert project.application == Path.join(@example, "ptc.json")
     assert project.host == @host
-    assert project.env_file == nil
+    assert project.env_file == Path.join(@example, ".env")
     assert project.artifacts.inspection
     assert project.viewer.private
   end

@@ -26,6 +26,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
     {:doctor, :connect},
     :models,
     :materialize,
+    :transcript,
     :unknown
   ]
   @success_modes [
@@ -37,7 +38,8 @@ defmodule PtcRunner.Kernel.CommandOutcome do
     :doctor,
     {:doctor, :connect},
     :models,
-    :materialize
+    :materialize,
+    :transcript
   ]
   @static_modes [
     :help,
@@ -48,6 +50,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
     :doctor,
     :models,
     :materialize,
+    :transcript,
     :unknown
   ]
   @exit_statuses [0, 2, 3, 4, 5, 6, 7, 70]
@@ -82,6 +85,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
           | {:doctor, :connect}
           | :models
           | :materialize
+          | :transcript
           | :unknown
   @type t :: %__MODULE__{
           command_mode: command_mode(),
@@ -124,12 +128,48 @@ defmodule PtcRunner.Kernel.CommandOutcome do
           :doctor | {:doctor, :connect},
           binary(),
           map(),
+          CommandDiagnostic.t()
+        ) :: t()
+  def doctor_failure(command_mode, run_ref, result, diagnostic),
+    do: doctor_failure(command_mode, run_ref, result, diagnostic, [], [])
+
+  @doc false
+  @spec doctor_failure(
+          :doctor | {:doctor, :connect},
+          binary(),
+          map(),
           CommandDiagnostic.t(),
           [CommandDiagnostic.t()]
         ) :: t()
-  def doctor_failure(command_mode, run_ref, result, diagnostic, secondary \\ [])
+  def doctor_failure(command_mode, run_ref, result, diagnostic, secondary),
+    do: doctor_failure(command_mode, run_ref, result, diagnostic, secondary, [])
 
-  def doctor_failure(command_mode, run_ref, result, %CommandDiagnostic{} = diagnostic, secondary)
+  @doc false
+  @spec doctor_failure(
+          :doctor | {:doctor, :connect},
+          binary(),
+          map(),
+          CommandDiagnostic.t(),
+          [CommandDiagnostic.t()],
+          [CommandDiagnostic.t()]
+        ) :: t()
+  def doctor_failure(
+        command_mode,
+        run_ref,
+        result,
+        diagnostic,
+        secondary,
+        warning_diagnostics
+      )
+
+  def doctor_failure(
+        command_mode,
+        run_ref,
+        result,
+        %CommandDiagnostic{} = diagnostic,
+        secondary,
+        warning_diagnostics
+      )
       when command_mode in [:doctor, {:doctor, :connect}] and is_map(result) and
              is_list(secondary) and length(secondary) <= 6 do
     rendered_primary = CommandDiagnostic.to_map(diagnostic)
@@ -139,6 +179,9 @@ defmodule PtcRunner.Kernel.CommandOutcome do
          (command_mode == {:doctor, :connect} or secondary == []) and
          doctor_failure_mode_allowed?(command_mode, diagnostic) and
          valid_mode_diagnostics?(command_mode, [diagnostic | secondary]) and
+         is_list(warning_diagnostics) and
+         valid_mode_diagnostics?(command_mode, warning_diagnostics) and
+         valid_doctor_warning_diagnostics?(command_mode, result, warning_diagnostics) and
          valid_compound_diagnostics?(diagnostic, secondary) and
          CommandContract.valid_doctor_failure_result?(
            result,
@@ -150,6 +193,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
         command_mode
         |> error_envelope(run_ref, diagnostic, secondary)
         |> Map.put("result", result)
+        |> Map.put("warnings", diagnostic_warnings(warning_diagnostics))
 
       seal(command_mode, envelope, diagnostic.exit_status)
     else
@@ -157,8 +201,15 @@ defmodule PtcRunner.Kernel.CommandOutcome do
     end
   end
 
-  def doctor_failure(_command_mode, _run_ref, _result, _diagnostic, _secondary),
-    do: raise(ArgumentError, "invalid closed doctor failure outcome")
+  def doctor_failure(
+        _command_mode,
+        _run_ref,
+        _result,
+        _diagnostic,
+        _secondary,
+        _warning_diagnostics
+      ),
+      do: raise(ArgumentError, "invalid closed doctor failure outcome")
 
   @spec run_error(
           binary(),
@@ -342,6 +393,46 @@ defmodule PtcRunner.Kernel.CommandOutcome do
     }
   end
 
+  defp diagnostic_warnings(diagnostics) do
+    diagnostics
+    |> Enum.flat_map(& &1.warnings)
+    |> CommandWarning.sort()
+    |> Enum.map(&CommandWarning.to_map/1)
+  end
+
+  defp valid_doctor_warning_diagnostics?({:doctor, :connect}, _result, diagnostics),
+    do: diagnostics == []
+
+  defp valid_doctor_warning_diagnostics?(
+         :doctor,
+         %{"checks" => checks, "model_aliases" => aliases},
+         diagnostics
+       )
+       when is_list(checks) and is_list(aliases) do
+    failed =
+      MapSet.new(checks, fn check ->
+        {check["name"], check["status"], check["code"]}
+      end)
+
+    Enum.all?(diagnostics, fn
+      %CommandDiagnostic{
+        phase: :local_preflight,
+        code: _code,
+        subject: %CommandSubject{name: name, operation: :local},
+        provider_activity: false
+      } ->
+        CommandContract.selected_live_llm_alias?(aliases, name) and
+          Enum.any?(failed, fn {check_name, status, _code} ->
+            check_name == "provider/#{name}/local" and status == "fail"
+          end)
+
+      _invalid ->
+        false
+    end)
+  end
+
+  defp valid_doctor_warning_diagnostics?(_mode, _result, _diagnostics), do: false
+
   defp seal(command_mode, envelope, exit_status) do
     outcome = %__MODULE__{
       command_mode: command_mode,
@@ -501,15 +592,13 @@ defmodule PtcRunner.Kernel.CommandOutcome do
 
   defp valid_success_mode?(:doctor, %{
          "checks" => checks,
-         "provider_activity" => false,
-         "readiness" => "unverified"
+         "provider_activity" => false
        }),
        do: valid_doctor_checks?(:default, checks)
 
   defp valid_success_mode?({:doctor, :connect}, %{
          "checks" => checks,
-         "provider_activity" => provider_activity,
-         "readiness" => "ready"
+         "provider_activity" => provider_activity
        }),
        do: is_boolean(provider_activity) and valid_doctor_checks?(:connect, checks)
 

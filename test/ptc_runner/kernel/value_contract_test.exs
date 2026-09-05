@@ -24,6 +24,75 @@ defmodule PtcRunner.Kernel.ValueContractTest do
     refute ValueContract.valid?(contract, %{"task" => "inspect", "extra" => true})
   end
 
+  test "canonicalizes and validates bounded nullable types" do
+    schema = %{
+      "type" => "object",
+      "properties" => %{
+        "analysis" => %{"type" => ["null", "string"], "minLength" => 2},
+        "count" => %{"type" => ["integer", "null"], "minimum" => 1}
+      },
+      "required" => ["analysis"]
+    }
+
+    assert {:ok, contract} = ValueContract.compile(schema)
+    assert get_in(contract.schema, ["properties", "analysis", "type"]) == ["string", "null"]
+    assert ValueContract.valid?(contract, %{"analysis" => "ok"})
+    assert ValueContract.valid?(contract, %{"analysis" => nil, "count" => nil})
+    refute ValueContract.valid?(contract, %{})
+    refute ValueContract.valid?(contract, %{"analysis" => 42})
+    refute ValueContract.valid?(contract, %{"analysis" => "x"})
+
+    reversed = put_in(schema, ["properties", "analysis", "type"], ["string", "null"])
+    assert {:ok, reversed_contract} = ValueContract.compile(reversed)
+    assert contract.schema == reversed_contract.schema
+    assert ValueContract.behavior_hash(contract) == ValueContract.behavior_hash(reversed_contract)
+    assert ValueContract.describe(contract) == ~s({"analysis" string|null, "count"? integer|null})
+  end
+
+  test "nullable object and array nodes retain nested safe diagnostic paths" do
+    schema = %{
+      "type" => "object",
+      "properties" => %{
+        "record" => %{
+          "type" => ["object", "null"],
+          "properties" => %{
+            "items" => %{"type" => ["null", "array"], "items" => %{"type" => "integer"}}
+          },
+          "required" => ["items"]
+        }
+      },
+      "required" => ["record"]
+    }
+
+    assert {:ok, contract} = ValueContract.compile(schema)
+    assert ValueContract.valid?(contract, %{"record" => nil})
+    assert ValueContract.valid?(contract, %{"record" => %{"items" => nil}})
+    assert ValueContract.valid?(contract, %{"record" => %{"items" => [1, 2]}})
+
+    classification = ValueContract.classify(contract, %{"record" => %{"items" => [1, "bad"]}})
+
+    assert %{segments: [{:property, "record"}, {:property, "items"}, {:index, 1}], kind: :type} in classification.violations
+  end
+
+  test "rejects malformed and general type arrays at the type pointer" do
+    for type <- [
+          ["string", "number"],
+          ["string", "string"],
+          ["string"],
+          ["string", "null", "number"],
+          ["string", "unknown"]
+        ] do
+      schema = %{"type" => "object", "properties" => %{"value" => %{"type" => type}}}
+
+      assert {:error,
+              {:invalid_value_contract,
+               %{
+                 rule: :unsupported_type,
+                 segments: [property: "properties", property: "value", property: "type"]
+               }}} = ValueContract.compile(schema)
+    end
+  end
+
   test "accepts only a bounded root tagged union with one shared discriminator" do
     schema = decision_schema()
 
@@ -48,6 +117,27 @@ defmodule PtcRunner.Kernel.ValueContractTest do
              "decision" => "unknown",
              "reason" => "not declared"
            })
+  end
+
+  test "a nullable string type remains a valid tagged-union discriminator" do
+    schema =
+      update_in(decision_schema(), ["oneOf"], fn branches ->
+        Enum.map(branches, &put_in(&1, ["properties", "decision", "type"], ["null", "string"]))
+      end)
+
+    assert {:ok, contract} = ValueContract.compile(schema)
+    assert ValueContract.valid?(contract, %{"decision" => "no-change", "reason" => "none"})
+  end
+
+  test "describes a pure null field once" do
+    schema = %{
+      "type" => "object",
+      "properties" => %{"nothing" => %{"type" => "null"}},
+      "required" => ["nothing"]
+    }
+
+    assert {:ok, contract} = ValueContract.compile(schema)
+    assert ValueContract.describe(contract) == ~s({"nothing" null})
   end
 
   # Diagnosing "the model returned the discriminator instead of the map" cost

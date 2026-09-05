@@ -51,18 +51,20 @@ attached source into ordinary workflow data. Component files must not contain
 credentials.
 
 `ptc repl --inspect-only` compiles the selected project or manifest environment
-and attaches that catalog without a host document, environment file, input,
-provider, or capability. Pure attached functions may run; Kernel, provider, and
+and attaches that catalog without an environment file, input, provider, or
+capability. When a project declares a host, project mode reads that document
+only for non-secret installed limit ceilings; credentials remain unresolved and providers remain inactive.
+Pure attached functions may run; Kernel, provider, and
 capability routes fail closed. See the [REPL reference](repl.md#inspect-without-providers).
 
 ## Admitted programs
 
 `retain_programs` exists only on `agent.core/run-outcome`. Omitted or `nil`
 keeps the historical outcome shape. When set, every returned outcome includes
-`:programs` and `:programs-omitted`. Entries keep `:turn`, `:mission`, and
-exact `:source` for programs admitted to subordinate evaluation. Protocol
-errors and source refused before admission are excluded. See the
-[agent library reference](../agent-library-reference.md).
+`:programs` and `:programs-omitted`. Entries keep `:turn`, `:mission`, exact
+`:source`, and a bounded `:execution` summary for programs admitted to
+subordinate evaluation. Protocol errors and source refused before admission
+are excluded. See the [agent library reference](../agent-library-reference.md).
 
 ## Export and candidate files
 

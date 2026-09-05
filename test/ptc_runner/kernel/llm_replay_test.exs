@@ -599,7 +599,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
               %{
                 "id" => "eval-bad",
                 "name" => "run_ptc_lisp",
-                "args" => %{"program" => "(/ 1 0)"}
+                "args" => %{"program" => "(count 5)"}
               }
             ]
           }
@@ -613,15 +613,17 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
              inspect(exhausted.envelope)
 
       assert exhausted.envelope["execution"]["last_evaluation_error"] == %{
-               "kind" => "arithmetic_error",
-               "message" => "division by zero"
+               "kind" => "type_error",
+               "message" => "a PTC-Lisp operation received a value of the wrong type"
              }
 
       assert CommandContract.valid_envelope?(exhausted.envelope)
 
       assert {:stderr, rendered} = CommandRenderer.render(exhausted)
       assert rendered =~ "error: execution/turn_limit_exceeded:"
-      assert rendered =~ "evaluation: arithmetic_error: division by zero"
+
+      assert rendered =~
+               "evaluation: type_error: a PTC-Lisp operation received a value of the wrong type"
     end
 
     @tag :tmp_dir

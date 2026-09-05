@@ -329,6 +329,277 @@ defmodule PtcViewer.KernelTranscriptTest do
     assert rendered =~ "mission unavailable"
   end
 
+  test "summarizes observed evaluations and repeated capability calls", %{tmp_dir: directory} do
+    rendered =
+      render(directory, %{
+        "metadata" => %{"run_id" => "overview-run", "status" => "ok"},
+        "turns" => %{
+          "items" => [
+            event(1, "evaluation-started", %{
+              "evaluation_id" => "workflow-1",
+              "environment" => "workflow"
+            }),
+            event(2, "evaluation-started", %{
+              "evaluation_id" => "mission-1",
+              "environment" => "mission",
+              "mission_name" => "review"
+            }),
+            event(3, "capability-started", %{
+              "capability_id" => "read-1",
+              "environment" => "mission",
+              "mission_name" => "review",
+              "name" => "workspace.read"
+            }),
+            event(4, "capability-stopped", %{
+              "capability_id" => "read-1",
+              "environment" => "mission",
+              "mission_name" => "review",
+              "name" => "workspace.read",
+              "status" => "ok"
+            }),
+            event(5, "capability-started", %{
+              "capability_id" => "read-2",
+              "environment" => "mission",
+              "mission_name" => "review",
+              "name" => "workspace.read"
+            }),
+            event(6, "capability-stopped", %{
+              "capability_id" => "read-2",
+              "environment" => "mission",
+              "mission_name" => "review",
+              "name" => "workspace.read",
+              "status" => "ok"
+            }),
+            event(7, "evaluation-stopped", %{
+              "evaluation_id" => "mission-1",
+              "environment" => "mission",
+              "mission_name" => "review",
+              "status" => "ok"
+            }),
+            event(8, "workflow-annotation", %{
+              "annotation_type" => "agent-action",
+              "data" => %{
+                "invocation" => "agent-596be325449c5d0c",
+                "kind" => "tool-call",
+                "max_turns" => 16,
+                "turn" => 0
+              }
+            }),
+            event(9, "evaluation-stopped", %{
+              "evaluation_id" => "workflow-1",
+              "environment" => "workflow",
+              "status" => "ok"
+            })
+          ]
+        },
+        "conversation" => %{
+          "streams" => [
+            %{
+              "stream_id" => "review-session",
+              "turns" => [
+                %{
+                  "turn" => 1,
+                  "generated" => [
+                    %{
+                      "evaluation_id" => "mission-1",
+                      "mission_name" => "review",
+                      "source" => "(return :ok)"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "result" => %{"value" => "reviewed"}
+      })
+
+    assert rendered =~ "What actually ran"
+    assert rendered =~ "A model session generates a program"
+    assert rendered =~ "Orchestrated 1 model session across 1 mission evaluation"
+    assert rendered =~ ">review</strong>"
+    assert rendered =~ "Model turn 1 generated a program for this mission"
+    assert rendered =~ "Open prompt, response &amp; program"
+    assert rendered =~ ~s(href="#model-session-review-session")
+    assert rendered =~ "Returned to the workflow."
+    assert rendered =~ "exact mission return value is not duplicated as model feedback"
+    assert rendered =~ "workspace.read × 2"
+    assert rendered =~ "2 individual calls"
+    assert rendered =~ "Model turn 1 of 16 · program requested"
+    assert rendered =~ "The model returned a PTC-Lisp program for evaluation."
+    assert rendered =~ "Application result"
+    assert rendered =~ "reviewed"
+    refute rendered =~ ~s(class="kt-reference-panel" open="")
+  end
+
+  test "labels an observed execution summary as partial while events remain", %{
+    tmp_dir: directory
+  } do
+    rendered =
+      render(directory, %{
+        "metadata" => %{"run_id" => "partial-run"},
+        "turns" => %{
+          "next_cursor" => "more-events",
+          "items" => [
+            event(1, "evaluation-started", %{
+              "evaluation_id" => "workflow-1",
+              "environment" => "workflow"
+            })
+          ]
+        }
+      })
+
+    assert rendered =~ "What is visible in loaded events"
+    assert rendered =~ "1 evaluation loaded"
+    assert rendered =~ "This is a partial summary."
+    refute rendered =~ "What actually ran"
+  end
+
+  test "labels dropped canonical events as incomplete and not loadable", %{tmp_dir: directory} do
+    rendered =
+      render(directory, %{
+        "metadata" => %{"run_id" => "dropped-run", "truncated" => true},
+        "turns" => %{
+          "items" => [
+            event(1, "evaluation-started", %{
+              "evaluation_id" => "workflow-1",
+              "environment" => "workflow"
+            })
+          ]
+        }
+      })
+
+    assert rendered =~ "What is visible in recorded events"
+    assert rendered =~ "trace reports dropped events"
+    assert rendered =~ "missing events cannot be loaded"
+    refute rendered =~ "What actually ran"
+  end
+
+  test "distinguishes loadable retained pages from irrecoverably dropped events", %{
+    tmp_dir: directory
+  } do
+    rendered =
+      render(directory, %{
+        "metadata" => %{"run_id" => "partial-dropped-run", "truncated" => true},
+        "turns" => %{
+          "next_cursor" => "more-retained-events",
+          "items" => [
+            event(1, "evaluation-started", %{
+              "evaluation_id" => "workflow-1",
+              "environment" => "workflow"
+            })
+          ]
+        }
+      })
+
+    assert rendered =~ "What is visible so far"
+    assert rendered =~ "1 evaluation loaded"
+    assert rendered =~ "More retained events can be loaded"
+    assert rendered =~ "dropped events that cannot be recovered"
+  end
+
+  test "counts retry evaluations within one stream as one model session", %{tmp_dir: directory} do
+    events = [
+      event(1, "evaluation-started", %{
+        "evaluation_id" => "workflow-1",
+        "environment" => "workflow"
+      }),
+      event(2, "evaluation-started", %{
+        "evaluation_id" => "mission-1",
+        "environment" => "mission",
+        "mission_name" => "review"
+      }),
+      event(3, "evaluation-stopped", %{
+        "evaluation_id" => "mission-1",
+        "environment" => "mission",
+        "mission_name" => "review",
+        "status" => "returned"
+      }),
+      event(4, "evaluation-started", %{
+        "evaluation_id" => "mission-2",
+        "environment" => "mission",
+        "mission_name" => "review"
+      }),
+      event(5, "evaluation-stopped", %{
+        "evaluation_id" => "mission-2",
+        "environment" => "mission",
+        "mission_name" => "review",
+        "status" => "returned"
+      }),
+      event(6, "evaluation-stopped", %{
+        "evaluation_id" => "workflow-1",
+        "environment" => "workflow",
+        "status" => "ok"
+      })
+    ]
+
+    rendered =
+      render(directory, %{
+        "metadata" => %{"run_id" => "retry-run"},
+        "turns" => %{"items" => events},
+        "conversation" => %{
+          "streams" => [
+            %{
+              "stream_id" => "one-session",
+              "turns" => [
+                %{"turn" => 1, "generated" => [%{"evaluation_id" => "mission-1"}]},
+                %{"turn" => 2, "generated" => [%{"evaluation_id" => "mission-2"}]}
+              ]
+            }
+          ]
+        }
+      })
+
+    assert rendered =~ "1 model session across 2 mission evaluations"
+    refute rendered =~ "2 model sessions"
+  end
+
+  test "counts a failed model session even when it generated no mission evaluation", %{
+    tmp_dir: directory
+  } do
+    rendered =
+      render(directory, %{
+        "metadata" => %{"run_id" => "failed-session-run"},
+        "turns" => %{
+          "items" => [
+            event(1, "evaluation-started", %{
+              "evaluation_id" => "workflow-1",
+              "environment" => "workflow"
+            }),
+            event(2, "evaluation-started", %{
+              "evaluation_id" => "mission-1",
+              "environment" => "mission",
+              "mission_name" => "analysis"
+            }),
+            event(3, "evaluation-stopped", %{
+              "evaluation_id" => "mission-1",
+              "environment" => "mission",
+              "mission_name" => "analysis",
+              "status" => "returned"
+            }),
+            event(4, "evaluation-stopped", %{
+              "evaluation_id" => "workflow-1",
+              "environment" => "workflow",
+              "status" => "error"
+            })
+          ]
+        },
+        "conversation" => %{
+          "streams" => [
+            %{
+              "stream_id" => "successful",
+              "turns" => [
+                %{"turn" => 1, "generated" => [%{"evaluation_id" => "mission-1"}]}
+              ]
+            },
+            %{"stream_id" => "provider-failure", "turns" => [%{"turn" => 1, "generated" => []}]}
+          ]
+        }
+      })
+
+    assert rendered =~ "Orchestrated 2 model sessions across 1 mission evaluation"
+  end
+
   defp private_program_data(ambiguous?) do
     program = ~S|(runs/diagnose "failed-run")|
 

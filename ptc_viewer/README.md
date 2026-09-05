@@ -19,7 +19,12 @@ mix ptc viewer ptc-project.json --env-file .env
 ```
 
 That command also derives the Live tab's fixed launch target and project
-details from the named project. A Viewer-started workflow runs inside the same
+details from the named project. Live shows a declared application map with the
+workflow entry and available mission environments; it is configuration, not a
+claim that every mission runs. Selecting **workflow** runs the application with
+the edited JSON input. Selecting a mission instead evaluates one PTC-Lisp
+expression in that mission sandbox; it is a focused environment test, not a
+way to start that workflow stage. A Viewer-started workflow runs inside the same
 long-lived PtcRunner BEAM instance under the ordinary execution-session owner,
 preserving the project's host, environment, and artifact defaults without
 starting a `mix` or `ptc` child process. No programmatic `PtcViewer.start/1`
@@ -78,14 +83,41 @@ isolated without hiding disjoint valid runs. The Runs tab renders the
 Kernel's bounded isolation evidence; it never rescans or reclassifies files in
 the browser.
 
+The run page first summarizes the evaluations that actually occurred, in
+canonical start order, and groups repeated capability calls by name. This is
+recorded execution evidence; the Viewer does not infer dependencies from timing
+or imply that a configured mission ran. Individual evaluations, capability
+calls, and raw canonical events remain in the collapsed execution transcript.
+If the bounded eager read leaves more event pages, the overview labels itself
+partial until the operator loads them. If the trace reports dropped events, the
+overview also states that it is incomplete and that those events cannot be
+recovered. When both conditions apply, it distinguishes the retained pages that
+can still be loaded from the dropped events that cannot.
+
+When private evidence associates a generated program with a mission
+evaluation, the overview links that evaluation to its model session. Expanding
+the session shows the prompt, input added for that turn, model response, and
+program. Model turns are presented one-based: one turn means the model was
+called once; a later turn exists only when the loop called it again with
+feedback or another instruction. The raw zero-based `agent-action` annotation
+remains available, but the transcript describes its meaning first.
+
 The canonical transcript keeps canonical events as its execution spine. With
 an authorized inspection artifact, it also shows each evaluation's exact
 generated program from the semantic conversation projection and the feedback
 reconstructed on the following turn. Ambiguous program-to-turn associations
 are not guessed into result blocks. Private model requests and responses also
-appear in the separate **Model conversation** panel produced by `RunAnalysis`;
-ambiguous exchanges are omitted from streams and reported by the semantic
-result rather than guessed into a turn.
+appear in the separate **Model sessions & programs** panel produced by
+`RunAnalysis`. That panel leads with the model input, response, generated
+programs, and tool feedback; the complete raw turn record stays one disclosure
+away. It labels a session with captured mission names when available, retaining
+the opaque stream ID as provenance. The Viewer does not expose a run's final
+application value from the sanitized trace. When the host grants the run's
+private inspection artifact, the Viewer reads the existing authorized result
+projection and displays it separately from per-turn feedback. Run envelopes
+remain the canonical automation interface; ambiguous exchanges are omitted
+from streams and reported by the semantic result rather than guessed into a
+turn.
 
 The browser cannot choose a server path or discover inspection files. Startup
 pins the operator-selected artifact, validates it against the captured
@@ -194,6 +226,7 @@ live ingestion and controls, not the trace browser as a whole.
 | `GET /api/kernel/runs/:run_id/turns` | `list_turns` with bounded filters and pagination |
 | `GET /api/kernel/counters` | `counters` |
 | `GET /api/analysis/runs/:run_id/conversation` | Presentation over the bounded `turns` collection |
+| `GET /api/analysis/runs/:run_id/result` | Authorized terminal application result from the pinned inspection projection |
 | `GET /api/analysis/runs/:run_id/preludes` | Bounded effective prelude sources from the pinned inspection projection |
 | `GET /api/analysis/runs/:run_id/execution-errors` | Authorized workflow execution-error records from the pinned inspection projection |
 | `GET /api/analysis/runs/:run_id/explicit-failure-values` | Dedicated explicit-failure-value records from the pinned inspection projection |

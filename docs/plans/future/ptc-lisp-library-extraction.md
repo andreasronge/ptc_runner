@@ -157,8 +157,7 @@ cwd-relative compile-time loads of `priv/functions.exs` /
 ### Honest performance accounting
 
 The suite profile is ~171 s = ~32 s async + ~139 s sync, and the sync 81% is
-entirely runner-side (CommandEngine, MCP transports, Mix tasks — see
-`docs/plans/faster-hooks.md`). Lisp tests are 131 of 133 `async: true` and
+entirely runner-side (CommandEngine, MCP transports, Mix tasks). Lisp tests are 131 of 133 `async: true` and
 live in the cheap async phase, so extraction shaves only ~15–25 s of suite
 wall time, not the ~30% its LOC share suggests. Warm incremental `mix compile`
 is ~4.6 s; the edit loop is not the problem.

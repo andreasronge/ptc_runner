@@ -38,7 +38,9 @@ checks can make real requests and may incur cost:
 ptc doctor ptc-project.json --connect
 ```
 
-Plain doctor reports `readiness: "unverified"` when its local checks pass.
+Readiness is derived from provider check rows: no rows report
+`readiness: "not_applicable"`, all passing rows report `readiness: "ready"`,
+and any skipped row reports `readiness: "unverified"`.
 Missing provider commands, unreadable replay fixtures, and other attributable
 local failures produce failed check rows, `readiness: "failed"`, and a nonzero
 exit without activating a provider. Successful active checks report `ready`;
@@ -136,6 +138,11 @@ ptc run ptc.json \
 
 Useful run switches are:
 
+- `--progress` writes best-effort live status only to stderr; stdout remains the
+  workflow result. On an interactive stderr it updates one ASCII line. When
+  stderr is redirected or its width is unavailable, it writes bounded
+  newline-delimited milestones and at most one unchanged heartbeat every ten
+  seconds. It remains opt-in and works alongside `PTC_VIEWER_URL`.
 - `--input INPUT.json` replaces the manifest input with another normal object.
   Resolve the path as an application-relative document first; otherwise treat it
   as absolute or relative to the process working directory (same rule as
@@ -157,9 +164,9 @@ Useful run switches are:
   error, artifact state, and a closed `warnings` array. For `run`, an uncataloged
   installed model appears there as `model_uncataloged` with its provider alias
   and an adapter-attested public selector; the same warning is retained in
-  `run-started` metadata. Non-run commands require an empty warnings
-  array. In particular, `doctor --connect` retains uncataloged-model notices on
-  stderr rather than claiming run metadata it does not produce. Parse the
+  `run-started` metadata. A failed plain `doctor` command also publishes locally
+  derived `model_uncataloged` warnings for every affected provider check;
+  successful non-run commands keep the array empty. Parse the
   envelope rather than scraping stdout, which is a human
   presentation channel that may also carry application output.
 
@@ -182,8 +189,8 @@ files the repository wants.
 
 `ptc init DIRECTORY --example NAME` publishes one of the walkthrough projects
 this executable embeds instead of the scaffold, under the same no-replace
-commit. Run `ptc init` with an unknown example name to have the embedded
-names listed. The trees are byte-identical to the repository's, so the commands the
+commit. Run `ptc help init` to see the embedded names. The trees are
+byte-identical to the repository's, so the commands the
 guides print work from wherever the copy was created rather than from one
 checkout directory.
 
@@ -347,8 +354,8 @@ file whose JSON Schema this executable serves as `ptc docs schema-envelope`
 (`priv/schemas/ptc-command-envelope-v4.schema.json` in the repository). Its
 status and exit-code relationship is sealed by the same command contract.
 
-After arguments parse, an ordinary or caught command outcome publishes one
-requested envelope. This includes a recognized `run`, `validate`, `doctor`, or
+After arguments parse, an ordinary or caught shared-engine command outcome
+publishes one requested envelope. This includes a recognized `run`, `validate`, `doctor`, or
 `models` invocation whose named project fails schema validation: project
 diagnostics terminate before command bootstrap or project references are
 opened, but after the envelope destination is admitted. Malformed command
@@ -363,8 +370,8 @@ that failure through the missing envelope. Success exits `0`; classified
 failures use their diagnostic catalog status; caught internal failures use
 `70`.
 
-`run`, `validate`, `doctor`, `models`, `init`, and `materialize` accept `--envelope`.
-`repl`, `transcript`, `viewer`, `docs`, help, and version do not. A private run
+`run`, `validate`, `doctor`, `models`, `init`, `materialize`, `transcript`, and
+`version` accept `--envelope`. `repl`, `viewer`, `docs`, and help do not. A private run
 envelope omits the result value. Installation, packaging, and container
 commands live in the [installation documentation](../installation/standalone.md),
 not in this process-contract reference.
@@ -379,8 +386,50 @@ envelope when the branch needs to know which failure it was.
 
 A recoverable capability error does not change the exit status. Exhausting
 `workflow_capability_calls_per_name` returns
-`{"status":"error","kind":"limit_exceeded","reason":"capability_quota","details":{"limit":"workflow_capability_calls_per_name","name":"llm-request","limit_value":2}}` as a
-value into PTC-Lisp; a workflow that reads past it can still `return` and the
+`{"status":"error","kind":"limit_exceeded","reason":"capability_quota","retryable?":false,"model":"primary","details":{"limit":"workflow_capability_calls_per_name","name":"llm-request","limit_value":2}}` as a
+JSON boundary value; it is not an exact display of the value's PTC-Lisp types.
+The equivalent value inside the workflow uses keyword keys and keyword-valued
+`:status`, `:kind`, and `:reason` fields:
+
+```clojure
+{:status :error
+ :kind :limit_exceeded
+ :reason :capability_quota
+ :retryable? false
+ :model "primary"
+ :details {:limit :workflow_capability_calls_per_name
+           :name "llm-request"
+           :limit_value 2}}
+```
+
+An aggregate cost-budget refusal has the same field types and this copyable
+PTC-Lisp shape:
+
+```clojure
+{:status :error
+ :kind :limit_exceeded
+ :reason :llm_cost_microusd
+ :retryable? false
+ :details {:limit :llm_cost_microusd
+           :limit_value 1
+           :remaining 1
+           :requested 8585}}
+```
+
+PTC-Lisp equality is type-sensitive even though JSON projection renders a
+keyword value as its name string. Therefore
+`(= "limit_exceeded" (get response :kind))` is false, while
+`(= :limit_exceeded (get response :kind))` is true. Preserve the authenticated
+envelope when ending the run so the command retains its limit classification:
+
+```clojure
+(let [response (tool/llm-request request)]
+  (if (= :limit_exceeded (get response :kind))
+    (fail response)
+    response))
+```
+
+A workflow that reads past a recoverable error can still `return` and the
 command exits `0`. Refusing an aggregate `llm_total_tokens` or
 `llm_cost_microusd` reservation is the same class of recoverable value, with
 `reason` naming the budget. Aborting that exact envelope reports
@@ -637,7 +686,7 @@ The table is generated from the catalog the REPL frontend dispatches on:
 | `selected_trace_not_regular` | The exact selected trace candidate is not a regular file. | selected trace is not a regular file |
 | `source_changed` | A selected source or cursor identity changed while it was being verified. | analysis source changed during immutable capture |
 | `source_limit_exceeded` | Aggregate bytes, per-artifact records, index entries, or heap were exceeded. | selected analysis source exceeded its admission limits |
-| `source_retained_limit_exceeded` | The immutable trace projection or inspection index retained too much memory. | selected analysis source exceeded its retained-memory limit |
+| `source_retained_limit_exceeded` | The immutable trace projection or inspection index retained too much memory. | selected analysis source exceeded its retained-memory limit; for whole-directory private-run-analysis-v2 capture, select exact runs with --run RUN_ID |
 | `source_unavailable` | A source root became unavailable or its bounded capture deadline elapsed. | analysis source is unavailable or capture timed out |
 | `unsupported_schema` | A selected trace or inspection artifact uses an unsupported version. | analysis source uses an unsupported schema version |
 <!-- END GENERATED: profile diagnostic catalog -->
@@ -809,7 +858,7 @@ sanitization, filtering, pagination, and source classes. The
 
 Capture canonical and inspection artifacts in separate trusted locations. The
 credential-free
-[Kernel inspection lab](https://github.com/andreasronge/ptc_runner/tree/main/examples/kernel-inspection-lab)
+[Kernel inspection lab](https://github.com/andreasronge/ptc_runner/tree/main/scripts/labs/inspection-lab)
 creates a correlated pair without a live model.
 
 For one transcript, avoid a REPL:
@@ -820,8 +869,23 @@ ptc transcript RUN_ID \
   --traces tmp/traces \
   --inspection tmp/inspection \
   --private-unattended \
-  --private-output tmp/transcript/conversation.private.json
+  --private-output tmp/transcript/conversation.private.json \
+  --envelope tmp/transcript/command-envelope.json
 ```
+
+On success the command prints one JSON line containing `command`, the selected
+run under `run_ref`, the absolute output `path`, and the number of published
+`turns`. The optional envelope receives the same result in the V4 command
+contract.
+The frontend-owned transcript command publishes this success envelope only
+after its private document is complete; a transcript refusal retains its
+existing `transcript/` diagnostic and publishes neither file.
+
+Transcript document schema version 2 scopes `conversation.complete?` with the
+top-level `complete_scope: "model_conversation"`. Its top-level `not_included`
+list names evidence outside that scope: `prelude_sources`, `capability_schemas`,
+and the run `result`. The list comes from the `turns` collection catalog entry;
+the transcript does not include those surfaces.
 
 Each selected model turn carries the provider-neutral `request_hash` used by
 `llm_replay` fixtures. The underlying owner-only inspection artifact carries
@@ -878,147 +942,12 @@ provider and follows typed evidence links with the shipped `debug.nav` prelude.
 ## Browse traces in the Viewer
 
 ```console
-ptc viewer ptc-project.json --env-file .env
+ptc viewer PROJECT.json [--port PORT] [--listen ADDRESS] [--env-file FILE]
 ```
 
-The project document supplies the trace root and optional inspection root, plus
-the port, browser-opening preference, REPL setting, and private-data grant. The
-Viewer pins the selected data and can open a bounded analysis REPL over an
-immutable capture. `--port` overrides the project's port; `0` asks the
-operating system for a free one and is the project default. Startup prints the
-selected address. If an explicitly selected port is occupied, the command
-probes loopback: another PTC Viewer is reported with its exact project document
-path, while any other listener is reported as an occupied service. The command
-runs in the foreground until `Ctrl+C`, and opens a browser only when the project
-asks for it *and* a terminal is attached.
-
-Directory discovery expects producer-owned `<run-id>.jsonl` and
-`<run-id>.private.jsonl` names, each containing exactly that one run and one
-trace identity. The run list reports bounded damaged-source evidence when a
-stable malformed, mismatched, split, or conflicting component is isolated;
-unrelated valid runs remain available. A selected namespace change during
-capture fails the refresh rather than installing a partial generation.
-
-The Viewer does not search the invocation directory or its parents for a
-`.env` file. Environment-backed provider credentials come from the inherited
-process environment, the project's `host.env_file`, or an explicit
-`--env-file FILE`. The command-line file is resolved when the Viewer starts
-and overrides the project's environment-file reference for every workflow or
-mission launched from its Live tab. It is read only when the selected provider
-actually requires an environment credential.
-
-The Viewer ships inside the standalone release and the container image. It is
-not part of the published Hex package, where `ptc doctor` reports it as an
-unavailable optional companion and `ptc viewer` says so rather than failing
-obscurely. See the
-[Viewer documentation](https://github.com/andreasronge/ptc_runner/tree/main/ptc_viewer)
-for its complete HTTP API.
-
-### Expose it deliberately, or not at all
-
-The Viewer has no authentication and can display private inspection records
-when the project grants them, so it binds `127.0.0.1` and reaches nothing else.
-`--listen 0.0.0.0` is the only way to change that, it accepts no other address,
-and it prints a warning when used. Authenticated remote Viewer hosting is not a
-goal of this command.
-
-A container is the one place the wildcard is routine, because it is not an
-exposure decision there. Inside a container `127.0.0.1` is the container's own
-loopback, while a published port forwards to the container's external
-interface, so a loopback bind refuses every connection a `-p` mapping delivers.
-Binding `0.0.0.0` *inside the container's network namespace* is what makes the
-mapping reachable, and the host-side exposure decision moves to the publish
-rule:
-
-```console
-image=ghcr.io/andreasronge/ptc_runner:VERSION
-docker run --rm \
-  --user "$(id -u):$(id -g)" \
-  --env HOME=/tmp \
-  -p 127.0.0.1:4123:4123 \
-  -v "$PWD:/work" \
-  "$image" viewer /work/ptc-project.json --listen 0.0.0.0 --port 4123
-```
-
-The `127.0.0.1:` prefix on `-p` is what keeps this equivalent to a loopback
-bind. Writing `-p 4123:4123` instead publishes an unauthenticated trace browser
-to every host that can reach the machine. The command cannot enforce that
-prefix; you must write it. The user mapping preserves access to the
-mounted project's owner-only artifacts; do not run this form from a root shell.
-
-### Watch and launch live runs
-
-A Kernel run reports to the Live tab when `PTC_VIEWER_URL` names the Viewer:
-
-```console
-PTC_VIEWER_URL=http://127.0.0.1:4123 ptc run ptc.json
-```
-
-The reporter is best-effort and does not alter the run result. Frames are
-correlated to their owning run, and the terminal frame is published only after
-provider cleanup and trace-event finalization establish the actual
-outcome. A timeout failure names the binding limit, its configured duration,
-and the manifest key that raises it, in both the launch diagnostic and the
-ended Live card; for example, `parallel_timeout_ms limit 60000 ms was exceeded
-during execution; raise limits.parallel_timeout_ms in the manifest, and the
-installed host ceiling if it is lower`. Mission
-sessions currently show their bounded command-output tail in the launch panel
-instead of streaming frames.
-
-An ended workflow card offers **View result**. That action captures a fresh,
-internally consistent trace snapshot, confirms that the matching run exists,
-and then opens its detail view in the Runs tab. The Viewer therefore does not
-need to be restarted after a run it launched.
-
-The ordinary project command also configures the Live project details and one
-fixed launch target from that same project document. The browser may edit
-workflow input or choose one declared mission, but it cannot choose a project,
-manifest, working directory, or command:
-
-```console
-ptc viewer ptc-project.json --env-file .env
-```
-
-Viewer-launched workflow cards use the manifest label and workflow entry as
-their human-facing title, while retaining the `cmd-...` value as the stable run
-identifier. The Live tab and `GET /api/live/runs` list newest first, and each
-card shows when the Viewer first saw that run, so an edited ceiling cannot be
-read off an older card as a stale enforcement.
-
-The command is already a long-running PtcRunner host, so Viewer-started work
-runs inside that BEAM instance under the ordinary execution-session owner. A
-host-injected adapter receives a semantic workflow or mission request and a
-direct live-frame sink; no `mix` or `ptc` child process is started. The adapter
-dispatches the named project through the same command engine, so its host,
-environment, and artifact defaults remain authoritative.
-
-Live browser reads require a page opened at `localhost`, `127.0.0.1`, or
-`::1`; mutations additionally require the page's same-origin nonce. A reporter
-connecting from a non-loopback address must send the configured token through
-`PTC_VIEWER_TOKEN`. Generate a new value for each Viewer process, for example
-with `openssl rand -hex 32`.
-
-When a host-published port makes the browser's network peer non-loopback, open
-the Live tab once with the same token:
-
-```text
-http://localhost:4123/?live_token=THE_TOKEN#/live
-```
-
-The page removes the query parameter after bootstrapping and authenticates all
-Live API reads and mutations with the token. The SSE stream carries it in its
-own encoded query because the browser EventSource API cannot set headers.
-
-For Docker, keep the Viewer bound to `0.0.0.0` *inside* the container and keep
-the published host port on loopback. Viewer-started runs report directly inside
-the container process. A separately started run in the same container can
-report over container loopback. A host-side run can use
-`PTC_VIEWER_URL=http://127.0.0.1:4123`; another container must instead use the
-Viewer container's service name on a shared Docker network (for example,
-`PTC_VIEWER_URL=http://viewer:4123`) or an explicitly configured host-gateway
-address. Both must set the matching `PTC_VIEWER_TOKEN`. This protects live
-ingestion and browser mutations; it does not turn the trace browser into an
-authenticated remote service, so `-p 4123:4123` remains unsafe.
+The Viewer opens captured traces and watches or launches live runs for one
+project. See the [Viewer reference](viewer.md) for its display, startup,
+exposure, authentication, and live-reporting contract.
 
 ## Test a workflow
 

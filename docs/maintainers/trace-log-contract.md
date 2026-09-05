@@ -429,6 +429,10 @@ list, such as `generated[].evaluation_id` on a turn.
 The `model_exchanges` and `capability_calls` entries additionally advertise
 `item_completeness_field: "complete?"`; collections without per-item
 completion semantics omit that catalog field.
+The `turns` entry also owns the transcript projection boundary:
+`projection_scope: "model_conversation"` and `projection_not_included` name
+the scope certified by a published transcript and the evidence surfaces it
+excludes. Transcript publication derives its header from these catalog fields.
 
 ### `analysis/read`
 
@@ -481,8 +485,18 @@ Generated programs carry `prelude_calls_available?` and a sorted
 `prelude_calls` list of `{ref, component_id}` entries. Exact
 `prelude_call`/`prelude_component` filters work on both `generated_sources` and
 `turns`. The association between a turn and generated source is explicitly
-`source_match`; duplicate identical sources are marked ambiguous rather than
-given a fabricated causal identity.
+`source_match`. Matching partitions retained tool-call occurrences and
+generated-source records by source. A source can match only an earlier model
+response, and an association is exact only when every complete chronology-
+respecting one-to-one assignment puts that evaluation on the same turn.
+Repeated identical programs are therefore distinct occurrences;
+multiple identical calls in one response retain multiple evaluation records on
+that turn. Delayed evaluation may cross later model requests without losing its
+candidate producer. If the retained occurrence counts differ, or multiple
+complete assignments put an evaluation on different turns, every still-
+possible evaluation retains one chronology-respecting match marked ambiguous,
+rather than being multiplied across candidate turns or given a fabricated
+causal identity.
 
 Private execution errors, generated programs, and effective prelude sources may
 carry a `relationships` list. Each relationship has this closed shape:
@@ -770,6 +784,13 @@ provider request normalization, `output_limit` records `name: "max_tokens"`,
 the positive effective request value, and the canonically ordered binding
 list. This is the cap PtcRunner sent, not an assertion about a provider's
 private ceiling. A rewritten, removed, or ambiguously resolved cap is omitted.
+For live Kernel requests, the closed binding vocabulary distinguishes the
+effective application `llm_request_output_tokens` ceiling (`application_limit`)
+from installation `params.max_tokens` (`installation_param`) and retains both
+when they tie. The application value may be the manifest request or its
+compiled default, each capped by a lower installed host ceiling. This provenance
+is sealed during model preparation rather than
+reconstructed from the effective value after the request.
 
 When proven truncation prevents a usable shipped-agent action, the failed
 `run-stopped` records `reason: "model_output_truncated"` and the authenticated
@@ -1194,10 +1215,13 @@ to the caller and does not fail the evaluation:
 | `annotation_type` | accepted `data` |
 | --- | --- |
 | `"progress"` | `{"stage": started \| planning \| executing \| validating \| completed \| failed}` — that key and no other |
-| `"agent-action"` | `{"turn": 0..127, "kind": tool-call \| protocol-error \| provider-error \| max-calls \| model-output-truncated}`, or that plus `{"phase": 0..7, "phase_turn": 0..127, "mission": <name>}` — exactly two keys or exactly five |
+| `"agent-action"` | `{"turn": 0..127, "max_turns": 1..128, "invocation": "agent-<16 lowercase hex>", "kind": tool-call \| protocol-error \| provider-error \| max-calls \| model-output-truncated}`, or that plus `{"phase": 0..7, "phase_turn": 0..127, "mission": <name>}` — exactly four keys or exactly seven |
 
 Keyword types and keys normalize (`:phase-turn` → `"phase_turn"`). A phased
-`agent-action` takes all three extra keys or none. `mission` is the phase's
+`agent-action` takes all three phase keys or none. Callers provide every field
+except `invocation`; the runtime adds that run-local opaque correlation value
+before validation and emission. `max_turns` is the configured total ceiling for
+the invocation, and `turn` is always strictly less than it. `mission` is the phase's
 mission name: a lowercase letter, then up to 127 letters, digits, `.`, `_`, or
 `-`. The vocabulary never carries detailed reasons, generated source, or model
 content. A non-string annotation type is a malformed call, not this

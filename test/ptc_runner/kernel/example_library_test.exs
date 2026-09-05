@@ -1,11 +1,15 @@
 defmodule PtcRunner.Kernel.ExampleLibraryTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
+  import ExUnit.CaptureIO
+
+  alias PtcRunner.Dotenv
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.ExampleLibrary
   alias PtcRunner.Kernel.ProjectConfig
+  alias PtcRunner.MixCommandAdapter
 
   @root Path.expand("../../..", __DIR__)
 
@@ -31,6 +35,21 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
     assert manifest["limits"] == %{
              "run_duration_ms" => 120_000,
              "workflow_timeout_ms" => 120_000
+           }
+  end
+
+  test "the materializable cost-budget tutorial includes both spend ceilings and a tariff" do
+    assert {:ok, files} = ExampleLibrary.fetch("kernel-tutorial")
+
+    manifest = files["06-cost-budget/ptc.json"] |> Jason.decode!()
+    host = files["ptc-host-cost-budget.json"] |> Jason.decode!()
+
+    assert manifest["limits"]["llm_cost_microusd"] == 1
+    assert host["limits"]["llm_cost_microusd"] == 1
+
+    assert host["install"]["deepseek"]["reservation_tariff"] == %{
+             "currency" => "USD",
+             "id" => "openrouter-model-pricing-v1"
            }
   end
 
@@ -69,6 +88,13 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
 
     assert File.exists?(Path.join(target, ".env"))
     assert File.exists?(Path.join(target, ".gitignore"))
+
+    # The routing card is the scaffold's, minus the scaffold's file names: an
+    # agent dropped into a materialized example finds the same commands.
+    card = File.read!(Path.join(target, "AGENTS.md"))
+    assert card =~ "ptc docs agent-guide"
+    assert card =~ "README.md"
+    refute card =~ "main.clj"
     refute File.read!(Path.join(target, "README.md")) =~ "../../docs/"
     refute File.read!(Path.join(target, ".env")) == ""
 
@@ -92,11 +118,40 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
     assert {:ok, created} = ExampleLibrary.created("kernel-tutorial")
     assert ".env" in created
     assert ".gitignore" in created
+    assert "AGENTS.md" in created
     assert envelope["result"] == %{"created" => created}
     assert CommandContract.valid_envelope?(envelope)
 
     assert {:ok, replay} = ExampleLibrary.fetch("llm-replay")
     refute Map.has_key?(replay, ".env")
+  end
+
+  @tag :tmp_dir
+  test "model-backed examples keep inherited credentials through comment-only env stubs", %{
+    tmp_dir: directory
+  } do
+    key = "OPENROUTER_API_KEY"
+    previous = System.get_env(key)
+    sentinel = "inherited-sentinel"
+    System.put_env(key, sentinel)
+
+    on_exit(fn ->
+      if previous, do: System.put_env(key, previous), else: System.delete_env(key)
+    end)
+
+    for example <- ["kernel-tutorial", "support-triage"] do
+      target = Path.join(directory, example)
+
+      assert {:ok, %CommandOutcome{}} =
+               CommandEngine.dispatch(["init", target, "--example", example])
+
+      env_file = Path.join(target, ".env")
+      contents = File.read!(env_file)
+      assert contents =~ "# #{key}"
+      refute contents =~ ~r/^#{key}=/m
+      assert :ok = Dotenv.load_file(env_file)
+      assert System.get_env(key) == sentinel
+    end
   end
 
   test "the debug-a-failed-run README walks the standalone executable, not Mix" do
@@ -148,12 +203,33 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
   test "init materializes the replay example as a one-argument project run", %{
     tmp_dir: directory
   } do
+    assert {:ok, %CommandOutcome{envelope: docs_envelope}} =
+             CommandEngine.dispatch(["docs", "agent-guide"])
+
+    guide = docs_envelope["result"]["content"]
+    assert guide =~ "Choose one `ptc init` form"
+    assert guide =~ "ptc init hello-ptc --example llm-replay"
+    assert guide =~ "ptc repl --project hello-ptc/ptc-project.json -e '(dir)'"
+
     target = Path.join(directory, "llm-replay")
 
     assert {:ok, %CommandOutcome{}} =
              CommandEngine.dispatch(["init", target, "--example", "llm-replay"])
 
     assert File.exists?(Path.join(target, "ptc-project.json"))
+
+    repl_output =
+      capture_io(fn ->
+        MixCommandAdapter.run_task([
+          "repl",
+          "--project",
+          Path.join(target, "ptc-project.json"),
+          "-e",
+          "(dir)"
+        ]).outcome
+      end)
+
+    assert repl_output == ~s(["cap" "example.replay"]\n)
 
     assert {:ok, %CommandOutcome{envelope: envelope}} =
              CommandEngine.dispatch(["run", Path.join(target, "ptc-project.json")])

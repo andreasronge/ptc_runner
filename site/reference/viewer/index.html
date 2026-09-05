@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Viewer reference · PtcRunner</title>
+<meta name="description" content="The Viewer presents captured and live runs for one PtcRunner project. It is a
+local inspection surface, not a general remote administration service.">
+<link rel="canonical" href="https://ptc-runner.dev/reference/viewer/">
+<meta property="og:title" content="Viewer reference · PtcRunner">
+<meta property="og:description" content="The Viewer presents captured and live runs for one PtcRunner project. It is a
+local inspection surface, not a general remote administration service.">
+<meta property="og:url" content="https://ptc-runner.dev/reference/viewer/">
+<meta property="og:type" content="article">
+<link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Inspect and customize components</a></li>
+</ul>
+
+<h2>Design</h2>
+<ul>
+<li><a href="/guides/designing-agent-workflows/">Design an agent workflow</a></li>
+<li><a href="/guides/agent-workflow-patterns/">Choose a workflow shape</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/inspecting-source-and-programs/">Inspect source and generated programs</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/examples/">Examples reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/viewer/" class="current" aria-current="page">Viewer reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="viewer-reference">Viewer reference</h1><p>The Viewer presents captured and live runs for one PtcRunner project. It is a
+local inspection surface, not a general remote administration service.</p><h2 id="what-it-shows">What it shows</h2><p>The <strong>Runs</strong> tab lists the project's captured traces read-only. A run page shows
+turns, tool calls, and effective prelude components. When the project records
+<code class="inline">artifacts.inspection</code> and grants <code class="inline">viewer.private</code>, it also shows generated
+programs, prelude sources, and model exchanges.</p><p>When the project enables <code class="inline">viewer.repl</code>, a run page can open a bounded analysis
+REPL over an immutable capture of the selected run. The <strong>Live</strong> tab shows runs
+that report through <code class="inline">PTC_VIEWER_URL</code>; it can also launch the project's workflow
+or evaluate one expression in a declared mission's sandbox. The Live tab lists
+newest first.</p><h2 id="starting-it">Starting it</h2><pre><code class="console language-console">ptc viewer PROJECT.json [--port PORT] [--listen ADDRESS] [--env-file FILE]</code></pre><p><code class="inline">--port</code> overrides the project's <code class="inline">viewer.port</code>; when neither selects a fixed
+port, the default <code class="inline">0</code> asks the operating system for a free one. Startup prints
+the selected address. When an explicitly selected port is occupied, the
+command distinguishes another PTC Viewer, including its project path, from
+another service and reports the conflict. It runs in the foreground until
+<code class="inline">Ctrl+C</code>.</p><p>The Viewer never searches for <code class="inline">.env</code>. Environment-backed credentials come from
+the inherited environment, the project's <code class="inline">host.env_file</code>, or the exact file
+passed with <code class="inline">--env-file FILE</code>; that option overrides <code class="inline">host.env_file</code> for work
+launched from the Live tab. Host-configured file and literal credential
+bindings remain available.</p><p>The Viewer ships in the standalone release and container image. It is not part
+of the published Hex package, where <code class="inline">ptc doctor</code> reports the optional Viewer as
+unavailable.</p><p>The <a href="/reference/project-files/#viewer">project reference</a> documents the <code class="inline">viewer</code> block.</p><h2 id="exposing-it">Exposing it</h2><p>The Viewer binds to <code class="inline">127.0.0.1</code> by default. <code class="inline">--listen 0.0.0.0</code> is the only
+alternative; it accepts connections through every network interface and prints
+a warning. Set a fresh <code class="inline">PTC_VIEWER_TOKEN</code> of at least 32 bytes before allowing
+any non-loopback peer; for example, generate one with <code class="inline">openssl rand -hex 32</code>.</p><p>For a browser arriving through a non-loopback peer, keep the page authority at
+<code class="inline">localhost</code>, <code class="inline">127.0.0.1</code>, or <code class="inline">::1</code> through a port forward, then open the Viewer
+once with <code class="inline">?live_token=THE_TOKEN</code> to bootstrap Live access. The page removes
+that query parameter after use. The token protects Live ingestion and controls;
+it never authenticates the Runs trace browser, so exposing the Viewer can
+disclose trace and private inspection data.</p><p>For container binding and host-port rules, see
+<a href="/installation/docker/#open-the-viewer">Docker installation</a>.</p><h2 id="reporting-a-run">Reporting a run</h2><p>Set <code class="inline">PTC_VIEWER_URL</code> for <code class="inline">ptc run</code> to report progress to the Live tab. When the
+Viewer requires a token, set the same <code class="inline">PTC_VIEWER_TOKEN</code> for the run. Reporting
+is best-effort and never changes the run result. It sends the exact manifest
+label, or the manifest filename when no label exists, and workflow entry to the
+Viewer for display; trace metadata keeps its fingerprinted label.</p>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/cli/">&larr; Command-line reference</a><a class="pager-next" href="/reference/repl/">REPL reference &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/reference/viewer.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

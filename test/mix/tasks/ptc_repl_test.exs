@@ -106,7 +106,7 @@ defmodule PtcRunner.ReplFrontendTest do
     assert output == expected <> "\n"
   end
 
-  test "direct eval renders a type_error kind only once" do
+  test "direct eval preserves the detailed type_error message and renders its kind once" do
     output =
       capture_io(:stderr, fn ->
         error =
@@ -574,7 +574,7 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
-  test "kernel/eval-source from a workflow session names --mission instead of :busy", %{
+  test "kernel/eval-source returns nested terminal data from a workflow session", %{
     tmp_dir: directory
   } do
     manifest_path = Path.join(directory, "ptc.json")
@@ -596,20 +596,19 @@ defmodule PtcRunner.ReplFrontendTest do
       })
     )
 
-    error =
-      assert_raise Mix.Error, fn ->
+    output =
+      capture_io(fn ->
         run_repl([
           "--manifest",
           manifest_path,
           "-e",
           ~S|(kernel/eval-source "review" "(return 1)")|
         ])
-      end
+      end)
 
-    assert error.message =~ "Error (mission_session_required):"
-    assert error.message =~ "--mission NAME"
-    assert error.message =~ "declared: review, writing"
-    refute error.message =~ "evaluation_in_progress"
+    assert output =~ ":outcome :returned"
+    assert output =~ ":value 1"
+    refute output =~ "evaluation_in_progress"
   end
 
   @tag :tmp_dir
@@ -749,7 +748,10 @@ defmodule PtcRunner.ReplFrontendTest do
       assert error.message =~
                "error: repl/command_failed: active_preflight/credential_unavailable: " <>
                  "provider/#{expected_subject}/credentials: a required provider credential is unavailable; " <>
-                 "export it, pass --env-file PATH, or use a host file credential"
+                 "export it, pass --env-file PATH, or use a host file credential; " <>
+                 "for credential-free source and helper evaluation, rerun with only " <>
+                 "--project PROJECT (or --manifest MANIFEST), optional --mission MISSION, " <>
+                 "--inspect-only, and -e EXPR"
 
       refute error.message =~ "PTC_REPL_ABSENT"
     end
@@ -865,6 +867,63 @@ defmodule PtcRunner.ReplFrontendTest do
       end)
 
     assert output == "3\n"
+
+    File.rm!(Path.join(directory, "ptc-host.json"))
+
+    error =
+      assert_raise Mix.Error, fn ->
+        run_repl(["--project", project_path, "--inspect-only", "-e", "(+ 1 2)"])
+      end
+
+    assert error.message =~ "host/host_unavailable"
+    refute error.message =~ "ptc repl setup failed: :"
+  end
+
+  @tag :tmp_dir
+  test "inspect-only project uses its host limit ceiling without resolving credentials", %{
+    tmp_dir: directory
+  } do
+    project_path = write_inspect_only_project(directory)
+    manifest_path = Path.join(directory, "ptc.json")
+    manifest = Jason.decode!(File.read!(manifest_path))
+
+    File.write!(
+      manifest_path,
+      Jason.encode!(Map.put(manifest, "limits", %{"evaluation_heap_words" => 5_000_000}))
+    )
+
+    File.write!(
+      Path.join(directory, "ptc-host.json"),
+      Jason.encode!(%{
+        "credentials" => %{"unused" => %{"env" => "PTC_REPL_MISSING_CREDENTIAL"}},
+        "install" => %{},
+        "limits" => %{"evaluation_heap_words" => 5_000_000}
+      })
+    )
+
+    project = Jason.decode!(File.read!(project_path))
+
+    File.write!(
+      project_path,
+      Jason.encode!(Map.put(project, "host", %{"path" => "ptc-host.json"}))
+    )
+
+    output =
+      capture_io(fn ->
+        run_repl(["--project", project_path, "--inspect-only", "-e", "(+ 1 2)"])
+      end)
+
+    assert output == "3\n"
+
+    File.rm!(Path.join(directory, "ptc-host.json"))
+
+    error =
+      assert_raise Mix.Error, fn ->
+        run_repl(["--project", project_path, "--inspect-only", "-e", "(+ 1 2)"])
+      end
+
+    assert error.message =~ "host/host_unavailable"
+    refute error.message =~ "ptc repl setup failed: :"
   end
 
   test "inspect-only conflicts with host, trace, and profile switches" do

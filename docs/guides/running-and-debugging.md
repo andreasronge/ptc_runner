@@ -33,6 +33,24 @@ Use `--connect` only when an active provider probe is intended:
 ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json --connect
 ```
 
+## How do I watch a run while it is running?
+
+Start the Viewer on the fan-out step, which runs long enough to watch:
+
+```console
+ptc viewer kernel-tutorial/07-parallel-fan-out.ptc-project.json --port 4123
+```
+
+In a second terminal, set the URL the Viewer printed:
+
+```console
+export OPENROUTER_API_KEY=...
+PTC_VIEWER_URL=http://127.0.0.1:4123 ptc run kernel-tutorial/07-parallel-fan-out.ptc-project.json
+```
+
+Status appears in the Live tab. If the Viewer requires a token, set the same
+`PTC_VIEWER_TOKEN` for the run.
+
 ## How do I browse completed runs?
 
 Browse completed runs locally:
@@ -40,16 +58,6 @@ Browse completed runs locally:
 ```console
 ptc viewer hello-ptc/ptc-project.json
 ```
-
-The Runs list uses a matching project `labels.name` as its readable headline,
-keeps the command run ID underneath, and shows finite label tags. When every
-successful model call reported a metric, the row also shows full-run input and
-output tokens and provider-reported cost; missing prices or usage stay absent.
-Refresh includes runs that finished after this captured snapshot.
-
-When the Live tab launches provider-backed work, pass an exact dotenv file
-with `--env-file FILE` or declare `host.env_file` in the project. The Viewer
-does not search implicitly for `.env`.
 
 The Viewer binds to loopback by default, where Live controls need no token.
 Do not expose it to a network without setting `PTC_VIEWER_TOKEN`, especially
@@ -69,7 +77,6 @@ diagnostics:
 ptc run hello-ptc/ptc-project.json --envelope command-envelope.json
 ```
 
-Use the [CLI reference](../reference/cli.md) for the complete command grammar,
-exit statuses, envelopes, artifact publication, diagnostics, transcripts,
-Viewer behavior, and process contract. Continue with [Debug a failed
-run](debugging-a-failed-run.md) when a trace needs deeper investigation.
+The [CLI reference](../reference/cli.md) covers command grammar, exit statuses,
+and envelopes. See the [Viewer reference](../reference/viewer.md) for Viewer
+details or [Debug a failed run](debugging-a-failed-run.md) for deeper trace investigation.

@@ -84,14 +84,63 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     assert content =~ "--private-output"
   end
 
-  test "designing-agent-workflows locates returned-value and quarantined in the example" do
+  test "the running guide explains how to attach an external run to the Live tab" do
+    assert {:ok, content} = DocumentationLibrary.fetch("running-and-debugging")
+
+    assert content =~ "## How do I watch a run while it is running?"
+    assert content =~ "PTC_VIEWER_URL=http://127.0.0.1:4123"
+    assert content =~ "PTC_VIEWER_TOKEN"
+    assert content =~ "ptc docs viewer"
+    assert content =~ "token does not authenticate the Runs trace browser"
+  end
+
+  test "the viewer page serves its invocation, exposure, reporting, and packaging contract" do
+    assert {:ok, %CommandOutcome{envelope: envelope}} =
+             CommandEngine.dispatch(["docs", "viewer"])
+
+    content = envelope["result"]["content"]
+
+    assert content =~ List.first(CommandDeclaration.usage(:viewer))
+    assert content =~ "PTC_VIEWER_URL"
+    assert content =~ "PTC_VIEWER_TOKEN"
+
+    assert String.replace(content, ~r/\s+/, " ") =~
+             "not part of the published Hex package"
+  end
+
+  test "no served page documents the Viewer HTTP surface" do
+    for name <- DocumentationLibrary.names(), not String.starts_with?(name, "schema-") do
+      content = page_content(name)
+
+      refute content =~ "/api/", "#{name} documents a Viewer HTTP route"
+
+      refute content =~
+               "github.com/andreasronge/ptc_runner/tree/main/ptc_viewer",
+             "#{name} links to the Viewer source tree"
+    end
+  end
+
+  test "designing-agent-workflows links faithful aborts and locates its helpers" do
     assert {:ok, content} = DocumentationLibrary.fetch("designing-agent-workflows")
     assert content =~ "returned-value"
     assert content =~ "quarantined"
-    assert content =~ "03-specialists/workflow.clj"
-    assert content =~ "not shipped"
-    assert content =~ "built-ins"
+    assert content =~ "fail-outcome"
+    assert content =~ "original diagnostic"
     assert content =~ "ptc init support-triage --example support-triage"
+  end
+
+  test "mission docs distinguish capability grants from forwarded data" do
+    assert {:ok, guide} = DocumentationLibrary.fetch("designing-agent-workflows")
+    assert guide =~ "limits capabilities"
+    assert guide =~ "does not filter handoff data"
+    assert guide =~ "trusted workflow code must perform that filtering"
+    assert guide =~ "prompt-level mitigation"
+
+    assert {:ok, manifest} = DocumentationLibrary.fetch("manifest")
+    manifest = String.replace(manifest, ~r/\s+/, " ")
+    assert manifest =~ "does not prevent that data from reaching a later mission"
+    assert manifest =~ "do not sanitize data or determine its sensitivity"
+    assert manifest =~ "secret"
   end
 
   test "served model docs distinguish cost reservations from measured spend" do

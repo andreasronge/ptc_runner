@@ -79,6 +79,20 @@ defmodule PtcRunner.Scripts.GuideBudgetTest do
     assert output =~ "a.md"
   end
 
+  test "generated-sounding tics are counted per prose word and ratcheted", context do
+    write(context, "a.md", short_guide())
+    assert {_, 0} = run(context, "bless")
+
+    write(
+      context,
+      "a.md",
+      short_guide() <> "\nThis is deliberately a value, not a hope \u2014 read it.\n"
+    )
+
+    assert {output, 1} = run(context, "check")
+    assert output =~ "a.md: tics"
+  end
+
   test "a new guide with no baseline row is held to the new-guide caps", context do
     write(context, "a.md", short_guide())
     assert {_, 0} = run(context, "bless")

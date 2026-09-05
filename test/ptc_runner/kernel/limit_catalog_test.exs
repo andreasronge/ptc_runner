@@ -52,8 +52,8 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     },
     "local_preflight_timeout_ms" => %{
       field: :local_preflight_timeout_ms,
-      compiled_default: 5_000,
-      installed_default: 5_000,
+      compiled_default: 15_000,
+      installed_default: 15_000,
       identity: true
     },
     "provider_cleanup_timeout_ms" => %{
@@ -153,7 +153,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
                         :reservation_tariff
                       ],
                       prerequisite_description:
-                        "Requires usage_guarantees.tokens: true, usage_guarantees.cost_currency: \"USD\", and an explicit USD reservation_tariff on every live LLM installation."
+                        "Requires usage_guarantees.tokens: true, usage_guarantees.cost_currency: \"USD\", an explicit USD reservation_tariff on every live LLM installation, and supported USD reservation pricing for each selected model. reservation_tariff.id identifies the declared tariff but does not supply model rates."
                     })
                     |> Map.put("workflow_loop_iterations", %{
                       field: :workflow_loop_iterations,
@@ -452,7 +452,21 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     assert LimitConfigurationDiagnostic.valid_message?(message)
     refute LimitConfigurationDiagnostic.valid_message?(message <> "\n")
 
-    assert :ok = LimitConfiguration.validate_effective(invalid, :private)
+    private_required = LimitConfiguration.required_private_event_bytes(base)
+
+    {:ok, invalid_private} =
+      Limits.new(event_payload_bytes: payload_bytes, normal_event_bytes: private_required - 1)
+
+    assert {:error,
+            {:limit_configuration_invalid, configured_private, ^private_required, ^payload_bytes}} =
+             LimitConfiguration.validate_effective(invalid_private, :private)
+
+    assert configured_private == private_required - 1
+
+    {:ok, valid_private} =
+      Limits.new(event_payload_bytes: payload_bytes, normal_event_bytes: private_required)
+
+    assert :ok = LimitConfiguration.validate_effective(valid_private, :private)
 
     assert {:ok, valid} =
              Limits.new(event_payload_bytes: payload_bytes, normal_event_bytes: required_bytes)

@@ -77,6 +77,10 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
                                         @subordinate_maximum_digits +
                                         byte_size(@result_limit_suffix)
 
+  @event_capture_limits [:normal_event_count, :normal_event_bytes]
+  @event_capture_suffix " was exceeded; raise limits."
+  @event_capture_remedy @manifest_remedy <> ", or reduce emitted trace events"
+
   # A bounded agent loop can end four ways, and only two of them are answered by
   # buying more turns. Naming `max_turns` for a model that never emitted a
   # usable tool call sells the reader another round of the same failure, so each
@@ -543,6 +547,45 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
     end
   end
 
+  @doc false
+  @spec event_capture_message(atom(), term()) :: {:ok, binary()} | :error
+  def event_capture_message(limit, value) when limit in @event_capture_limits do
+    with {:ok, row} <- LimitCatalog.fetch(limit),
+         true <- LimitCatalog.valid_value?(row, value) do
+      name = Atom.to_string(limit)
+
+      {:ok,
+       name <>
+         " limit " <>
+         Integer.to_string(value) <>
+         @event_capture_suffix <>
+         name <>
+         @event_capture_remedy}
+    else
+      _invalid -> :error
+    end
+  end
+
+  def event_capture_message(_limit, _value), do: :error
+
+  @doc false
+  @spec event_capture_message?(term()) :: boolean()
+  def event_capture_message?(message) when is_binary(message) do
+    Enum.any?(@event_capture_limits, fn limit ->
+      name = Atom.to_string(limit)
+
+      valid_exact_message?(
+        message,
+        name <> " limit ",
+        @event_capture_suffix <> name <> @event_capture_remedy,
+        @subordinate_maximum_digits,
+        &event_capture_message(limit, &1)
+      )
+    end)
+  end
+
+  def event_capture_message?(_message), do: false
+
   # One lookup from a runtime error's details to the setting it breached and the
   # sentence describing it. The command boundary needs a diagnostic code and a
   # source as well, so it keeps its own dispatch; the Live reporter needs only
@@ -564,6 +607,10 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
 
   def details_message(%{limit: :terminal_result_bytes, limit_value: value}),
     do: named_limit(:terminal_result_bytes, result_limit_message(value))
+
+  def details_message(%{limit: limit, limit_value: value})
+      when limit in @event_capture_limits,
+      do: named_limit(limit, event_capture_message(limit, value))
 
   def details_message(%{limit: :workflow_heap_words, limit_value: value}),
     do: named_limit(:workflow_heap_words, heap_words_message(value))
@@ -828,6 +875,25 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   @spec result_limit_message_schema(binary()) :: map()
   def result_limit_message_schema(fallback) when is_binary(fallback),
     do: message_schema(fallback, [result_limit_message_branch()])
+
+  @doc false
+  @spec event_capture_message_schema(binary()) :: map()
+  def event_capture_message_schema(fallback) when is_binary(fallback) do
+    branches =
+      Enum.map(@event_capture_limits, fn limit ->
+        name = Atom.to_string(limit)
+
+        bounded_branch(
+          byte_size(name <> " limit ") + @subordinate_maximum_digits +
+            byte_size(@event_capture_suffix <> name <> @event_capture_remedy),
+          name <> " limit ",
+          @subordinate_limit_pattern,
+          @event_capture_suffix <> name <> @event_capture_remedy
+        )
+      end)
+
+    message_schema(fallback, branches)
+  end
 
   defp message_schema(fallback, branches) do
     %{

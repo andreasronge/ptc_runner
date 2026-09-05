@@ -19,6 +19,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
   alias PtcRunner.Kernel.MCPAcquisitionDiagnostic
   alias PtcRunner.Kernel.MissionCapabilityDiagnostic
+  alias PtcRunner.Kernel.ModelContractDiagnostic
   alias PtcRunner.Kernel.ModelOutputDiagnostic
   alias PtcRunner.Kernel.OptionalBudgetDiagnostic
   alias PtcRunner.Kernel.ResultContractDiagnostic
@@ -427,6 +428,13 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def message_schema(%{phase: :execution, code: :run_timeout, message: fallback}),
     do: RuntimeLimitDiagnostic.run_duration_message_schema(fallback)
 
+  def message_schema(%{
+        phase: :execution,
+        code: :event_capture_limit_exceeded,
+        message: fallback
+      }),
+      do: RuntimeLimitDiagnostic.event_capture_message_schema(fallback)
+
   def message_schema(%{phase: :execution, code: :explicit_failure, message: fallback}),
     do: ExplicitFailureDiagnostic.message_schema(fallback)
 
@@ -486,6 +494,13 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def message_schema(%{phase: :local_preflight, code: code, message: fallback})
       when code in @fixture_codes,
       do: LLMReplayFixtureDiagnostic.message_schema(fallback)
+
+  def message_schema(%{
+        phase: :local_preflight,
+        code: :model_contract_unsupported,
+        message: fallback
+      }),
+      do: ModelContractDiagnostic.message_schema(fallback)
 
   def message_schema(%{
         phase: :result_cleanup,
@@ -549,6 +564,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   defp valid_dynamic_message?(:execution, :run_timeout, message),
     do: RuntimeLimitDiagnostic.run_duration_message?(message)
 
+  defp valid_dynamic_message?(:execution, :event_capture_limit_exceeded, message),
+    do: RuntimeLimitDiagnostic.event_capture_message?(message)
+
   defp valid_dynamic_message?(:execution, :explicit_failure, message),
     do: ExplicitFailureDiagnostic.valid_message?(message)
 
@@ -603,6 +621,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   defp valid_dynamic_message?(:local_preflight, code, message) when code in @fixture_codes,
     do: LLMReplayFixtureDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:local_preflight, :model_contract_unsupported, message),
+    do: ModelContractDiagnostic.valid_message?(message)
 
   defp valid_dynamic_message?(:result_cleanup, :result_contract_failed, message),
     do: ResultContractDiagnostic.valid_message?(message)
@@ -818,7 +839,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
       do: [:authorization]
 
   def subject_operations(:active_preflight, :authentication_rejected),
-    do: [:authorization, :connectivity, :acquisition]
+    do: [:credentials, :authorization, :connectivity, :acquisition]
 
   def subject_operations(:active_preflight, code)
       when code in [
@@ -1087,6 +1108,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def subject_occurrence_policy(:active_preflight, code, _operation)
       when code in [:provider_application_unavailable, :credential_unavailable],
       do: :forbidden
+
+  def subject_occurrence_policy(:active_preflight, :authentication_rejected, :credentials),
+    do: :forbidden
 
   def subject_occurrence_policy(:active_preflight, code, _operation)
       when code in [

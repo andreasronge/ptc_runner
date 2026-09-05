@@ -403,6 +403,85 @@ defmodule PtcRunner.Kernel.CommandMaterializeTest do
   end
 
   @tag :tmp_dir
+  test "project materialize uses its host ceiling and classifies host failures", %{
+    tmp_dir: dir
+  } do
+    manifest = write_application(dir)
+    document = Jason.decode!(File.read!(manifest))
+
+    File.write!(
+      manifest,
+      Jason.encode!(put_in(document, ["limits"], %{"evaluation_heap_words" => 5_000_000}))
+    )
+
+    File.write!(
+      Path.join(dir, "ptc-host.json"),
+      Jason.encode!(%{
+        "credentials" => %{"unused" => %{"env" => "PTC_MATERIALIZE_MISSING_CREDENTIAL"}},
+        "install" => %{},
+        "limits" => %{"evaluation_heap_words" => 5_000_000}
+      })
+    )
+
+    project = %{
+      "kind" => "ptc-project",
+      "version" => 1,
+      "application" => %{"path" => "ptc.json"},
+      "host" => %{"path" => "ptc-host.json"}
+    }
+
+    project_path = Path.join(dir, "ptc-project.json")
+    File.write!(project_path, Jason.encode!(project))
+    exported = Path.join(dir, "exported.clj")
+
+    assert {:ok, outcome} =
+             CommandEngine.dispatch([
+               "materialize",
+               project_path,
+               "--workflow",
+               "--component",
+               "helper",
+               "--source-out",
+               exported
+             ])
+
+    assert outcome.envelope["status"] == "ok"
+    assert File.read!(exported) == @placeholder
+
+    File.rm!(Path.join(dir, "ptc-host.json"))
+
+    assert {:error, missing_host} =
+             CommandEngine.dispatch([
+               "materialize",
+               project_path,
+               "--workflow",
+               "--component",
+               "helper",
+               "--source-out",
+               Path.join(dir, "missing-host.clj")
+             ])
+
+    assert missing_host.envelope["error"]["phase"] == "host"
+    assert missing_host.envelope["error"]["code"] == "host_unavailable"
+
+    File.write!(Path.join(dir, "ptc-host.json"), "not json")
+
+    assert {:error, invalid_host} =
+             CommandEngine.dispatch([
+               "materialize",
+               project_path,
+               "--workflow",
+               "--component",
+               "helper",
+               "--source-out",
+               Path.join(dir, "invalid-host.clj")
+             ])
+
+    assert invalid_host.envelope["error"]["phase"] == "host"
+    assert invalid_host.envelope["error"]["code"] == "host_invalid"
+  end
+
+  @tag :tmp_dir
   test "an envelope path equal to --source-out is refused before publication", %{tmp_dir: dir} do
     manifest = write_application(dir)
     exported = Path.join(dir, "exported.clj")

@@ -581,7 +581,15 @@ defmodule PtcRunner.Kernel.AgentCoreCharacterizationTest do
 
     assert Enum.any?(events, fn event ->
              event.type == "workflow-annotation" and
-               event.data.data == %{"turn" => 0, "kind" => "provider-error"}
+               match?(
+                 %{
+                   "turn" => 0,
+                   "max_turns" => 1,
+                   "invocation" => "agent-" <> _,
+                   "kind" => "provider-error"
+                 },
+                 event.data.data
+               )
            end)
   end
 
@@ -761,7 +769,7 @@ defmodule PtcRunner.Kernel.AgentCoreCharacterizationTest do
     config.event_sink
     |> EventSink.events()
     |> Enum.filter(&(&1.type == "workflow-annotation"))
-    |> Enum.map(& &1.data.data)
+    |> Enum.map(&Map.drop(&1.data.data, ["invocation", "max_turns"]))
   end
 
   defp phased_source do
@@ -856,7 +864,7 @@ defmodule PtcRunner.Kernel.AgentCoreCharacterizationTest do
 
   defp required_agent_tools do
     Map.new(
-      ~w(kernel-check-source kernel-eval kernel-agent-config-failure kernel-agent-protocol-error kernel-llm-provider-failure kernel-mission-inventory kernel-mission-model-context kernel-phase-return-contract-failure kernel-result-contract kernel-result-contract-failure kernel-runtime-limit-failure
+      ~w(kernel-check-source kernel-eval kernel-agent-config-failure kernel-agent-outcome-failure kernel-agent-protocol-error kernel-llm-provider-failure kernel-mission-inventory kernel-mission-model-context kernel-phase-return-contract-failure kernel-result-contract kernel-result-contract-failure kernel-runtime-limit-failure
          llm-request workflow-annotate),
       &{&1, %TrustedTool{function: fn _arguments -> %{status: :error} end}}
     )

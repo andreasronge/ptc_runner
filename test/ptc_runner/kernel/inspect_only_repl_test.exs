@@ -118,6 +118,14 @@ defmodule PtcRunner.Kernel.InspectOnlyReplTest do
   end
 
   @tag :tmp_dir
+  test "an explicit nil installed-limits option uses installed defaults", %{tmp_dir: directory} do
+    manifest_path = write_manifest(directory)
+
+    assert {:ok, session} = InspectOnlyRepl.open(manifest_path, installed_limits: nil)
+    assert {:ok, _} = ReplSession.close(session)
+  end
+
+  @tag :tmp_dir
   test "inspect-only attaches tool-backed components and evaluates pure exports", %{
     tmp_dir: directory
   } do

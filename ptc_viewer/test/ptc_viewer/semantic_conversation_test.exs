@@ -104,6 +104,88 @@ defmodule PtcViewer.SemanticConversationTest do
     # An unchanged prompt is carried once per stream, so the second turn
     # renders without repeating it rather than showing an empty field.
     refute rendered =~ ~s("system": null)
+    assert rendered =~ "System prompt unchanged from the previous turn."
+  end
+
+  test "distinguishes no prompt, de-duplicates feedback, and withholds ambiguous joins", %{
+    tmp_dir: directory
+  } do
+    rendered =
+      render(directory, %{
+        "complete?" => false,
+        "ambiguous?" => true,
+        "streams" => [
+          %{
+            "stream_id" => "stream-ambiguous",
+            "turns" => [
+              %{
+                "turn" => 1,
+                "system" => nil,
+                "messages_added" => [
+                  %{"role" => "tool", "tool_call_id" => "call-1", "content" => "once"}
+                ],
+                "feedback" => [
+                  %{"role" => "tool", "tool_call_id" => "call-1", "content" => "once"}
+                ],
+                "generated" => [
+                  %{
+                    "mission_name" => "wrong-if-guessed",
+                    "source" => "(return :ambiguous)",
+                    "association_ambiguous?" => true
+                  }
+                ],
+                "outcome" => "ok"
+              }
+            ]
+          }
+        ]
+      })
+
+    assert rendered =~ "No system prompt was sent."
+    assert length(Regex.scan(~r/class="kt-msg kt-msg-tool"/, rendered)) == 1
+    assert rendered =~ "1 generated source had an ambiguous turn association"
+    refute rendered =~ "Generated programs"
+    refute rendered =~ ">wrong-if-guessed</strong>"
+    assert rendered =~ "(return :ambiguous)"
+  end
+
+  test "presents model sessions and generated programs before the raw record", %{
+    tmp_dir: directory
+  } do
+    rendered =
+      render(directory, %{
+        "complete?" => true,
+        "streams" => [
+          %{
+            "stream_id" => "stream-7",
+            "turns" => [
+              %{
+                "turn" => 1,
+                "request_sequence" => 4,
+                "messages_added" => [%{"role" => "user", "content" => "check this"}],
+                "generated" => [
+                  %{
+                    "mission_name" => "review",
+                    "evaluation_id" => "eval-7",
+                    "source" => ~S|(+ 1 2)|
+                  }
+                ],
+                "outcome" => "ok"
+              }
+            ]
+          }
+        ]
+      })
+
+    assert rendered =~ "Model sessions &amp; programs"
+    assert rendered =~ "One turn means the model was called once"
+    assert rendered =~ ">review</strong>"
+    assert rendered =~ "stream-7"
+    assert rendered =~ "Input added this turn"
+    assert rendered =~ "Generated programs"
+    assert rendered =~ "eval-7"
+    assert rendered =~ "Raw turn record"
+    assert rendered =~ "check this"
   end
 
   defp render(directory, conversation) do

@@ -828,7 +828,7 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
       "enum" => [%{"x-mcp-header" => "instance-data"}],
       "x-vendor" => %{"x-mcp-header" => "vendor-data"},
       "properties" => %{
-        "region" => %{"type" => "string", "x-mcp-header" => "Region"},
+        "region" => %{"type" => ["null", "string"], "x-mcp-header" => "Region"},
         "nested" => %{
           "type" => "object",
           "properties" => %{
@@ -852,6 +852,14 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
              {"mcp-param-Enabled", "false"},
              {"mcp-param-Region", "=?base64?IG5vcnRoIA==?="}
            ]
+
+    assert {:ok, headers_without_null} =
+             MCPProtocol.header_values(parameters, %{
+               "region" => nil,
+               "nested" => %{"attempt" => 7, "enabled" => false}
+             })
+
+    refute Enum.any?(headers_without_null, &match?({"mcp-param-Region", _value}, &1))
 
     for {value, encoded} <- [
           {7.0, "7"},

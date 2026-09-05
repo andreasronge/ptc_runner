@@ -7,7 +7,7 @@ rule is easy to state and easy to erode: a bug fix adds one correct paragraph to
 a guide, the next fix adds another, and six weeks later the page nobody could
 skim is the page every new reader starts on.
 
-This gate measures three properties per guide and fails when any of them exceeds
+This gate measures four properties per guide and fails when any of them exceeds
 the committed baseline. It never fails on the existing backlog, so it can land
 without a rewrite, and it cannot be satisfied by moving text between guides.
 
@@ -17,6 +17,10 @@ without a rewrite, and it cannot be satisfied by moving text between guides.
             page has become a reference wearing a guide's heading.
   blockers  paragraphs of 3+ sentences and 55+ words carrying no list, code, or
             table. These are what a hurried reader cannot skim past.
+  tics      intensifiers (deliberately, explicitly, ...), the "X, not Y"
+            contrast, and em-dashes per 100 words of prose. Each is harmless
+            once; together they are the sound of text pasted in a paragraph
+            at a time.
 
 Usage:
   scripts/guide_budget.py check   [baseline.json]
@@ -40,12 +44,21 @@ GUIDE_GLOB_DIRS = tuple(
 
 # Caps for a guide with no baseline row. A new guide starts inside the budget
 # rather than setting its own, so adding a page cannot quietly raise the bar.
-NEW_GUIDE_CAPS = {"words": 700, "density": 5.0, "blockers": 2}
+NEW_GUIDE_CAPS = {"words": 700, "density": 5.0, "blockers": 2, "tics": 1.0}
+
+METRICS = ("words", "density", "blockers", "tics")
 
 FENCE = re.compile(r"```.*?```", re.S)
 INLINE_CODE = re.compile(r"`[^`\n]+`")
 SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
+TIC_WORDS = re.compile(
+    r"\b(deliberately|explicitly|genuinely|simply|merely|robust(?:ly)?"
+    r"|seamless(?:ly)?|leverages?|importantly|crucially|notably)\b",
+    re.I,
+)
+TIC_CONTRAST = re.compile(r",\s+not\s+\S")
+TIC_DASH = re.compile("\u2014")
 
 
 def guide_paths() -> list[str]:
@@ -69,6 +82,13 @@ def measure(path: str) -> dict:
     identifiers = len(INLINE_CODE.findall(prose))
     density = identifiers * 100.0 / prose_words
 
+    plain = INLINE_CODE.sub(" ", prose)
+    tics = (
+        len(TIC_WORDS.findall(plain))
+        + len(TIC_CONTRAST.findall(plain))
+        + len(TIC_DASH.findall(plain))
+    )
+
     blockers = 0
     for para in re.split(r"\n\s*\n", prose):
         flat = " ".join(para.split())
@@ -84,6 +104,7 @@ def measure(path: str) -> dict:
         "words": words,
         "density": round(density, 1),
         "blockers": blockers,
+        "tics": round(tics * 100.0 / prose_words, 1),
     }
 
 
@@ -124,9 +145,9 @@ def check(baseline_path: str) -> int:
         if unbaselined:
             allowed = caps
 
-        for metric in ("words", "density", "blockers"):
+        for metric in METRICS:
             have = current[metric]
-            cap = allowed[metric]
+            cap = allowed.get(metric, caps[metric])
             if have > cap:
                 origin = "new-guide cap" if unbaselined else "baseline"
                 failures.append(
@@ -136,8 +157,8 @@ def check(baseline_path: str) -> int:
         if not unbaselined:
             shrunk = [
                 metric
-                for metric in ("words", "density", "blockers")
-                if current[metric] < allowed[metric]
+                for metric in METRICS
+                if current[metric] < allowed.get(metric, caps[metric])
             ]
             if shrunk:
                 slack.append(
@@ -145,7 +166,8 @@ def check(baseline_path: str) -> int:
                     % (
                         path,
                         ", ".join(
-                            f"{m} {allowed[m]} -> {current[m]}" for m in shrunk
+                            f"{m} {allowed.get(m, caps[m])} -> {current[m]}"
+                            for m in shrunk
                         ),
                     )
                 )
@@ -179,7 +201,10 @@ def bless(baseline_path: str) -> int:
 
 def report(baseline_path: str) -> int:
     baseline = load_baseline(baseline_path).get("guides", {})
-    print("%-42s %6s %8s %9s" % ("guide", "words", "density", "blockers"))
+    print(
+        "%-42s %6s %8s %9s %6s"
+        % ("guide", "words", "density", "blockers", "tics")
+    )
     total = 0
     for path in guide_paths():
         current = measure(path)
@@ -189,19 +214,20 @@ def report(baseline_path: str) -> int:
         if allowed:
             over = [
                 m
-                for m in ("words", "density", "blockers")
-                if current[m] > allowed[m]
+                for m in METRICS
+                if current[m] > allowed.get(m, NEW_GUIDE_CAPS[m])
             ]
             flag = "  OVER: " + ",".join(over) if over else ""
         else:
             flag = "  (no baseline row)"
         print(
-            "%-42s %6d %8.1f %9d%s"
+            "%-42s %6d %8.1f %9d %6.1f%s"
             % (
                 os.path.basename(path),
                 current["words"],
                 current["density"],
                 current["blockers"],
+                current["tics"],
                 flag,
             )
         )

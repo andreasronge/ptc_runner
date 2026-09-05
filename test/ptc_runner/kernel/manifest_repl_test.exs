@@ -154,6 +154,108 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
   end
 
   @tag :tmp_dir
+  test "workflow REPL keeps agent run-outcome terminal mission results as data", %{
+    tmp_dir: directory
+  } do
+    configure_host_llm(
+      host_llm_test_result:
+        {:ok,
+         %{
+           content: nil,
+           tool_calls: [
+             %{id: "terminal", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+           ],
+           tokens: %{}
+         }}
+    )
+
+    {manifest, host} = write_llm_application(directory, :normal)
+
+    File.write!(
+      Path.join(directory, "main.clj"),
+      ~S|(ns app) (defn run [_input] (agent.core/run-outcome "Return 42" {"mission" "default" "model" "model" "max_turns" 1 "retain_programs" 2}))|
+    )
+
+    document = Jason.decode!(File.read!(manifest))
+
+    document =
+      document
+      |> put_in(["workflow", "components"], [
+        %{"library" => "agent.core"},
+        %{"id" => "app", "path" => "main.clj", "dependencies" => ["agent.core"]}
+      ])
+      |> Map.put("missions", %{"default" => %{}})
+
+    File.write!(manifest, Jason.encode!(document))
+
+    assert {:ok, session} =
+             ManifestRepl.open(manifest, host,
+               input_mode: :eval,
+               interactive_loop: false,
+               terminal_attached: true
+             )
+
+    assert {:ok, result, session} = ReplSession.eval(session, "(app/run {})")
+    assert result.return["status"] == "returned"
+    assert result.return["value"] == 42
+
+    assert result.return["programs"] == [
+             %{
+               :source => "(return 42)",
+               "execution" => %{"outcome" => "returned"},
+               "mission" => "default",
+               "turn" => 1
+             }
+           ]
+
+    assert result.return["programs-omitted"] == 0
+
+    Application.put_env(
+      :ptc_runner,
+      :host_llm_test_result,
+      {:ok,
+       %{
+         content: nil,
+         tool_calls: [
+           %{id: "terminal-fail", name: "run_ptc_lisp", args: %{"program" => "(fail :stop)"}}
+         ],
+         tokens: %{}
+       }}
+    )
+
+    assert {:ok, failed, session} = ReplSession.eval(session, "(app/run {})")
+    assert failed.return["status"] == "subject-failure"
+
+    assert [
+             %{
+               :source => "(fail :stop)",
+               "execution" => execution,
+               "mission" => "default",
+               "turn" => 1
+             }
+           ] = failed.return["programs"]
+
+    assert execution["outcome"] == :failed
+    assert execution["retryable?"]
+    assert is_binary(execution["message"])
+
+    assert {:ok, events} = ReplSession.close(session)
+
+    workflow_ids =
+      for %{type: "evaluation-started", data: %{environment: :workflow, evaluation_id: id}} <-
+            events,
+          do: id
+
+    mission_parents =
+      for %{type: "evaluation-started", data: %{environment: :mission, parent_evaluation_id: id}} <-
+            events,
+          do: id
+
+    assert length(workflow_ids) == 2
+    assert Enum.sort(mission_parents) == Enum.sort(workflow_ids)
+  end
+
+  @tag :tmp_dir
   test "a private interactive session retains canonical events beyond 128 forms", %{
     tmp_dir: directory
   } do
@@ -293,6 +395,43 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
       assert count_diagnostic.code == :schema_violation
       assert CommandDiagnostic.to_map(count_diagnostic)["path"] == "/limits/normal_event_count"
     end
+  end
+
+  @tag :tmp_dir
+  test "manifest REPL rejects a private trace budget that cannot retain its terminal event", %{
+    tmp_dir: directory
+  } do
+    write_component(directory)
+    manifest = Path.join(directory, "invalid-private-trace-budget.json")
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
+    {:ok, base_limits} = Limits.new(event_payload_bytes: payload_bytes)
+    required_bytes = LimitConfiguration.required_private_event_bytes(base_limits)
+
+    document =
+      :private
+      |> manifest_document(%{})
+      |> Map.put("limits", %{
+        "event_payload_bytes" => payload_bytes,
+        "normal_event_bytes" => required_bytes - 1
+      })
+
+    File.write!(manifest, Jason.encode!(document))
+    {:ok, runtime} = CommandRuntime.new(provider_application_mode: :host_owned)
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} =
+             CommandAcquisition.prepare_repl(manifest, nil, runtime, true)
+
+    assert diagnostic.phase == :application
+    assert diagnostic.code == :limit_configuration_invalid
+
+    diagnostic_message = diagnostic.message
+
+    assert {:ok, ^diagnostic_message} =
+             LimitConfigurationDiagnostic.message(
+               required_bytes - 1,
+               required_bytes,
+               payload_bytes
+             )
   end
 
   @tag :tmp_dir
@@ -881,7 +1020,11 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
   end
 
   defp configure_host_llm(extra \\ []) do
-    keys = [:llm_adapter, :host_llm_test_owner, :host_llm_test_ready_gate]
+    keys =
+      [:llm_adapter, :host_llm_test_owner, :host_llm_test_ready_gate]
+      |> Kernel.++(Keyword.keys(extra))
+      |> Enum.uniq()
+
     previous = Map.new(keys, &{&1, Application.get_env(:ptc_runner, &1, :unset)})
 
     Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.TestSupport.HostLLMAdapter)

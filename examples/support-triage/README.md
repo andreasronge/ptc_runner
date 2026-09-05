@@ -21,13 +21,14 @@ single bounded question into a two-specialist workflow with a result contract:
    result contract.
 
 Each project has a project document in this directory. All three select the
-trusted `deepseek` model alias and require `OPENROUTER_API_KEY` in this
-directory's `.env`:
+trusted `deepseek` model alias and require a non-empty `OPENROUTER_API_KEY`.
+Keep the generated comment-only `.env` and export the variable, or replace its
+comment with a non-empty assignment in that file. Assigned file values override
+exported values, including empty assignments:
 
 ```console
 ptc init support-triage --example support-triage
-printf 'OPENROUTER_API_KEY=\n' > support-triage/.env
-chmod 600 support-triage/.env
+export OPENROUTER_API_KEY=...
 ptc run support-triage/01-one-question.ptc-project.json
 ptc run support-triage/02-domain-api.ptc-project.json
 ptc run support-triage/03-specialists.ptc-project.json
@@ -49,3 +50,13 @@ to see exactly what a design decision added.
 
 `ptc-host.json` is the shared operator document these examples install from;
 `ptc docs host-configuration` explains its fields.
+
+`03-specialists/workflow.clj` wraps the ranked tickets in an
+`<untrusted_tickets>` block before they enter the escalation task, because
+ticket text is customer-authored. The block tells the model to treat that text
+as data; it does not stop a misleading ticket from producing a wrong team or
+priority. The mission grant prevents the escalation model from calling a
+capability or reading the wider ticket pool directly. It does not filter the
+handoff, so this example provides no data-flow guarantee. The scheduled live
+test checks each escalation's id, priority, team, and first action against the
+policy; only the summary prose goes unchecked.

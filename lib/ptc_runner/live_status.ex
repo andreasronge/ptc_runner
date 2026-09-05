@@ -11,8 +11,43 @@ defmodule PtcRunner.LiveStatus do
   run.
   """
 
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.LiveStatus.Reporter
   alias PtcRunner.LiveStatus.Target
+  alias PtcRunner.Utf8
+
+  @doc false
+  @spec external_target(binary() | nil) :: Target.t() | nil
+  def external_target(label) do
+    case System.get_env("PTC_VIEWER_URL") do
+      url when is_binary(url) and url != "" ->
+        token = System.get_env("PTC_VIEWER_TOKEN")
+
+        case Target.new(
+               fn run_id, frame -> Reporter.report_http(url, run_id, frame, token) end,
+               label: label
+             ) do
+          {:ok, target} -> target
+          _error -> nil
+        end
+
+      _absent ->
+        nil
+    end
+  end
+
+  @doc false
+  @spec application_label_for(ApplicationPackage.t(), binary()) :: binary()
+  def application_label_for(%ApplicationPackage{} = package, application)
+      when is_binary(application) do
+    name = get_in(package.manifest, ["labels", "name"]) || Path.basename(application)
+    application_label(name, package.entry)
+  end
+
+  @doc false
+  @spec application_label(binary(), binary()) :: binary()
+  def application_label(name, entry) when is_binary(name) and is_binary(entry),
+    do: Utf8.truncate_valid("#{name} · #{entry}", 256)
 
   @target_key {__MODULE__, :target}
 

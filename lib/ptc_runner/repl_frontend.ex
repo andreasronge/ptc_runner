@@ -39,9 +39,10 @@ defmodule PtcRunner.ReplFrontend do
       capabilities, limits, input, labels, and event policy;
     * `--mission` — evaluate one manifest mission directly, with only its
       components, data, direct capabilities, and provider dependency closure;
-    * `--inspect-only` — compile the selected environment and inspect it
-      without host, credentials, providers, input, traces, or private-session
-      authority;
+    * `--inspect-only` — compile the selected environment and inspect it. A
+      project-declared host is decoded only for installed limit ceilings;
+      credentials, providers, input, traces, and private-session authority are
+      not acquired;
     * `--host-config` — manifest-only trusted provider installation document;
     * `-t, --trace` — append this session's canonical events to a JSONL file;
     * `--profile` — select a code-owned mission session profile;
@@ -114,12 +115,15 @@ defmodule PtcRunner.ReplFrontend do
   alias PtcRunner.Kernel.AnalysisSessionBuilder
   alias PtcRunner.Kernel.AnalysisTerminal
   alias PtcRunner.Kernel.CommandArguments
+  alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandDiagnosticRenderer
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.DirectorySeparation
   alias PtcRunner.Kernel.InspectOnlyRepl
   alias PtcRunner.Kernel.ManifestRepl
+  alias PtcRunner.Kernel.ModelContractDiagnostic
+  alias PtcRunner.Kernel.ProjectContext
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.SelectedCanonicalSource
@@ -139,7 +143,12 @@ defmodule PtcRunner.ReplFrontend do
   @spec run(CommandArguments.t(), CommandRuntime.t(), keyword()) ::
           :ok | {:error, binary()} | {:error, atom(), binary()}
   def run(
-        %CommandArguments{command: :repl, application: script, ordered_options: opts},
+        %CommandArguments{
+          command: :repl,
+          application: script,
+          ordered_options: opts,
+          project: project
+        },
         %CommandRuntime{} = runtime,
         frontend_opts
       ) do
@@ -159,12 +168,19 @@ defmodule PtcRunner.ReplFrontend do
           )
 
         {:ok, :inspect_only} ->
-          opts =
-            opts
-            |> Keyword.put(:command_runtime, runtime)
-            |> Keyword.put(:terminal_attached, terminal_attached?)
+          case ProjectContext.installed_limits(project) do
+            {:ok, installed_limits} ->
+              opts =
+                opts
+                |> Keyword.put(:command_runtime, runtime)
+                |> Keyword.put(:terminal_attached, terminal_attached?)
+                |> Keyword.put(:installed_limits, installed_limits)
 
-          run_inspect_only_session(opts, arguments)
+              run_inspect_only_session(opts, arguments)
+
+            {:error, %CommandDiagnostic{} = diagnostic} ->
+              fail_command_diagnostic(diagnostic)
+          end
 
         {:ok, :manifest} ->
           opts =
@@ -196,6 +212,14 @@ defmodule PtcRunner.ReplFrontend do
   end
 
   def run(_arguments, _runtime, _frontend_opts), do: {:error, "invalid repl frontend options"}
+
+  @spec fail_command_diagnostic(CommandDiagnostic.t()) :: no_return()
+  defp fail_command_diagnostic(diagnostic) do
+    case CommandDiagnosticRenderer.render(diagnostic) do
+      {:ok, rendered} -> fail(rendered)
+      {:error, :invalid_command_diagnostic} -> fail("ptc repl setup failed")
+    end
+  end
 
   defp valid_frontend_opts?(opts) do
     Keyword.keyword?(opts) and Keyword.keys(opts) -- [:terminal_attached] == [] and
@@ -1393,7 +1417,8 @@ defmodule PtcRunner.ReplFrontend do
   defp run_inspect_only_session(opts, arguments) do
     case InspectOnlyRepl.open(opts[:manifest],
            mission: opts[:mission],
-           interactive_loop: interactive_input?(opts, arguments)
+           interactive_loop: interactive_input?(opts, arguments),
+           installed_limits: opts[:installed_limits]
          ) do
       {:ok, session} ->
         run_workflow_session(session, opts, arguments)
@@ -1402,10 +1427,7 @@ defmodule PtcRunner.ReplFrontend do
         fail("unknown mission #{inspect(opts[:mission])}; declared: #{Enum.join(declared, ", ")}")
 
       {:error, %{code: code, diagnostic: diagnostic}} ->
-        case CommandDiagnosticRenderer.render(diagnostic) do
-          {:ok, rendered} -> fail(rendered)
-          {:error, :invalid_command_diagnostic} -> fail(manifest_repl_error(code))
-        end
+        fail(render_setup_diagnostic(code, diagnostic))
 
       {:error, %{code: code}} ->
         fail(manifest_repl_error(code))
@@ -1445,10 +1467,8 @@ defmodule PtcRunner.ReplFrontend do
         fail("unknown mission #{inspect(opts[:mission])}; declared: #{Enum.join(declared, ", ")}")
 
       {:error, %{code: code, diagnostic: diagnostic}} ->
-        case CommandDiagnosticRenderer.render(diagnostic) do
-          {:ok, rendered} -> fail(rendered)
-          {:error, :invalid_command_diagnostic} -> fail(manifest_repl_error(code))
-        end
+        rendered = render_setup_diagnostic(code, diagnostic)
+        fail(manifest_diagnostic_guidance(rendered, diagnostic))
 
       {:error, %{code: code}} ->
         fail(manifest_repl_error(code))
@@ -1471,6 +1491,18 @@ defmodule PtcRunner.ReplFrontend do
       abort_session(session, :frontend_exit)
       :erlang.raise(kind, reason, __STACKTRACE__)
   end
+
+  defp manifest_diagnostic_guidance(
+         rendered,
+         %{phase: :active_preflight, code: :credential_unavailable}
+       ),
+       do:
+         rendered <>
+           "; for credential-free source and helper evaluation, rerun with only " <>
+           "--project PROJECT (or --manifest MANIFEST), optional --mission MISSION, " <>
+           "--inspect-only, and -e EXPR"
+
+  defp manifest_diagnostic_guidance(rendered, _diagnostic), do: rendered
 
   defp manifest_input_mode(opts, arguments) do
     cond do
@@ -1527,6 +1559,18 @@ defmodule PtcRunner.ReplFrontend do
 
   defp manifest_repl_error(code) when is_atom(code),
     do: "ptc repl setup failed: #{code}"
+
+  defp render_setup_diagnostic(code, diagnostic) do
+    case CommandDiagnosticRenderer.render(diagnostic) do
+      {:ok, rendered} ->
+        warning = ModelContractDiagnostic.warning_line(diagnostic.message)
+        if warning != "", do: error(String.trim_trailing(warning, "\n"))
+        rendered
+
+      {:error, :invalid_command_diagnostic} ->
+        manifest_repl_error(code)
+    end
+  end
 
   defp evaluate_mode(session, opts, arguments, render) do
     with {:ok, session} <- maybe_load(session, opts[:load], render) do
@@ -1763,6 +1807,16 @@ defmodule PtcRunner.ReplFrontend do
       )
 
     info(preview.text)
+  end
+
+  defp format_error(
+         %{fail: %{reason: :type_error, message: message}} = step,
+         session,
+         render
+       )
+       when is_binary(message) do
+    body = String.replace_prefix(message, "type_error: ", "")
+    "Error (type_error): " <> mission_hint(step, session, render) <> body
   end
 
   defp format_error(

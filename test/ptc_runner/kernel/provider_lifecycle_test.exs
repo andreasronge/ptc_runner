@@ -588,6 +588,61 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     assert Jason.decode!(call.function.arguments) == %{"program" => "(return 42)"}
   end
 
+  test "provider request adaptation owns every accepted field atom" do
+    {:ok, {_module, [atoms: atoms]}} =
+      ProviderRegistry |> :code.which() |> :beam_lib.chunks([:atoms])
+
+    owned = MapSet.new(atoms, fn {_index, atom} -> atom end)
+
+    for atom <- [
+          :system,
+          :messages,
+          :tools,
+          :cache,
+          :schema,
+          :role,
+          :content,
+          :tool_calls,
+          :tool_call_id,
+          :id,
+          :type,
+          :function,
+          :name,
+          :args,
+          :args_error,
+          :arguments
+        ] do
+      assert MapSet.member?(owned, atom),
+             "#{inspect(atom)} must be a literal in ProviderRegistry, not borrowed from another module"
+    end
+  end
+
+  test "provider request adaptation does not intern unknown fields" do
+    unknown = "provider_registry_unknown_field_1735"
+
+    assert_raise ArgumentError, fn -> String.to_existing_atom(unknown) end
+
+    request = %{
+      unknown => "request",
+      "messages" => [
+        %{
+          unknown => "message",
+          "tool_calls" => [
+            %{
+              unknown => "tool call",
+              "function" => %{"name" => "tool", "arguments" => "{}", unknown => "function"}
+            }
+          ]
+        }
+      ]
+    }
+
+    assert %{messages: [%{tool_calls: [%{function: %{name: "tool", arguments: "{}"}}]}]} =
+             ProviderRegistry.adapter_request(request)
+
+    assert_raise ArgumentError, fn -> String.to_existing_atom(unknown) end
+  end
+
   @tag :tmp_dir
   test "assembly failure closes successful providers in reverse order", %{tmp_dir: dir} do
     parent = self()

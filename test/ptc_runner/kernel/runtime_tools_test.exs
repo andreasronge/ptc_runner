@@ -26,7 +26,7 @@ defmodule PtcRunner.Kernel.RuntimeToolsTest do
     {:ok, limits} = Limits.new()
     # The run state is linked to the test process, so it goes away with it.
     {:ok, state} = RunState.start(limits)
-    %{callback: RuntimeTools.runtime_limit_failure(state, limits)}
+    %{callback: RuntimeTools.runtime_limit_failure(state, limits), state: state}
   end
 
   test "every closed reason mints its own turn-limit detail", %{callback: callback} do
@@ -215,6 +215,94 @@ defmodule PtcRunner.Kernel.RuntimeToolsTest do
              callback.(%{"option" => "not_an_option", "min" => 1, "max" => 128, "value" => 129})
 
     assert {:ok, _} = AgentConfigDiagnostic.integer_message("max_turns", 1, 128, 129)
+  end
+
+  test "agent outcome evidence uses distinct bounded proofs", %{state: state} do
+    callback = RuntimeTools.agent_outcome_failure(state)
+
+    evidence = %{
+      "status" => "subject-failure",
+      "kind" => "turn-limit",
+      "error" => %{"limit_value" => 1, "reason" => "evaluation-error"}
+    }
+
+    record = %{"mode" => "record-turn", "evidence" => evidence}
+    consume = %{"mode" => "consume", "evidence" => evidence}
+
+    :ok =
+      RunState.record_last_evaluator_failure(state, %{
+        kind: :arithmetic_error,
+        details: %{marker: 1}
+      })
+
+    assert %{"failure_token" => first_token} = callback.(record)
+
+    :ok =
+      RunState.record_last_evaluator_failure(state, %{
+        kind: :java_type_error,
+        details: %{marker: 2}
+      })
+
+    assert %{"failure_token" => second_token} = callback.(record)
+    refute first_token == second_token
+
+    assert %TrustedError{
+             reason: :runtime_limit_exceeded,
+             details: %{last_evaluator_failure: %{kind: :java_type_error}}
+           } =
+             callback.(Map.put(consume, "token", second_token))
+
+    assert %TrustedError{
+             reason: :runtime_limit_exceeded,
+             details: %{last_evaluator_failure: %{kind: :arithmetic_error}}
+           } =
+             callback.(Map.put(consume, "token", first_token))
+
+    assert %{reason: :invalid_agent_outcome_failure} =
+             callback.(Map.put(consume, "token", first_token))
+
+    :ok =
+      RunState.record_last_evaluator_failure(state, %{
+        evaluation_id: "evaluation-a",
+        environment: :mission,
+        kind: :arithmetic_error,
+        details: %{marker: :a}
+      })
+
+    :ok =
+      RunState.record_last_evaluator_failure(state, %{
+        evaluation_id: "evaluation-b",
+        environment: :mission,
+        kind: :java_type_error,
+        details: %{marker: :b}
+      })
+
+    assert %{"failure_token" => exact_token} =
+             callback.(Map.put(record, "evaluation_id", "evaluation-a"))
+
+    assert %TrustedError{
+             details: %{
+               last_evaluator_failure: %{
+                 evaluation_id: "evaluation-a",
+                 kind: :arithmetic_error,
+                 details: %{marker: :a}
+               }
+             }
+           } = callback.(Map.put(consume, "token", exact_token))
+
+    failure = %TrustedError{reason: :runtime_limit_exceeded, message: "bounded", details: %{}}
+
+    for index <- 1..2_048 do
+      assert :ok =
+               RunState.record_agent_outcome_failure(
+                 state,
+                 "proof-#{index}",
+                 evidence,
+                 failure
+               )
+    end
+
+    assert %TrustedError{reason: :runtime_limit_exceeded} = callback.(record)
   end
 
   test "standalone phase-contract failures are authenticated and candidate-free" do

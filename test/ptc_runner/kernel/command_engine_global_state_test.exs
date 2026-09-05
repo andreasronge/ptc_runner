@@ -13,9 +13,117 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
   alias PtcRunner.Kernel.CommandEntry
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandPreparation
+  alias PtcRunner.Kernel.CommandRenderer
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.StandaloneCLI
+  alias PtcRunner.TestSupport.HTTPRequest
   alias PtcRunner.TestSupport.LLMSupport
+
+  @tag :tmp_dir
+  test "doctor attributes a reached LLM authentication refusal to credentials", %{
+    tmp_dir: directory
+  } do
+    keys = [:llm_adapter, :host_llm_test_owner, :host_llm_test_result]
+    previous = Map.new(keys, &{&1, Application.fetch_env(:ptc_runner, &1)})
+
+    Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.TestSupport.HostLLMAdapter)
+    Application.put_env(:ptc_runner, :host_llm_test_owner, self())
+
+    on_exit(fn -> restore_application_env(previous) end)
+
+    host_path =
+      write_host_config(directory, "doctor-llm-auth", literal_credential_host("rejected-key"))
+
+    application = doctor_application(directory, "doctor-llm-auth", workflow: ["model"])
+
+    for kind <- [:authentication_failed, :denied] do
+      Application.put_env(
+        :ptc_runner,
+        :host_llm_test_result,
+        {:error,
+         ProviderError.new(kind, "PRIVATE PROVIDER MESSAGE", dispatch_provenance: :dispatched)}
+      )
+
+      assert {:error, %CommandOutcome{} = outcome} =
+               CommandEngine.prepare([
+                 "doctor",
+                 application,
+                 "--host-config",
+                 host_path,
+                 "--connect"
+               ])
+
+      assert outcome.envelope["error"]["phase"] == "active_preflight"
+      assert outcome.envelope["error"]["code"] == "authentication_rejected"
+      assert outcome.envelope["error"]["subject"]["operation"] == "credentials"
+      refute Jason.encode!(outcome.envelope) =~ "PRIVATE PROVIDER MESSAGE"
+
+      checks = outcome.envelope["result"]["checks"]
+
+      assert %{"status" => "fail", "code" => "authentication_rejected"} =
+               Enum.find(checks, &(&1["name"] == "provider/model/credentials"))
+
+      assert %{"status" => "pass", "code" => "available"} =
+               Enum.find(checks, &(&1["name"] == "provider/model/connectivity"))
+
+      assert_schema_valid(outcome.envelope)
+      assert_receive {:host_llm_request, "openrouter:test/model", _request}
+    end
+
+    for provenance <- [nil, :not_dispatched] do
+      Application.put_env(
+        :ptc_runner,
+        :host_llm_test_result,
+        {:error,
+         ProviderError.new(:authentication_failed, "PRIVATE PROVIDER MESSAGE",
+           dispatch_provenance: provenance
+         )}
+      )
+
+      assert {:error, %CommandOutcome{} = outcome} =
+               CommandEngine.prepare([
+                 "doctor",
+                 application,
+                 "--host-config",
+                 host_path,
+                 "--connect"
+               ])
+
+      assert outcome.envelope["error"]["code"] == "connectivity_unavailable"
+      assert outcome.envelope["error"]["subject"]["operation"] == "connectivity"
+      refute Jason.encode!(outcome.envelope) =~ "PRIVATE PROVIDER MESSAGE"
+      assert_schema_valid(outcome.envelope)
+      assert_receive {:host_llm_request, "openrouter:test/model", _request}
+    end
+
+    Application.put_env(
+      :ptc_runner,
+      :host_llm_test_result,
+      {:error, ProviderError.new(:transport_error, "PRIVATE TRANSPORT MESSAGE")}
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare([
+               "doctor",
+               application,
+               "--host-config",
+               host_path,
+               "--connect"
+             ])
+
+    assert outcome.envelope["error"]["code"] == "connectivity_unavailable"
+    assert outcome.envelope["error"]["subject"]["operation"] == "connectivity"
+
+    assert %{"status" => "fail", "code" => "connectivity_unavailable"} =
+             Enum.find(
+               outcome.envelope["result"]["checks"],
+               &(&1["name"] == "provider/model/connectivity")
+             )
+
+    refute Jason.encode!(outcome.envelope) =~ "PRIVATE TRANSPORT MESSAGE"
+    assert_schema_valid(outcome.envelope)
+    assert_receive {:host_llm_request, "openrouter:test/model", _request}
+  end
 
   @tag :tmp_dir
   test "agent LLM failures publish a bounded provider class", %{tmp_dir: directory} do
@@ -169,12 +277,14 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
   end
 
   @tag :tmp_dir
-  test "doctor --connect sets up selected environment credentials before active work", %{
+  test "commands resolve deferred environment before active work and live reporting", %{
     tmp_dir: directory
   } do
     environment_name = "PTC_TEST_DOCTOR_CONNECT_TOKEN"
     previous_environment = System.get_env(environment_name)
+    previous_viewer_url = System.get_env("PTC_VIEWER_URL")
     System.put_env(environment_name, "ambient-secret")
+    System.put_env("PTC_VIEWER_URL", "http://127.0.0.1:1")
 
     provider_applications = LLMSupport.snapshot_provider_applications()
 
@@ -208,6 +318,10 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
         do: System.put_env(environment_name, previous_environment),
         else: System.delete_env(environment_name)
 
+      if previous_viewer_url,
+        do: System.put_env("PTC_VIEWER_URL", previous_viewer_url),
+        else: System.delete_env("PTC_VIEWER_URL")
+
       Enum.each(previous, fn
         {key, {:ok, value}} -> Application.put_env(:ptc_runner, key, value)
         {key, :error} -> Application.delete_env(:ptc_runner, key)
@@ -233,7 +347,23 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
 
     application = doctor_application(directory, "command-owned-model", workflow: ["model"])
     env_file = Path.join(directory, "model.env")
-    File.write!(env_file, "#{environment_name}=test-secret\n")
+    {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
+    {:ok, port} = :inet.port(listener)
+    parent = self()
+
+    _server =
+      spawn(fn ->
+        {:ok, socket} = :gen_tcp.accept(listener)
+        {:ok, request} = HTTPRequest.receive_complete(socket)
+        send(parent, {:deferred_viewer_request, request})
+        :ok = :gen_tcp.send(socket, "HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n")
+        :ok = :gen_tcp.close(socket)
+      end)
+
+    File.write!(
+      env_file,
+      "#{environment_name}=test-secret\nPTC_VIEWER_URL=http://127.0.0.1:#{port}\n"
+    )
 
     presentation =
       StandaloneCLI.execute([
@@ -277,6 +407,20 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
                }
              ]
            }
+
+    assert %{exit_status: 0} =
+             StandaloneCLI.execute([
+               "run",
+               application,
+               "--host-config",
+               host_path,
+               "--env-file",
+               env_file
+             ])
+
+    assert_receive {:deferred_viewer_request, request}, 2_000
+    assert request =~ ~s|"label":"ptc.json · app/run"|
+    :ok = :gen_tcp.close(listener)
   end
 
   @tag :tmp_dir
@@ -386,6 +530,92 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
              Enum.find(result["checks"], &(&1["name"] == "provider/workspace/connectivity"))
 
     assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "run stderr explains named env-file precedence only when a file is selected", %{
+    tmp_dir: directory
+  } do
+    environment_name = "PTC_TEST_RUN_MISSING_NAMED_ENV_CREDENTIAL"
+    previous_environment = System.get_env(environment_name)
+    System.delete_env(environment_name)
+
+    on_exit(fn ->
+      if previous_environment,
+        do: System.put_env(environment_name, previous_environment),
+        else: System.delete_env(environment_name)
+    end)
+
+    host_path =
+      write_host_config(
+        directory,
+        "run-missing-named-env",
+        stdio_credential_host(environment_name)
+      )
+
+    application = doctor_application(directory, "run-missing-named-env", mission: ["workspace"])
+
+    env_file = Path.join(directory, "model.env")
+    File.write!(env_file, "# #{environment_name}\n")
+
+    with_file =
+      StandaloneCLI.execute([
+        "run",
+        application,
+        "--host-config",
+        host_path,
+        "--env-file",
+        env_file
+      ])
+
+    without_file = StandaloneCLI.execute(["run", application, "--host-config", host_path])
+
+    file_credential_host =
+      stdio_credential_host(environment_name)
+      |> put_in(["credentials", "key"], %{"file" => "missing-token"})
+
+    file_credential_host_path =
+      write_host_config(directory, "run-missing-file-credential", file_credential_host)
+
+    unrelated_file =
+      StandaloneCLI.execute([
+        "run",
+        application,
+        "--host-config",
+        file_credential_host_path,
+        "--env-file",
+        env_file
+      ])
+
+    mixed_credential_host =
+      stdio_credential_host(environment_name)
+      |> put_in(["credentials", "file_key"], %{"file" => "missing-token"})
+      |> put_in(["install", "workspace", "transport", "env", "FILE_TOKEN"], %{
+        "binding" => "file_key"
+      })
+
+    mixed_credential_host_path =
+      write_host_config(directory, "run-mixed-credentials", mixed_credential_host)
+
+    mixed_sources =
+      StandaloneCLI.execute([
+        "run",
+        application,
+        "--host-config",
+        mixed_credential_host_path,
+        "--env-file",
+        env_file
+      ])
+
+    assert with_file.outcome.envelope["error"] == without_file.outcome.envelope["error"]
+    assert with_file.stderr =~ "assignments in a named environment file override process values"
+    assert with_file.stderr =~ "including empty assignments"
+    refute with_file.stderr =~ env_file
+    refute without_file.stderr =~ "assignments in a named environment file"
+    assert unrelated_file.outcome.envelope["error"]["code"] == "credential_unavailable"
+    refute unrelated_file.stderr =~ "assignments in a named environment file"
+    assert mixed_sources.outcome.envelope["error"]["code"] == "credential_unavailable"
+    assert mixed_sources.stderr =~ "assignments in a named environment file"
   end
 
   @tag :tmp_dir
@@ -904,5 +1134,156 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
       |> Enum.find(&(&1["type"] == "run-started"))
 
     assert started["data"]["warnings"] == [warning]
+  end
+
+  @tag :tmp_dir
+  test "an uncataloged cost-budget refusal explains pricing in run and doctor", %{
+    tmp_dir: directory
+  } do
+    keys = [
+      :llm_adapter,
+      :host_llm_test_owner,
+      :host_llm_test_prepare_error,
+      :host_llm_test_public_model
+    ]
+
+    previous = Map.new(keys, &{&1, Application.fetch_env(:ptc_runner, &1)})
+
+    Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.TestSupport.HostLLMAdapter)
+    Application.put_env(:ptc_runner, :host_llm_test_owner, self())
+
+    Application.put_env(
+      :ptc_runner,
+      :host_llm_test_prepare_error,
+      :uncataloged_cost_reservation_pricing_unavailable
+    )
+
+    Application.put_env(:ptc_runner, :host_llm_test_public_model, true)
+
+    on_exit(fn ->
+      Enum.each(previous, fn
+        {key, {:ok, value}} -> Application.put_env(:ptc_runner, key, value)
+        {key, :error} -> Application.delete_env(:ptc_runner, key)
+      end)
+    end)
+
+    model = "openrouter:future-vendor/future-priced-model-1724"
+
+    host = uncataloged_cost_host(model)
+
+    host_path = write_host_config(directory, "uncataloged-cost", host)
+
+    manifest =
+      valid_manifest(%{
+        "workflow" => %{
+          "components" => [%{"id" => "app", "path" => "main.clj"}],
+          "entry" => "app/run"
+        },
+        "providers" => %{
+          "workflow" => [%{"name" => "model", "config" => %{}}],
+          "mission" => []
+        }
+      })
+
+    application =
+      write_application(directory, "uncataloged-cost", manifest, %{
+        "main.clj" => ~S|(ns app) (defn run [_input] true)|
+      })
+
+    assert {:error, %CommandOutcome{} = run} =
+             CommandEngine.dispatch(["run", application, "--host-config", host_path])
+
+    assert run.exit_status == 4, inspect(run.envelope)
+    assert run.envelope["error"]["phase"] == "local_preflight", inspect(run.envelope)
+    assert run.envelope["error"]["code"] == "model_contract_unsupported"
+    assert run.envelope["error"]["provider_activity"] == false
+    assert run.envelope["error"]["notes"] == []
+    assert run.envelope["error"]["subject"]["name"] == "model"
+    assert run.envelope["error"]["message"] =~ "llm_cost_microusd"
+    assert run.envelope["error"]["message"] =~ model
+    assert run.envelope["error"]["message"] =~ "supported USD reservation pricing"
+
+    assert run.envelope["warnings"] == [
+             %{
+               "code" => "model_uncataloged",
+               "message" =>
+                 "the configured model is not an exact catalog entry; pricing, limits, token estimation, and capability detection may be incomplete",
+               "provider" => "model",
+               "model" => model
+             }
+           ]
+
+    assert {:stderr, run_stderr} = CommandRenderer.render(run)
+    assert run_stderr =~ "warning: model_uncataloged"
+    assert run_stderr =~ model
+
+    assert_schema_valid(run.envelope)
+
+    message_prefix = "llm_cost_microusd requires supported USD reservation pricing for "
+
+    message_suffix =
+      "; remove limits.llm_cost_microusd, or select a model with supported USD reservation pricing"
+
+    for invalid_message <- [
+          message_prefix <> ~S("invalid\qescape") <> message_suffix,
+          message_prefix <> ~S("\u0061") <> message_suffix,
+          message_prefix <> ~S("\/") <> message_suffix,
+          message_prefix <> Jason.encode!(String.duplicate("a", 257)) <> message_suffix,
+          message_prefix <> Jason.encode!(String.duplicate("é", 129)) <> message_suffix,
+          run.envelope["error"]["message"] <> "\n"
+        ] do
+      assert_schema_invalid(put_in(run.envelope, ["error", "message"], invalid_message))
+    end
+
+    Application.put_env(:ptc_runner, :host_llm_test_public_model, false)
+
+    assert {:error, %CommandOutcome{} = private_run} =
+             CommandEngine.dispatch(["run", application, "--host-config", host_path])
+
+    refute private_run.envelope["error"]["message"] =~ model
+    assert private_run.envelope["error"]["message"] =~ "the selected model"
+    assert [%{"code" => "model_uncataloged", "model" => nil}] = private_run.envelope["warnings"]
+    assert_schema_valid(private_run.envelope)
+
+    Application.put_env(:ptc_runner, :host_llm_test_public_model, true)
+
+    assert {:error, %CommandOutcome{} = doctor} =
+             CommandEngine.dispatch([
+               "doctor",
+               application,
+               "--host-config",
+               host_path,
+               "--connect"
+             ])
+
+    assert {:stdio, _doctor_stdout, doctor_stderr} = CommandRenderer.render(doctor)
+
+    assert doctor_stderr =~ "warning: model_uncataloged"
+    assert doctor_stderr =~ model
+    assert doctor_stderr =~ "pricing"
+
+    assert doctor.exit_status == 4
+    assert doctor.envelope["result"]["readiness"] == "failed", inspect(doctor.envelope)
+    assert doctor.envelope["result"]["provider_activity"] == false
+    assert doctor.envelope["warnings"] == []
+    assert doctor.envelope["error"]["code"] == "model_contract_unsupported"
+
+    assert Enum.any?(doctor.envelope["result"]["checks"], fn check ->
+             check == %{
+               "name" => "provider/model/local",
+               "status" => "fail",
+               "code" => "model_contract_unsupported"
+             }
+           end)
+
+    refute_received {:host_llm_request, _, _}
+    assert_schema_valid(doctor.envelope)
+  end
+
+  defp restore_application_env(previous) do
+    Enum.each(previous, fn
+      {key, {:ok, value}} -> Application.put_env(:ptc_runner, key, value)
+      {key, :error} -> Application.delete_env(:ptc_runner, key)
+    end)
   end
 end

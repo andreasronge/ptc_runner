@@ -3,103 +3,123 @@
   "new_guide_caps": {
     "words": 700,
     "density": 5.0,
-    "blockers": 2
+    "blockers": 2,
+    "tics": 1.0
   },
   "guides": {
     "docs/guides/agent-cli-usage.md": {
-      "words": 690,
-      "density": 5.0,
-      "blockers": 2
+      "words": 701,
+      "density": 5.2,
+      "blockers": 2,
+      "tics": 1.0
     },
     "docs/guides/agent-workflow-patterns.md": {
-      "words": 516,
-      "density": 1.9,
-      "blockers": 1
+      "words": 589,
+      "density": 2.2,
+      "blockers": 1,
+      "tics": 1.2
     },
     "docs/guides/building-agents.md": {
       "words": 536,
       "density": 1.2,
-      "blockers": 1
+      "blockers": 1,
+      "tics": 0.4
     },
     "docs/guides/components-and-preludes.md": {
       "words": 298,
       "density": 0.0,
-      "blockers": 0
+      "blockers": 0,
+      "tics": 0.0
     },
     "docs/guides/concepts.md": {
       "words": 340,
       "density": 2.9,
-      "blockers": 0
+      "blockers": 0,
+      "tics": 0.0
     },
     "docs/guides/connecting-tools-with-mcp.md": {
       "words": 317,
       "density": 4.0,
-      "blockers": 1
+      "blockers": 1,
+      "tics": 0.7
     },
     "docs/guides/debugging-a-failed-run.md": {
       "words": 247,
       "density": 1.4,
-      "blockers": 0
+      "blockers": 0,
+      "tics": 0.5
     },
     "docs/guides/designing-agent-workflows.md": {
-      "words": 1024,
+      "words": 677,
       "density": 2.0,
-      "blockers": 5
+      "blockers": 0,
+      "tics": 0.0
     },
     "docs/guides/evaluating-with-replay.md": {
-      "words": 699,
-      "density": 3.1,
-      "blockers": 1
+      "words": 464,
+      "density": 2.4,
+      "blockers": 0,
+      "tics": 0.0
     },
     "docs/guides/getting-started.md": {
       "words": 369,
       "density": 2.9,
-      "blockers": 0
+      "blockers": 0,
+      "tics": 0.3
     },
     "docs/guides/host-configuration.md": {
       "words": 321,
       "density": 4.5,
-      "blockers": 0
+      "blockers": 0,
+      "tics": 0.4
     },
     "docs/guides/inspecting-source-and-programs.md": {
       "words": 221,
       "density": 2.3,
-      "blockers": 0
+      "blockers": 0,
+      "tics": 0.5
     },
     "docs/guides/kernel-repl.md": {
       "words": 223,
       "density": 0.6,
-      "blockers": 0
+      "blockers": 0,
+      "tics": 0.6
     },
     "docs/guides/manifests-and-capabilities.md": {
       "words": 437,
       "density": 5.5,
-      "blockers": 0
+      "blockers": 0,
+      "tics": 0.3
     },
     "docs/guides/project-configuration.md": {
       "words": 200,
       "density": 4.8,
-      "blockers": 0
+      "blockers": 0,
+      "tics": 0.0
     },
     "docs/guides/ptc-lisp-basics.md": {
       "words": 920,
       "density": 3.1,
-      "blockers": 0
+      "blockers": 0,
+      "tics": 1.5
     },
     "docs/guides/quickstart.md": {
-      "words": 365,
-      "density": 2.5,
-      "blockers": 0
+      "words": 264,
+      "density": 3.6,
+      "blockers": 0,
+      "tics": 0.0
     },
     "docs/guides/running-and-debugging.md": {
-      "words": 355,
-      "density": 2.9,
-      "blockers": 1
+      "words": 329,
+      "density": 2.2,
+      "blockers": 0,
+      "tics": 0.0
     },
     "docs/guides/using-models.md": {
       "words": 323,
       "density": 3.2,
-      "blockers": 0
+      "blockers": 0,
+      "tics": 0.0
     }
   }
 }

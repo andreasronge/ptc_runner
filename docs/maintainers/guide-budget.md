@@ -31,13 +31,14 @@ visible at the moment it is added, when moving the paragraph is still cheap.
 
 ## What it measures
 
-Three numbers per guide.
+Four numbers per guide.
 
 | Metric | Meaning | Why |
 | --- | --- | --- |
 | `words` | total words, code fences included | length is what a hurried reader sees first |
 | `density` | inline `` `identifiers` `` per 100 words of prose, code fences excluded | a guide sits well below the reference tier; crossing it means the page became a reference wearing a guide's heading |
 | `blockers` | paragraphs of 3+ sentences and 55+ words carrying no list, code, or table | these are what a reader cannot skim past |
+| `tics` | intensifiers such as *deliberately*, the "X, not Y" contrast, and em-dashes per 100 words of prose | the marks of text added a paragraph at a time by a model; a rising count is the page losing its voice |
 
 Density is the load-bearing one. When the baseline was recorded, `docs/guides/`
 averaged 3.3 identifiers per 100 prose words and `docs/reference/` averaged 6.1.
@@ -52,7 +53,8 @@ page cannot quietly set its own bar.
 
 ## When the gate fails
 
-Prefer the first response.
+Prefer the first response. The gate only measures; the writing procedure is
+the guide skill in `.claude/skills/write-guide/SKILL.md`.
 
 ### Move it to the reference page that owns the surface
 

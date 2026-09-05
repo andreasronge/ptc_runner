@@ -83,9 +83,11 @@
 <li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
 <li><a href="/reference/host-installation/">Host-configuration reference</a></li>
 <li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/examples/">Examples reference</a></li>
 <li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
 <li><a href="/reference/mcp/">MCP reference</a></li>
 <li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/viewer/">Viewer reference</a></li>
 <li><a href="/reference/repl/">REPL reference</a></li>
 <li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
 <li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
@@ -102,8 +104,8 @@ reference pages. Start at the top if PtcRunner is new to you.</p>
 <h2>Start</h2>
 <ul class="links">
 <li><a href="/guides/quickstart/">Quickstart</a>
-  <span class="desc">Install ptc, verify it without an API key, then run a model-authored program
-without writing PTC-Lisp yourself.</span></li>
+  <span class="desc">Install ptc, run a project that needs no API key, then run one where the
+model writes the program.</span></li>
 
 <li><a href="/guides/getting-started/">Understand a generated project</a>
   <span class="desc">Understand the files, result, and trace created by ptc init without writing
@@ -164,8 +166,8 @@ Installing that prompt as application code is a separate graph change.</span></l
 <h2>Design</h2>
 <ul class="links">
 <li><a href="/guides/designing-agent-workflows/">Design an agent workflow</a>
-  <span class="desc">Design a small support-inbox agent in three runnable steps: provide the data,
-move the rules into code, then split the work between specialists.</span></li>
+  <span class="desc">Build a small support-inbox agent in three runnable steps: grant the data, move
+the rules into code, then split the work between two specialists.</span></li>
 
 <li><a href="/guides/agent-workflow-patterns/">Choose a workflow shape</a>
   <span class="desc">Choose how to split a task between missions, agent loops, and trusted workflow
@@ -191,8 +193,8 @@ executable decision you can inspect.</span></li>
 the trace cannot answer the question.</span></li>
 
 <li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a>
-  <span class="desc">Compare an agent prompt or prelude change against fixed model responses before
-deciding whether to promote it.</span></li>
+  <span class="desc">Compare a prompt or prelude change against fixed model responses before you
+decide whether to keep it.</span></li>
 
 </ul>
 
@@ -232,7 +234,7 @@ Building agents.</span></li>
   <span class="desc">Ordinary limits are positive enforced ceilings. Optional limits are disabled when omitted by the host. Two documents decide an enabled number: the host documen…</span></li>
 
 <li><a href="/reference/prelude-reference/">Shipped prelude reference</a>
-  <span class="desc">PtcRunner ships 17 reusable PTC-Lisp components with 60 public exports. A component is one named source module with one namespace. A prelude is the immutable c…</span></li>
+  <span class="desc">PtcRunner ships 17 reusable PTC-Lisp components with 61 public exports. A component is one named source module with one namespace. A prelude is the immutable c…</span></li>
 
 <li><a href="/reference/signature-syntax/">Signature reference</a>
   <span class="desc">Use signatures to describe component and model-visible tool inputs and outputs,
@@ -249,6 +251,10 @@ data classes, and outer limits.</span></li>
   <span class="desc">This is the complete local path, artifact, override, and Viewer-preference
 contract.</span></li>
 
+<li><a href="/reference/examples/">Examples reference</a>
+  <span class="desc">This is the complete inventory of shipped example trees, the layout every tree
+follows, and the aspect each one demonstrates.</span></li>
+
 <li><a href="/reference/component-contracts/">Components-and-preludes reference</a>
   <span class="desc">This is the complete component, dependency, visibility, and shipped-library
 contract.</span></li>
@@ -259,6 +265,10 @@ lifecycle contract.</span></li>
 
 <li><a href="/reference/cli/">Command-line reference</a>
   <span class="desc">This is the complete ptc command and process contract.</span></li>
+
+<li><a href="/reference/viewer/">Viewer reference</a>
+  <span class="desc">The Viewer presents captured and live runs for one PtcRunner project. It is a
+local inspection surface, not a general remote administration service.</span></li>
 
 <li><a href="/reference/repl/">REPL reference</a>
   <span class="desc">This is the complete interactive, unattended, analysis-profile, and

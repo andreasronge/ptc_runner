@@ -8,10 +8,11 @@ code. The shapes compose — a real design usually combines two or three.
 | [One bounded question](#one-bounded-question) | a single read-only question over data you already hold | [`support-triage`](https://github.com/andreasronge/ptc_runner/tree/main/examples/support-triage) |
 | [Domain rules as mission code](#domain-rules-as-mission-code) | the policy is deterministic — thresholds, scoring, routing | [tutorial step 2](designing-agent-workflows.md#step-2-move-the-rules-into-mission-code) |
 | [Specialists as missions](#specialists-as-missions) | stages need different data, tools, or rules | [`support-triage/03-specialists`](https://github.com/andreasronge/ptc_runner/tree/main/examples/support-triage) (data) and [`named-mission-reader-writer`](https://github.com/andreasronge/ptc_runner/tree/main/examples/named-mission-reader-writer) (tools) |
-| [Plan, then act](#plan-then-act) | the task ends in an effect | [agent library reference](../agent-library-reference.md) |
-| [Parallel fan-out](#parallel-fan-out) | items are independent — one call per document or ticket | [kernel limits reference](../kernel-limits-reference.md) |
-| [Contracts instead of parsing](#contracts-instead-of-parsing) | anything downstream consumes the answer | [Configure an application](../reference/application-manifest.md#validate-inputs-and-results) |
-| [Effects at the edge](#effects-at-the-edge) | the workflow writes somewhere | [Connect an MCP tool](connecting-tools-with-mcp.md) |
+| [Review the work](#review-the-work) | a stage's answer must be checked before anyone acts on it | [`dabstep-fraud`](https://github.com/andreasronge/ptc_runner/tree/main/examples/dabstep-fraud) |
+| [Plan, then act](#plan-then-act) | the task ends in an effect | [debug-a-failed-run repair agent](https://github.com/andreasronge/ptc_runner/tree/main/examples/debug-a-failed-run) |
+| [Parallel fan-out](#parallel-fan-out) | items are independent — one call per document or ticket | [tutorial step 07](https://github.com/andreasronge/ptc_runner/tree/main/examples/kernel-tutorial) |
+| [Contracts instead of parsing](#contracts-instead-of-parsing) | anything downstream consumes the answer | [support-triage step 03](https://github.com/andreasronge/ptc_runner/tree/main/examples/support-triage) |
+| [Effects at the edge](#effects-at-the-edge) | the workflow writes somewhere | [named-mission-reader-writer](https://github.com/andreasronge/ptc_runner/tree/main/examples/named-mission-reader-writer) |
 
 ## One bounded question
 
@@ -30,9 +31,17 @@ rules drag every intermediate value through the model's context.
 
 Give each stage a named mission and let one trusted workflow drive a loop per
 stage. The mission decides what a specialist can see; the workflow decides what
-crosses between stages. Use `agent.core/run-outcome` to handle a specialist's
-failure as data; select a named handoff contract when workflow code consumes
-its value.
+crosses between stages. Inspect failures with `agent.core/run-outcome`; on abort,
+use the [abort helper](../agent-library-reference.md#agent-core-fail-outcome) to
+preserve its diagnostic. Select handoff contracts for consumed values.
+
+## Review the work
+
+Keep the exact programs a stage ran (`agent.core/run-outcome` with
+`"retain_programs"`) and hand them, with the input and returned evidence, to a
+reviewer mission that has the same read-only tools and measures the answer
+itself. Compare the two measurements in workflow code. A model can describe a
+defect, but publishing stays a workflow decision.
 
 ## Plan, then act
 

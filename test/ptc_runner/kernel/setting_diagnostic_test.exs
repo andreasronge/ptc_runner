@@ -38,6 +38,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
     {:host, :installed_limit_invalid},
     {:local_preflight, :environment_unavailable},
     {:local_preflight, :fixtures_unreadable},
+    {:local_preflight, :model_contract_unsupported},
     {:project, :project_schema_invalid},
     {:provider_acquisition, :capability_requirement_missing},
     {:provider_acquisition, :provider_protocol_version_unsupported},
@@ -57,9 +58,62 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
 
     assert {:ok, message} = ModelOutputDiagnostic.message(details)
     assert message =~ "adapter_default and model_output_limit max_tokens 4096"
-    assert message =~ "Select a model with a larger output limit"
+    assert message =~ "select a model with a larger output limit"
     assert ModelOutputDiagnostic.valid_message?(message)
     refute ModelOutputDiagnostic.valid_message?(message <> "\n")
+  end
+
+  test "model output truncation names the actionable configured ceiling" do
+    cases = [
+      {[:application_limit], "application limit llm_request_output_tokens",
+       "Raise limits.llm_request_output_tokens"},
+      {[:installation_param], "installation params.max_tokens", "Raise params.max_tokens"},
+      {[:application_limit, :installation_param],
+       "application limit llm_request_output_tokens and installation params.max_tokens",
+       "Raise limits.llm_request_output_tokens in the application manifest and its installed host ceiling if lower and raise params.max_tokens"}
+    ]
+
+    for {bindings, source, remedy} <- cases do
+      details = %{
+        limit: :max_tokens,
+        limit_value: 4_096,
+        limit_bindings: bindings,
+        alias: "hy3"
+      }
+
+      assert {:ok, message} = ModelOutputDiagnostic.message(details)
+      assert message =~ "max_tokens 4096 from the #{source}"
+      assert message =~ remedy
+      assert ModelOutputDiagnostic.valid_message?(message)
+    end
+  end
+
+  test "model output truncation names every remedy for tied constraints" do
+    details = %{
+      limit: :max_tokens,
+      limit_value: 4_096,
+      limit_bindings: [:application_limit, :model_output_limit, :remaining_context],
+      alias: "hy3"
+    }
+
+    assert {:ok, message} = ModelOutputDiagnostic.message(details)
+    assert message =~ "Raise limits.llm_request_output_tokens"
+    assert message =~ "select a model with a larger output limit"
+    assert message =~ "reduce the prompt or transcript"
+    assert ModelOutputDiagnostic.valid_message?(message)
+  end
+
+  test "model output truncation message bounds max_tokens consistently" do
+    details = %{
+      limit: :max_tokens,
+      limit_value: 1_000_000,
+      limit_bindings: [:application_limit],
+      alias: "hy3"
+    }
+
+    assert {:ok, message} = ModelOutputDiagnostic.message(details)
+    assert ModelOutputDiagnostic.valid_message?(message)
+    refute ModelOutputDiagnostic.valid_message?(String.replace(message, "1000000", "1000001"))
   end
 
   test "model output truncation uses the stable generic message without cap provenance" do
@@ -135,6 +189,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
       {%{limit: :agent_turns, limit_value: 4, limit_reason: :turn_limit_exceeded}, "max_turns"},
       {%{limit: :max_transcript_chars, limit_value: 262_144}, "max_transcript_chars"},
       {%{limit: :terminal_result_bytes, limit_value: 1_000_000}, "terminal_result_bytes"},
+      {%{limit: :normal_event_count, limit_value: 256}, "normal_event_count"},
       {%{limit: :workflow_heap_words, limit_value: 8_000_000}, "workflow_heap_words"},
       {%{limit: :max_calls, alias: "deepseek", limit_value: 4}, "max_calls"},
       {%{limit: :workflow_capability_calls_per_name, name: "llm-request", limit_value: 2},
@@ -584,6 +639,15 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
         value: "64",
         remedy: "raise limits.protocol_errors in the manifest",
         build: fn -> RuntimeLimitDiagnostic.protocol_errors_message(64) end
+      },
+      %{
+        phase: :execution,
+        code: :event_capture_limit_exceeded,
+        source: nil,
+        setting: "normal_event_count",
+        value: "256",
+        remedy: "raise limits.normal_event_count in the manifest",
+        build: fn -> RuntimeLimitDiagnostic.event_capture_message(:normal_event_count, 256) end
       },
       %{
         phase: :execution,

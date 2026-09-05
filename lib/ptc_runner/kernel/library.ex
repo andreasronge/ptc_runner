@@ -135,6 +135,7 @@ defmodule PtcRunner.Kernel.Library do
       "result"
     ],
     "agent.core" => [
+      "agent.feedback",
       "agent.machine",
       "agent.native",
       "agent.prompt",

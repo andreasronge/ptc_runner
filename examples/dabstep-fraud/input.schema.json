@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["task", "guidelines", "analyzer_model", "reviewer_model", "work_turns", "review_turns", "review_task", "options"],
+  "properties": {
+    "task": {"type": "string", "minLength": 1, "maxLength": 1000},
+    "guidelines": {"type": "string", "minLength": 1, "maxLength": 2000},
+    "review_task": {"type": "string", "minLength": 1, "maxLength": 2000},
+    "analyzer_model": {"type": "string", "enum": ["deepseek", "luna"]},
+    "reviewer_model": {"type": "string", "enum": ["deepseek", "luna"]},
+    "work_turns": {"type": "integer", "minimum": 1, "maximum": 16},
+    "review_turns": {"type": "integer", "minimum": 1, "maximum": 8},
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["NL", "BE", "ES", "FR"],
+      "properties": {
+        "NL": {"type": "string", "minLength": 1, "maxLength": 32},
+        "BE": {"type": "string", "minLength": 1, "maxLength": 32},
+        "ES": {"type": "string", "minLength": 1, "maxLength": 32},
+        "FR": {"type": "string", "minLength": 1, "maxLength": 32}
+      }
+    }
+  }
+}

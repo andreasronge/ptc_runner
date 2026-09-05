@@ -1,21 +1,12 @@
 # Quickstart
 
-Install `ptc`, verify it without an API key, then run a model-authored program
-without writing PTC-Lisp yourself.
+Install `ptc`, run a project that needs no API key, then run one where the
+model writes the program.
 
-Download the executable as described under
-[Standalone installation](../installation/standalone.md). Starting with the
-next root release, the [Docker image](../installation/docker.md) provides the
-same command interface; its installation page gives the complete mounted-file
-and ownership form.
+Download the executable as described in
+[Standalone installation](../installation/standalone.md).
 
 ## Run without a credential
-
-Create and run a project that needs no API key:
-
-The `ptc init` target must not already exist. For an existing repository,
-initialize a new sibling or subdirectory and deliberately copy or move the
-generated files you want into the repository.
 
 <!-- ptc-guide-e2e: id=quickstart-no-api-key frontend=mix scratch=hello-ptc -->
 ```console
@@ -27,24 +18,18 @@ ptc run hello-ptc/ptc-project.json
 {"greeting":"hello world"}
 ```
 
-`init` creates an application, a project document with local artifact settings,
-and ignore rules for public and private run artifacts. The first run contacts no
-model or external tool and records a trace and command envelope under
-`hello-ptc/.ptc`.
+`init` writes a small application, a project document, and ignore rules for
+run artifacts into a directory that must not exist yet. The run contacts no
+model or tool and records a trace under `hello-ptc/.ptc`.
 
 ## Run a model-authored program
 
-Materialize the tutorial projects and create their owner-only environment file:
+Materialize the tutorial, export an OpenRouter key, and run the multi-turn
+agent:
 
 ```console
 ptc init kernel-tutorial --example kernel-tutorial
-printf 'OPENROUTER_API_KEY=\n' > kernel-tutorial/.env
-chmod 600 kernel-tutorial/.env
-```
-
-Set `OPENROUTER_API_KEY` in that exact file, then run:
-
-```console
+export OPENROUTER_API_KEY=...
 ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json
 ```
 
@@ -52,39 +37,33 @@ ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json
 {"ok":true,"value":42}
 ```
 
-The project selects the shipped agent loop. The model receives a task, writes a
-bounded mission program, observes its result, and completes on the second turn.
-You configure the task, model alias, mission, tools, and limits; you do not need
-to read or edit the generated program. To read it anyway, open the Viewer:
+The model writes a small mission program, sees its result, and finishes on the
+second turn. Open the Viewer to read the program it wrote:
 
 ```console
 ptc viewer kernel-tutorial/04-multi-turn-agent.ptc-project.json
 ```
 
-The tutorial projects record private inspection and grant it to the Viewer, so
-each evaluation shows the PTC-Lisp the model wrote and each prelude component
-shows the source the run loaded.
+The tutorial projects retain private inspection and grant it to the Viewer, so
+you see the PTC-Lisp behind each evaluation and the source of each prelude
+component.
 
-Credentials belong in `ptc-host.json`, never in `ptc.json`, a generated
-program, or a trace. `ptc.json` can select the installed model alias but cannot
-name its endpoint or key.
+The generated `.env` file names the credential in a comment. Either export the
+variable, as above, or write a non-empty value into that file. Credentials
+belong in `ptc-host.json` or the environment, never in `ptc.json`, a program,
+or a trace. The
+[host reference](../reference/host-installation.md#declare-credentials-once)
+has the loading rules.
 
-## Diagnose readiness
+## Check readiness before spending
 
-Check configuration without contacting the provider:
+`doctor` checks the configuration without contacting the provider. Add
+`--connect` when you want to probe the credential and the network too:
 
 ```console
 ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json
-```
-
-Probe credentials and connectivity only when remote work and possible cost are
-intended:
-
-```console
 ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json --connect
 ```
 
-Continue with [Understand a generated project](getting-started.md), [Use a
-model](using-models.md), or [Customize an agent](building-agents.md). The
-[command-line reference](../reference/cli.md) owns the exact command and failure
-contract.
+Continue with [Understand a generated project](getting-started.md),
+[Use a model](using-models.md), or [Customize an agent](building-agents.md).

@@ -29,10 +29,11 @@ ptc run kernel-tutorial/01-orders.ptc-project.json
 ptc viewer kernel-tutorial/01-orders.ptc-project.json
 ```
 
-The provider-backed examples additionally reference the shared host document
-and `kernel-tutorial/.env` from their project files. After creating
-that explicitly named environment file, their run commands have the same
-single-argument shape:
+Provider-backed Examples 02 through 04 additionally reference the shared host
+document and `kernel-tutorial/.env` from their project files. Example 06 uses a
+dedicated host document so its deliberate cost ceiling cannot affect the
+successful examples. After creating the explicitly named environment file,
+their run commands have the same single-argument shape:
 
 ```console
 ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json
@@ -188,13 +189,16 @@ replace their project defaults.
 
 Mission selection, input, and component-override switches remain
 invocation-only. Mission names stay in the application manifest rather than
-being duplicated as project defaults. A project environment file is loaded
-only when inert preparation proves that a selected mission provider or its
-dependency uses an environment-backed credential. Unrelated providers do not
-cause environment-backed credentials to be read. Runs without providers, passive
-doctor, Viewer startup, and file- or literal-backed credentials do not read it.
+being duplicated as project defaults. An environment file explicitly selected
+by the project or `--env-file` is loaded only when inert preparation proves that
+a selected mission provider or its dependency uses an environment-backed
+credential. Unrelated providers do not cause environment-backed credentials to
+be read. Runs without providers, passive doctor, Viewer startup, and file- or
+literal-backed credentials do not read it.
 Viewer-started workflows and missions read the selected file lazily through
-their ordinary command preparation.
+their ordinary command preparation. When the file is loaded, assigned keys
+override process values, including with empty values, while omitted keys retain
+their process values.
 
 Direct manifest invocation remains the low-level form for automation:
 
@@ -222,7 +226,7 @@ The Viewer port defaults to `0`, which asks the operating system for a free
 port; startup prints the selected address before opening a browser. Set a fixed
 port only when another process needs a stable address. If that port is occupied,
 the command probes loopback and names the project when another PTC Viewer owns
-it. The Live project header and `/api/live/project` expose the exact project
+it. The Live project header exposes the exact project
 document path, so a working page cannot silently look like the project whose
 startup just failed.
 
@@ -230,19 +234,13 @@ The REPL and private-data settings are orthogonal. Enabling both presents the
 public-trace REPL alongside the private evidence panels without adding private
 inspection authority to the evaluation session.
 
-Because `artifacts.inspection` and `viewer.private` must both hold, the private
-routes distinguish which one is missing: `inspection_not_configured` for a
-project that records no inspection artifact, `inspection_not_private` for one
-that records it and withheld the grant. The second needs no re-run — the
-artifact on disk is already usable once the Viewer refreshes after the grant.
-Revoking the grant takes effect on the next request without Refresh.
-
-A run can also fall outside evidence the Viewer does hold, which the routes
-name separately from the project settings: `inspection_run_not_recorded` for a
-run made before `artifacts.inspection` was set, and `inspection_run_mismatch`
-for a Viewer pinned to one other run's artifact. The
-[debug-navigation reference](debug-navigation.md#reaching-the-ungated-reconstruction)
-carries the complete table.
+Because `artifacts.inspection` and `viewer.private` must both hold, granting the
+Viewer access to an existing inspection artifact needs no re-run. The artifact
+on disk is already usable once the Viewer refreshes after the grant. Revoking
+the grant takes effect on the next request without Refresh. For headless access
+to the same reconstructed conversation, use
+`ptc repl --profile private-run-analysis-v2`; run `ptc docs repl` for the
+complete invocation.
 
 Viewer-started workflows and missions use the project's `host.env_file` when
 one is declared. `ptc viewer ptc-project.json --env-file FILE` supplies an
@@ -253,7 +251,7 @@ process environment or use another trusted host binding.
 The listener binds `127.0.0.1`. The project document deliberately cannot change
 that: exposure is an invocation-time decision made with `--listen 0.0.0.0`,
 where it stays visible in the command line rather than stored in a file. See
-[Running and debugging](cli.md#expose-it-deliberately-or-not-at-all).
+the [Viewer exposure reference](viewer.md#exposing-it).
 
 The Viewer ships in the standalone release and container image and is absent
 from the published package.

@@ -116,7 +116,7 @@ defmodule PtcRunner.Kernel.LimitCatalog do
 
   @installed_only [
     {:provider_cleanup_timeout_ms, 5_000, true},
-    {:local_preflight_timeout_ms, 5_000, true},
+    {:local_preflight_timeout_ms, 15_000, true},
     {:selection_validation_timeout_ms, 5_000, true},
     {:doctor_connectivity_timeout_ms, 10_000, false}
   ]
@@ -125,7 +125,7 @@ defmodule PtcRunner.Kernel.LimitCatalog do
     {:evaluation_loop_iterations, 1, @generic_maximum},
     {:llm_cost_microusd, 1, 9_007_199_254_740_991,
      [:usage_tokens, :usage_cost_currency, :reservation_tariff],
-     "Requires usage_guarantees.tokens: true, usage_guarantees.cost_currency: \"USD\", and an explicit USD reservation_tariff on every live LLM installation."},
+     "Requires usage_guarantees.tokens: true, usage_guarantees.cost_currency: \"USD\", an explicit USD reservation_tariff on every live LLM installation, and supported USD reservation pricing for each selected model. reservation_tariff.id identifies the declared tariff but does not supply model rates."},
     {:llm_total_tokens, 1, 9_007_199_254_740_991, [:usage_tokens],
      "Requires usage_guarantees.tokens: true on every live LLM installation."},
     {:workflow_loop_iterations, 1, @generic_maximum}
@@ -174,8 +174,8 @@ defmodule PtcRunner.Kernel.LimitCatalog do
     capability_result_bytes: "Encoded result crossing a capability boundary.",
     event_payload_bytes: "One trace event payload.",
     terminal_result_bytes: "Encoded terminal workflow or mission-session result.",
-    normal_event_count: "Trace events retained under the normal policy.",
-    normal_event_bytes: "Aggregate encoded trace events retained under the normal policy.",
+    normal_event_count: "Trace events retained under normal or private policy.",
+    normal_event_bytes: "Aggregate encoded trace events retained under normal or private policy.",
     provider_cleanup_timeout_ms: "Kernel-owned provider cleanup after execution.",
     local_preflight_timeout_ms: "Whole audited local-preflight phase across selected providers.",
     selection_validation_timeout_ms: "Active validation of selected provider declarations.",

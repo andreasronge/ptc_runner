@@ -9,6 +9,8 @@ defmodule PtcRunner.LLM do
   this transport adapter.
   """
 
+  alias PtcRunner.Kernel.ModelContractDiagnostic
+  alias PtcRunner.Kernel.ModelContractPricingCause
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.LLM.Invocation
   alias PtcRunner.LLM.PreparedModel
@@ -37,7 +39,12 @@ defmodule PtcRunner.LLM do
         }
 
   @type output_limit_binding ::
-          :configured | :adapter_default | :model_output_limit | :remaining_context
+          :application_limit
+          | :installation_param
+          | :configured
+          | :adapter_default
+          | :model_output_limit
+          | :remaining_context
   @type output_limit :: %{
           name: :max_tokens,
           value: pos_integer(),
@@ -84,6 +91,13 @@ defmodule PtcRunner.LLM do
   The returned attestation must be exactly the canonical requirements map. An
   adapter that cannot preserve the requested options, mode, reporting
   guarantees, or reservation authority returns `{:error, :unsupported_model_option}`.
+  An adapter that has positively established an uncataloged target and cannot
+  supply the USD rates required by a requested cost reservation returns the
+  payload-free sentinel
+  `{:error, :uncataloged_cost_reservation_pricing_unavailable}`. The Kernel
+  maps only that exact sentinel to the pricing-specific
+  `model_contract_unsupported` diagnostic and `model_uncataloged` warning;
+  payload-bearing variants fail closed.
   """
   @callback prepare_model(model :: String.t(), requirements :: Requirements.t()) ::
               {:ok, target :: term(), catalog_status(), Requirements.t()} | {:error, term()}
@@ -99,8 +113,11 @@ defmodule PtcRunner.LLM do
   (e.g. a `:persistent_term`/ETS catalog) so the first per-request provider
   worker does not pay a large one-time load inside its bounded heap.
 
-  Optional. Invoked during selected provider-application admission and again at
-  capability-build time for direct embedding paths; implementations must be
+  Optional. The Kernel invokes it during selected provider-application
+  admission and capability-build time for direct embedding paths. An adapter
+  may also invoke its own callback during audited local contract attestation;
+  that path runs before provider activity inside a bounded worker, so it must
+  use only process-independent local metadata. Implementations must be
   idempotent.
   """
   @callback ensure_ready() :: :ok
@@ -163,7 +180,7 @@ defmodule PtcRunner.LLM do
   @doc false
   @spec attested_public_model(module(), String.t()) :: String.t() | nil
   def attested_public_model(adapter, model) when is_atom(adapter) and is_binary(model) do
-    if function_exported?(adapter, :public_model, 1) do
+    if Code.ensure_loaded?(adapter) and function_exported?(adapter, :public_model, 1) do
       case adapter.public_model(model) do
         {:ok, ^model}
         when byte_size(model) in 1..256 ->
@@ -298,6 +315,25 @@ defmodule PtcRunner.LLM do
   defp seal_prepared(_adapter, _model, _canonical, {:error, :unsupported_model_option}),
     do: {:error, :unsupported_model_option}
 
+  defp seal_prepared(
+         adapter,
+         model,
+         canonical,
+         {:error, :uncataloged_cost_reservation_pricing_unavailable}
+       ) do
+    if Requirements.cost_reservation?(canonical),
+      do: {:error, ModelContractPricingCause.new(adapter, model)},
+      else: {:error, :invalid_model_preparation}
+  end
+
+  defp seal_prepared(
+         _adapter,
+         _model,
+         _canonical,
+         {:error, {:uncataloged_cost_reservation_pricing_unavailable, _payload}}
+       ),
+       do: {:error, :invalid_model_preparation}
+
   defp seal_prepared(_adapter, _model, _canonical, {:error, _reason} = error), do: error
 
   defp seal_prepared(_adapter, _model, _canonical, _invalid),
@@ -343,13 +379,7 @@ defmodule PtcRunner.LLM do
 
   defp warn_catalog_status(%PreparedModel{catalog_status: :uncataloged} = prepared) do
     {:model_uncataloged, public_model} = catalog_warning(prepared)
-    identity = if public_model, do: " #{inspect(public_model)}", else: ""
-
-    IO.warn(
-      "model_uncataloged: configured model#{identity} is not an exact catalog entry; " <>
-        "pricing, limits, token estimation, and capability detection may be incomplete",
-      []
-    )
+    IO.warn(ModelContractDiagnostic.model_uncataloged_message(public_model), [])
   end
 
   defp warn_catalog_status(%PreparedModel{}), do: :ok

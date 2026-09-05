@@ -20,6 +20,7 @@ defmodule PtcRunner.Kernel.ModelContract do
   """
 
   alias PtcRunner.Kernel.DeterministicJSON
+  alias PtcRunner.Kernel.JSONSchema
   alias PtcRunner.Kernel.TypedCanonicalJSON
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Lisp.Signature
@@ -202,7 +203,18 @@ defmodule PtcRunner.Kernel.ModelContract do
 
   defp signature_field(_field), do: {:error, :unsupported_contract}
 
-  defp json_schema(%{"type" => "object"} = schema) do
+  defp json_schema(schema) when is_map(schema) do
+    case JSONSchema.node_type(schema) do
+      {:ok, "object", nullable?} -> json_schema_object(schema, nullable?)
+      {:ok, "array", nullable?} -> json_schema_array(schema, nullable?)
+      {:ok, json_type, nullable?} -> json_schema_scalar(schema, json_type, nullable?)
+      :error -> json_schema_composition(schema)
+    end
+  end
+
+  defp json_schema(_schema), do: {:error, :unsupported_contract}
+
+  defp json_schema_object(schema, nullable?) do
     properties = Map.get(schema, "properties", %{})
     required = MapSet.new(Map.get(schema, "required", []))
 
@@ -225,7 +237,7 @@ defmodule PtcRunner.Kernel.ModelContract do
          schema,
          [
            {"kind", "object"},
-           {"nullable", false},
+           {"nullable", nullable?},
            {"closed", Map.get(schema, "additionalProperties", false) == false},
            {"fields", fields}
          ] ++
@@ -234,26 +246,29 @@ defmodule PtcRunner.Kernel.ModelContract do
     end
   end
 
-  defp json_schema(%{"oneOf" => branches}) when is_list(branches),
+  defp json_schema_composition(%{"oneOf" => branches}) when is_list(branches),
     do: {:error, :unsupported_contract}
 
-  defp json_schema(%{"type" => "array"} = schema) do
+  defp json_schema_composition(_schema), do: {:error, :unsupported_contract}
+
+  defp json_schema_array(schema, nullable?) do
     with {:ok, items} <- optional_items(schema) do
       {:ok,
        constrained_node(
          schema,
-         [{"kind", "array"}, {"nullable", false}, {"items", items}]
+         [{"kind", "array"}, {"nullable", nullable?}, {"items", items}]
        )}
     end
   end
 
-  defp json_schema(%{"type" => json_type} = schema)
+  defp json_schema_scalar(schema, json_type, nullable?)
        when json_type in ["null", "boolean", "number", "integer", "string"] do
     kind = if json_type == "null", do: "nil", else: json_type
-    {:ok, constrained_node(schema, [{"kind", kind}, {"nullable", json_type == "null"}])}
+    {:ok, constrained_node(schema, [{"kind", kind}, {"nullable", nullable?}])}
   end
 
-  defp json_schema(_schema), do: {:error, :unsupported_contract}
+  defp json_schema_scalar(_schema, _json_type, _nullable?),
+    do: {:error, :unsupported_contract}
 
   defp json_schema_union(%{"oneOf" => branches} = schema, discriminator)
        when is_list(branches) and is_binary(discriminator) do

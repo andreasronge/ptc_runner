@@ -1,28 +1,20 @@
 # Design an agent workflow
 
-Design a small support-inbox agent in three runnable steps: provide the data,
-move the rules into code, then split the work between specialists.
+Build a small support-inbox agent in three runnable steps: grant the data, move
+the rules into code, then split the work between two specialists.
 
-Each step answers one design question — where does the data live, where do
-the business rules live, and how is work divided between agents. The
-configuration guides explain each surface exhaustively; this page shows why a
-design uses them.
-
-Materialize the three projects and supply an
-[OpenRouter](https://openrouter.ai/keys) key:
+Materialize the three projects and export an
+[OpenRouter](https://openrouter.ai/keys) key. Each run costs well under a cent.
 
 ```console
 ptc init support-triage --example support-triage
+export OPENROUTER_API_KEY=...
 ```
-
-Set `OPENROUTER_API_KEY` in the generated `support-triage/.env`. Each project
-costs well under a cent to run with the tutorial's `deepseek` alias.
 
 ## Step 1: ask one bounded question
 
-The smallest agent shape is a single bounded run: grant the data, ask the
-question, read the answer. The first manifest declares no tools at all — the
-tickets are granted as mission `data`:
+The smallest agent is one run over data you already hold. The first manifest
+grants the tickets as mission `data` and declares no tools:
 
 ```json
 "missions": {
@@ -33,7 +25,7 @@ tickets are granted as mission `data`:
 }
 ```
 
-and the entire trusted workflow delegates to the shipped loop:
+The whole trusted workflow delegates to the shipped loop:
 
 ```clojure
 (defn run [input]
@@ -48,26 +40,23 @@ ptc run support-triage/01-one-question.ptc-project.json
 {"ok":true,"value":["T-1001","T-1004"]}
 ```
 
-The model reads the advertised `data/tickets`, writes one PTC-Lisp program
-that filters it, and returns the ids. Open the Viewer to read that program:
+The model reads `data/tickets`, writes one program that filters it, and returns
+the ids. Open the Viewer to read that program:
 
 ```console
 ptc viewer support-triage/01-one-question.ptc-project.json
 ```
 
-The design decision here is what the mission does **not** contain. There is no
-filesystem, no working directory, and no tool the model could wander into: the
-mission holds exactly the six tickets and nothing else. When a question can be
-answered from data you already have, granting the data is simpler and safer
-than connecting a tool that reaches it.
+The decision in this step is what the mission leaves out. It holds six tickets
+and nothing else: no filesystem, no working directory, no tool to wander into.
+When you already have the data, grant the data.
 
 ## Step 2: move the rules into mission code
 
-The second question the inbox scenario forces: where do the SLA thresholds and
-priority rules live? Putting them in the task prompt makes them suggestions the
-model may drift from. Exposing them as one-call-per-rule tools makes the model
-relay intermediate results through its context. The second project instead
-ships them as a prompt-visible mission component, `triage.clj`:
+Where do the SLA thresholds and priority rules live? In the task prompt they
+are suggestions the model can drift from. As one tool per rule they make the
+model relay every intermediate value through its context. The second project
+ships them as a mission component, `triage.clj`:
 
 ```clojure
 (defn priority
@@ -86,23 +75,20 @@ ptc run support-triage/02-domain-api.ptc-project.json
 {"id":"T-1006","priority":58},{"id":"T-1005","priority":52}]}
 ```
 
-Mission component exports are advertised to the model by default; the
-component's `{:visibility :prompt}` metadata only makes that default
-explicit. The model now composes `triage.rules/breached?` and
-`triage.rules/priority` with the granted data in a single program — filter,
-score, sort, return — and the scores are exactly what the deterministic
-policy computes. The model
-decides *how to use* the rules; it cannot *reinterpret* them. That split is
-the core of code-mode design: judgment in the model, policy in reviewable
-code. [The customization guide](components-and-preludes.md) covers the
+Mission exports are advertised to the model, so it composes
+`triage.rules/breached?` and `triage.rules/priority` with the data in one
+program: filter, score, sort, return. The scores are what the code computes.
+
+The model decides how to use the rules and cannot reinterpret them.
+[Inspect and customize components](components-and-preludes.md) covers the
 component and signature rules this step relies on.
 
 ## Step 3: give each specialist only what it needs
 
-The final step routes each breached ticket to a team. Classification is
-model judgment, but routing is policy — and the routing stage needs none of
-the raw ticket pool. So the third manifest declares two named missions with
-different grants:
+The last step routes each breached ticket to a team. Classifying a ticket is
+model judgment. Routing is policy, and the routing stage has no use for the raw
+ticket pool. So the third manifest declares two missions with different
+grants:
 
 ```json
 "missions": {
@@ -116,47 +102,31 @@ different grants:
 }
 ```
 
-The trusted workflow runs one loop in each mission, passing only the triage
-result forward, and validates the final report against the manifest's
-`result_schema` contract. `returned-value` and `quarantined` are local
-`defn-` helpers in this example's `03-specialists/workflow.clj` — not shipped
-built-ins. Materialize them with `ptc init support-triage --example support-triage`.
+The workflow passes only the triage result forward and validates the final
+report. Its local returned-value helper uses the documented
+[fail-outcome path](../agent-library-reference.md#agent-core-fail-outcome) to
+keep the original diagnostic on abort; quarantined is also local. Materialize
+the example with ptc init support-triage --example support-triage.
 
 ```clojure
 (defn run [input]
-  (let [ranked (returned-value)
+  (let [ranked (returned-value
                  (agent.core/run-outcome (get input "triage_task")
-                                         {"mission" "triage" "max_turns" 4})
-                 "triage")]
+                                         {"mission" "triage" "max_turns" 4}))]
     (return
       (agent.core/run-result-value
         (str (get input "escalation_task") "\n\n" (quarantined (pr-str ranked)))
         {"mission" "escalation" "max_turns" 4}))))
 ```
 
-The `quarantined` helper marks the handoff: ticket subjects and bodies are
-customer-authored, so the workflow wraps them in an `<untrusted_tickets>`
-block (stripping any smuggled closing marker) and the task names the block as
-data, not instructions. The marking is prompt hygiene, not enforcement — a
-model can still be misled by text inside the block. What the mission grant
-enforces is narrower and absolute: the escalation mission holds no tickets
-and no tools, so injected text can never reach a capability or the wider
-ticket pool. It can still corrupt this one report — wrong teams, wrong
-priorities, a misleading summary — or waste the run, which is why report
-content needs its own downstream check: the schema bounds the shape, and
-this example's scheduled live test checks each escalation's id, score, team,
-and first action against the policy; only the summary's prose goes
-unchecked. The agent loop marks
-its own tool observations as untrusted automatically; text a workflow
-splices into a task string is the workflow's responsibility.
+`quarantined` marks customer text as data but is only a prompt-level mitigation.
+[The mission boundary](../reference/application-manifest.md#supply-input-and-named-missions)
+limits capabilities. It does not filter handoff data, and this example provides
+no such guarantee; trusted workflow code must perform that filtering.
 
 ```console
 ptc run support-triage/03-specialists.ptc-project.json
 ```
-
-A run returns a contract-valid report; an invalid candidate would have
-received bounded correction feedback instead of reaching you. This run
-escalated all four breached tickets:
 
 ```json
 {"escalations":[
@@ -171,22 +141,22 @@ escalated all four breached tickets:
  "summary":"Four breached tickets were classified and escalated."}
 ```
 
-Two design rules carry this step. Specialists are missions, not prompts: the
-escalation model cannot read the ticket pool, because its mission was never
-granted it — the workflow decides exactly what crosses the boundary. And
-downstream consumers get contracts, not parsing: the schema is enforced by the
-runtime, so the report's *shape* — allowed keys, the team enumeration, the
-bounds — is a property of the run, not a hope about the model. The contract
-does not judge content: whether every breached ticket appears with its policy
-score is checked by this example's scheduled live test, not the schema. The
-correction loop is described in the
-[agent library reference](../agent-library-reference.md#agent-core-run).
+Two rules carry this step.
+
+- A specialist is a mission. The escalation model cannot read the ticket pool
+  because it was never granted it.
+- A consumer gets a contract. The runtime enforces the schema, so the shape of
+  the report is a property of the run.
+
+An invalid candidate receives correction feedback while turns remain; the
+[agent library reference](../agent-library-reference.md#agent-core-run)
+describes that loop.
 
 ## Where to go next
 
-[Choose a workflow shape](agent-workflow-patterns.md) names the recurring
-shapes these steps used — and the ones they didn't, such as parallel fan-out
-and plan/act phases. [Customize an agent](building-agents.md) covers replacing
-the loop's prompts and policy. For a longer course that builds a
-multi-specialist agent scenario chapter by chapter, see the
-[PtcRunner tutorial series](https://github.com/andreasronge/ptc_runner_tutorial).
+[Choose a workflow shape](agent-workflow-patterns.md) names the shapes these
+steps used and the ones they did not, such as parallel fan-out and plan/act
+phases. [Customize an agent](building-agents.md) covers replacing the loop's
+prompts and policy. The
+[PtcRunner tutorial series](https://github.com/andreasronge/ptc_runner_tutorial)
+grows a multi-specialist agent chapter by chapter.

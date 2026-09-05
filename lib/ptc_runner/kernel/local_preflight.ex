@@ -6,10 +6,12 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   # `run/4` and `collect/4` are the only places an `:audited_local` callback
   # runs. Both execute before the marker and enable no provider activity: a
   # shipped audited-local check may inspect decoded configuration and loaded
-  # adapter, executable, or fixture availability, but may not resolve a
-  # credential, start an application, process, or port, contact a provider, or
-  # perform network work. Reaching a host installation is a process-free
-  # decrypt of the sealed payload, not an activation.
+  # adapter, executable, fixture availability, or bundled process-independent
+  # metadata. That includes loading the bundled LLM catalog inside this bounded
+  # worker to attest reservation pricing. It may not resolve a credential,
+  # start an application, process, or port, contact a provider, or perform
+  # network work. Reaching a host installation is a process-free decrypt of the
+  # sealed payload, not an activation.
   #
   # `run_unverified/5` is the only place an `:unverified` callback runs, and it
   # is past the marker where none of those limits apply. The two steps are
@@ -89,7 +91,10 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   #   * `:local_preflight` / `:launcher_unavailable` —
   #     `mcp_stdio_launcher_unavailable`, `unsupported_mcp_stdio_platform`
   #   * `:local_preflight` / `:adapter_unavailable` — `invalid_llm_model`
-  #   * `:local_preflight` / `:model_contract_unsupported` — `unsupported_model_option`
+  #   * `:local_preflight` / `:model_contract_unsupported` —
+  #     `unsupported_model_option`, or the sealed `ModelContractPricingCause`
+  #     produced from the exact payload-free uncataloged-pricing sentinel. The
+  #     latter retains the matching `model_uncataloged` warning.
   #
   # Doctor refines `mcp_command_not_found` to `command_not_found`, an existing
   # but unusable executable to `executable_unavailable`, and every replay-fixture
@@ -126,10 +131,13 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
   alias PtcRunner.Kernel.MissionReplTarget
+  alias PtcRunner.Kernel.ModelContractDiagnostic
+  alias PtcRunner.Kernel.ModelContractPricingCause
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSession
@@ -168,8 +176,10 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   # Five million words matches the installed provider-work ceiling and leaves
   # room for the raw fixture, detached decoded values, and the retained entry
   # map to coexist without making phase 7 depend on an application-narrowable
-  # limit.
+  # limit. The bundled LLM catalog's one-time decode peaks above that ceiling,
+  # so only the shipped live-LLM callback receives the larger allowance.
   @max_heap_words 5_000_000
+  @llm_max_heap_words 32_000_000
 
   @doc """
   Runs every applicable audited-local check for one prepared run.
@@ -507,7 +517,15 @@ defmodule PtcRunner.Kernel.LocalPreflight do
                  activity = prior_activity or step.activity
 
                  {:attempted, activity,
-                  invoke(callback, occurrence.config, context, services, timeout_ms, step)}
+                  invoke(
+                    callback,
+                    occurrence,
+                    catalog.implementations[occurrence.name],
+                    context,
+                    services,
+                    timeout_ms,
+                    step
+                  )}
              end
            end) do
       case result do
@@ -613,11 +631,11 @@ defmodule PtcRunner.Kernel.LocalPreflight do
     end
   end
 
-  defp invoke(callback, selection, context, services, timeout_ms, step) do
+  defp invoke(callback, occurrence, implementation, context, services, timeout_ms, step) do
     result =
-      BoundedWorker.run(fn -> callback.(selection, context, services) end,
+      BoundedWorker.run(fn -> callback.(occurrence.config, context, services) end,
         timeout_ms: timeout_ms,
-        max_heap_words: step.max_heap_words,
+        max_heap_words: max_heap_words(implementation, step),
         cancel_with_caller: true,
         # Linking to the caller alone is not enough for active work. The
         # executor can outlive the session, so a callback blocked in network or
@@ -629,6 +647,11 @@ defmodule PtcRunner.Kernel.LocalPreflight do
 
     BoundedWorker.classify_callback(result)
   end
+
+  defp max_heap_words(%{provider_application: :req_llm}, %{activity: false}),
+    do: @llm_max_heap_words
+
+  defp max_heap_words(_implementation, step), do: step.max_heap_words
 
   # A refused fixture file states the rule it broke, and a line-level rejection
   # states which line. Both are part of the published fixture contract, so
@@ -658,6 +681,14 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   defp diagnostic(reason, occurrence, activity, _mode) when reason in @model_contract_reasons,
     do: local_diagnostic(:model_contract_unsupported, occurrence, activity)
 
+  defp diagnostic(
+         %ModelContractPricingCause{public_model: public_model} = cause,
+         occurrence,
+         activity,
+         _mode
+       ),
+       do: pricing_diagnostic(cause, public_model, occurrence, activity)
+
   defp diagnostic(:provider_destination_denied, occurrence, activity, _mode),
     do: declaration_diagnostic(:placement_denied, occurrence, activity)
 
@@ -665,6 +696,28 @@ defmodule PtcRunner.Kernel.LocalPreflight do
     do: declaration_diagnostic(:selection_invalid, occurrence, activity)
 
   defp diagnostic(_reason, _occurrence, activity, _mode), do: internal_diagnostic(activity)
+
+  defp pricing_diagnostic(cause, public_model, occurrence, activity) do
+    case ModelContractPricingCause.valid?(cause) and
+           CommandWarning.model_uncataloged(occurrence.name, public_model) do
+      {:ok, warning} ->
+        subject_diagnostic(
+          :local_preflight,
+          :model_contract_unsupported,
+          :local,
+          occurrence,
+          activity,
+          ModelContractDiagnostic.cost_reservation_pricing_message(public_model),
+          [warning]
+        )
+
+      :error ->
+        internal_diagnostic(activity)
+
+      false ->
+        internal_diagnostic(activity)
+    end
+  end
 
   defp fixture_diagnostic(reason, occurrence, activity, mode) do
     case LLMReplayFixtureDiagnostic.message(reason) do
@@ -710,12 +763,20 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   # Activity is cumulative attempted-work evidence supplied by the step that
   # knows what preceded this check. The same condition can therefore differ
   # before and after callback dispatch without borrowing the lifecycle marker.
-  defp subject_diagnostic(phase, code, operation, occurrence, activity, message \\ nil) do
+  defp subject_diagnostic(
+         phase,
+         code,
+         operation,
+         occurrence,
+         activity,
+         message \\ nil,
+         warnings \\ []
+       ) do
     site = %{destination: occurrence.destination, index: occurrence.index}
 
     case CommandSubject.provider(occurrence.name, operation, site) do
       {:ok, subject} ->
-        opts = [subject: subject, provider_activity: activity]
+        opts = [subject: subject, provider_activity: activity, warnings: warnings]
         opts = if is_binary(message), do: Keyword.put(opts, :message, message), else: opts
         CommandDiagnostic.new!(phase, code, opts)
 

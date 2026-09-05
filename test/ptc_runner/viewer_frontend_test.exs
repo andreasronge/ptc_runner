@@ -495,16 +495,33 @@ defmodule PtcRunner.ViewerFrontendTest do
   end
 
   @tag :tmp_dir
-  test "browser opening stays inert without an attached terminal", %{tmp_dir: directory} do
-    # The suite never runs with stdin and stdout both on a terminal, so this
-    # asserts the gate rather than simulating it: a project that asks to open a
-    # browser must still not launch one here.
-    refute AnalysisTerminal.attached?()
+  test "browser opening follows the classified terminal attachment", %{tmp_dir: directory} do
     project_path = viewer_project(directory, %{"open" => true})
 
-    assert {:ok, viewer, _address, _port} = ViewerFrontend.start(project_path)
-    on_exit(fn -> if Process.alive?(viewer), do: PtcViewer.stop(viewer) end)
-    assert :ok = PtcViewer.stop(viewer)
+    for {terminal_attached, expected_open} <- [{false, false}, {true, true}] do
+      assert {:ok, options} = captured_viewer_options(project_path, terminal_attached)
+      assert Keyword.fetch!(options, :open) == expected_open
+    end
+  end
+
+  @tag :tmp_dir
+  test "browser opening classifies the real terminal lazily when no override is supplied", %{
+    tmp_dir: directory
+  } do
+    project_path = viewer_project(directory, %{"open" => true})
+
+    assert {:ok, options} = captured_viewer_options(project_path)
+    assert Keyword.fetch!(options, :open) == AnalysisTerminal.attached?()
+  end
+
+  @tag :tmp_dir
+  test "invalid classified terminal attachment is rejected", %{tmp_dir: directory} do
+    project_path = viewer_project(directory)
+
+    for invalid <- [nil, :yes, 1, "true"] do
+      assert {:error, :invalid_viewer_config} =
+               ViewerFrontend.start(project_path, %{}, terminal_attached: invalid)
+    end
   end
 
   @tag :tmp_dir
@@ -601,6 +618,26 @@ defmodule PtcRunner.ViewerFrontendTest do
 
   defp announce(address, port) do
     ViewerFrontend.announce(address, port, :stdio)
+  end
+
+  defp captured_viewer_options(project_path, terminal_attached \\ :default) do
+    parent = self()
+
+    before_viewer_start = fn options ->
+      send(parent, {:viewer_options, options})
+      {:error, :viewer_options_captured}
+    end
+
+    options = [before_viewer_start: before_viewer_start]
+
+    options =
+      if terminal_attached == :default,
+        do: options,
+        else: Keyword.put(options, :terminal_attached, terminal_attached)
+
+    assert {:error, :viewer_options_captured} = ViewerFrontend.start(project_path, %{}, options)
+    assert_receive {:viewer_options, viewer_options}
+    {:ok, viewer_options}
   end
 
   defp live_nonce(base_url) do

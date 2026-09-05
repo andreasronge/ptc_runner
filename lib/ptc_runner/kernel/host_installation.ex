@@ -60,6 +60,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   alias PtcRunner.Kernel.MCPOAuth.ManagerCleanup
   alias PtcRunner.Kernel.MCPOAuth.TokenManager
   alias PtcRunner.Kernel.MCPSource
+  alias PtcRunner.Kernel.ModelContractPricingCause
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderRegistry
@@ -867,30 +868,48 @@ defmodule PtcRunner.Kernel.HostInstallation do
   # remains adapter-unavailable.
   defp prepare_llm_model(model, requirements, adapter) do
     case PtcRunner.LLM.prepare(model, requirements, adapter) do
-      {:ok, prepared_model} -> {:ok, prepared_model}
-      {:error, :unsupported_model_option} -> {:error, :unsupported_model_option}
-      {:error, _reason} -> {:error, :invalid_llm_model}
+      {:ok, prepared_model} ->
+        {:ok, prepared_model}
+
+      {:error, :unsupported_model_option} ->
+        {:error, :unsupported_model_option}
+
+      {:error, %ModelContractPricingCause{} = cause} ->
+        if ModelContractPricingCause.valid?(cause),
+          do: {:error, cause},
+          else: {:error, :invalid_llm_model}
+
+      {:error, _reason} ->
+        {:error, :invalid_llm_model}
     end
   end
 
-  # Contract attestation must not load a provider catalog or call ensure_ready
-  # inside the audited-local worker. Doctor and other declaration checks still
-  # report adapter availability from the selector/module. Preparing here is only
-  # for a positive unsupported-contract refusal that does not need the catalog:
-  # openai_codex drops max_tokens, and test adapters can attest without warmup.
-  # An adapter that cannot resolve the target yet is not a new local failure.
+  # Contract attestation runs inside the audited-local worker and its anchored
+  # deadline. A shipped adapter may load bundled, process-independent metadata
+  # here when it needs that local fact to decide whether the sealed contract can
+  # run. It must not resolve credentials, start provider applications or other
+  # processes, open ports, or perform network work.
   defp maybe_prepare_llm_contract(installation, context, model, adapter) do
     case live_llm_requirements(installation, context) do
-      {:ok, requirements} -> attest_or_skip_local_contract(requirements, model, adapter)
-      {:error, _reason} = error -> error
+      {:ok, requirements} ->
+        attest_or_skip_local_contract(requirements, model, adapter)
+
+      {:error, _reason} = error ->
+        error
     end
   end
 
   defp attest_or_skip_local_contract(requirements, model, adapter) do
     if function_exported?(adapter, :local_contract_attestation, 2) do
       case adapter.local_contract_attestation(model, requirements) do
-        :ok -> :ok
-        {:error, :unsupported_model_option} = error -> error
+        :ok ->
+          :ok
+
+        {:error, :unsupported_model_option} = error ->
+          error
+
+        {:error, :uncataloged_cost_reservation_pricing_unavailable} ->
+          pricing_cause(requirements, adapter, model)
       end
     else
       adapter_local_prepare(adapter, model, requirements)
@@ -919,6 +938,9 @@ defmodule PtcRunner.Kernel.HostInstallation do
           {:error, :unsupported_model_option} = error ->
             error
 
+          {:error, :uncataloged_cost_reservation_pricing_unavailable} ->
+            pricing_cause(canonical, adapter, model)
+
           {:error, _reason} ->
             {:error, :invalid_llm_model}
         end
@@ -940,6 +962,12 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
+  defp pricing_cause(requirements, adapter, model) do
+    if Requirements.cost_reservation?(requirements),
+      do: {:error, ModelContractPricingCause.new(adapter, model)},
+      else: {:error, :invalid_llm_model}
+  end
+
   defp live_llm_requirements(installation, %{limits: limits}) do
     case Requirements.live(
            installation.params,
@@ -955,19 +983,25 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp live_llm_requirements(_installation, _context), do: {:error, :invalid_llm_model}
 
+  defp probe_llm_requirements(installation, %{limits: limits}) do
+    case Requirements.probe(
+           installation.params,
+           installation.usage_guarantees,
+           reservation_requirement(installation, limits)
+         ) do
+      {:ok, requirements} -> {:ok, requirements}
+      :error -> {:error, :invalid_llm_model}
+    end
+  end
+
+  defp probe_llm_requirements(_installation, _context), do: {:error, :invalid_llm_model}
+
   defp reservation_requirement(installation, limits) do
     %{
       total_tokens?: not is_nil(limits.llm_total_tokens) or not is_nil(limits.llm_cost_microusd),
       cost_tariff:
         if(is_nil(limits.llm_cost_microusd), do: nil, else: installation.reservation_tariff)
     }
-  end
-
-  defp probe_llm_requirements(installation) do
-    case Requirements.probe(installation.params, installation.usage_guarantees) do
-      {:ok, requirements} -> {:ok, requirements}
-      :error -> {:error, :llm_connectivity_unavailable}
-    end
   end
 
   defp placement(%{source: :mcp}, :mission), do: :ok
@@ -1082,7 +1116,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
     with :ok <- placement(installation, context.destination),
          {:ok, _selected} <- llm_selection(installation, selection, context),
          {:ok, model, adapter} <- preflight_llm(installation.model),
-         {:ok, requirements} <- probe_llm_requirements(installation),
+         {:ok, requirements} <- probe_llm_requirements(installation, context),
          {:ok, prepared_model} <- prepare_llm_model(model, requirements, adapter),
          {:ok, credential} <-
            Map.fetch(Map.get(context, :credentials, %{}), installation.credential),
@@ -1098,7 +1132,13 @@ defmodule PtcRunner.Kernel.HostInstallation do
          max_heap_words: max_heap_words
        }}
     else
-      _reason -> {:error, :llm_connectivity_unavailable}
+      {:error, %ModelContractPricingCause{} = cause} ->
+        if ModelContractPricingCause.valid?(cause),
+          do: {:error, cause},
+          else: {:error, :llm_connectivity_unavailable}
+
+      _reason ->
+        {:error, :llm_connectivity_unavailable}
     end
   end
 
@@ -1126,8 +1166,6 @@ defmodule PtcRunner.Kernel.HostInstallation do
       _invalid -> {:error, :llm_connectivity_unavailable}
     end
   end
-
-  defp connectivity_probe_bounds(_context), do: {:error, :llm_connectivity_unavailable}
 
   # The probe bills a real request, so what it spent travels back with the
   # success rather than being pattern-matched away: `max_tokens: 1` is sealed
@@ -1158,6 +1196,9 @@ defmodule PtcRunner.Kernel.HostInstallation do
           {:ok, {:ok, response}} when is_map(response) ->
             normalize_probe_usage(response, probe.usage_guarantees)
 
+          {:ok, {:error, %ProviderError{} = error}} ->
+            normalize_llm_probe_error(error)
+
           _failure ->
             {:error, :llm_connectivity_unavailable}
         end
@@ -1169,6 +1210,12 @@ defmodule PtcRunner.Kernel.HostInstallation do
     _exception -> {:error, :llm_connectivity_unavailable}
   catch
     _kind, _reason -> {:error, :llm_connectivity_unavailable}
+  end
+
+  defp normalize_llm_probe_error(%ProviderError{} = error) do
+    if ProviderError.valid?(error),
+      do: {:error, error},
+      else: {:error, :llm_connectivity_unavailable}
   end
 
   defp normalize_probe_usage(response, guarantees) do

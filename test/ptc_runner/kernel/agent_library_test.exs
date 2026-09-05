@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMCapability
+  alias PtcRunner.Kernel.LLMReplay
   alias PtcRunner.Kernel.LLMRouter
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ModelContract
@@ -437,6 +438,41 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
             }} = Kernel.run("(return (agent.native/normalize data/response 64000))", config)
   end
 
+  test "agent.native accepts live application and installation truncation bindings" do
+    {:ok, component} = Library.component("agent.native")
+    {:ok, bundle} = Kernel.compile_bundle([component])
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle)
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+
+    for bindings <- [
+          ["application_limit"],
+          ["installation_param"],
+          ["application_limit", "installation_param"]
+        ] do
+      response =
+        truncated_response(%{"content" => ""})
+        |> put_in(["output_limit", "bindings"], bindings)
+
+      {:ok, sink} = EventSink.start(:normal, limits, run_id: "native-live-limit-bindings")
+
+      {:ok, config} =
+        RunConfig.new(
+          workflow_environment: workflow,
+          missions: %{"default" => mission},
+          input: %{"response" => response},
+          limits: limits,
+          event_sink: sink
+        )
+
+      assert {:ok,
+              %{value: %{"kind" => "model-output-truncated", "output-limit" => output_limit}}} =
+               Kernel.run("(return (agent.native/normalize data/response 64000))", config)
+
+      assert output_limit["bindings"] == bindings
+    end
+  end
+
   test "agent.native retains terminal truncation when request-cap provenance is unavailable" do
     {:ok, component} = Library.component("agent.native")
     {:ok, bundle} = Kernel.compile_bundle([component])
@@ -495,7 +531,15 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert [annotation] = Enum.filter(events, &(&1.type == "workflow-annotation"))
     assert annotation.data.annotation_type == "agent-action"
-    assert annotation.data.data == %{"turn" => 0, "kind" => "tool-call"}
+
+    assert annotation.data.data == %{
+             "turn" => 0,
+             "max_turns" => 2,
+             "invocation" => annotation.data.data["invocation"],
+             "kind" => "tool-call"
+           }
+
+    assert annotation.data.data["invocation"] =~ ~r/\Aagent-[0-9a-f]{16}\z/
     assert_receive {:provider_closed, :terminal_success}
     refute_receive {:provider_closed, :terminal_success}
   end
@@ -580,6 +624,8 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert explore_annotation == %{
              "turn" => 0,
+             "max_turns" => 2,
+             "invocation" => explore_annotation["invocation"],
              "kind" => "tool-call",
              "phase" => 0,
              "phase_turn" => 0,
@@ -588,6 +634,64 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert synthesize_annotation["phase"] == 1
     assert synthesize_annotation["mission"] == "synthesize"
+    assert synthesize_annotation["max_turns"] == 2
+    assert synthesize_annotation["invocation"] == explore_annotation["invocation"]
+  end
+
+  test "concurrent agent invocations publish distinct turn budgets" do
+    response = fn id ->
+      %{
+        content: nil,
+        tool_calls: [
+          %{id: id, name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+        ]
+      }
+    end
+
+    {:ok, config} = agent_config([response.("one"), response.("two")])
+
+    assert {:ok, %{value: [42, 42]}} =
+             Kernel.run(
+               ~S|(return (pmap (fn [limit] (agent.core/run-value "Compute" {"max_turns" limit})) [1 2]))|,
+               config
+             )
+
+    progress =
+      config.event_sink
+      |> EventSink.events()
+      |> Enum.filter(&(&1.type == "workflow-annotation"))
+      |> Enum.map(& &1.data.data)
+
+    assert Enum.sort(Enum.map(progress, & &1["max_turns"])) == [1, 2]
+    assert progress |> Enum.map(& &1["invocation"]) |> Enum.uniq() |> length() == 2
+  end
+
+  test "sequential agent invocations receive distinct correlation identifiers" do
+    response = fn id ->
+      %{
+        content: nil,
+        tool_calls: [
+          %{id: id, name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+        ]
+      }
+    end
+
+    {:ok, config} = agent_config([response.("one"), response.("two")])
+
+    assert {:ok, %{value: [42, 42]}} =
+             Kernel.run(
+               ~S|(return [(agent.core/run-value "First" {"max_turns" 1}) (agent.core/run-value "Second" {"max_turns" 2})])|,
+               config
+             )
+
+    progress =
+      config.event_sink
+      |> EventSink.events()
+      |> Enum.filter(&(&1.type == "workflow-annotation"))
+      |> Enum.map(& &1.data.data)
+
+    assert Enum.sort(Enum.map(progress, & &1["max_turns"])) == [1, 2]
+    assert progress |> Enum.map(& &1["invocation"]) |> Enum.uniq() |> length() == 2
   end
 
   # A non-final terminal-only phase would hand off to the next phase when it
@@ -1739,10 +1843,70 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute encoded =~ "source_bytes"
   end
 
+  test "run-outcome retain_programs includes bounded execution evidence" do
+    responses = [
+      agent_return("observe", "(+ 1 1)"),
+      agent_return("repair", "(+"),
+      agent_return("done", "(return 2)")
+    ]
+
+    {:ok, config} = agent_config(responses)
+
+    assert {:ok, %{value: value}} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Review the session" {"max_turns" 3 "retain_programs" 8}))|,
+               config
+             )
+
+    assert [continued, failed, returned] = value["programs"]
+
+    assert continued["execution"] == %{
+             "outcome" => "continued",
+             "observation" => "user=> 2",
+             "observation-truncated?" => false
+           }
+
+    assert %{
+             "outcome" => "evaluation_error",
+             "kind" => "parse_error",
+             "message" => message
+           } = failed["execution"]
+
+    assert is_binary(message)
+    assert returned["execution"] == %{"outcome" => "returned"}
+  end
+
+  test "run-outcome caps retained observations independently of the agent observation ceiling" do
+    printed = String.duplicate("x", 3_000)
+
+    responses = [
+      agent_return("observe", ~s|"#{printed}"|),
+      agent_return("done", "(return 1)")
+    ]
+
+    {:ok, config} = agent_config(responses)
+
+    assert {:ok, %{value: value}} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Review the session" {"max_turns" 2 "max_observation_chars" 4096 "retain_programs" 8}))|,
+               config
+             )
+
+    [continued, _returned] = value["programs"]
+    observation = continued["execution"]["observation"]
+
+    assert String.length(observation) <= 2_048
+    assert String.ends_with?(observation, "... (retained observation truncated)")
+    assert continued["execution"]["observation-truncated?"]
+  end
+
   test "run-outcome retain_programs attaches prior programs to subject and provider failures" do
     subject_responses = [
       agent_return("continue", "(+ 1 1)"),
-      agent_return("fail", ~S|(fail "declined")|)
+      agent_return(
+        "fail",
+        ~S|(fail {:status :error :kind :declined :reason :policy :secret "x"})|
+      )
     ]
 
     {:ok, subject_config} = agent_config(subject_responses)
@@ -1758,8 +1922,37 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert [
              %{"turn" => 1, "mission" => "default", "source" => "(+ 1 1)"},
-             %{"turn" => 2, "mission" => "default", "source" => ~S|(fail "declined")|}
+             %{"turn" => 2, "mission" => "default", "execution" => execution} = failed
            ] = subject["programs"]
+
+    assert failed["source"] =~ "(fail {:status :error :kind :declined"
+    assert execution["outcome"] == "failed"
+    assert execution["kind"] == "declined"
+    assert execution["reason"] == "policy"
+    refute Map.has_key?(execution, "value")
+    refute inspect(execution) =~ "secret"
+
+    long = String.duplicate("k", 129)
+
+    unbounded_responses = [
+      agent_return(
+        "fail",
+        ~s|(fail {:status :error :kind :#{long} :reason "two words\there"})|
+      )
+    ]
+
+    {:ok, unbounded_config} = agent_config(unbounded_responses)
+
+    assert {:ok, %{value: unbounded}} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Fail loudly" {"max_turns" 1 "retain_programs" 8}))|,
+               unbounded_config
+             )
+
+    assert [%{"execution" => unbounded_execution}] = unbounded["programs"]
+    assert unbounded_execution["outcome"] == "failed"
+    refute Map.has_key?(unbounded_execution, "kind")
+    refute Map.has_key?(unbounded_execution, "reason")
 
     provider_responses = [
       agent_return("continue", "(+ 2 2)"),
@@ -2139,7 +2332,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
                   }
                 }} =
                  Kernel.run(
-                   ~S|(return (agent.core/run-value "evidence" {"max_turns" 1 "return_contract" "evidence"}))|,
+                   ~S|(agent.core/fail-outcome (agent.core/run-outcome "evidence" {"max_turns" 1 "return_contract" "evidence"}))|,
                    value_config
                  )
 
@@ -2755,6 +2948,17 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute observation.prints_truncated?
     assert observation.caps_hit == []
     assert observation.text =~ inspect(get_in(page, ["items", Access.at(0), "text"]))
+  end
+
+  test "agent observation renders nested debug navigation filters within its budget" do
+    page = ValuePreviewFixture.debug_navigation_page()
+    observation = EvaluationObservation.success(%{value: page, prints: []}, 2_048)
+
+    refute observation.truncated?
+    refute observation.value_truncated?
+    assert observation.caps_hit == []
+    assert observation.text =~ ~S|"filters" {"component_id" "pricing.base"}|
+    assert observation.text =~ ~S|"source" "(ns pricing.rule)"|
   end
 
   test "agent.feedback distinguishes retained values, returned values, and print omission" do
@@ -3570,6 +3774,47 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert feedback =~ "reduce"
   end
 
+  test "heap-kill correction requests and retained execution stay stable across baselines" do
+    run = fn padding ->
+      responses = [
+        agent_return(
+          "explode",
+          ~S|(reduce (fn [acc i] (conj acc (range 0 4096))) [] (range 0 4096))|
+        ),
+        agent_return("recover", "(return 42)")
+      ]
+
+      {:ok, config} =
+        agent_config(responses, [evaluation_heap_words: 200_000],
+          mission_data: %{"baseline_padding" => padding}
+        )
+
+      assert {:ok, %{value: outcome}} =
+               Kernel.run(
+                 ~S|(return (agent.core/run-outcome "Recover efficiently" {"max_turns" 2 "retain_programs" 2}))|,
+                 config
+               )
+
+      assert_receive {:agent_request, first_request}
+      assert_receive {:agent_request, correction_request}
+
+      assert [failed, %{"execution" => %{"outcome" => "returned"}}] = outcome["programs"]
+      assert failed["execution"]["kind"] == "memory_exceeded"
+
+      {first_request, correction_request, failed["execution"]}
+    end
+
+    small = run.([0])
+    large = run.(Enum.to_list(1..20_000))
+
+    assert elem(small, 0) == elem(large, 0)
+    assert elem(small, 1) == elem(large, 1)
+    assert elem(small, 2) == elem(large, 2)
+
+    assert {:ok, small_hash} = LLMReplay.request_hash(elem(small, 1))
+    assert {:ok, ^small_hash} = LLMReplay.request_hash(elem(large, 1))
+  end
+
   test "agent distinguishes retained-definition rejection from a heap kill" do
     oversized = String.duplicate("x", 1_024)
 
@@ -3978,6 +4223,46 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
             }} = Kernel.run(~S|(agent.core/run-value "Exhaust" {"max_turns" 1})|, config)
 
     assert is_map(details)
+  end
+
+  test "parallel inspected outcomes retain their originating evaluator failure" do
+    requester = fn request ->
+      task = inspect(request["messages"])
+
+      program =
+        if String.contains?(task, "arithmetic-branch"),
+          do: "(/ 1 0)",
+          else: "((fn [x] x))"
+
+      {:ok,
+       %{
+         content: nil,
+         tool_calls: [
+           %{id: "eval-bad", name: "run_ptc_lisp", args: %{"program" => program}}
+         ]
+       }}
+    end
+
+    {:ok, config} = agent_config_with_requester(requester)
+
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              reason: :runtime_limit_exceeded,
+              details: %{
+                limit_reason: :evaluation_error,
+                last_evaluator_failure: %{kind: :arithmetic_error}
+              }
+            }} =
+             Kernel.run(
+               ~S|(let [outcomes
+                        (pmap
+                          (fn [task]
+                            (agent.core/run-outcome task {"max_turns" 1}))
+                          ["arithmetic-branch" "missing-branch"])]
+                    (agent.core/fail-outcome (first outcomes)))|,
+               config
+             )
   end
 
   test "each way a bounded loop ends carries its own turn-limit reason" do
@@ -5578,6 +5863,71 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
              )
   end
 
+  test "fail-outcome preserves returned data and authenticates failures" do
+    returned = agent_return("kept", ~S|(return 7)|)
+    {:ok, returned_config} = agent_config([returned])
+
+    assert {:ok,
+            %{
+              value: %{
+                "status" => "returned",
+                "value" => 7,
+                "programs" => [%{"source" => "(return 7)"}],
+                "programs-omitted" => 0
+              }
+            }} =
+             Kernel.run(
+               ~S|(return (agent.core/fail-outcome (agent.core/run-outcome "Return" {"max_turns" 1 "retain_programs" 1})))|,
+               returned_config
+             )
+
+    {:ok, provider_config} = agent_config([{:error, :transport_down}])
+
+    assert {:error, %{kind: :workflow_failed, reason: :llm_provider_failed}} =
+             Kernel.run(
+               ~S|(agent.core/fail-outcome (agent.core/run-outcome "Provider" {"max_turns" 1}))|,
+               provider_config
+             )
+
+    {:ok, turn_limit_config} = agent_config([%{content: "prose", tool_calls: []}])
+
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              reason: :runtime_limit_exceeded,
+              details: %{limit: :agent_turns, limit_value: 1}
+            }} =
+             Kernel.run(
+               ~S|(agent.core/fail-outcome (agent.core/run-outcome "Exhaust" {"max_turns" 1}))|,
+               turn_limit_config
+             )
+
+    {:ok, low_history_config} =
+      agent_config([%{content: "prose", tool_calls: []}], evaluation_history_bytes: 1)
+
+    assert {:error, %{reason: :runtime_limit_exceeded}} =
+             Kernel.run(
+               ~S|(agent.core/fail-outcome (agent.core/run-outcome "Exhaust" {"max_turns" 1}))|,
+               low_history_config
+             )
+
+    {:ok, forged_config} = agent_config([])
+
+    assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
+             Kernel.run(
+               ~S|(agent.core/fail-outcome {:status :provider-failure :error {:kind :provider-error :reason :unavailable}})|,
+               forged_config
+             )
+
+    {:ok, forged_turn_config} = agent_config([])
+
+    assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
+             Kernel.run(
+               ~S|(agent.core/fail-outcome {:status :subject-failure :kind :turn-limit :error {:limit_value 1 :reason :protocol-error}})|,
+               forged_turn_config
+             )
+  end
+
   test "agent.core run-outcome returns typed provider failures with the resolved alias" do
     timeout = ProviderError.new(:timeout, "provider timed out", retryable?: true)
     {:ok, failing} = LLMCapability.new(requester: fn _ -> {:error, timeout} end)
@@ -5678,7 +6028,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
               }
             }} =
              Kernel.run(
-               ~S|(return (agent.core/run-value "Retry later" {"max_turns" 1}))|,
+               ~S|(agent.core/fail-outcome (agent.core/run-outcome "Retry later" {"max_turns" 1}))|,
                fail_fast_config
              )
   end
@@ -5740,7 +6090,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
               }
             }} =
              Kernel.run(
-               ~S|(return (agent.core/run-value "Stay within the reservation" {"max_turns" 1}))|,
+               ~S|(agent.core/fail-outcome (agent.core/run-outcome "Stay within the reservation" {"max_turns" 1}))|,
                fail_fast_config
              )
   end
@@ -5786,6 +6136,19 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
                quota_config
              )
 
+    {:ok, quota_abort_config} = agent_router_config(router)
+
+    assert {:error,
+            %{
+              kind: :limit_exceeded,
+              reason: :capability_quota,
+              details: %{limit: :max_calls, alias: "expensive", limit_value: 1}
+            }} =
+             Kernel.run(
+               ~S|(agent.core/fail-outcome (agent.core/run-outcome "Spend the alias" {"max_turns" 2}))|,
+               quota_abort_config
+             )
+
     {:ok, unknown_config} = agent_router_config(router)
 
     assert {:ok,
@@ -5827,6 +6190,19 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
              Kernel.run(
                ~S|(return (agent.core/run-outcome "Global quota" {"max_turns" 2}))|,
                global_config
+             )
+
+    {:ok, global_abort_config} = agent_config([mixed], workflow_capability_calls: 1)
+
+    assert {:error,
+            %{
+              kind: :limit_exceeded,
+              reason: :capability_quota,
+              details: %{limit: :workflow_capability_calls, name: "llm-request", limit_value: 1}
+            }} =
+             Kernel.run(
+               ~S|(agent.core/fail-outcome (agent.core/run-outcome "Global quota" {"max_turns" 2}))|,
+               global_abort_config
              )
   end
 
@@ -5952,7 +6328,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
               }
             }} =
              Kernel.run(
-               ~S|(return (agent.core/run-value "Stay within the reservation" {"max_turns" 2}))|,
+               ~S|(agent.core/fail-outcome (agent.core/run-outcome "Stay within the reservation" {"max_turns" 2}))|,
                fail_fast_config
              )
   end
@@ -6316,7 +6692,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
   defp required_agent_tools do
     Map.new(
-      ~w(kernel-check-source kernel-eval kernel-agent-config-failure kernel-agent-protocol-error kernel-llm-provider-failure kernel-mission-inventory kernel-mission-model-context kernel-phase-return-contract-failure kernel-result-contract kernel-result-contract-failure kernel-runtime-limit-failure
+      ~w(kernel-check-source kernel-eval kernel-agent-config-failure kernel-agent-outcome-failure kernel-agent-protocol-error kernel-llm-provider-failure kernel-mission-inventory kernel-mission-model-context kernel-phase-return-contract-failure kernel-result-contract kernel-result-contract-failure kernel-runtime-limit-failure
          llm-request workflow-annotate),
       &{&1, %TrustedTool{function: fn _arguments -> %{status: :error} end}}
     )

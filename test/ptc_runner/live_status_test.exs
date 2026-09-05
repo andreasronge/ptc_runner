@@ -2,6 +2,8 @@ defmodule PtcRunner.LiveStatusTest do
   # async: false — mutates the PTC_VIEWER_URL environment variable.
   use ExUnit.Case, async: false
 
+  import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
+
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.EventSink
@@ -16,8 +18,63 @@ defmodule PtcRunner.LiveStatusTest do
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.LiveStatus.Reporter
   alias PtcRunner.LiveStatus.Target
+  alias PtcRunner.MixCommandAdapter
+  alias PtcRunner.TestSupport.HTTPRequest
+
+  @tag :tmp_dir
+  test "an externally attached CLI run carries the manifest application identity", %{tmp_dir: dir} do
+    manifest = Path.join(dir, "ptc.json")
+    File.write!(Path.join(dir, "app.clj"), "(ns app) (defn run [input] input)")
+
+    File.write!(manifest, ~S|{
+      "version": 1,
+      "labels": {"name": "invoice-triage"},
+      "workflow": {
+        "components": [{"id": "app", "path": "app.clj"}],
+        "entry": "app/run"
+      },
+      "input": {"value": {}}
+    }|)
+
+    {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
+    {:ok, port} = :inet.port(listener)
+    parent = self()
+
+    server =
+      spawn(fn ->
+        {:ok, socket} = :gen_tcp.accept(listener)
+        {:ok, request} = HTTPRequest.receive_complete(socket)
+        send(parent, {:external_cli_request, request})
+        :ok = :gen_tcp.send(socket, "HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n")
+        :ok = :gen_tcp.close(socket)
+      end)
+
+    server_ref = Process.monitor(server)
+
+    System.put_env("PTC_VIEWER_URL", "http://127.0.0.1:#{port}")
+    on_exit(fn -> System.delete_env("PTC_VIEWER_URL") end)
+
+    assert %{exit_status: 0} = MixCommandAdapter.execute(["run", manifest])
+    assert_receive {:external_cli_request, request}, 2_000
+    assert request =~ ~s|"label":"invoice-triage · app/run"|
+    :ok = :gen_tcp.close(listener)
+    assert_receive {:DOWN, ^server_ref, :process, ^server, :normal}, 2_000
+  end
 
   @moduletag :capture_log
+
+  test "the reporter records a failed target delivery" do
+    {:ok, target} = Target.new(fn _run_id, _frame -> :error end)
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "failed-delivery")
+    {:ok, config} = run_config(limits, sink, %{})
+    {:ok, run_state} = RunState.start(limits)
+    {:ok, reporter} = Reporter.start(target, config, run_state)
+
+    assert assert_eventually(fn -> :sys.get_state(reporter).post_failed? end)
+    assert :ok = Reporter.stop(reporter)
+    assert :ok = RunState.stop(run_state)
+  end
 
   test "telemetry delivery is isolated to its correlated run" do
     run_ref = self()
@@ -43,6 +100,45 @@ defmodule PtcRunner.LiveStatusTest do
              )
 
     assert_receive {:live_telemetry, [:ptc_runner, :capability, :start], %{}, %{}}
+  end
+
+  test "agent progress remains scoped to concurrent invocation identities" do
+    parent = self()
+    {:ok, target} = Target.new(fn _run_id, frame -> send(parent, {:live_frame, frame}) end)
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "concurrent-agent-progress")
+    {:ok, config} = run_config(limits, sink, %{})
+    {:ok, run_state} = RunState.start(limits)
+    {:ok, reporter} = Reporter.start(target, config, run_state)
+    assert_receive {:live_frame, _frame}
+
+    for progress <- [
+          %{invocation: "agent-aaaaaaaaaaaaaaaa", turn: 1, max_turns: 6, kind: "tool-call"},
+          %{invocation: "agent-bbbbbbbbbbbbbbbb", turn: 0, max_turns: 2, kind: "provider-error"}
+        ] do
+      Reporter.handle_telemetry(
+        [:ptc_runner, :agent, :action],
+        %{},
+        Map.put(progress, :live_run, run_state.pid),
+        {reporter, run_state.pid}
+      )
+    end
+
+    assert :ok = Reporter.complete(reporter, :ok, nil, nil)
+    assert_receive {:live_frame, %{phase: "ok", activity: activity}}, 2_000
+
+    assert Enum.any?(
+             activity,
+             &match?(%{name: "agent-aaaaaaaaaaaaaaaa", turn: 1, max_turns: 6}, &1)
+           )
+
+    assert Enum.any?(
+             activity,
+             &match?(%{name: "agent-bbbbbbbbbbbbbbbb", turn: 0, max_turns: 2}, &1)
+           )
+
+    assert :ok = Reporter.stop(reporter)
+    assert :ok = RunState.stop(run_state)
   end
 
   test "the reporter stops when the run owner dies" do
@@ -98,6 +194,31 @@ defmodule PtcRunner.LiveStatusTest do
     assert_receive {:DOWN, ^delivery_ref, :process, ^delivery, :killed}, 2_000
     reporter_ref = Process.monitor(reporter)
     assert_receive {:DOWN, ^reporter_ref, :process, ^reporter, :normal}, 2_000
+    assert :ok = RunState.stop(run_state)
+  end
+
+  test "ordered fan-out reaches terminal progress before a blocked Viewer" do
+    parent = self()
+
+    {:ok, terminal} =
+      Target.new(fn _run_id, frame -> send(parent, {:terminal_frame, frame.phase}) end)
+
+    {:ok, viewer} =
+      Target.new(fn _run_id, _frame ->
+        send(parent, :viewer_started)
+        receive do: (:never -> :ok)
+      end)
+
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "fanout-live-target")
+    {:ok, config} = run_config(limits, sink, %{})
+    {:ok, run_state} = RunState.start(limits)
+    {:ok, fanout} = Target.compose([terminal, viewer])
+    {:ok, reporter} = Reporter.start(fanout, config, run_state)
+
+    assert_receive {:terminal_frame, "running"}, 1_000
+    assert_receive :viewer_started
+    assert :ok = Reporter.stop(reporter)
     assert :ok = RunState.stop(run_state)
   end
 

@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Evaluate changes with replay · PtcRunner</title>
-<meta name="description" content="Compare an agent prompt or prelude change against fixed model responses before
-deciding whether to promote it.">
+<meta name="description" content="Compare a prompt or prelude change against fixed model responses before you
+decide whether to keep it.">
 <link rel="canonical" href="https://ptc-runner.dev/guides/evaluating-with-replay/">
 <meta property="og:title" content="Evaluate changes with replay · PtcRunner">
-<meta property="og:description" content="Compare an agent prompt or prelude change against fixed model responses before
-deciding whether to promote it.">
+<meta property="og:description" content="Compare a prompt or prelude change against fixed model responses before you
+decide whether to keep it.">
 <meta property="og:url" content="https://ptc-runner.dev/guides/evaluating-with-replay/">
 <meta property="og:type" content="article">
 <link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
@@ -85,9 +85,11 @@ deciding whether to promote it.">
 <li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
 <li><a href="/reference/host-installation/">Host-configuration reference</a></li>
 <li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/examples/">Examples reference</a></li>
 <li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
 <li><a href="/reference/mcp/">MCP reference</a></li>
 <li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/viewer/">Viewer reference</a></li>
 <li><a href="/reference/repl/">REPL reference</a></li>
 <li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
 <li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
@@ -99,61 +101,43 @@ deciding whether to promote it.">
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="evaluate-changes-with-replay">Evaluate changes with replay</h1><p>Compare an agent prompt or prelude change against fixed model responses before
-deciding whether to promote it.</p><p>Live model output drifts between runs, while
-the <code class="inline">llm_replay</code> provider holds model
-responses fixed so a difference between a baseline and candidate run can be
-attributed to the candidate component rather than another model sample.</p><p>Replay changes neither the manifest grammar nor the application's model alias.
-Replace the installed provider behind that alias in <code class="inline">ptc-host.json</code>.</p><h2 id="run-the-network-free-example">Run the network-free example</h2><p>The checked-in example needs no credential or network access:</p><pre><code class="console language-console">ptc init replay-example --example llm-replay
-ptc run replay-example/ptc-project.json</code></pre><pre><code class="json language-json">{&quot;content&quot;:&quot;Frozen answer&quot;,&quot;model&quot;:&quot;frozen-model&quot;}</code></pre><p>The project records private inspection and grants it to the Viewer:</p><pre><code class="console language-console">ptc viewer replay-example/ptc-project.json</code></pre><h2 id="install-a-replay-model">Install a replay model</h2><p>The host document names a JSON Lines fixture:</p><pre><code class="json language-json">&quot;frozen-model&quot;: {
+<h1 id="evaluate-changes-with-replay">Evaluate changes with replay</h1><p>Compare a prompt or prelude change against fixed model responses before you
+decide whether to keep it.</p><p>Live model output changes between runs. The <code class="inline">llm_replay</code> provider answers each
+request from a fixture instead, so a difference between a baseline run and a
+candidate run comes from the candidate rather than from another model sample.
+Replay changes nothing in the manifest: you replace the provider behind the
+model alias in <code class="inline">ptc-host.json</code>.</p><h2 id="run-the-network-free-example">Run the network-free example</h2><pre><code class="console language-console">ptc init replay-example --example llm-replay
+ptc run replay-example/ptc-project.json</code></pre><pre><code class="json language-json">{&quot;content&quot;:&quot;Frozen answer&quot;,&quot;model&quot;:&quot;frozen-model&quot;}</code></pre><p>The project retains private inspection and grants it to the Viewer:</p><pre><code class="console language-console">ptc viewer replay-example/ptc-project.json</code></pre><h2 id="install-a-replay-model">Install a replay model</h2><p>The host document points the alias at a JSON Lines fixture file:</p><pre><code class="json language-json">&quot;frozen-model&quot;: {
   &quot;source&quot;: &quot;llm_replay&quot;,
   &quot;installation_revision&quot;: &quot;frozen-model-v1&quot;,
   &quot;fixtures&quot;: &quot;evaluation/replay.jsonl&quot;
-}</code></pre><p>Every fixture line has <code class="inline">schema_version</code> 1, a deterministic hash of the
-provider-neutral request, and exactly one <code class="inline">response</code> or ordered <code class="inline">responses</code>
-field:</p><pre><code class="json language-json">{&quot;schema_version&quot;:1,&quot;request_hash&quot;:&quot;sha256:0000000000000000000000000000000000000000000000000000000000000000&quot;,&quot;response&quot;:{&quot;content&quot;:&quot;frozen&quot;}}</code></pre><p>Plain doctor parses the selected fixture under installed ceilings without
-starting the provider:</p><pre><code class="console language-console">ptc doctor replay-example/ptc-project.json</code></pre><p>A missing, empty, malformed, duplicate, or oversized fixture set fails its
-local provider check as <code class="inline">fixtures_unreadable</code>, and the message names the rule
-the file broke. A line-level rejection names the line as well:</p><pre><code class="text language-text">replay fixture line 3 must set schema_version to 1</code></pre><p>The line number is the number in the file, counting blank lines. Nothing the
-line contains is published — only which rule it broke.</p><p><code class="inline">ptc validate</code> reads the same file under the same ceilings, so a manifest and
-host document that validate cannot fail on the fixture when <code class="inline">run</code> reaches it.
-The remaining local checks — an installed model's adapter, an MCP server's
-executable — stay out of <code class="inline">validate</code>: whether they are present says nothing
-about whether the documents are well formed.</p><h2 id="author-fixtures-from-exact-requests">Author fixtures from exact requests</h2><p>Start with any schema-valid placeholder hash and the response shape the
-workflow expects. A normal-data miss reports:</p><pre><code class="text language-text">no replay fixture matches this request (request_hash: sha256:...)</code></pre><p>Copy that hash into the fixture and rerun. For private-data requests, follow
+}</code></pre><p>Each line carries <code class="inline">schema_version</code> 1, the hash of the request it answers, and
+one <code class="inline">response</code>, or an ordered list of <code class="inline">responses</code> for a request the workflow
+makes more than once:</p><pre><code class="json language-json">{&quot;schema_version&quot;:1,&quot;request_hash&quot;:&quot;sha256:0000000000000000000000000000000000000000000000000000000000000000&quot;,&quot;response&quot;:{&quot;content&quot;:&quot;frozen&quot;}}</code></pre><p><code class="inline">ptc doctor</code> and <code class="inline">ptc validate</code> both read the fixture file, so a broken file
+fails before a run starts. The
+<a href="/reference/host-installation/#choose-a-provider-source">host reference</a>
+lists the rules a fixture file must follow.</p><h2 id="write-a-fixture-from-a-real-request">Write a fixture from a real request</h2><p>Start with a placeholder hash and the response shape you want. The first run
+misses and prints the hash it looked for:</p><pre><code class="text language-text">no replay fixture matches this request (request_hash: sha256:...)</code></pre><p>Copy that hash into the fixture and run again. Matching is exact, so an edited
+prompt misses instead of reusing an old answer. When the request carries
+private data the hash is not printed; follow
 <a href="/reference/cli/#inspect-a-private-model-conversation">Inspect a private model conversation</a>
-and copy the selected turn's replay hash; the public diagnostic omits that
-unsalted value.</p><p>Matching is exact, so an edited request misses rather than quietly reusing the
-wrong response. A miss is a provider error returned as a value, not a failed
-evaluation — the shipped <code class="inline">llm-replay</code> example calls <code class="inline">cap/unwrap!</code> so a miss
-still exits non-zero. The <a href="/reference/host-installation/#choose-a-provider-source">host-configuration
-reference</a> states
-what a miss records.</p><p>An ordered <code class="inline">responses</code> sequence supports workflows that make the same request
-more than once.</p><h2 id="evaluate-the-candidate-without-installing-it">Evaluate the candidate without installing it</h2><p><code class="inline">--component-override-descriptor</code> replaces one component already selected by
-the manifest. A transitively selected component is also eligible, so selecting
-<code class="inline">agent.core</code> makes its <code class="inline">agent.prompt</code> dependency available as a workflow
-override target.</p><p>The descriptor binds the candidate to the installed source it replaces and to
-the exact candidate bytes. It cannot add a component, change dependencies, or
-grant a provider. The replacement still passes compilation, dependency,
-signature, export, capability-requirement, and bundle checks. A refused
-descriptor names the field it broke (<code class="inline">base_source_hash</code>, <code class="inline">source_hash</code>,
-<code class="inline">component_id</code>, or <code class="inline">path</code>) rather than collapsing every mistake into one
-sentence. See the
+to read it from the private record.</p><p>A miss reaches the workflow as a provider error value. The shipped
+<code class="inline">llm-replay</code> example calls <code class="inline">cap/unwrap!</code> so a miss still fails the run.</p><h2 id="evaluate-the-candidate-without-installing-it">Evaluate the candidate without installing it</h2><p>Export the component you want to change, edit the copy, and publish it as a
+candidate, as shown in
+<a href="/guides/components-and-preludes/#change-the-prompt-on-a-run">Inspect and customize components</a>.
+Then run the baseline and the candidate with the same replay installation,
+input, host ceilings, and content snapshots:</p><pre><code class="console language-console">ptc run ptc-project.json
+ptc run ptc-project.json \
+  --component-override-descriptor private/agent-prompt-candidate/descriptor.json</code></pre><p>Compare the values, envelopes, usage, and traces. The descriptor replaces one
+component the manifest already selects, including one selected through a
+dependency such as <code class="inline">agent.prompt</code>. It cannot add a component, change
+dependencies, or grant a provider; the
 <a href="/reference/component-contracts/#evaluate-one-replacement-component">component reference</a>
-for every descriptor field and validation rule.</p><p>Create the candidate with the standalone command rather than a source
-checkout helper, then follow
-<a href="/guides/components-and-preludes/#change-the-prompt-on-a-run">the customization guide</a>
-to validate and compare it.</p><p>The active bundle stays immutable for the whole run. A run may author source,
-but only a later host invocation can materialize it and start with the newly
-compiled bundle. Component-override switches are invocation-only and are not
-stored in <code class="inline">ptc-project.json</code>.</p><p>Run the unchanged baseline and the override with the same replay installation,
-inputs, host ceilings, and content snapshots. Compare their values, envelopes,
-usage, and traces. Replay removes model sampling as a variable; it
-does not make external MCP content deterministic unless that content is also
-frozen and identified.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/guides/components-and-preludes/">Components and preludes</a> defines component
-identity, dependencies, exports, and signatures.</li><li><a href="/guides/running-and-debugging/">Running and debugging</a> documents override switches,
-artifacts, traces, and private inspection.</li><li><a href="/reference/kernel-limits-reference/">Kernel limits</a> lists every run ceiling that
-must remain comparable between evaluations.</li></ul>
+lists its fields and validation rules.</p><p>Replay removes model sampling as a variable, but every model-visible
+observation must remain stable. For details, see the
+<a href="/reference/host-installation/#choose-a-provider-source">exact request-matching requirement</a>.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/guides/components-and-preludes/">Inspect and customize components</a> has the
+materialize and validate commands.</li><li><a href="/reference/kernel-limits-reference/">Kernel limits</a> lists the ceilings that must
+stay equal between the two runs.</li></ul>
 </article>
 <nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/debugging-a-failed-run/">&larr; Debug a failed run</a><a class="pager-next" href="/installation/standalone/">Standalone installation &rarr;</a></nav>
 <footer>

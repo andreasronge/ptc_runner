@@ -83,8 +83,9 @@ depends on the input grammar, never TTY detection: argumentless `ptc repl`
 uses it when lines arrive from a terminal or a pipe, and `--load SETUP.clj`
 uses it when the setup is followed by that loop. Direct interactive sessions
 set `run_duration_ms` and `subordinate_evaluations` to their catalog maxima and
-retain normal events up to the installed `normal_event_count` and
-`normal_event_bytes` ceilings. Per-form time, heap, source, memory, history,
+retain events up to the installed `normal_event_count` and
+`normal_event_bytes` ceilings. Despite their historical names, these ceilings
+also bound private traces. Per-form time, heap, source, memory, history,
 result, projection, and capability limits remain at their ordinary defaults.
 
 Interactive manifest and mission sessions use the installed host ceilings for
@@ -124,6 +125,10 @@ application, host configuration, and lazy environment-file paths, while
 duplicated in `ptc-project.json`. The manifest form is the equivalent low-level
 command. Omitting `--mission` keeps the workflow REPL behavior — which carries
 no mission namespaces, so a mission's own namespace is rejected as unknown.
+Workflow code may still call its attached `kernel/eval*` routes; the REPL
+yields its workflow-continuation lease while each outer form runs, so nested
+mission `return` and `fail` outcomes remain data for callers such as
+`agent.core/run-outcome`.
 A `data/<name>` form in that session answers from the language rather than as
 an unknown namespace, because `data/` is a language namespace the workflow
 environment carries: an ungranted name is a missing-grant runtime error, and
@@ -167,8 +172,10 @@ ptc repl --manifest ptc.json --inspect-only
 ```
 
 `--inspect-only` requires `--project` or `--manifest`. It compiles the selected
-workflow or named mission and attaches its component catalog without a host
-document, environment file, input, provider, or capability. A startup notice
+workflow or named mission and attaches its component catalog without an
+environment file, input, provider, or capability. When a project declares a
+host, project mode reads and validates that document only to obtain its non-secret installed
+limit ceilings; it does not resolve credentials or acquire providers. A startup notice
 states that this is a compile-and-inspect environment, not a runnable
 application environment.
 
@@ -655,12 +662,13 @@ mutually exclusive with `--private-terminal`:
 ```console
 ptc repl \
   --profile private-run-analysis-v2 \
+  --run RUN_ID \
   --resource traces=tmp/tutorial-traces \
   --resource inspection=tmp/tutorial-inspection \
   --session-trace-dir tmp/analysis-traces \
   --private-unattended \
   --format jsonl \
-  -e '(analysis/read "run-id" {"collection" "turns" "limit" 100})' \
+  -e '(analysis/read "RUN_ID" {"collection" "turns" "limit" 100})' \
   >tmp/private-analysis.jsonl
 ```
 

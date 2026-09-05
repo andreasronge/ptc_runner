@@ -99,7 +99,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert {:ok, step, session} =
              ReplSession.eval(
                session,
-               ~S|(workflow.event/annotate "agent-action" {:turn 0 :kind "tool-call"})|
+               ~S|(workflow.event/annotate "agent-action" {:turn 0 :max-turns 1 :kind "tool-call"})|
              )
 
     assert step.return[:status] == :ok or step.return["status"] == "ok"
@@ -152,7 +152,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     refute inspect(arguments) =~ "secret-evidence"
   end
 
-  test "manifest REPL source checks refuse nested busy with a --mission remedy" do
+  test "manifest REPL source checks run while the workflow continuation is yielded" do
     {:ok, component} = Library.component("kernel")
     {:ok, bundle} = Kernel.compile_bundle([component])
     {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle)
@@ -171,12 +171,144 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
 
     {:ok, session} = ReplSession.new(config: config)
 
-    assert {:error, %{fail: %{reason: :mission_session_required, message: message}}, _session} =
+    assert {:ok, %{return: check}, _session} =
              ReplSession.eval(session, ~S|(kernel/check-source "default" "(return 42)")|)
 
-    assert message =~ "--mission NAME"
-    assert message =~ "declared: default"
-    assert %{subordinate_source_checks: 0} = ReplSession.usage(session)
+    assert check.outcome == :valid
+    assert %{subordinate_source_checks: 1} = ReplSession.usage(session)
+  end
+
+  test "workflow nested-evaluation contention preserves its public reason" do
+    {:ok, holder} = Agent.start_link(fn -> nil end)
+    test_pid = self()
+
+    {:ok, reserve} =
+      Capability.new(
+        name: "reserve",
+        input_schema: @input_schema,
+        callback: fn _arguments ->
+          state = Agent.get(holder, & &1)
+          callback_pid = self()
+
+          owner =
+            spawn_link(fn ->
+              {:ok, _memory, _history, lease} =
+                RunState.reserve_evaluation(state, "default", :fail_fast)
+
+              send(callback_pid, {:reserved, self(), lease})
+
+              receive do
+                :release ->
+                  send(test_pid, {:released, self(), RunState.release_evaluation(state, lease)})
+              end
+            end)
+
+          receive do
+            {:reserved, ^owner, lease} ->
+              Agent.update(holder, fn _state -> {state, lease, owner} end)
+          end
+
+          {:ok, %{}}
+        end
+      )
+
+    {:ok, component} = Library.component("kernel")
+    {:ok, bundle} = Kernel.compile_bundle([component])
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [reserve])
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = Limits.defaults()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-nested-contention")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    {:ok, session} = ReplSession.new(config: config)
+    state = owned_run_state(session)
+    Agent.update(holder, fn _unset -> state end)
+
+    result =
+      ReplSession.eval(
+        session,
+        ~S|(do (tool/reserve {}) (tool/kernel-eval {:mission "default" :kind :source :source "(return 42)"}))|
+      )
+
+    assert {:error, %{fail: %{reason: :evaluation_in_progress}}, session} = result
+
+    assert ReplSession.open?(session)
+    {^state, _lease, owner} = Agent.get(holder, & &1)
+    send(owner, :release)
+    assert_receive {:released, ^owner, :ok}
+    assert {:ok, _events} = ReplSession.close(session)
+  end
+
+  test "a yielded workflow lease rejects stale revisions without corrupting continuation" do
+    {:ok, state} = RunState.start(Limits.defaults())
+    {:ok, _memory, _history, workflow_lease} = RunState.reserve_workflow_evaluation(state)
+    assert {:ok, revision} = RunState.yield_workflow_evaluation(state, workflow_lease)
+
+    {:ok, memory, history, newer_workflow_lease} = RunState.reserve_workflow_evaluation(state)
+    assert :ok = RunState.commit_evaluation(state, newer_workflow_lease, memory, history)
+    assert {:error, :stale} = RunState.resume_workflow_evaluation(state, revision)
+    assert :ok = RunState.stop(state)
+  end
+
+  test "a stale workflow resume returns a bounded error and closes its event lifecycle" do
+    holder = :ets.new(:stale_workflow_resume, [:set, :public])
+
+    {:ok, revise} =
+      Capability.new(
+        name: "revise",
+        input_schema: @input_schema,
+        callback: fn _arguments ->
+          [{:state, state}] = :ets.lookup(holder, :state)
+
+          :sys.replace_state(state.pid, fn owned ->
+            continuation = %{memory: %{}, history: [], revision: 1}
+            %{owned | continuations: Map.put(owned.continuations, "$workflow", continuation)}
+          end)
+
+          {:ok, %{}}
+        end
+      )
+
+    {:ok, workflow} = WorkflowEnvironment.new(capabilities: [revise])
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = Limits.defaults()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-stale-resume")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    {:ok, session} = ReplSession.new(config: config)
+    [{_id, {owner, token}}] = :ets.lookup(session.access, session.id)
+    {:ok, _owned_config, state} = ReplSessionOwner.resources(owner, token)
+    true = :ets.insert(holder, {:state, state})
+
+    assert {:error, %{fail: %{reason: :evaluation_in_progress}}, session} =
+             ReplSession.eval(session, "(tool/revise {})")
+
+    assert {:ok, events} = ReplSession.close(session)
+
+    assert Enum.map(events, & &1.type) == [
+             "run-started",
+             "evaluation-started",
+             "capability-started",
+             "capability-stopped",
+             "evaluation-stopped",
+             "run-stopped"
+           ]
   end
 
   test "direct evaluations persist definitions and bounded turn history" do
@@ -837,18 +969,72 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
       )
 
     {:ok, session} = ReplSession.new(config: config)
-    assert :ok = EventSink.emit(sink, "occupied", %{})
 
-    assert {:error, %{fail: %{reason: :event_sink_error}}, returned} =
+    assert {:error, %{fail: %{reason: :limit_exceeded, message: message}}, returned} =
              ReplSession.eval(session, "(def committed 42)")
+
+    assert message =~ "normal_event_count limit 3 was exceeded"
 
     assert %{attempts: 1, errors: 1} = returned
 
     assert %{defined_count: 1, history_count: 1} =
              ReplSession.evaluation_memory_summary(returned)
 
-    assert {:error, %{fail: %{reason: :session_closed}}, ^returned} =
+    assert {:error, %{fail: %{reason: :limit_exceeded, message: repeated}}, repeated_session} =
              ReplSession.eval(returned, "committed")
+
+    assert repeated == message
+    assert %{attempts: 2, errors: 2} = repeated_session
+  end
+
+  test "a private mission session reports a terminal event capture limit" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(normal_event_count: 3)
+    {:ok, sink} = EventSink.start(:private, limits, run_id: "mission-event-limit")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    mode = %{kind: :mission, name: "default", component_ids: [], direct_provider_aliases: []}
+    {:ok, session} = ReplSession.new(config: config, mode: mode)
+
+    assert {:error, %{fail: %{reason: :limit_exceeded, message: message}}, returned} =
+             ReplSession.eval(session, "42")
+
+    assert message =~ "normal_event_count limit 3 was exceeded"
+    refute ReplSession.open?(returned)
+  end
+
+  test "a failed private mission still reports the terminal event capture limit" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(normal_event_count: 3)
+    {:ok, sink} = EventSink.start(:private, limits, run_id: "failed-mission-event-limit")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    mode = %{kind: :mission, name: "default", component_ids: [], direct_provider_aliases: []}
+    {:ok, session} = ReplSession.new(config: config, mode: mode)
+
+    assert {:error, %{fail: %{reason: :limit_exceeded, message: message}}, returned} =
+             ReplSession.eval(session, "(fail :expected)")
+
+    assert message =~ "normal_event_count limit 3 was exceeded"
+    refute ReplSession.open?(returned)
   end
 
   test "explicit failure rolls back memory and turn history" do
@@ -1351,7 +1537,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     failed_pid = private_sink.pid
     failed_ref = Process.monitor(failed_pid)
 
-    for _index <- 1..3 do
+    for _index <- 1..2 do
       :ok = EventSink.emit(private_sink, "run-started", %{missions: %{}})
     end
 

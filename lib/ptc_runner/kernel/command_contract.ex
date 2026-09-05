@@ -116,6 +116,8 @@ defmodule PtcRunner.Kernel.CommandContract do
                                     |> Enum.map(& &1.code)
                                     |> Enum.map(&Atom.to_string/1)
   @doctor_notice "doctor --connect may perform one or more real provider requests and may incur provider cost"
+  @run_notice "set PTC_VIEWER_URL; it reports an externally started run to a Viewer Live tab"
+  @viewer_notice "for an externally started run, use the Viewer URL printed at startup as PTC_VIEWER_URL when it is loopback; otherwise use an address that reaches the Viewer"
   @init_notices [
     "DIRECTORY must not already exist",
     "init assembles the complete scaffold or selected example tree and publishes it atomically without replacing anything",
@@ -171,7 +173,8 @@ defmodule PtcRunner.Kernel.CommandContract do
             ),
             success_envelope("doctor", doctor_success_result()),
             success_envelope("models", models_result()),
-            success_envelope("materialize", materialize_result())
+            success_envelope("materialize", materialize_result()),
+            success_envelope("transcript", transcript_result())
           ],
       "$defs" => %{
         "unclassified_diagnostic" =>
@@ -242,9 +245,12 @@ defmodule PtcRunner.Kernel.CommandContract do
          "status" => "error",
          "error" => primary,
          "secondary_errors" => secondary,
-         "result" => result
+         "result" => result,
+         "warnings" => warnings
        }),
-       do: valid_doctor_failure_result?(result, primary, secondary)
+       do:
+         valid_doctor_failure_result?(result, primary, secondary) and
+           valid_doctor_failure_warnings?(result, primary, secondary, warnings)
 
   defp valid_envelope_semantics?(%{
          "command" => "doctor",
@@ -258,7 +264,17 @@ defmodule PtcRunner.Kernel.CommandContract do
   @doc false
   @spec valid_success_result?(atom(), term()) :: boolean()
   def valid_success_result?(command, result)
-      when command in [:help, :version, :docs, :init, :validate, :doctor, :models, :materialize] do
+      when command in [
+             :help,
+             :version,
+             :docs,
+             :init,
+             :validate,
+             :doctor,
+             :models,
+             :materialize,
+             :transcript
+           ] do
     with true <- JSONValue.value?(result),
          {:ok, root} <-
            compiled_jsv_root({__MODULE__, :success_root, command}, fn ->
@@ -280,7 +296,8 @@ defmodule PtcRunner.Kernel.CommandContract do
   Validates deterministic success-result constraints not fully expressible in JSON Schema.
 
   Callers that consume the generated schema must apply this predicate after
-  ordinary schema validation for `doctor`, `models`, and `materialize` results.
+  ordinary schema validation for `doctor`, `models`, `materialize`, and
+  `transcript` results.
   """
   @spec valid_success_semantics?(atom(), term()) :: boolean()
   def valid_success_semantics?(
@@ -311,27 +328,13 @@ defmodule PtcRunner.Kernel.CommandContract do
             provider_groups_start_with_local?(keys) and
             provider_groups_match_application?(keys, application_check)
 
-        common and
-          case readiness do
-            "unverified" ->
-              doctor_mode_consistent?(
-                :default,
-                application_check,
-                provider_checks,
-                provider_activity
-              )
-
-            "ready" ->
-              doctor_mode_consistent?(
-                :connect,
-                application_check,
-                provider_checks,
-                provider_activity
-              )
-
-            _other ->
-              false
-          end
+        common and readiness == doctor_readiness(provider_checks) and
+          doctor_readiness_consistent?(
+            readiness,
+            application_check,
+            provider_checks,
+            provider_activity
+          )
 
       _invalid ->
         false
@@ -357,11 +360,68 @@ defmodule PtcRunner.Kernel.CommandContract do
       when is_binary(directory),
       do: Path.type(directory) == :absolute
 
+  def valid_success_semantics?(:transcript, %{"path" => path}) when is_binary(path),
+    do: Path.type(path) == :absolute
+
   def valid_success_semantics?(command, _result)
       when command in [:help, :version, :docs, :init, :validate],
       do: true
 
   def valid_success_semantics?(_command, _result), do: false
+
+  @doc false
+  @spec doctor_readiness([map()]) :: String.t()
+  def doctor_readiness([]), do: "not_applicable"
+
+  def doctor_readiness(provider_checks) when is_list(provider_checks) do
+    if Enum.any?(provider_checks, &(&1["status"] == "skipped")),
+      do: "unverified",
+      else: "ready"
+  end
+
+  defp doctor_readiness_consistent?(
+         "not_applicable",
+         _application_check,
+         provider_checks,
+         false
+       ),
+       do: provider_checks == []
+
+  defp doctor_readiness_consistent?(
+         "unverified",
+         application_check,
+         provider_checks,
+         provider_activity
+       ),
+       do:
+         doctor_mode_consistent?(
+           :default,
+           application_check,
+           provider_checks,
+           provider_activity
+         )
+
+  defp doctor_readiness_consistent?(
+         "ready",
+         application_check,
+         provider_checks,
+         provider_activity
+       ),
+       do:
+         doctor_mode_consistent?(
+           :connect,
+           application_check,
+           provider_checks,
+           provider_activity
+         )
+
+  defp doctor_readiness_consistent?(
+         _readiness,
+         _application_check,
+         _provider_checks,
+         _provider_activity
+       ),
+       do: false
 
   @doc false
   @spec valid_doctor_failure_result?(term(), term(), term()) :: boolean()
@@ -489,6 +549,42 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp default_local_failure_checks_consistent?(_checks, _primary, _secondary), do: false
 
+  defp valid_doctor_failure_warnings?(_result, _primary, _secondary, []), do: true
+
+  defp valid_doctor_failure_warnings?(
+         %{
+           "checks" => [_runtime, _application, _viewer | provider_checks],
+           "model_aliases" => aliases
+         },
+         primary,
+         secondary,
+         warnings
+       )
+       when is_list(warnings) do
+    default_local_failure_checks_consistent?(provider_checks, primary, secondary) and
+      Enum.all?(warnings, fn
+        %{"code" => "model_uncataloged", "provider" => provider} = warning ->
+          CommandWarning.valid_map?(warning) and selected_live_llm_alias?(aliases, provider) and
+            Enum.any?(provider_checks, fn check ->
+              check["name"] == "provider/#{provider}/local" and check["status"] == "fail"
+            end)
+
+        _invalid ->
+          false
+      end)
+  end
+
+  defp valid_doctor_failure_warnings?(_result, _primary, _secondary, _warnings), do: false
+
+  @doc false
+  @spec selected_live_llm_alias?([map()], binary()) :: boolean()
+  def selected_live_llm_alias?(aliases, name) do
+    Enum.any?(aliases, fn alias_row ->
+      alias_row["alias"] == name and alias_row["source"] == "llm" and
+        alias_row["selected"] == true
+    end)
+  end
+
   defp connect_failure_checks_consistent?(checks, primary) do
     with {:ok, expected_name, expected_code} <- failure_row_identity(primary),
          [failed] <- Enum.filter(checks, &(&1["status"] == "fail")),
@@ -499,7 +595,8 @@ defmodule PtcRunner.Kernel.CommandContract do
              "code" => expected_code
            } do
       Enum.all?(checks, fn check ->
-        check == failed or indeterminate_provider_check?(check) or static_connect_check?(check)
+        check == failed or indeterminate_provider_check?(check) or static_connect_check?(check) or
+          failure_evidence_check?(check, failed)
       end)
     else
       _invalid -> false
@@ -575,6 +672,19 @@ defmodule PtcRunner.Kernel.CommandContract do
        do: String.ends_with?(name, "/selection")
 
   defp static_connect_check?(_check), do: false
+
+  defp failure_evidence_check?(
+         %{"name" => connectivity, "status" => "pass", "code" => "available"},
+         %{
+           "name" => credentials,
+           "status" => "fail",
+           "code" => "authentication_rejected"
+         }
+       ) do
+    String.replace_suffix(credentials, "/credentials", "/connectivity") == connectivity
+  end
+
+  defp failure_evidence_check?(_check, _failed), do: false
 
   defp diagnostic_activity(diagnostics) do
     if Enum.all?(diagnostics, &is_boolean(&1["provider_activity"])),
@@ -859,6 +969,8 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp help_notices(:doctor), do: [@doctor_notice]
   defp help_notices(:init), do: @init_notices
+  defp help_notices(:run), do: [@run_notice]
+  defp help_notices(:viewer), do: [@viewer_notice]
   defp help_notices(_topic), do: []
 
   @spec version_result() :: map()
@@ -909,6 +1021,7 @@ defmodule PtcRunner.Kernel.CommandContract do
     closed(
       ~w(schema_version command status run_ref error secondary_errors warnings result),
       base_properties(["doctor"], "error")
+      |> Map.put("warnings", warning_schema())
       |> Map.merge(%{
         "error" => primary_diagnostic,
         "secondary_errors" => %{
@@ -1035,7 +1148,8 @@ defmodule PtcRunner.Kernel.CommandContract do
               :models,
               :doctor,
               {:doctor, :connect},
-              :run_unclassified
+              :run_unclassified,
+              :materialize
             ] and
               code in @host_codes,
        do: true
@@ -1390,6 +1504,18 @@ defmodule PtcRunner.Kernel.CommandContract do
        do: RuntimeLimitDiagnostic.run_duration_message_schema(row.message)
 
   defp diagnostic_message_schema(
+         %{phase: :execution, code: :event_capture_limit_exceeded} = row,
+         %{"type" => "null"}
+       ),
+       do: RuntimeLimitDiagnostic.event_capture_message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :event_capture_limit_exceeded} = row,
+         _source
+       ),
+       do: %{"const" => row.message}
+
+  defp diagnostic_message_schema(
          %{phase: :result_cleanup, code: :result_contract_failed} = row,
          %{"properties" => %{"kind" => %{"const" => "result_contract"}}}
        ),
@@ -1480,6 +1606,12 @@ defmodule PtcRunner.Kernel.CommandContract do
          %{"type" => "null"}
        ),
        do: CandidateRefusedDiagnostic.message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :local_preflight, code: :model_contract_unsupported} = row,
+         %{"type" => "null"}
+       ),
+       do: DiagnosticCatalog.message_schema(row)
 
   defp diagnostic_message_schema(row, %{"type" => "null"}), do: %{"const" => row.message}
   defp diagnostic_message_schema(row, _source_schema), do: DiagnosticCatalog.message_schema(row)
@@ -2065,7 +2197,7 @@ defmodule PtcRunner.Kernel.CommandContract do
       "provider_activity" => %{"type" => "boolean"},
       "readiness" =>
         if(mode == :success,
-          do: %{"enum" => ~w(unverified ready)},
+          do: %{"enum" => ~w(not_applicable unverified ready)},
           else: %{"const" => "failed"}
         )
     })
@@ -2135,7 +2267,10 @@ defmodule PtcRunner.Kernel.CommandContract do
         "selection" ->
           [{"pass", "declarative"}, {"skipped", "active_check_required"}]
 
-        operation when operation in ["credentials", "authorization", "connectivity"] ->
+        "connectivity" ->
+          [{"pass", "available"}, {"skipped", "requires_connect"}]
+
+        operation when operation in ["credentials", "authorization"] ->
           [{"skipped", "requires_connect"}]
       end
 
@@ -2211,6 +2346,15 @@ defmodule PtcRunner.Kernel.CommandContract do
     }
   end
 
+  defp transcript_result do
+    closed(~w(command run_ref path turns), %{
+      "command" => %{"const" => "transcript"},
+      "run_ref" => %{"pattern" => @run_ref, "type" => "string"},
+      "path" => %{"type" => "string", "minLength" => 1, "maxLength" => 4096},
+      "turns" => nonnegative_integer()
+    })
+  end
+
   # `ModelSelectorDisclosure` withholds endpoint-bearing selectors; the closed
   # envelope refuses one rather than trusting every producer to remember.
   defp model_selector_schema do
@@ -2229,6 +2373,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   defp success_result_schema(:doctor), do: doctor_success_result()
   defp success_result_schema(:models), do: models_result()
   defp success_result_schema(:materialize), do: materialize_result()
+  defp success_result_schema(:transcript), do: transcript_result()
 
   defp nullable_ref(name),
     do: %{"oneOf" => [%{"type" => "null"}, ref(name)]}

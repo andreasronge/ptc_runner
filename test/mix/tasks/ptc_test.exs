@@ -3,6 +3,14 @@ defmodule Mix.Tasks.PtcTest do
 
   import ExUnit.CaptureIO
 
+  import PtcRunner.TestSupport.CommandEngineFixtures,
+    only: [
+      uncataloged_cost_host: 1,
+      valid_manifest: 1,
+      write_application: 4,
+      write_host_config: 3
+    ]
+
   alias Mix.Tasks.Ptc
   alias PtcRunner.Kernel.CommandEntry
   alias PtcRunner.Kernel.CommandFrontend
@@ -11,6 +19,85 @@ defmodule Mix.Tasks.PtcTest do
   alias PtcRunner.MixCommandAdapter
   alias PtcRunner.MixCommandRuntime
   alias PtcRunner.StandaloneCommandRuntime
+
+  @tag :tmp_dir
+  test "Mix doctor writes the pricing warning without dropping its failed report", %{tmp_dir: dir} do
+    model = "openrouter:future-vendor/mix-pricing-test"
+    host_path = write_host_config(dir, "mix-pricing", uncataloged_cost_host(model))
+
+    manifest =
+      valid_manifest(%{
+        "providers" => %{
+          "workflow" => [%{"name" => "model", "config" => %{}}],
+          "mission" => []
+        }
+      })
+
+    application = write_application(dir, "mix-pricing", manifest, %{})
+    args = ["doctor", application, "--host-config", host_path, "--connect"]
+    presentation = MixCommandAdapter.execute(args)
+
+    assert presentation.exit_status == 4
+    assert presentation.stderr =~ "warning: model_uncataloged"
+
+    stdout =
+      capture_io(fn ->
+        stderr =
+          capture_io(:stderr, fn ->
+            assert catch_exit(MixCommandAdapter.run_task(args)) == {:shutdown, 4}
+          end)
+
+        send(self(), {:captured_stderr, stderr})
+      end)
+
+    assert_receive {:captured_stderr, stderr}
+    assert Jason.decode!(stdout)["readiness"] == "failed"
+    assert stderr =~ "warning: model_uncataloged"
+    assert stderr =~ model
+  end
+
+  @tag :tmp_dir
+  test "manifest REPL keeps a long uncataloged warning separate from its setup error", %{
+    tmp_dir: dir
+  } do
+    model = "openrouter:future-vendor/" <> String.duplicate("m", 220)
+    host_path = write_host_config(dir, "repl-pricing", uncataloged_cost_host(model))
+
+    manifest =
+      valid_manifest(%{
+        "providers" => %{
+          "workflow" => [%{"name" => "model", "config" => %{}}],
+          "mission" => []
+        }
+      })
+
+    application = write_application(dir, "repl-pricing", manifest, %{})
+
+    stderr =
+      capture_io(:stderr, fn ->
+        error =
+          assert_raise Mix.Error, fn ->
+            MixCommandAdapter.run_task([
+              "repl",
+              "--manifest",
+              application,
+              "--host-config",
+              host_path,
+              "-e",
+              "true"
+            ])
+          end
+
+        send(self(), {:repl_error, error.message})
+      end)
+
+    assert_receive {:repl_error, error}
+    [warning] = String.split(stderr, "\n", trim: true)
+    assert String.starts_with?(warning, "warning: model_uncataloged:")
+    assert warning =~ model
+    assert String.starts_with?(error, "error: repl/command_failed: local_preflight/")
+    refute error =~ "warning: model_uncataloged"
+  end
 
   @root Path.expand("../../..", __DIR__)
 

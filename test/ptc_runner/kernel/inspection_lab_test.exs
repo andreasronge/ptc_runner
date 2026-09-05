@@ -1,7 +1,7 @@
 fixture =
-  Path.expand("../../../examples/kernel-inspection-lab/support/mcp_fixture.exs", __DIR__)
+  Path.expand("../../../scripts/labs/inspection-lab/support/mcp_fixture.exs", __DIR__)
 
-lab = Path.expand("../../../examples/kernel-inspection-lab/support/lab.exs", __DIR__)
+lab = Path.expand("../../../scripts/labs/inspection-lab/support/lab.exs", __DIR__)
 Code.require_file(fixture)
 Code.require_file(lab)
 
@@ -166,7 +166,7 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
         )
 
       assert rendered =~ "Private analysis"
-      assert rendered =~ "Model conversation"
+      assert rendered =~ "Model sessions &amp; programs"
       assert rendered =~ "Turn 1"
       assert rendered =~ "Canonical Kernel trace"
       assert rendered =~ "Mission inventory"

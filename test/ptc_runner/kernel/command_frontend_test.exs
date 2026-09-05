@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.DiagnosticCatalog
+  alias PtcRunner.Kernel.ExampleLibrary
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.ValueContractDiagnostic
   import PtcRunner.TestSupport.CommandEngineFixtures, only: [validate_success_result: 0]
@@ -42,6 +43,15 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
     refute_received :unexpected_bootstrap
   end
 
+  test "init help lists every embedded example for both frontends" do
+    for frontend <- [:standalone, :mix] do
+      help = CommandContract.help_result(:init, frontend)
+      description = get_in(help, ["options", Access.at(0), "description"])
+
+      assert description =~ "examples: " <> Enum.join(ExampleLibrary.names(), ", ")
+    end
+  end
+
   test "repl structural rejections occur before bootstrap without echoing values" do
     parent = self()
 
@@ -65,6 +75,59 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
     refute presentation.stderr =~ "caller-value"
     refute_received :unexpected_bootstrap
     refute_received :unexpected_repl
+  end
+
+  test "repl publication and jsonl mode rejections name the violated argument rule" do
+    for {profile, authorization, output_switch} <- [
+          {"run-analysis-v1", [], "--output"},
+          {"private-run-analysis-v2", ["--private-unattended"], "--private-output"}
+        ] do
+      publication =
+        [
+          "repl",
+          "--profile",
+          profile,
+          "--resource",
+          "traces=traces"
+        ] ++ authorization ++ [output_switch, "answer.json", "-e", "1", "-e", "2"]
+
+      assert {:error, entry} = CommandEntry.open_with_ref(publication, :standalone, @run_ref)
+      assert entry.rejection.kind == :repl_output_evaluation_count
+
+      assert CommandRenderer.rejection(@run_ref, entry.rejection) =~
+               "#{output_switch} publishes exactly one -e/--eval evaluation"
+    end
+
+    assert {:error, entry} =
+             CommandEntry.open_with_ref(
+               ["repl", "--format", "jsonl", "-e", "1"],
+               :standalone,
+               @run_ref
+             )
+
+    assert entry.rejection.kind == :repl_jsonl_requires_profile
+
+    assert CommandRenderer.rejection(@run_ref, entry.rejection) =~
+             "--format jsonl requires --profile"
+
+    for companion <- [["--load", "setup.clj"], ["--continue-on-error"]] do
+      argv =
+        [
+          "repl",
+          "--profile",
+          "run-analysis-v1",
+          "--resource",
+          "traces=traces",
+          "--output",
+          "answer.json",
+          "-e",
+          "1"
+        ] ++ companion
+
+      assert {:error, entry} = CommandEntry.open_with_ref(argv, :standalone, @run_ref)
+      assert entry.rejection.kind == :generic
+      refute CommandRenderer.rejection(@run_ref, entry.rejection) =~ "exactly one"
+    end
   end
 
   test "missing switch values and fixed positional arity render declaration-owned guidance" do
@@ -1057,6 +1120,13 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
               "error: active_preflight/credential_unavailable: " <>
                 "provider/deepseek/credentials: a required provider credential is unavailable " <>
                 "(run_ref: #{@run_ref}); export it, pass --env-file PATH, or use a host file credential\n"}
+
+    assert CommandRenderer.render(credential_outcome, nil, named_env_file: true) ==
+             {:stderr,
+              "error: active_preflight/credential_unavailable: " <>
+                "provider/deepseek/credentials: a required provider credential is unavailable " <>
+                "(run_ref: #{@run_ref}); export it, pass --env-file PATH, or use a host file credential; " <>
+                "assignments in a named environment file override process values, including empty assignments\n"}
 
     assert CommandDiagnosticRenderer.render(credential_outcome.envelope["error"]) ==
              {:error, :invalid_command_diagnostic}

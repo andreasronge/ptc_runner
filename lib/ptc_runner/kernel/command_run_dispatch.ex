@@ -12,11 +12,18 @@ defmodule PtcRunner.Kernel.CommandRunDispatch do
   alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.LiveStatus
+  alias PtcRunner.LiveStatus.Target
 
   @spec dispatch(CommandPreparation.t(), CommandRuntime.t()) ::
           {:ok, CommandOutcome.t()} | {:error, CommandOutcome.t()}
   def dispatch(%CommandPreparation{} = preparation, %CommandRuntime{} = runtime) do
-    case dispatch_after_preflight(CommandDestination.preflight(preparation), preparation, runtime) do
+    case dispatch_after_preflight(
+           CommandDestination.preflight(preparation),
+           preparation,
+           runtime,
+           nil
+         ) do
       {status, outcome, _rejection} -> {status, outcome}
     end
   end
@@ -25,43 +32,52 @@ defmodule PtcRunner.Kernel.CommandRunDispatch do
   @spec dispatch_frontend(
           CommandPreparation.t(),
           CommandRuntime.t(),
-          :standalone | :mix
+          :standalone | :mix,
+          binary()
         ) ::
           {:ok, CommandOutcome.t(), nil}
           | {:error, CommandOutcome.t(), PtcRunner.Kernel.CommandRejection.t() | nil}
   def dispatch_frontend(
         %CommandPreparation{} = preparation,
         %CommandRuntime{} = runtime,
-        frontend
+        frontend,
+        external_label
       )
-      when frontend in [:standalone, :mix] do
+      when frontend in [:standalone, :mix] and is_binary(external_label) do
     preparation
     |> CommandDestination.preflight_frontend(frontend)
-    |> dispatch_after_preflight(preparation, runtime)
+    |> dispatch_after_preflight(preparation, runtime, external_label)
   end
 
-  defp dispatch_after_preflight({:ok, authority}, preparation, runtime),
-    do: with_rejection(execute_preflighted(preparation, runtime, authority))
+  defp dispatch_after_preflight({:ok, authority}, preparation, runtime, external_label),
+    do: with_rejection(execute_preflighted(preparation, runtime, authority, external_label))
 
-  defp dispatch_after_preflight({:ok, authority, nil}, preparation, runtime),
-    do: with_rejection(execute_preflighted(preparation, runtime, authority))
+  defp dispatch_after_preflight({:ok, authority, nil}, preparation, runtime, external_label),
+    do: with_rejection(execute_preflighted(preparation, runtime, authority, external_label))
 
-  defp dispatch_after_preflight({:error, %CommandOutcome{} = outcome}, _preparation, _runtime),
-    do: {:error, outcome, nil}
+  defp dispatch_after_preflight(
+         {:error, %CommandOutcome{} = outcome},
+         _preparation,
+         _runtime,
+         _label
+       ),
+       do: {:error, outcome, nil}
 
   defp dispatch_after_preflight(
          {:error, %CommandOutcome{} = outcome, rejection},
          _preparation,
-         _runtime
+         _runtime,
+         _label
        ),
        do: {:error, outcome, rejection}
 
   defp with_rejection({status, %CommandOutcome{} = outcome}) when status in [:ok, :error],
     do: {status, outcome, nil}
 
-  defp execute_preflighted(preparation, runtime, authority) do
+  defp execute_preflighted(preparation, runtime, authority, external_label) do
     with :ok <- maybe_setup_environment(preparation, runtime),
          {:ok, execution} <- provider_execution(preparation, runtime) do
+      runtime = attach_external_live_status(runtime, external_label)
       execute_started(preparation, runtime, authority, execution)
     else
       {:error, reason} ->
@@ -94,6 +110,33 @@ defmodule PtcRunner.Kernel.CommandRunDispatch do
   after
     PublicationAuthority.close(authority)
     CommandPreparation.close(preparation)
+  end
+
+  defp attach_external_live_status(%{live_status: nil} = runtime, label) when is_binary(label) do
+    case LiveStatus.external_target(label) do
+      nil -> runtime
+      target -> elem(CommandRuntime.with_live_status(runtime, target), 1)
+    end
+  end
+
+  defp attach_external_live_status(%{live_status: local} = runtime, label)
+       when is_binary(label) do
+    if Target.append_external?(local),
+      do: append_external_live_status(runtime, local, label),
+      else: runtime
+  end
+
+  defp attach_external_live_status(runtime, _label), do: runtime
+
+  defp append_external_live_status(runtime, local, label) do
+    case LiveStatus.external_target(label) do
+      nil ->
+        runtime
+
+      external ->
+        {:ok, target} = Target.compose([local, external])
+        elem(CommandRuntime.with_live_status(runtime, target), 1)
+    end
   end
 
   defp execute_started(preparation, runtime, authority, execution) do

@@ -5,10 +5,11 @@ defmodule PtcRunner.Lisp.ValuePreview do
   Unlike `PtcRunner.Lisp.Format`, this module is deliberately bounded. Its
   default pass samples collections and preserves sibling shape while enforcing
   depth, node, string, character, and UTF-8 byte ceilings. When the shape pass
-  reports only the string cap and no explicit string ceiling was supplied, one
-  bounded greedy pass may replace the preview with an exact rendering if every
-  part fits all remaining ceilings. Otherwise the original shape-preserving
-  preview wins.
+  reports truncation from implicit ceilings, one bounded greedy pass may lift
+  node and string ceilings to the output budget and item and depth ceilings to
+  larger internal traversal bounds. It replaces the preview with an exact
+  rendering only if every part fits those bounds. Otherwise the original
+  shape-preserving preview wins.
 
   Neither pass recursively sanitizes a complete value or materializes a
   complete collection before applying the traversal ceilings.
@@ -43,6 +44,8 @@ defmodule PtcRunner.Lisp.ValuePreview do
   @default_max_depth 4
   @default_max_nodes 256
   @default_max_string_chars 256
+  @max_complete_items 256
+  @max_complete_depth 256
   @sampled_key_limit 24
   @sort_key_chars 64
   @large_integer Integer.pow(10, 100)
@@ -179,12 +182,14 @@ defmodule PtcRunner.Lisp.ValuePreview do
   end
 
   defp maybe_render_complete(shape, value, opts, shape_policy, sampled_keys) do
-    if shape.caps_hit == [:string] and not Keyword.has_key?(opts, :max_string_chars) do
-      complete_policy = %{
+    if shape.truncated? and retryable_caps?(shape.caps_hit, opts) do
+      complete_policy =
         shape_policy
-        | allocation_mode: :complete,
-          max_string_chars: shape_policy.max_chars
-      }
+        |> Map.put(:allocation_mode, :complete)
+        |> lift_implicit_cap(opts, :max_items)
+        |> lift_implicit_cap(opts, :max_depth)
+        |> lift_implicit_cap(opts, :max_nodes)
+        |> lift_implicit_cap(opts, :max_string_chars)
 
       case render_once(value, complete_policy, sampled_keys) do
         %Result{truncated?: false, caps_hit: []} = complete -> complete
@@ -196,6 +201,26 @@ defmodule PtcRunner.Lisp.ValuePreview do
   rescue
     _error -> shape
   end
+
+  defp lift_implicit_cap(policy, opts, cap) do
+    if Keyword.has_key?(opts, cap),
+      do: policy,
+      else: Map.put(policy, cap, implicit_complete_cap(cap, policy.max_chars))
+  end
+
+  defp retryable_caps?(caps, opts) do
+    Enum.all?(caps, fn
+      :items -> not Keyword.has_key?(opts, :max_items)
+      :depth -> not Keyword.has_key?(opts, :max_depth)
+      :nodes -> not Keyword.has_key?(opts, :max_nodes)
+      :string -> not Keyword.has_key?(opts, :max_string_chars)
+      :output -> true
+    end)
+  end
+
+  defp implicit_complete_cap(:max_items, max_chars), do: min(max_chars, @max_complete_items)
+  defp implicit_complete_cap(:max_depth, max_chars), do: min(max_chars, @max_complete_depth)
+  defp implicit_complete_cap(_cap, max_chars), do: max_chars
 
   defp unavailable do
     %Result{
@@ -727,7 +752,7 @@ defmodule PtcRunner.Lisp.ValuePreview do
       end
 
     {key_text, key_truncated?, key_caps, nodes} =
-      render_key(key, key_budget_chars, key_budget_bytes, nodes, policy)
+      render_key(key, depth + 1, key_budget_chars, key_budget_bytes, nodes, policy)
 
     separator = " "
     remaining_chars = max(chars - String.length(key_text) - 1, 0)
@@ -746,17 +771,17 @@ defmodule PtcRunner.Lisp.ValuePreview do
     }
   end
 
-  defp render_key(key, chars, bytes, nodes, policy) when is_binary(key),
+  defp render_key(key, _depth, chars, bytes, nodes, policy) when is_binary(key),
     do: render_string(key, chars, bytes, nodes, policy)
 
-  defp render_key(%LispKeyword{} = key, chars, bytes, nodes, policy),
+  defp render_key(%LispKeyword{} = key, _depth, chars, bytes, nodes, policy),
     do: render_keyword(key, chars, bytes, nodes, policy)
 
-  defp render_key(key, chars, bytes, nodes, _policy) when is_atom(key),
+  defp render_key(key, _depth, chars, bytes, nodes, _policy) when is_atom(key),
     do: leaf(":" <> Atom.to_string(key), chars, bytes, nodes)
 
-  defp render_key(key, chars, bytes, nodes, policy),
-    do: render_value(key, 0, chars, bytes, nodes, policy)
+  defp render_key(key, depth, chars, bytes, nodes, policy),
+    do: render_value(key, depth, chars, bytes, nodes, policy)
 
   defp render_sequence(open, close, items, more?, cap, render_context) do
     %{depth: depth, chars: chars, bytes: bytes, nodes: nodes, policy: policy} = render_context
@@ -814,6 +839,7 @@ defmodule PtcRunner.Lisp.ValuePreview do
             caps: []
           })
 
+        parts = Enum.reverse(parts)
         needs_marker? = sequence.more? or stopped?
         marker = if(parts == [], do: "...", else: " ...")
 
@@ -869,7 +895,7 @@ defmodule PtcRunner.Lisp.ValuePreview do
         state
         | nodes: next_nodes,
           remaining_count: state.remaining_count - 1,
-          parts: state.parts ++ [next],
+          parts: [next | state.parts],
           used_chars: state.used_chars + String.length(next),
           used_bytes: state.used_bytes + byte_size(next),
           truncated?: state.truncated? or child_truncated?,

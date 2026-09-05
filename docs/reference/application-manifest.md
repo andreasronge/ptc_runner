@@ -122,6 +122,14 @@ one or more providers remain unresolved until those providers are acquired.
 `"default"` is an ordinary declared name, not an implicit fallback.
 Definitions and `*1`/`*2`/`*3` history never cross between missions.
 
+A mission boundary is a capability boundary, not a data boundary. A mission's
+grant limits the code, data, and providers available inside that mission, but
+does not prevent that data from reaching a later mission when trusted workflow
+code includes it in the handoff. If a later mission must not receive some
+content, filter it deterministically in workflow code before the handoff.
+Prompt instructions or wrappers that mark content as untrusted may help a model
+treat it as data, but they do not enforce the grant.
+
 Workflow code selects the mission explicitly with the `kernel/eval*`,
 `kernel/check-source`, or mission-introspection functions. The shipped
 `agent.core` loop uses `"default"` only when its own mission option is omitted,
@@ -159,6 +167,11 @@ escapes unusual contract-authored property names rather than emitting their
 control bytes. Missing-required failures name the first missing schema-declared
 property, including when the absent property is at the contract root.
 
+Result and phase-return schemas validate structure and declared value
+constraints. They do not sanitize data or determine its sensitivity. For
+example, an array `maxItems` bound can limit the number of entries but cannot
+stop a model from choosing a secret-bearing entry over a safe one.
+
 Terminal agent helpers also give a model-authored candidate one ordinary
 correction turn when budget remains. `agent.core/run` validates the exact
 final value it returns — the standard success envelope by default, or the
@@ -184,9 +197,14 @@ rejected during inert acquisition as
 
 Contracts are closed object schemas by default. The profile supports common
 object, array, scalar, enum, const, and bound keywords, plus the asserted
-`sha256` string format. It also supports one root discriminated `oneOf` for
-closed object branches. References, regexes, nested composition, union types,
-and general-purpose `oneOf` are rejected.
+`sha256` string format. `type` is either one of `"null"`, `"boolean"`,
+`"object"`, `"array"`, `"number"`, `"integer"`, and `"string"`, or—at a
+non-root node—an exactly two-member nullable array pairing `"null"` with one
+of the other types, in either order. Nullable object and array nodes use their
+non-null member for keyword applicability. The root remains a non-nullable
+object. The profile also supports one root discriminated `oneOf` for closed
+object branches. References, regexes, nested composition, general type unions
+(such as `["string", "number"]`), and general-purpose `oneOf` are rejected.
 
 Two edges are worth knowing before you write one. `enum` and `const` must carry
 a sibling `type`, so `{"enum": ["a", "b"]}` is rejected and
@@ -198,11 +216,13 @@ The supported keyword profile above is deliberately closed. Unsupported schema
 composition is rejected during inert application loading rather than being
 partially interpreted at runtime. A `contract_invalid` rejection names the rule
 it broke and the JSON Pointer of the offending node inside the schema document
-— for example `contract schema declares an unsupported "type" at
-/properties/sum/type in result.schema.json` — so a misspelled type, a keyword
-outside the profile, and an unsatisfiable bound are told apart without
-bisecting the schema. Every reported segment is a key or index the submitted
-document carries, and the same pointer appears in the envelope's `path`.
+— for example `contract schema "type" must be "null", "boolean", "object",
+"array", "number", "integer", or "string", or a two-member array pairing
+"null" with one non-null type at /properties/sum/type in result.schema.json` —
+so a misspelled type, a keyword outside the profile, and an unsatisfiable bound
+are told apart without bisecting the schema. Every reported segment is a key or
+index the submitted document carries, and the same pointer appears in the
+envelope's `path`.
 
 `--output PATH` atomically publishes only the validated result value without
 replacing an existing file. Use `--private-output` for a private run; it
@@ -328,11 +348,18 @@ Optional labels support trace grouping:
 ```
 
 Labels do not affect execution, authority, prompts, results, or provider
-selection. `name`, `model`, and `provider` are fingerprinted in traces; tag
-keys and values come from a small fixed vocabulary. Labels are application
-claims, not authoritative provider identity. Use the provider snapshot and
-canonical usage for accounting, and never put prompts, results, credentials,
-paths, or arbitrary user text in labels.
+selection. `name`, `model`, and `provider` are fingerprinted in traces.
+`labels.tags` is closed to these keys and values:
+
+- `environment`: `development`, `test`, `staging`, or `production`
+- `mode`: `agent`, `deterministic`, `direct`, `wrapper`, or `repl`
+- `stage`: `started`, `planning`, `executing`, `validating`, `completed`, or
+  `failed`
+- `suite`: `unit`, `integration`, `e2e`, `conformance`, or `privacy`
+
+Labels are application claims, not authoritative provider identity. Use the
+provider snapshot and canonical usage for accounting, and never put prompts,
+results, credentials, paths, or arbitrary user text in labels.
 
 ## Next steps
 

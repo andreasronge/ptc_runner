@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
+  alias PtcRunner.Kernel.ModelContractPricingCause
 
   @occurrence %{provider: "selected", destination: :workflow, index: 3}
 
@@ -239,6 +240,19 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
       diagnostic = AcquisitionReason.diagnostic(:mcp_transport_error, bad)
       assert diagnostic.phase == :internal
       assert diagnostic.code == :internal_error
+
+      pricing = ModelContractPricingCause.new(PtcRunner.TestSupport.HostLLMAdapter, "model")
+      diagnostic = AcquisitionReason.diagnostic(pricing, bad)
+      assert diagnostic.phase == :internal
+      assert diagnostic.code == :internal_error
     end
+  end
+
+  test "a pricing cause with added fields fails closed" do
+    cause = ModelContractPricingCause.new(PtcRunner.TestSupport.HostLLMAdapter, "model")
+    forged = Map.put(cause, :private_payload, "must not cross the callback boundary")
+
+    refute ModelContractPricingCause.valid?(forged)
+    assert AcquisitionReason.diagnostic(forged, @occurrence).code == :internal_error
   end
 end

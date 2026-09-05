@@ -205,7 +205,11 @@ defmodule PtcRunner.Kernel.Capability do
     end)
   end
 
-  defp callable_children?(%{"type" => "object"} = schema) do
+  defp callable_children?(schema) do
+    callable_children_by_type(JSONSchema.node_type(schema), schema)
+  end
+
+  defp callable_children_by_type({:ok, "object", _nullable?}, schema) do
     schema
     |> Map.get("properties", %{})
     |> Enum.all?(fn {name, child} ->
@@ -213,10 +217,10 @@ defmodule PtcRunner.Kernel.Capability do
     end)
   end
 
-  defp callable_children?(%{"type" => "array", "items" => items}),
+  defp callable_children_by_type({:ok, "array", _nullable?}, %{"items" => items}),
     do: callable_input_schema?(items)
 
-  defp callable_children?(_schema), do: true
+  defp callable_children_by_type(_type, _schema), do: true
 
   defp callable_argument_value?(value) when is_map(value) and not is_struct(value) do
     Enum.all?(value, fn {key, child} ->

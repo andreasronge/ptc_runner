@@ -39,10 +39,17 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
   # A failure is reported authoritatively through the closed diagnostic catalog.
   # The doctor command may additionally project an attributable diagnostic into
   # its corresponding failed check row; subjectless operation timeouts remain
-  # diagnostic-only. Only the reason the shipped probe can produce is translated:
+  # diagnostic-only. Only reasons the shipped probe can produce are translated:
   #
   #   * `:active_preflight` / `:connectivity_unavailable` —
-  #     `llm_connectivity_unavailable`
+  #     `llm_connectivity_unavailable` or a normalized non-authentication LLM
+  #     provider failure
+  #   * `:local_preflight` / `:model_contract_unsupported` — the sealed
+  #     `ModelContractPricingCause` produced only from the adapter's exact,
+  #     payload-free uncataloged-pricing sentinel.
+  #   * `:active_preflight` / `:authentication_rejected` — a normalized LLM
+  #     `authentication_failed` or `denied` response. The endpoint answered, so
+  #     the diagnostic names credentials and proves connectivity.
   #
   # An exhausted budget reports `:active_preflight` / `:connectivity_timeout`
   # and carries no subject, because that budget belongs to the operation: it can
@@ -68,16 +75,20 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
   # probed occurrence, in the order the occurrences were probed, and a callback
   # answering a bare `:ok` produces an entry whose usage is absent.
 
+  alias PtcRunner.Kernel.AcquisitionReason
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.LLMUsage
+  alias PtcRunner.Kernel.ModelContractPricingCause
   alias PtcRunner.Kernel.PreparedRun
+  alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderRuntimeServices
 
   @unavailable_reasons [:llm_connectivity_unavailable]
+  @llm_authentication_kinds [:authentication_failed, :denied]
 
   @type usage_entry :: %{
           name: binary(),
@@ -201,10 +212,18 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
     with {:ok, callback} <- callback(catalog, occurrence.name, provider_activity),
          {:ok, timeout_ms} <- remaining(deadline, provider_activity) do
       case invoke(callback, occurrence.config, context, services, timeout_ms, limits) do
-        :ok -> settled(deadline, nil)
-        {:ok, payload} -> settled_with_usage(deadline, payload)
-        :timed_out -> {:error, timeout_diagnostic(true)}
-        {:error, reason} -> {:error, diagnostic(reason, occurrence)}
+        :ok ->
+          settled(deadline, nil)
+
+        {:ok, payload} ->
+          settled_with_usage(deadline, payload)
+
+        :timed_out ->
+          {:error, timeout_diagnostic(true)}
+
+        {:error, reason} ->
+          descriptor = Map.get(catalog.descriptors, occurrence.name)
+          {:error, diagnostic(reason, occurrence, descriptor)}
       end
     end
   end
@@ -261,10 +280,52 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
         cancel_with_caller: true
       )
 
-    BoundedWorker.classify_payload_callback(result)
+    case result do
+      {:ok, {:error, %ProviderError{} = error}} ->
+        if ProviderError.valid?(error), do: {:error, error}, else: {:error, :internal}
+
+      other ->
+        BoundedWorker.classify_payload_callback(other)
+    end
   end
 
-  defp diagnostic(reason, occurrence) when reason in @unavailable_reasons do
+  defp diagnostic(%ModelContractPricingCause{} = reason, occurrence, _descriptor),
+    do:
+      AcquisitionReason.diagnostic(reason, %{
+        provider: occurrence.name,
+        destination: occurrence.destination,
+        index: occurrence.index
+      })
+
+  defp diagnostic(reason, occurrence, _descriptor) when reason in @unavailable_reasons do
+    connectivity_diagnostic(occurrence)
+  end
+
+  defp diagnostic(
+         %ProviderError{kind: kind, dispatch_provenance: :dispatched},
+         occurrence,
+         %{source: :llm}
+       )
+       when kind in @llm_authentication_kinds do
+    case CommandSubject.provider(occurrence.name, :credentials) do
+      {:ok, subject} ->
+        CommandDiagnostic.new!(:active_preflight, :authentication_rejected,
+          subject: subject,
+          provider_activity: true
+        )
+
+      {:error, _reason} ->
+        internal_diagnostic(true)
+    end
+  end
+
+  defp diagnostic(%ProviderError{}, occurrence, _descriptor) do
+    connectivity_diagnostic(occurrence)
+  end
+
+  defp diagnostic(_reason, _occurrence, _descriptor), do: internal_diagnostic(true)
+
+  defp connectivity_diagnostic(occurrence) do
     site = %{destination: occurrence.destination, index: occurrence.index}
 
     case CommandSubject.provider(occurrence.name, :connectivity, site) do
@@ -278,8 +339,6 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
         internal_diagnostic(true)
     end
   end
-
-  defp diagnostic(_reason, _occurrence), do: internal_diagnostic(true)
 
   defp timeout_diagnostic(provider_activity),
     do:

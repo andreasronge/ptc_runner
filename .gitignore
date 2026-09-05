@@ -49,6 +49,8 @@ ptc_runner-*.tar
 examples/kernel-tutorial/*/.ptc/
 examples/debug-a-failed-run/*/.ptc/
 examples/support-triage/*/.ptc/
+examples/named-mission-reader-writer/.ptc/
+examples/named-mission-reader-writer/writer-state/summary.txt
 
 # Temporary commit message files from tooling.
 .commit_msg.txt
@@ -73,8 +75,8 @@ examples/support-triage/*/.ptc/
 .context/
 MEMORY/
 
-# Generated viewer-demo data root
-/examples/viewer-demo/files/
+# Generated viewer-demo lab data root
+/scripts/labs/viewer-demo/files/
 
 # Personal Claude Code overrides
 .claude/settings.local.json

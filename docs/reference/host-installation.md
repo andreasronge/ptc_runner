@@ -140,6 +140,12 @@ missing, empty, or unreadable value fails with `credential_unavailable`; there
 is no ambient provider-specific fallback. Never put credentials in a manifest,
 PTC-Lisp, traces, or committed files.
 
+With `doctor --connect`, an LLM endpoint that answers by rejecting the supplied
+credential fails the provider's credentials check with
+`authentication_rejected`. Its connectivity check passes because the HTTP
+response proves the endpoint was reached. Transport failures, timeouts, and
+invalid or unavailable provider responses continue to fail connectivity.
+
 Surrounding whitespace is not part of a secret and is trimmed from every
 source, so `gh auth token > vendor.token` and an editor that adds a trailing
 newline both work. Interior structure is preserved: a PEM block or a JSON
@@ -153,8 +159,10 @@ reports — rather than an internal fault.
 manifest-backed `repl`. When any selected installation binds an `env`
 credential — an LLM through `credential`, or an MCP transport through
 `transport.env` or `transport.auth` — the frontend loads that exact file before
-provider activity; it never searches for one. Embedded hosts load no dotenv
-file implicitly.
+provider activity; it never searches for one. When loaded, every key assigned
+in the file overrides its process value, including when the assignment is
+empty; keys omitted from the file retain their process values. Embedded hosts
+load no dotenv file implicitly.
 
 ## Choose a provider source
 
@@ -244,12 +252,15 @@ explicit so changing only its model selector retains the same request contract.
 
 The built-in adapter prepares the selected model once before constructing its
 requester. A selector absent from the bundled model catalog remains usable when
-ReqLLM supports its provider, but PtcRunner emits one `model_uncataloged`
-warning for that requester. Catalog metadata such as pricing, limits, token
-estimation, and capability detection may then be incomplete; the warning does
-not mean the provider request itself is known to fail. Run envelopes V4 publish
+ReqLLM supports its provider unless `llm_cost_microusd` requires reservation
+rates the catalog cannot supply. PtcRunner emits one `model_uncataloged` warning
+for that requester or refusal. Catalog metadata such as pricing, limits, token
+estimation, and capability detection may then be incomplete; the warning alone
+does not mean the provider request is known to fail. Run envelopes V4 publish
 the same fact in their closed `warnings` array, and canonical `run-started`
-metadata retains it for trace consumers; stderr remains the human presentation.
+metadata retains it for trace consumers. Failed plain-doctor envelopes publish
+the same locally derived warning for each affected provider check without
+claiming provider activity; stderr remains the human presentation.
 
 Preparation seals the exact controls into the target and requires the adapter
 to attest the same canonical map. The built-in adapter uses ReqLLM's strict
@@ -308,8 +319,10 @@ prepared adapter before admission, and every live installation must declare
 `usage_guarantees.tokens: true`. A cost budget additionally requires
 `usage_guarantees.cost_currency: "USD"` and an explicit
 `reservation_tariff: {"currency":"USD","id":"..."}`. Cost reservations bind
-to that prepared tariff identity; tariff details remain private. A token
-reservation must be at least the request's authorized output-token ceiling.
+to that prepared tariff identity, but its `id` does not supply model rates;
+supported USD reservation pricing for the selected model must also be
+available. Tariff details remain private. A token reservation must be at least
+the request's authorized output-token ceiling.
 Attestation performs no credential lookup or remote work. An absent, crashing,
 timed-out, undersized, or otherwise malformed attestation refuses the call
 before provider dispatch. Provider errors and
@@ -357,11 +370,31 @@ Use `source: "llm_replay"` when responses must be deterministic. The
 [replay evaluation guide](../guides/evaluating-with-replay.md) owns fixture authoring, the
 network-free example, candidate materialization, and component overrides.
 
+A fixture file is JSON Lines. Every line sets `schema_version` to `1`, a
+`request_hash` computed from the provider-neutral request, and exactly one of
+`response` or an ordered `responses` list for a request the workflow makes
+more than once. Plain `doctor` and `validate` parse the selected file under
+the installed ceilings without starting the provider, so a manifest and host
+document that validate cannot fail on the fixture when `run` reaches it. A
+missing, empty, malformed, duplicate, or oversized fixture set fails the
+local provider check as `fixtures_unreadable`; the message names the rule the
+file broke and, for a line-level rejection, the line number counted with
+blank lines. Nothing the line contains is published. The other local checks
+(an installed model's adapter, an MCP server's executable) stay out of
+`validate`.
+
 Fixture matching is exact: changed messages, tools, schema, or provider-neutral
 parameters produce another `request_hash` rather than silently consuming
-unrelated evidence. A structured-output fixture uses the public
-`structured_output` object rather than encoded `content`. A miss is a provider error — `kind` `provider_error`,
-`reason` `not_found` — and `llm/request` returns that envelope as a value with
+unrelated evidence. That request includes every model-visible observation
+accumulated during the run. Frozen MCP response content is therefore necessary
+but not sufficient when opaque cursors, generated identifiers, timestamps, or
+runtime diagnostics can vary between hosts. When recording a portable fixture,
+keep those values stable and retain host-specific measurements only in
+structured details that do not enter a later model request. A
+structured-output fixture uses the public
+`structured_output` object rather than encoded `content`. A miss is a provider
+error with `:kind :provider_error` and `:reason :not_found`, and `llm/request`
+returns that envelope as a value with
 `:status :error` rather than failing the evaluation, so a workflow that wants a
 miss to be fatal calls `cap/unwrap!` on the raw `tool/llm-request` envelope. The
 run envelope records the miss in usage: that alias's `successful_calls` stays 0
@@ -478,6 +511,11 @@ workflow timeout, model-call and mission-call quotas, subordinate evaluations,
 parallel timeout, and event count/byte ceilings too. Source checks have their
 own quota and do not execute code.
 
+The historically named `normal_event_count` and `normal_event_bytes` ceilings
+bound retained events for both normal and private traces. A private run that
+reaches either ceiling keeps its trace and inspection artifacts and reports
+`execution/event_capture_limit_exceeded` with the binding name and value.
+
 `install` is required and may be empty. A limits-only host document raises
 ceilings for an application that selects no providers:
 
@@ -525,8 +563,9 @@ ptc init kernel-tutorial --example kernel-tutorial
 ptc doctor kernel-tutorial/02-deepseek-extract.ptc-project.json --connect
 ```
 
-`readiness` is `ready` only after successful active checks. Plain doctor is
-`unverified`; a failed active check is `failed` and exits nonzero. The report
+`readiness` is `not_applicable` when there are no provider check rows, `ready`
+when every provider row passes, and `unverified` when any provider row is
+skipped. A failed check reports `failed` and exits nonzero. The report
 does not expose endpoints, commands, paths, credentials, or OAuth authority.
 
 ## Next steps

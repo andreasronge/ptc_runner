@@ -7,12 +7,29 @@ defmodule PtcRunner.Kernel.CommandMaterialize do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.Materialize
+  alias PtcRunner.Kernel.ProjectContext
 
   @spec dispatch(CommandArguments.t(), binary()) ::
           {:ok, CommandOutcome.t()} | {:error, CommandOutcome.t()}
   def dispatch(%CommandArguments{command: :materialize} = arguments, run_ref)
       when is_binary(run_ref) do
-    case Materialize.run(arguments.application, materialize_opts(arguments.options)) do
+    case ProjectContext.installed_limits(arguments.project) do
+      {:ok, installed_limits} ->
+        dispatch_materialize(
+          Materialize.run(
+            arguments.application,
+            Keyword.put(materialize_opts(arguments.options), :installed_limits, installed_limits)
+          ),
+          run_ref
+        )
+
+      {:error, reason} ->
+        materialize_error(run_ref, reason)
+    end
+  end
+
+  defp dispatch_materialize(result, run_ref) do
+    case result do
       {:ok, {:source_out, path}} ->
         {:ok,
          CommandOutcome.success(:materialize, run_ref, %{"mode" => "source-out", "path" => path})}
@@ -52,6 +69,9 @@ defmodule PtcRunner.Kernel.CommandMaterialize do
     ]
     |> Enum.reject(fn {_key, value} -> is_nil(value) end)
   end
+
+  defp materialize_error(run_ref, %CommandDiagnostic{} = diagnostic),
+    do: {:error, CommandOutcome.error(:materialize, run_ref, diagnostic)}
 
   defp materialize_error(run_ref, reason) do
     case publication_code(reason) do

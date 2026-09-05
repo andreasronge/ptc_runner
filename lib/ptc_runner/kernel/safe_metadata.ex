@@ -158,10 +158,10 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   Returns whether an annotation belongs to the finite canonical vocabulary.
 
   `"progress"` carries exactly one enumerated `stage`. `"agent-action"` is
-  the shipped agent loop's coarse per-turn record: exactly the keys `turn`
-  (an integer from 0 through 127, matching the loop's maximum turn count)
-  and `kind` (one of `tool-call`, `protocol-error`, `provider-error`, or
-  `max-calls`, or `model-output-truncated`).
+  the shipped agent loop's coarse per-turn record: `turn` (an integer from 0
+  through 127), `max_turns` (1 through 128), a runtime-authored opaque
+  `invocation` identifier, and `kind` (one of `tool-call`, `protocol-error`,
+  `provider-error`, `max-calls`, or `model-output-truncated`).
   A phased agent run adds exactly `phase` (0 through 7), `phase_turn`
   (0 through 127), and `mission` (the phase's mission name) — all three or
   none, so a partial shape stays out of the vocabulary. It never carries
@@ -172,29 +172,46 @@ defmodule PtcRunner.Kernel.SafeMetadata do
       when map_size(data) == 1 and stage in @progress_stages,
       do: true
 
-  def annotation?("agent-action", %{"turn" => turn, "kind" => kind} = data)
-      when map_size(data) == 2 and is_integer(turn) and turn >= 0 and turn <= 127 and
-             kind in @agent_action_kinds,
-      do: true
+  def annotation?(
+        "agent-action",
+        %{
+          "turn" => turn,
+          "max_turns" => max_turns,
+          "invocation" => invocation,
+          "kind" => kind
+        } = data
+      )
+      when map_size(data) == 4,
+      do: valid_agent_action?(turn, max_turns, invocation, kind)
 
   def annotation?(
         "agent-action",
         %{
           "turn" => turn,
+          "max_turns" => max_turns,
+          "invocation" => invocation,
           "kind" => kind,
           "phase" => phase,
           "phase_turn" => phase_turn,
           "mission" => mission
         } = data
       )
-      when map_size(data) == 5 and is_integer(turn) and turn >= 0 and turn <= 127 and
-             kind in @agent_action_kinds and is_integer(phase) and phase >= 0 and phase <= 7 and
-             is_integer(phase_turn) and phase_turn >= 0 and phase_turn <= 127 and
-             is_binary(mission) do
-    mission =~ ~r/\A[a-z][a-z0-9._-]{0,127}\z/
+      when map_size(data) == 7 do
+    valid_agent_action?(turn, max_turns, invocation, kind) and
+      is_integer(phase) and phase >= 0 and phase <= 7 and
+      is_integer(phase_turn) and phase_turn >= 0 and phase_turn <= 127 and
+      is_binary(mission) and
+      mission =~ ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   end
 
   def annotation?(_type, _data), do: false
+
+  defp valid_agent_action?(turn, max_turns, invocation, kind) do
+    is_integer(turn) and turn >= 0 and turn <= 127 and turn < max_turns and
+      is_integer(max_turns) and max_turns >= 1 and max_turns <= 128 and
+      is_binary(invocation) and invocation =~ ~r/\Aagent-[0-9a-f]{16}\z/ and
+      kind in @agent_action_kinds
+  end
 
   @spec failure_taxonomy(term()) :: map()
   @doc """

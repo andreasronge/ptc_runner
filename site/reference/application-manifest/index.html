@@ -83,9 +83,11 @@
 <li><a href="/reference/application-manifest/" class="current" aria-current="page">Application-manifest reference</a></li>
 <li><a href="/reference/host-installation/">Host-configuration reference</a></li>
 <li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/examples/">Examples reference</a></li>
 <li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
 <li><a href="/reference/mcp/">MCP reference</a></li>
 <li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/viewer/">Viewer reference</a></li>
 <li><a href="/reference/repl/">REPL reference</a></li>
 <li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
 <li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
@@ -161,7 +163,13 @@ requirement that the mission environment does not supply implicitly. Add an
 appropriate provider selection or remove the requirement. Missions selecting
 one or more providers remain unresolved until those providers are acquired.
 <code class="inline">&quot;default&quot;</code> is an ordinary declared name, not an implicit fallback.
-Definitions and <code class="inline">*1</code>/<code class="inline">*2</code>/<code class="inline">*3</code> history never cross between missions.</p><p>Workflow code selects the mission explicitly with the <code class="inline">kernel/eval*</code>,
+Definitions and <code class="inline">*1</code>/<code class="inline">*2</code>/<code class="inline">*3</code> history never cross between missions.</p><p>A mission boundary is a capability boundary, not a data boundary. A mission's
+grant limits the code, data, and providers available inside that mission, but
+does not prevent that data from reaching a later mission when trusted workflow
+code includes it in the handoff. If a later mission must not receive some
+content, filter it deterministically in workflow code before the handoff.
+Prompt instructions or wrappers that mark content as untrusted may help a model
+treat it as data, but they do not enforce the grant.</p><p>Workflow code selects the mission explicitly with the <code class="inline">kernel/eval*</code>,
 <code class="inline">kernel/check-source</code>, or mission-introspection functions. The shipped
 <code class="inline">agent.core</code> loop uses <code class="inline">&quot;default&quot;</code> only when its own mission option is omitted,
 and that mission must exist. The
@@ -184,7 +192,10 @@ safe failure projection identifies a non-root declared path, the command
 envelope and terminal diagnostic include its JSON Pointer. Terminal rendering
 escapes unusual contract-authored property names rather than emitting their
 control bytes. Missing-required failures name the first missing schema-declared
-property, including when the absent property is at the contract root.</p><p>Terminal agent helpers also give a model-authored candidate one ordinary
+property, including when the absent property is at the contract root.</p><p>Result and phase-return schemas validate structure and declared value
+constraints. They do not sanitize data or determine its sensitivity. For
+example, an array <code class="inline">maxItems</code> bound can limit the number of entries but cannot
+stop a model from choosing a secret-bearing entry over a safe one.</p><p>Terminal agent helpers also give a model-authored candidate one ordinary
 correction turn when budget remains. <code class="inline">agent.core/run</code> validates the exact
 final value it returns — the standard success envelope by default, or the
 raw object when <code class="inline">result_envelope</code> is false. <code class="inline">agent.main/run</code> and
@@ -203,9 +214,14 @@ once per declaration, to a 1,048,576-byte application aggregate. Overflow is
 rejected during inert acquisition as
 <code class="inline">application/contract_projection_limit_exceeded</code>.</p><p>Contracts are closed object schemas by default. The profile supports common
 object, array, scalar, enum, const, and bound keywords, plus the asserted
-<code class="inline">sha256</code> string format. It also supports one root discriminated <code class="inline">oneOf</code> for
-closed object branches. References, regexes, nested composition, union types,
-and general-purpose <code class="inline">oneOf</code> are rejected.</p><p>Two edges are worth knowing before you write one. <code class="inline">enum</code> and <code class="inline">const</code> must carry
+<code class="inline">sha256</code> string format. <code class="inline">type</code> is either one of <code class="inline">&quot;null&quot;</code>, <code class="inline">&quot;boolean&quot;</code>,
+<code class="inline">&quot;object&quot;</code>, <code class="inline">&quot;array&quot;</code>, <code class="inline">&quot;number&quot;</code>, <code class="inline">&quot;integer&quot;</code>, and <code class="inline">&quot;string&quot;</code>, or—at a
+non-root node—an exactly two-member nullable array pairing <code class="inline">&quot;null&quot;</code> with one
+of the other types, in either order. Nullable object and array nodes use their
+non-null member for keyword applicability. The root remains a non-nullable
+object. The profile also supports one root discriminated <code class="inline">oneOf</code> for closed
+object branches. References, regexes, nested composition, general type unions
+(such as <code class="inline">[&quot;string&quot;, &quot;number&quot;]</code>), and general-purpose <code class="inline">oneOf</code> are rejected.</p><p>Two edges are worth knowing before you write one. <code class="inline">enum</code> and <code class="inline">const</code> must carry
 a sibling <code class="inline">type</code>, so <code class="inline">{&quot;enum&quot;: [&quot;a&quot;, &quot;b&quot;]}</code> is rejected and
 <code class="inline">{&quot;type&quot;: &quot;string&quot;, &quot;enum&quot;: [&quot;a&quot;, &quot;b&quot;]}</code> is accepted. The accepted bounds are
 <code class="inline">minimum</code>, <code class="inline">maximum</code>, <code class="inline">minLength</code>, <code class="inline">maxLength</code>, <code class="inline">minItems</code>, and <code class="inline">maxItems</code>;
@@ -213,10 +229,11 @@ a sibling <code class="inline">type</code>, so <code class="inline">{&quot;enum&
 composition is rejected during inert application loading rather than being
 partially interpreted at runtime. A <code class="inline">contract_invalid</code> rejection names the rule
 it broke and the JSON Pointer of the offending node inside the schema document
-— for example <code class="inline">contract schema declares an unsupported &quot;type&quot; at /properties/sum/type in result.schema.json</code> — so a misspelled type, a keyword
-outside the profile, and an unsatisfiable bound are told apart without
-bisecting the schema. Every reported segment is a key or index the submitted
-document carries, and the same pointer appears in the envelope's <code class="inline">path</code>.</p><p><code class="inline">--output PATH</code> atomically publishes only the validated result value without
+— for example <code class="inline">contract schema &quot;type&quot; must be &quot;null&quot;, &quot;boolean&quot;, &quot;object&quot;, &quot;array&quot;, &quot;number&quot;, &quot;integer&quot;, or &quot;string&quot;, or a two-member array pairing &quot;null&quot; with one non-null type at /properties/sum/type in result.schema.json</code> —
+so a misspelled type, a keyword outside the profile, and an unsatisfiable bound
+are told apart without bisecting the schema. Every reported segment is a key or
+index the submitted document carries, and the same pointer appears in the
+envelope's <code class="inline">path</code>.</p><p><code class="inline">--output PATH</code> atomically publishes only the validated result value without
 replacing an existing file. Use <code class="inline">--private-output</code> for a private run; it
 publishes an owner-only artifact and keeps the value off stdout. See
 <a href="/reference/cli/#run-a-manifest">Running and debugging</a> for destination
@@ -290,11 +307,11 @@ inspection artifact; a manifest cannot enable or choose that destination.</p><p>
   &quot;provider&quot;: &quot;openrouter&quot;,
   &quot;tags&quot;: {&quot;mode&quot;: &quot;agent&quot;, &quot;environment&quot;: &quot;staging&quot;}
 }</code></pre><p>Labels do not affect execution, authority, prompts, results, or provider
-selection. <code class="inline">name</code>, <code class="inline">model</code>, and <code class="inline">provider</code> are fingerprinted in traces; tag
-keys and values come from a small fixed vocabulary. Labels are application
-claims, not authoritative provider identity. Use the provider snapshot and
-canonical usage for accounting, and never put prompts, results, credentials,
-paths, or arbitrary user text in labels.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/reference/host-installation/">Host configuration</a> defines the selected aliases.</li><li><a href="/guides/building-agents/">Building agents</a> puts model policy behind the grants.</li><li><a href="/reference/cli/">Running and debugging</a> validates, runs, and
+selection. <code class="inline">name</code>, <code class="inline">model</code>, and <code class="inline">provider</code> are fingerprinted in traces.
+<code class="inline">labels.tags</code> is closed to these keys and values:</p><ul><li><code class="inline">environment</code>: <code class="inline">development</code>, <code class="inline">test</code>, <code class="inline">staging</code>, or <code class="inline">production</code></li><li><code class="inline">mode</code>: <code class="inline">agent</code>, <code class="inline">deterministic</code>, <code class="inline">direct</code>, <code class="inline">wrapper</code>, or <code class="inline">repl</code></li><li><code class="inline">stage</code>: <code class="inline">started</code>, <code class="inline">planning</code>, <code class="inline">executing</code>, <code class="inline">validating</code>, <code class="inline">completed</code>, or
+<code class="inline">failed</code></li><li><code class="inline">suite</code>: <code class="inline">unit</code>, <code class="inline">integration</code>, <code class="inline">e2e</code>, <code class="inline">conformance</code>, or <code class="inline">privacy</code></li></ul><p>Labels are application claims, not authoritative provider identity. Use the
+provider snapshot and canonical usage for accounting, and never put prompts,
+results, credentials, paths, or arbitrary user text in labels.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/reference/host-installation/">Host configuration</a> defines the selected aliases.</li><li><a href="/guides/building-agents/">Building agents</a> puts model policy behind the grants.</li><li><a href="/reference/cli/">Running and debugging</a> validates, runs, and
 inspects the manifest.</li><li><a href="/reference/component-contracts/">Components and preludes</a> explains bundle
 composition.</li></ul><p>The generated application-manifest schema is the exact field reference; this
 guide documents the additional semantic and authority rules applied at load.</p>

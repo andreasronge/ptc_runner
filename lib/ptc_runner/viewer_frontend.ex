@@ -43,6 +43,7 @@ defmodule PtcRunner.ViewerFrontend do
   alias PtcRunner.Kernel.ProjectConfig
   alias PtcRunner.Kernel.ViewerBinding
   alias PtcRunner.Kernel.ViewerProjectAdapter
+  alias PtcRunner.LiveStatus
   alias PtcRunner.ViewerLaunchAdapter
   alias PtcRunner.ViewerSnapshotStore
 
@@ -261,14 +262,20 @@ defmodule PtcRunner.ViewerFrontend do
   defp start_viewer(project, overrides, snapshots, callbacks) do
     options = viewer_options(project, overrides, snapshots, callbacks)
 
-    # credo:disable-for-next-line Credo.Check.Refactor.Apply
-    case apply(@viewer, :start, [options]) do
-      {:ok, pid} ->
-        finish_start(pid, Keyword.fetch!(options, :ip), snapshots, callbacks)
+    with :ok <- invoke_before_viewer_start(callbacks.before_viewer_start, options),
+         result <- default_viewer_start(options) do
+      case result do
+        {:ok, pid} ->
+          finish_start(pid, Keyword.fetch!(options, :ip), snapshots, callbacks)
 
+        {:error, _reason} = error ->
+          ViewerSnapshotStore.stop(snapshots)
+          classify_start_error(error, options)
+      end
+    else
       {:error, _reason} = error ->
         ViewerSnapshotStore.stop(snapshots)
-        classify_start_error(error, options)
+        error
     end
   end
 
@@ -301,14 +308,28 @@ defmodule PtcRunner.ViewerFrontend do
       capture = Keyword.get(opts, :capture_inspection, &capture_inspection/3)
       listener = Keyword.get_lazy(opts, :listener_info, &default_listener_info/0)
       project_loader = Keyword.get(opts, :project_loader, &ProjectConfig.load/1)
+      before_viewer_start = Keyword.get(opts, :before_viewer_start, fn _options -> :ok end)
       frontend = Keyword.get(opts, :frontend, :mix)
       env_file = Keyword.get(opts, :env_file)
 
+      terminal_attached =
+        Keyword.get_lazy(opts, :terminal_attached, &AnalysisTerminal.attached?/0)
+
       if keys --
-           [:capture_inspection, :listener_info, :project_loader, :device, :frontend, :env_file] ==
+           [
+             :capture_inspection,
+             :listener_info,
+             :project_loader,
+             :before_viewer_start,
+             :device,
+             :frontend,
+             :env_file,
+             :terminal_attached
+           ] ==
            [] and
            length(keys) == MapSet.size(MapSet.new(keys)) and is_function(capture, 3) and
            is_function(listener, 1) and is_function(project_loader, 1) and
+           is_function(before_viewer_start, 1) and is_boolean(terminal_attached) and
            frontend in [:mix, :standalone] and
            valid_env_file?(env_file),
          do:
@@ -317,8 +338,10 @@ defmodule PtcRunner.ViewerFrontend do
               capture_inspection: capture,
               listener_info: listener,
               project_loader: project_loader,
+              before_viewer_start: before_viewer_start,
               frontend: frontend,
-              env_file: env_file
+              env_file: env_file,
+              terminal_attached: terminal_attached
             }},
          else: {:error, :invalid_viewer_config}
     else
@@ -329,6 +352,23 @@ defmodule PtcRunner.ViewerFrontend do
   defp default_listener_info do
     # credo:disable-for-next-line Credo.Check.Refactor.Apply
     fn pid -> apply(@viewer, :listener_info, [pid]) end
+  end
+
+  defp default_viewer_start(options) do
+    # credo:disable-for-next-line Credo.Check.Refactor.Apply
+    apply(@viewer, :start, [options])
+  end
+
+  defp invoke_before_viewer_start(callback, options) do
+    case callback.(options) do
+      :ok -> :ok
+      {:error, _reason} = error -> error
+      _invalid -> {:error, :viewer_start_failed}
+    end
+  rescue
+    _exception -> {:error, :viewer_start_failed}
+  catch
+    _kind, _reason -> {:error, :viewer_start_failed}
   end
 
   defp invoke_project_loader(callback, path) do
@@ -393,7 +433,7 @@ defmodule PtcRunner.ViewerFrontend do
       port: Map.get(overrides, :port) || project.viewer.port,
       trace_dir: Path.join(project.artifact_root, "traces"),
       private_traces: private?,
-      open: project.viewer.open and AnalysisTerminal.attached?(),
+      open: project.viewer.open and callbacks.terminal_attached,
       trace_source: source,
       inspection_source: if(recorded?, do: source),
       kernel_trace_adapter: PtcRunner.Kernel.ProjectViewerAdapter,
@@ -456,9 +496,7 @@ defmodule PtcRunner.ViewerFrontend do
   defp workflow_label(project) do
     case describe_project(project) do
       {:ok, %{name: name, entry: entry}} when is_binary(name) ->
-        [name, entry]
-        |> Enum.join(" · ")
-        |> String.slice(0, 256)
+        LiveStatus.application_label(name, entry)
 
       _unavailable ->
         "workflow"

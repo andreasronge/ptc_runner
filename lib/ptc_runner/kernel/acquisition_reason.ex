@@ -4,8 +4,13 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   # Translates a provider callback's bare reason into a closed diagnostic while
   # the occurrence that produced it is still in scope.
   #
-  # A prepare, preflight, or acquire callback answers `{:error, reason}` with an
-  # atom and nothing else. Every acquisition diagnostic produced here requires
+  # A prepare, preflight, or acquire callback normally answers `{:error, reason}`
+  # with an atom and nothing else. Closed tuple forms preserve details for a
+  # small set of catalogued reasons handled below. The sole sealed struct is
+  # `ModelContractPricingCause`, produced from the exact payload-free
+  # uncataloged-pricing sentinel; it maps to the pricing-specific
+  # `model_contract_unsupported` diagnostic and matching `model_uncataloged`
+  # warning. Every acquisition diagnostic produced here requires
   # a subject bearing an occurrence, so a bare reason cannot be classified once
   # it has left the loop that knows which occurrence produced it: it reaches the command
   # boundary carrying no subject and fails closed as `internal_error`, reporting
@@ -87,8 +92,11 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
 
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
   alias PtcRunner.Kernel.MCPAcquisitionDiagnostic
+  alias PtcRunner.Kernel.ModelContractDiagnostic
+  alias PtcRunner.Kernel.ModelContractPricingCause
 
   # `:mcp_remote_error` is an answered case — a JSON-RPC error at discovery — and
   # sits here rather than with the protocol reasons because a refused discovery
@@ -252,6 +260,32 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   def diagnostic(reason, occurrence) when reason in @model_contract_reasons,
     do: subject_diagnostic(:local_preflight, :model_contract_unsupported, :local, occurrence)
 
+  def diagnostic(
+        %ModelContractPricingCause{public_model: public_model} = cause,
+        %{provider: provider} = occurrence
+      ) do
+    case ModelContractPricingCause.valid?(cause) and
+           CommandWarning.model_uncataloged(provider, public_model) do
+      {:ok, warning} ->
+        subject_diagnostic(
+          :local_preflight,
+          :model_contract_unsupported,
+          :local,
+          occurrence,
+          ModelContractDiagnostic.cost_reservation_pricing_message(public_model),
+          [warning]
+        )
+
+      :error ->
+        internal_diagnostic()
+
+      false ->
+        internal_diagnostic()
+    end
+  end
+
+  def diagnostic(%ModelContractPricingCause{}, _occurrence), do: internal_diagnostic()
+
   def diagnostic(reason, occurrence) when reason in @selection_reasons,
     do: subject_diagnostic(:active_preflight, :selection_rejected, :selection, occurrence)
 
@@ -276,12 +310,12 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   defp acquisition_diagnostic(code, occurrence, message \\ nil),
     do: subject_diagnostic(:provider_acquisition, code, :acquisition, occurrence, message)
 
-  defp subject_diagnostic(phase, code, operation, occurrence, message \\ nil) do
+  defp subject_diagnostic(phase, code, operation, occurrence, message \\ nil, warnings \\ []) do
     site = %{destination: occurrence.destination, index: occurrence.index}
 
     case CommandSubject.provider(occurrence.provider, operation, site) do
       {:ok, subject} ->
-        opts = [subject: subject, provider_activity: true]
+        opts = [subject: subject, provider_activity: true, warnings: warnings]
         opts = if is_binary(message), do: Keyword.put(opts, :message, message), else: opts
         CommandDiagnostic.new!(phase, code, opts)
 

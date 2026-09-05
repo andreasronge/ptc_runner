@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Conversation do
 
   alias PtcRunner.Kernel.ConversationMessage
   alias PtcRunner.Kernel.DeterministicJSON
+  alias PtcRunner.Kernel.GeneratedSourceAssociation
 
   @type node_row :: %{
           complete_hash: binary(),
@@ -78,8 +79,6 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Conversation do
 
   @spec finish(map(), map()) :: map()
   def finish(state, trace_facts) when is_map(state) and is_map(trace_facts) do
-    source_counts = Enum.frequencies_by(state.source_hashes, & &1.hash)
-
     by_stream = Enum.group_by(state.turns, & &1.stream_id)
 
     turns =
@@ -89,7 +88,9 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Conversation do
         |> Map.get(stream_id, [])
         |> Enum.sort_by(& &1.turn)
       end)
-      |> Enum.map(&attach_generated(&1, state.source_hashes, source_counts))
+
+    association_result = generated_associations(turns, state.source_hashes)
+    turns = Enum.map(turns, &attach_generated(&1, association_result.by_turn))
 
     expected = MapSet.new(Map.get(trace_facts, "expected_model_exchange_ids", []))
 
@@ -109,7 +110,8 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Conversation do
         Enum.any?(turn.generated, & &1.association_ambiguous?)
       end)
 
-    ambiguity_count = length(state.ambiguous) + source_ambiguity_count
+    ambiguity_count =
+      length(state.ambiguous) + source_ambiguity_count + association_result.unresolved_count
 
     %{
       turns: turns,
@@ -257,23 +259,45 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Conversation do
     end
   end
 
-  defp attach_generated(turn, source_hashes, source_counts) do
-    requested = MapSet.new(turn.program_hashes)
-
+  defp attach_generated(turn, associations) do
     generated =
-      source_hashes
-      |> Enum.reverse()
-      |> Enum.filter(&MapSet.member?(requested, &1.hash))
-      |> Enum.map(fn source ->
+      associations
+      |> Map.get(turn.ordinal, [])
+      |> Enum.map(fn {source, ambiguous?} ->
         %{
           sequence: source.sequence,
           evaluation_id: source.evaluation_id,
           association: "source_match",
-          association_ambiguous?: Map.get(source_counts, source.hash, 0) > 1
+          association_ambiguous?: ambiguous?
         }
       end)
 
     Map.put(turn, :generated, generated)
+  end
+
+  defp generated_associations(turns, source_hashes) do
+    turns =
+      Enum.map(turns, fn turn ->
+        %{
+          id: turn.ordinal,
+          sequence: turn.output_sequence,
+          sources: turn.program_hashes
+        }
+      end)
+
+    sources =
+      Enum.map(source_hashes, fn source ->
+        %{sequence: source.sequence, source: source.hash, record: source}
+      end)
+
+    result = GeneratedSourceAssociation.associate(turns, sources)
+
+    by_turn =
+      Map.new(result.by_turn, fn {turn_id, entries} ->
+        {turn_id, Enum.map(entries, fn {source, ambiguous?} -> {source.record, ambiguous?} end)}
+      end)
+
+    %{by_turn: by_turn, unresolved_count: result.unresolved_count}
   end
 
   defp prefix_match?(comparable, node) do

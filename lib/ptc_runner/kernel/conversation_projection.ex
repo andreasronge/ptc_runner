@@ -2,27 +2,25 @@ defmodule PtcRunner.Kernel.ConversationProjection do
   @moduledoc false
 
   alias PtcRunner.Kernel.ConversationMessage
+  alias PtcRunner.Kernel.GeneratedSourceAssociation
 
   @spec compile([map()], [map()], map()) :: map()
   def compile(exchanges, programs, trace_facts)
       when is_list(exchanges) and is_list(programs) and is_map(trace_facts) do
     reconstructed = conversation_streams(exchanges)
-    program_counts = Enum.frequencies_by(programs, & &1["source"])
+    association_result = generated_associations(reconstructed.streams, programs)
+    associations = association_result.by_turn
 
     items =
       Enum.flat_map(reconstructed.streams, fn stream ->
         Enum.map(stream["turns"], fn turn ->
           generated =
-            turn["assistant"]
-            |> generated_sources()
-            |> then(fn sources -> Enum.filter(programs, &(&1["source"] in sources)) end)
-            |> Enum.map(fn program ->
+            associations
+            |> Map.get(turn["capability_id"], [])
+            |> Enum.map(fn {program, ambiguous?} ->
               program
               |> Map.put("association", "source_match")
-              |> Map.put(
-                "association_ambiguous?",
-                Map.get(program_counts, program["source"], 0) > 1
-              )
+              |> Map.put("association_ambiguous?", ambiguous?)
             end)
 
           turn
@@ -44,7 +42,9 @@ defmodule PtcRunner.Kernel.ConversationProjection do
         Enum.any?(item["generated"], & &1["association_ambiguous?"])
       end)
 
-    ambiguity_count = length(reconstructed.ambiguous) + source_ambiguity_count
+    ambiguity_count =
+      length(reconstructed.ambiguous) + source_ambiguity_count +
+        association_result.unresolved_count
 
     %{
       items: items,
@@ -180,6 +180,34 @@ defmodule PtcRunner.Kernel.ConversationProjection do
   end
 
   defp generated_sources(_assistant), do: []
+
+  defp generated_associations(streams, programs) do
+    turns =
+      Enum.flat_map(streams, fn stream ->
+        stream["turns"]
+        |> Enum.map(fn turn ->
+          %{
+            id: turn["capability_id"],
+            sequence: turn["response_sequence"],
+            sources: generated_sources(turn["assistant"])
+          }
+        end)
+      end)
+
+    sources =
+      Enum.map(programs, fn program ->
+        %{sequence: program["sequence"] || 0, source: program["source"], record: program}
+      end)
+
+    result = GeneratedSourceAssociation.associate(turns, sources)
+
+    by_turn =
+      Map.new(result.by_turn, fn {turn_id, entries} ->
+        {turn_id, Enum.map(entries, fn {source, ambiguous?} -> {source.record, ambiguous?} end)}
+      end)
+
+    %{by_turn: by_turn, unresolved_count: result.unresolved_count}
+  end
 
   defp initial_stream_state do
     %{nodes: [], streams: %{}, stream_order: [], ambiguous: [], next_stream: 1}

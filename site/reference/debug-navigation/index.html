@@ -83,9 +83,11 @@
 <li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
 <li><a href="/reference/host-installation/">Host-configuration reference</a></li>
 <li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/examples/">Examples reference</a></li>
 <li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
 <li><a href="/reference/mcp/">MCP reference</a></li>
 <li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/viewer/">Viewer reference</a></li>
 <li><a href="/reference/repl/">REPL reference</a></li>
 <li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
 <li><a href="/reference/debug-navigation/" class="current" aria-current="page">Debug-navigation reference</a></li>
@@ -136,7 +138,10 @@ ptc transcript RUN_ID \
   --traces .ptc/traces \
   --inspection .ptc/inspection \
   --private-unattended \
-  --private-output out/conversation.private.json</code></pre><p><code class="inline">--private-output</code> names a new owner-only file. Its parent must already exist
+  --private-output out/conversation.private.json</code></pre><p>Success prints one JSON line naming the command, selected run, absolute output
+path, and turn count. A schema-version-2 transcript scopes <code class="inline">complete?</code> to
+<code class="inline">model_conversation</code>; <code class="inline">not_included</code> names <code class="inline">prelude_sources</code>,
+<code class="inline">capability_schemas</code>, and the final <code class="inline">result</code> as evidence outside that scope.</p><p><code class="inline">--private-output</code> names a new owner-only file. Its parent must already exist
 and be reached without a symbolic link — on macOS <code class="inline">/tmp</code> is a symlink, so
 <code class="inline">/tmp/out.json</code> is refused. The parent must also be physically separate from
 <code class="inline">--traces</code> and <code class="inline">--inspection</code>: no directory may equal, contain, or be
@@ -263,21 +268,17 @@ model exchange is missing, and no turn or generated-source association is
 ambiguous. It is a statement about the reconstruction, not a promise that every
 field of every record is present. <code class="inline">ptc transcript</code> refuses to write a file at
 all unless <code class="inline">complete?</code> holds, so that field is always <code class="inline">true</code> in a published
-transcript; read it over <code class="inline">/api/analysis/runs/{id}/conversation</code>, which applies
-no such gate, when you need it to be able to say no.</p><p>The refusal names which of the three facts failed and by how much, because they
+transcript. The same reconstruction is ungated in
+<code class="inline">ptc repl --profile private-run-analysis-v2</code>; run <code class="inline">ptc docs repl</code> for the
+complete headless invocation.</p><p>The refusal names which of the three facts failed and by how much, because they
 have different next actions. <code class="inline">transcript/ambiguous_evidence</code> means nothing is
 missing: the run is complete and every expected exchange was
 captured, but some turn or generated-source association resolves to more than
-one predecessor. Re-running does not help; read the ungated route instead.
+one predecessor. Re-running does not help; read the ungated <code class="inline">turns</code> collection
+through the private analysis REPL instead.
 <code class="inline">transcript/incomplete_evidence</code> means the trace is not terminal or
 dropped events, or the inspection artifact does not carry every exchange the
-trace expects — both facts about the capture rather than the reconstruction.</p><h3 id="reaching-the-ungated-reconstruction">Reaching the ungated reconstruction</h3><p><code class="inline">/api/analysis/runs/{id}/conversation</code> is served by <code class="inline">ptc viewer</code> and needs the
-project's private grant. Four separate decisions withhold it — two about the
-project, two about the run — and the Viewer's private routes answer for each by
-name, so the reason body is the next action rather than a bare status:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">answer</th><th style="text-align: left;">cause</th><th style="text-align: left;">next action</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">404 inspection_not_configured</code></td><td style="text-align: left;">the project records no inspection artifact</td><td style="text-align: left;">set <code class="inline">artifacts.trace</code> and <code class="inline">artifacts.inspection</code> and run again</td></tr><tr><td style="text-align: left;"><code class="inline">404 inspection_not_private</code></td><td style="text-align: left;">the artifact exists, this Viewer was not granted it</td><td style="text-align: left;">set <code class="inline">viewer.private</code> and Refresh the Runs list; nothing needs re-running</td></tr><tr><td style="text-align: left;"><code class="inline">404 inspection_run_not_recorded</code></td><td style="text-align: left;">the Viewer reads private evidence, this run recorded none</td><td style="text-align: left;">run the project again, now that <code class="inline">artifacts.inspection</code> is set</td></tr><tr><td style="text-align: left;"><code class="inline">404 inspection_run_mismatch</code></td><td style="text-align: left;">the Viewer is pinned to a different run's artifact</td><td style="text-align: left;">start the Viewer for this run</td></tr></tbody></table></div><p>Every other answer is a transport status with prose, not a reason code: the
-route reports a source that is unavailable, changed, oversized, or malformed as
-the failure it is rather than as a setting the reader could change.
-<code class="inline">/api/analysis/runs/{id}/preludes</code> answers on the same terms.</p><p><code class="inline">omitted_count</code> is pagination: how many selected items this page did not
+trace expects — both facts about the capture rather than the reconstruction.</p><p><code class="inline">omitted_count</code> is pagination: how many selected items this page did not
 return. It never reports evidence withheld by policy. A source grant that
 withheld trace files of the other kind reports that separately, as
 <code class="inline">excluded_private_trace_files</code> or <code class="inline">excluded_sanitized_trace_files</code> on a run

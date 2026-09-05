@@ -85,9 +85,11 @@ data classes, and outer limits.">
 <li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
 <li><a href="/reference/host-installation/" class="current" aria-current="page">Host-configuration reference</a></li>
 <li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/examples/">Examples reference</a></li>
 <li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
 <li><a href="/reference/mcp/">MCP reference</a></li>
 <li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/viewer/">Viewer reference</a></li>
 <li><a href="/reference/repl/">REPL reference</a></li>
 <li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
 <li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
@@ -182,7 +184,11 @@ directory; absolute paths are canonicalized.</li><li><code class="inline">litera
 rendered by a secret manager.</li></ul><p>Credentials are resolved once and passed explicitly to the provider. A
 missing, empty, or unreadable value fails with <code class="inline">credential_unavailable</code>; there
 is no ambient provider-specific fallback. Never put credentials in a manifest,
-PTC-Lisp, traces, or committed files.</p><p>Surrounding whitespace is not part of a secret and is trimmed from every
+PTC-Lisp, traces, or committed files.</p><p>With <code class="inline">doctor --connect</code>, an LLM endpoint that answers by rejecting the supplied
+credential fails the provider's credentials check with
+<code class="inline">authentication_rejected</code>. Its connectivity check passes because the HTTP
+response proves the endpoint was reached. Transport failures, timeouts, and
+invalid or unavailable provider responses continue to fail connectivity.</p><p>Surrounding whitespace is not part of a secret and is trimmed from every
 source, so <code class="inline">gh auth token &gt; vendor.token</code> and an editor that adds a trailing
 newline both work. Interior structure is preserved: a PEM block or a JSON
 service-account key is one credential, and <code class="inline">transport.env</code> hands it to the
@@ -193,8 +199,10 @@ reports — rather than an internal fault.</p><p><code class="inline">ptc</code>
 manifest-backed <code class="inline">repl</code>. When any selected installation binds an <code class="inline">env</code>
 credential — an LLM through <code class="inline">credential</code>, or an MCP transport through
 <code class="inline">transport.env</code> or <code class="inline">transport.auth</code> — the frontend loads that exact file before
-provider activity; it never searches for one. Embedded hosts load no dotenv
-file implicitly.</p><h2 id="choose-a-provider-source">Choose a provider source</h2><p>The source set and placement are closed:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;"><code class="inline">source</code></th><th style="text-align: left;">Purpose</th><th style="text-align: left;">Environment</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">llm</code></td><td style="text-align: left;">Live language model</td><td style="text-align: left;">Workflow</td></tr><tr><td style="text-align: left;"><code class="inline">llm_replay</code></td><td style="text-align: left;">Frozen model responses</td><td style="text-align: left;">Workflow</td></tr><tr><td style="text-align: left;"><code class="inline">mcp</code></td><td style="text-align: left;">External tool server</td><td style="text-align: left;">Mission</td></tr><tr><td style="text-align: left;"><code class="inline">ptc_trace_snapshot</code></td><td style="text-align: left;">Trace queries</td><td style="text-align: left;">Mission</td></tr><tr><td style="text-align: left;"><code class="inline">ptc_private_trace_snapshot</code></td><td style="text-align: left;">Trace queries joined with authorized private records</td><td style="text-align: left;">Mission</td></tr><tr><td style="text-align: left;"><code class="inline">ptc_inspection_snapshot</code></td><td style="text-align: left;">Private inspection queries</td><td style="text-align: left;">Mission</td></tr></tbody></table></div><p>Selecting an alias into the wrong environment fails with
+provider activity; it never searches for one. When loaded, every key assigned
+in the file overrides its process value, including when the assignment is
+empty; keys omitted from the file retain their process values. Embedded hosts
+load no dotenv file implicitly.</p><h2 id="choose-a-provider-source">Choose a provider source</h2><p>The source set and placement are closed:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;"><code class="inline">source</code></th><th style="text-align: left;">Purpose</th><th style="text-align: left;">Environment</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">llm</code></td><td style="text-align: left;">Live language model</td><td style="text-align: left;">Workflow</td></tr><tr><td style="text-align: left;"><code class="inline">llm_replay</code></td><td style="text-align: left;">Frozen model responses</td><td style="text-align: left;">Workflow</td></tr><tr><td style="text-align: left;"><code class="inline">mcp</code></td><td style="text-align: left;">External tool server</td><td style="text-align: left;">Mission</td></tr><tr><td style="text-align: left;"><code class="inline">ptc_trace_snapshot</code></td><td style="text-align: left;">Trace queries</td><td style="text-align: left;">Mission</td></tr><tr><td style="text-align: left;"><code class="inline">ptc_private_trace_snapshot</code></td><td style="text-align: left;">Trace queries joined with authorized private records</td><td style="text-align: left;">Mission</td></tr><tr><td style="text-align: left;"><code class="inline">ptc_inspection_snapshot</code></td><td style="text-align: left;">Private inspection queries</td><td style="text-align: left;">Mission</td></tr></tbody></table></div><p>Selecting an alias into the wrong environment fails with
 <code class="inline">provider_destination_denied</code>. This keeps model authority out of
 model-authored mission code.</p><h3 id="live-models">Live models</h3><p>A live installation fixes the full model selector, credential, cache policy,
 optional request parameters, and request/response ceilings. <code class="inline">ceilings.max_calls</code>
@@ -241,12 +249,15 @@ the <code class="inline">xhigh</code> and <code class="inline">max</code> reason
 output budget than the effective Kernel limit. The tutorial keeps the value
 explicit so changing only its model selector retains the same request contract.</p><p>The built-in adapter prepares the selected model once before constructing its
 requester. A selector absent from the bundled model catalog remains usable when
-ReqLLM supports its provider, but PtcRunner emits one <code class="inline">model_uncataloged</code>
-warning for that requester. Catalog metadata such as pricing, limits, token
-estimation, and capability detection may then be incomplete; the warning does
-not mean the provider request itself is known to fail. Run envelopes V4 publish
+ReqLLM supports its provider unless <code class="inline">llm_cost_microusd</code> requires reservation
+rates the catalog cannot supply. PtcRunner emits one <code class="inline">model_uncataloged</code> warning
+for that requester or refusal. Catalog metadata such as pricing, limits, token
+estimation, and capability detection may then be incomplete; the warning alone
+does not mean the provider request is known to fail. Run envelopes V4 publish
 the same fact in their closed <code class="inline">warnings</code> array, and canonical <code class="inline">run-started</code>
-metadata retains it for trace consumers; stderr remains the human presentation.</p><p>Preparation seals the exact controls into the target and requires the adapter
+metadata retains it for trace consumers. Failed plain-doctor envelopes publish
+the same locally derived warning for each affected provider check without
+claiming provider activity; stderr remains the human presentation.</p><p>Preparation seals the exact controls into the target and requires the adapter
 to attest the same canonical map. The built-in adapter uses ReqLLM's strict
 unsupported-option policy and also refuses known lossy routes during local
 preflight, before credential loading. For example, Anthropic cannot combine
@@ -293,8 +304,10 @@ prepared adapter before admission, and every live installation must declare
 <code class="inline">usage_guarantees.tokens: true</code>. A cost budget additionally requires
 <code class="inline">usage_guarantees.cost_currency: &quot;USD&quot;</code> and an explicit
 <code class="inline">reservation_tariff: {&quot;currency&quot;:&quot;USD&quot;,&quot;id&quot;:&quot;...&quot;}</code>. Cost reservations bind
-to that prepared tariff identity; tariff details remain private. A token
-reservation must be at least the request's authorized output-token ceiling.
+to that prepared tariff identity, but its <code class="inline">id</code> does not supply model rates;
+supported USD reservation pricing for the selected model must also be
+available. Tariff details remain private. A token reservation must be at least
+the request's authorized output-token ceiling.
 Attestation performs no credential lookup or remote work. An absent, crashing,
 timed-out, undersized, or otherwise malformed attestation refuses the call
 before provider dispatch. Provider errors and
@@ -321,11 +334,29 @@ the adapter attests that the resolved model is safe public identity, provider
 snapshots and model-grouped usage include it. Endpoint-bearing or otherwise
 private targets remain absent, while alias/revision usage stays attributable.</p><p>Use <code class="inline">source: &quot;llm_replay&quot;</code> when responses must be deterministic. The
 <a href="/guides/evaluating-with-replay/">replay evaluation guide</a> owns fixture authoring, the
-network-free example, candidate materialization, and component overrides.</p><p>Fixture matching is exact: changed messages, tools, schema, or provider-neutral
+network-free example, candidate materialization, and component overrides.</p><p>A fixture file is JSON Lines. Every line sets <code class="inline">schema_version</code> to <code class="inline">1</code>, a
+<code class="inline">request_hash</code> computed from the provider-neutral request, and exactly one of
+<code class="inline">response</code> or an ordered <code class="inline">responses</code> list for a request the workflow makes
+more than once. Plain <code class="inline">doctor</code> and <code class="inline">validate</code> parse the selected file under
+the installed ceilings without starting the provider, so a manifest and host
+document that validate cannot fail on the fixture when <code class="inline">run</code> reaches it. A
+missing, empty, malformed, duplicate, or oversized fixture set fails the
+local provider check as <code class="inline">fixtures_unreadable</code>; the message names the rule the
+file broke and, for a line-level rejection, the line number counted with
+blank lines. Nothing the line contains is published. The other local checks
+(an installed model's adapter, an MCP server's executable) stay out of
+<code class="inline">validate</code>.</p><p>Fixture matching is exact: changed messages, tools, schema, or provider-neutral
 parameters produce another <code class="inline">request_hash</code> rather than silently consuming
-unrelated evidence. A structured-output fixture uses the public
-<code class="inline">structured_output</code> object rather than encoded <code class="inline">content</code>. A miss is a provider error — <code class="inline">kind</code> <code class="inline">provider_error</code>,
-<code class="inline">reason</code> <code class="inline">not_found</code> — and <code class="inline">llm/request</code> returns that envelope as a value with
+unrelated evidence. That request includes every model-visible observation
+accumulated during the run. Frozen MCP response content is therefore necessary
+but not sufficient when opaque cursors, generated identifiers, timestamps, or
+runtime diagnostics can vary between hosts. When recording a portable fixture,
+keep those values stable and retain host-specific measurements only in
+structured details that do not enter a later model request. A
+structured-output fixture uses the public
+<code class="inline">structured_output</code> object rather than encoded <code class="inline">content</code>. A miss is a provider
+error with <code class="inline">:kind :provider_error</code> and <code class="inline">:reason :not_found</code>, and <code class="inline">llm/request</code>
+returns that envelope as a value with
 <code class="inline">:status :error</code> rather than failing the evaluation, so a workflow that wants a
 miss to be fatal calls <code class="inline">cap/unwrap!</code> on the raw <code class="inline">tool/llm-request</code> envelope. The
 run envelope records the miss in usage: that alias's <code class="inline">successful_calls</code> stays 0
@@ -391,7 +422,10 @@ or running beside private inspection data.</p><h2 id="set-installed-ceilings">Se
 }</code></pre><p>Raising <code class="inline">run_duration_ms</code> alone rarely lengthens an agent loop. Check the
 workflow timeout, model-call and mission-call quotas, subordinate evaluations,
 parallel timeout, and event count/byte ceilings too. Source checks have their
-own quota and do not execute code.</p><p><code class="inline">install</code> is required and may be empty. A limits-only host document raises
+own quota and do not execute code.</p><p>The historically named <code class="inline">normal_event_count</code> and <code class="inline">normal_event_bytes</code> ceilings
+bound retained events for both normal and private traces. A private run that
+reaches either ceiling keeps its trace and inspection artifacts and reports
+<code class="inline">execution/event_capture_limit_exceeded</code> with the binding name and value.</p><p><code class="inline">install</code> is required and may be empty. A limits-only host document raises
 ceilings for an application that selects no providers:</p><pre><code class="json language-json">{
   &quot;install&quot;: {},
   &quot;limits&quot;: {
@@ -416,8 +450,9 @@ complete table of names, meanings, units, scopes, defaults, accepted ranges,
 and identity participation. The host schema is generated from the same
 catalog.</p><h2 id="verify-selected-providers">Verify selected providers</h2><p>Run active local, credential, authorization, and connectivity checks without
 invoking the workflow:</p><pre><code class="console language-console">ptc init kernel-tutorial --example kernel-tutorial
-ptc doctor kernel-tutorial/02-deepseek-extract.ptc-project.json --connect</code></pre><p><code class="inline">readiness</code> is <code class="inline">ready</code> only after successful active checks. Plain doctor is
-<code class="inline">unverified</code>; a failed active check is <code class="inline">failed</code> and exits nonzero. The report
+ptc doctor kernel-tutorial/02-deepseek-extract.ptc-project.json --connect</code></pre><p><code class="inline">readiness</code> is <code class="inline">not_applicable</code> when there are no provider check rows, <code class="inline">ready</code>
+when every provider row passes, and <code class="inline">unverified</code> when any provider row is
+skipped. A failed check reports <code class="inline">failed</code> and exits nonzero. The report
 does not expose endpoints, commands, paths, credentials, or OAuth authority.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/reference/application-manifest/">Manifests and capabilities</a> selects and
 narrows these aliases.</li><li><a href="/guides/building-agents/">Building agents</a> uses the installed model and mission
 capabilities.</li><li><a href="/reference/cli/">Running and debugging</a> runs and inspects the

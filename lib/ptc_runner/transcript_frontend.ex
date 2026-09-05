@@ -26,12 +26,12 @@ defmodule PtcRunner.TranscriptFrontend do
   @max_items 1_000
 
   @spec run(CommandArguments.t(), CommandRuntime.t()) ::
-          :ok | {:error, atom(), binary()}
+          {:ok, map()} | {:error, atom(), binary()}
   def run(arguments, runtime), do: run(arguments, runtime, [])
 
   @doc false
   @spec run(CommandArguments.t(), CommandRuntime.t(), keyword()) ::
-          :ok | {:error, atom(), binary()}
+          {:ok, map()} | {:error, atom(), binary()}
   def run(
         %CommandArguments{
           command: :transcript,
@@ -105,21 +105,39 @@ defmodule PtcRunner.TranscriptFrontend do
          {:ok, turns} <- RunAnalysis.collect(analysis, run_id, "turns", @max_items),
          conversation = ConversationProjection.present_page(turns),
          :ok <- admissible_evidence(conversation),
+         {:ok, projection} <- RunAnalysis.collection_projection("turns"),
          {:ok, encoded} <-
            DeterministicJSON.encode(%{
-             "schema_version" => 1,
+             "schema_version" => 2,
              "run_id" => run_id,
+             "complete_scope" => projection["scope"],
+             "not_included" => projection["not_included"],
              "conversation" => conversation
            }),
          :ok <- PublicationHandle.write(handle, encoded <> "\n"),
          :ok <- PublicationHandle.sync(handle),
          :ok <- PublicationHandle.publish(handle) do
-      :ok
+      {:ok,
+       %{
+         "command" => "transcript",
+         "run_ref" => run_id,
+         "path" => PublicationHandle.path(handle),
+         "turns" => turn_count(conversation)
+       }}
     else
       {:error, _code, _message} = classified -> classified
       {:error, reason} -> selected_publish_error(reason)
     end
   end
+
+  defp turn_count(%{"streams" => streams}) when is_list(streams) do
+    Enum.reduce(streams, 0, fn
+      %{"turns" => turns}, count when is_list(turns) -> count + length(turns)
+      _stream, count -> count
+    end)
+  end
+
+  defp turn_count(_conversation), do: 0
 
   defp selected_capture_error(:source_changed),
     do: {:error, :source_changed, "analysis source changed during capture"}
@@ -226,21 +244,22 @@ defmodule PtcRunner.TranscriptFrontend do
          "transcript evidence is incomplete: the canonical trace records no terminal run " <>
            "event or reports dropped events, so the conversation cannot be certified " <>
            "(#{missing} missing model #{plural(missing, "exchange")}, " <>
-           "#{ambiguity} ambiguous #{plural(ambiguity, "association")}). " <> ungated_route()}
+           "#{ambiguity} ambiguous #{plural(ambiguity, "association")}). " <> ungated_repl_hint()}
 
       missing > 0 ->
         {:error, :incomplete_evidence,
          "transcript evidence is incomplete: #{missing} model " <>
            "#{plural(missing, "exchange")} the canonical trace expects " <>
            "#{plural(missing, "was", "were")} not captured under --inspection " <>
-           "(#{ambiguity} ambiguous #{plural(ambiguity, "association")}). " <> ungated_route()}
+           "(#{ambiguity} ambiguous #{plural(ambiguity, "association")}). " <>
+           ungated_repl_hint()}
 
       ambiguity > 0 ->
         {:error, :ambiguous_evidence,
          "transcript evidence is ambiguous: #{ambiguity} turn or generated-source " <>
            "#{plural(ambiguity, "association")} #{plural(ambiguity, "resolves", "resolve")} " <>
            "to more than one predecessor. Nothing is missing: the canonical trace is " <>
-           "complete and every expected model exchange was captured. " <> ungated_route()}
+           "complete and every expected model exchange was captured. " <> ungated_repl_hint()}
 
       true ->
         :ok
@@ -248,12 +267,12 @@ defmodule PtcRunner.TranscriptFrontend do
   end
 
   # `ptc transcript` publishes only a reconstruction it can certify. The
-  # Viewer's analysis route applies no such gate, so it is the next action for
-  # every refusal above rather than a workaround for one of them.
-  defp ungated_route,
+  # private analysis profile applies no such gate and is present in every
+  # distribution, so it is the next action for every refusal above.
+  defp ungated_repl_hint,
     do:
-      "A Viewer started with viewer.private: true serves the ungated reconstruction at " <>
-        "/api/analysis/runs/RUN_ID/conversation."
+      "The same reconstruction is ungated in ptc repl --profile private-run-analysis-v2; " <>
+        "see ptc docs repl."
 
   defp count(conversation, key) do
     case Map.get(conversation, key) do
@@ -372,9 +391,9 @@ defmodule PtcRunner.TranscriptFrontend do
   defp destination_error(_reason),
     do: {:error, :destination_unavailable, "--private-output destination is unavailable"}
 
-  defp finalize_handle(handle, :ok) do
+  defp finalize_handle(handle, {:ok, _result} = success) do
     :ok = PublicationHandle.release(handle)
-    :ok
+    success
   end
 
   defp finalize_handle(handle, {:error, _code, _message} = error) do

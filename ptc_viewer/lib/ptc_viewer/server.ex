@@ -328,6 +328,7 @@ defmodule PtcViewer.Server do
         [
           :pin_inspection,
           :conversation,
+          :result,
           :preludes,
           :execution_errors,
           :explicit_failure_values

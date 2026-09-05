@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "tutorial.fan-out", "path": "fanout.clj", "dependencies": ["llm"]},
+      {"library": "llm"}
+    ],
+    "entry": "tutorial.fan-out/run"
+  },
+  "input": {
+    "value": {
+      "topics": [
+        "Why do BEAM heaps grow in generations?",
+        "What is a supervision tree?",
+        "Why is SSE simpler than WebSockets for one-way streams?",
+        "What makes immutability useful for tracing?",
+        "Name one benefit of capability-based security.",
+        "What does backpressure mean in a streaming system?",
+        "Why are monotonic clocks preferred for measuring durations?",
+        "What is a write-ahead log?",
+        "Explain eventual consistency briefly.",
+        "What is tail-call optimization?",
+        "Why do content-addressed stores deduplicate well?",
+        "What is a bloom filter good for?"
+      ]
+    }
+  },
+  "limits": {
+    "run_duration_ms": 120000,
+    "workflow_timeout_ms": 110000,
+    "parallel_timeout_ms": 60000
+  },
+  "providers": {
+    "workflow": [
+      {"name": "deepseek"}
+    ]
+  },
+  "labels": {
+    "name": "tutorial-parallel-fan-out",
+    "model": "openrouter:deepseek/deepseek-v4-flash",
+    "provider": "openrouter",
+    "tags": {"mode": "direct"}
+  }
+}

@@ -8,6 +8,56 @@ defmodule PtcRunner.GitHooks.PrePushTest do
   @executable_guides Path.expand("../support/executable_guides.txt", __DIR__)
   @git_env GitEnv.clear()
 
+  test "managed pushes coordinate the complete hook exactly once" do
+    %{repo: repo, path: path} = git_repo_with_change("docs/plans/managed-hook.md")
+    operation_marker = install_operation_wrapper!(path)
+
+    {output, status} =
+      run_hook(repo, path, [
+        {"PTC_MANAGED_OPERATION_CONTEXT", "/managed/context.json"},
+        {"PTC_OPERATION_WRAPPER", Path.join(fake_bin(path), "ptc-operation")},
+        {"OPERATION_MARKER", operation_marker}
+      ])
+
+    assert status == 0, output
+    assert output =~ "Plan-only push, skipping full pre-push gate"
+
+    assert File.read!(operation_marker) |> String.split("\n", trim: true) ==
+             ["run --label verify -- #{Path.join(repo, ".githooks/pre-push")}"]
+  end
+
+  test "an active operation does not recursively coordinate the hook" do
+    %{repo: repo, path: path} = git_repo_with_change("docs/plans/nested-hook.md")
+    operation_marker = install_operation_wrapper!(path)
+
+    {output, status} =
+      run_hook(repo, path, [
+        {"PTC_MANAGED_OPERATION_CONTEXT", "/managed/context.json"},
+        {"PTC_OPERATION_WRAPPER", Path.join(fake_bin(path), "ptc-operation")},
+        {"PTC_OPERATION_ACTIVE", "1"},
+        {"OPERATION_MARKER", operation_marker}
+      ])
+
+    assert status == 0, output
+    assert output =~ "Plan-only push, skipping full pre-push gate"
+    refute File.exists?(operation_marker)
+  end
+
+  test "an unmanaged Mac push ignores an available operation wrapper" do
+    %{repo: repo, path: path} = git_repo_with_change("docs/plans/local-hook.md")
+    operation_marker = install_operation_wrapper!(path)
+
+    {output, status} =
+      run_hook(repo, path, [
+        {"PTC_OPERATION_WRAPPER", Path.join(fake_bin(path), "ptc-operation")},
+        {"OPERATION_MARKER", operation_marker}
+      ])
+
+    assert status == 0, output
+    assert output =~ "Plan-only push, skipping full pre-push gate"
+    refute File.exists?(operation_marker)
+  end
+
   test "planning-only changes skip the full gate" do
     %{repo: repo, mix_marker: mix_marker, path: path} =
       git_repo_with_change("docs/plans/kernel-notes.md")
@@ -464,11 +514,30 @@ defmodule PtcRunner.GitHooks.PrePushTest do
             # test a forced full run instead. Cases that want a mode set it
             # through extra_env, which wins by coming last.
             {"PTC_PRE_PUSH_SERIAL", nil},
+            {"PTC_MANAGED_OPERATION_CONTEXT", nil},
+            {"PTC_OPERATION_ACTIVE", nil},
             {"FORCE_FULL_PRE_PUSH", nil}
           ] ++ extra_env,
       stderr_to_stdout: true
     )
   end
+
+  defp install_operation_wrapper!(path) do
+    bin = fake_bin(path)
+    marker = Path.join(Path.dirname(bin), "operation-called")
+
+    write_executable!(Path.join(bin, "ptc-operation"), """
+    #!/bin/sh
+    printf '%s\n' "$*" >> "$OPERATION_MARKER"
+    [ "$1" = "run" ] && [ "$2" = "--label" ] && [ "$3" = "verify" ] && [ "$4" = "--" ]
+    shift 4
+    PTC_OPERATION_ACTIVE=1 exec "$@"
+    """)
+
+    marker
+  end
+
+  defp fake_bin(path), do: path |> String.split(":") |> hd()
 
   defp write_changed_file!(repo, path, contents) do
     full_path = Path.join(repo, path)

@@ -83,9 +83,11 @@
 <li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
 <li><a href="/reference/host-installation/">Host-configuration reference</a></li>
 <li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/examples/">Examples reference</a></li>
 <li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
 <li><a href="/reference/mcp/">MCP reference</a></li>
 <li><a href="/reference/cli/" class="current" aria-current="page">Command-line reference</a></li>
+<li><a href="/reference/viewer/">Viewer reference</a></li>
 <li><a href="/reference/repl/">REPL reference</a></li>
 <li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
 <li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
@@ -104,7 +106,9 @@ grammar for each frontend.</p><h2 id="choose-a-command">Choose a command</h2><di
 help command for the frontend you invoke as its canonical command and option
 reference.</p><p>A provider-bearing manifest needs a host configuration. A project document can
 remember that path and its environment file. Before running it, active provider
-checks can make real requests and may incur cost:</p><pre><code class="console language-console">ptc doctor ptc-project.json --connect</code></pre><p>Plain doctor reports <code class="inline">readiness: &quot;unverified&quot;</code> when its local checks pass.
+checks can make real requests and may incur cost:</p><pre><code class="console language-console">ptc doctor ptc-project.json --connect</code></pre><p>Readiness is derived from provider check rows: no rows report
+<code class="inline">readiness: &quot;not_applicable&quot;</code>, all passing rows report <code class="inline">readiness: &quot;ready&quot;</code>,
+and any skipped row reports <code class="inline">readiness: &quot;unverified&quot;</code>.
 Missing provider commands, unreadable replay fixtures, and other attributable
 local failures produce failed check rows, <code class="inline">readiness: &quot;failed&quot;</code>, and a nonzero
 exit without activating a provider. Successful active checks report <code class="inline">ready</code>;
@@ -154,7 +158,11 @@ ptc run ptc.json \
   --host-config ptc-host.json \
   --trace-dir traces \
   --inspect traces/run.ptcins \
-  --envelope results/command.json</code></pre><p>Useful run switches are:</p><ul><li><code class="inline">--input INPUT.json</code> replaces the manifest input with another normal object.
+  --envelope results/command.json</code></pre><p>Useful run switches are:</p><ul><li><code class="inline">--progress</code> writes best-effort live status only to stderr; stdout remains the
+workflow result. On an interactive stderr it updates one ASCII line. When
+stderr is redirected or its width is unavailable, it writes bounded
+newline-delimited milestones and at most one unchanged heartbeat every ten
+seconds. It remains opt-in and works alongside <code class="inline">PTC_VIEWER_URL</code>.</li><li><code class="inline">--input INPUT.json</code> replaces the manifest input with another normal object.
 Resolve the path as an application-relative document first; otherwise treat it
 as absolute or relative to the process working directory (same rule as
 <code class="inline">--component-override-descriptor</code> host paths).</li><li><code class="inline">--private-input INPUT.json</code> does the same and classifies the run as private.</li><li><code class="inline">--output VALUE.json</code> publishes a normal result value without replacing an
@@ -169,9 +177,9 @@ document it publishes carries status, run reference, result or classified
 error, artifact state, and a closed <code class="inline">warnings</code> array. For <code class="inline">run</code>, an uncataloged
 installed model appears there as <code class="inline">model_uncataloged</code> with its provider alias
 and an adapter-attested public selector; the same warning is retained in
-<code class="inline">run-started</code> metadata. Non-run commands require an empty warnings
-array. In particular, <code class="inline">doctor --connect</code> retains uncataloged-model notices on
-stderr rather than claiming run metadata it does not produce. Parse the
+<code class="inline">run-started</code> metadata. A failed plain <code class="inline">doctor</code> command also publishes locally
+derived <code class="inline">model_uncataloged</code> warnings for every affected provider check;
+successful non-run commands keep the array empty. Parse the
 envelope rather than scraping stdout, which is a human
 presentation channel that may also carry application output.</li></ul><p>The command envelope reports the run reference and artifact class, not artifact
 paths. Output, trace, inspection, and envelope destinations must be distinct.
@@ -186,8 +194,8 @@ replacing anything. To add PtcRunner to an existing repository, initialize a
 new sibling or subdirectory, then deliberately copy or move the generated
 files the repository wants.</p><p><code class="inline">ptc init DIRECTORY --example NAME</code> publishes one of the walkthrough projects
 this executable embeds instead of the scaffold, under the same no-replace
-commit. Run <code class="inline">ptc init</code> with an unknown example name to have the embedded
-names listed. The trees are byte-identical to the repository's, so the commands the
+commit. Run <code class="inline">ptc help init</code> to see the embedded names. The trees are
+byte-identical to the repository's, so the commands the
 guides print work from wherever the copy was created rather than from one
 checkout directory.</p><p>For runs that produce a validated terminal event batch, <code class="inline">execution.usage</code>
 includes the required authoritative <code class="inline">llm_budget</code>, aggregate observational
@@ -304,8 +312,8 @@ the component dependency as described in
 output from applications or children. The envelope is an atomic, no-replace
 file whose JSON Schema this executable serves as <code class="inline">ptc docs schema-envelope</code>
 (<code class="inline">priv/schemas/ptc-command-envelope-v4.schema.json</code> in the repository). Its
-status and exit-code relationship is sealed by the same command contract.</p><p>After arguments parse, an ordinary or caught command outcome publishes one
-requested envelope. This includes a recognized <code class="inline">run</code>, <code class="inline">validate</code>, <code class="inline">doctor</code>, or
+status and exit-code relationship is sealed by the same command contract.</p><p>After arguments parse, an ordinary or caught shared-engine command outcome
+publishes one requested envelope. This includes a recognized <code class="inline">run</code>, <code class="inline">validate</code>, <code class="inline">doctor</code>, or
 <code class="inline">models</code> invocation whose named project fails schema validation: project
 diagnostics terminate before command bootstrap or project references are
 opened, but after the envelope destination is admitted. Malformed command
@@ -318,8 +326,8 @@ rather than paying for a run whose result it cannot receive. If envelope
 publication itself fails, the standalone command exits <code class="inline">74</code> and cannot report
 that failure through the missing envelope. Success exits <code class="inline">0</code>; classified
 failures use their diagnostic catalog status; caught internal failures use
-<code class="inline">70</code>.</p><p><code class="inline">run</code>, <code class="inline">validate</code>, <code class="inline">doctor</code>, <code class="inline">models</code>, <code class="inline">init</code>, and <code class="inline">materialize</code> accept <code class="inline">--envelope</code>.
-<code class="inline">repl</code>, <code class="inline">transcript</code>, <code class="inline">viewer</code>, <code class="inline">docs</code>, help, and version do not. A private run
+<code class="inline">70</code>.</p><p><code class="inline">run</code>, <code class="inline">validate</code>, <code class="inline">doctor</code>, <code class="inline">models</code>, <code class="inline">init</code>, <code class="inline">materialize</code>, <code class="inline">transcript</code>, and
+<code class="inline">version</code> accept <code class="inline">--envelope</code>. <code class="inline">repl</code>, <code class="inline">viewer</code>, <code class="inline">docs</code>, and help do not. A private run
 envelope omits the result value. Installation, packaging, and container
 commands live in the <a href="/installation/standalone/">installation documentation</a>,
 not in this process-contract reference.</p><h3 id="branch-on-the-exit-status">Branch on the exit status</h3><p>An exit status is a class, not an identity: several diagnostics share one.
@@ -328,8 +336,32 @@ not in this process-contract reference.</p><h3 id="branch-on-the-exit-status">Br
 on the status to decide whether to retry, and read <code class="inline">error.code</code> from the
 envelope when the branch needs to know which failure it was.</p><p>A recoverable capability error does not change the exit status. Exhausting
 <code class="inline">workflow_capability_calls_per_name</code> returns
-<code class="inline">{&quot;status&quot;:&quot;error&quot;,&quot;kind&quot;:&quot;limit_exceeded&quot;,&quot;reason&quot;:&quot;capability_quota&quot;,&quot;details&quot;:{&quot;limit&quot;:&quot;workflow_capability_calls_per_name&quot;,&quot;name&quot;:&quot;llm-request&quot;,&quot;limit_value&quot;:2}}</code> as a
-value into PTC-Lisp; a workflow that reads past it can still <code class="inline">return</code> and the
+<code class="inline">{&quot;status&quot;:&quot;error&quot;,&quot;kind&quot;:&quot;limit_exceeded&quot;,&quot;reason&quot;:&quot;capability_quota&quot;,&quot;retryable?&quot;:false,&quot;model&quot;:&quot;primary&quot;,&quot;details&quot;:{&quot;limit&quot;:&quot;workflow_capability_calls_per_name&quot;,&quot;name&quot;:&quot;llm-request&quot;,&quot;limit_value&quot;:2}}</code> as a
+JSON boundary value; it is not an exact display of the value's PTC-Lisp types.
+The equivalent value inside the workflow uses keyword keys and keyword-valued
+<code class="inline">:status</code>, <code class="inline">:kind</code>, and <code class="inline">:reason</code> fields:</p><pre><code class="clojure language-clojure">{:status :error
+ :kind :limit_exceeded
+ :reason :capability_quota
+ :retryable? false
+ :model &quot;primary&quot;
+ :details {:limit :workflow_capability_calls_per_name
+           :name &quot;llm-request&quot;
+           :limit_value 2}}</code></pre><p>An aggregate cost-budget refusal has the same field types and this copyable
+PTC-Lisp shape:</p><pre><code class="clojure language-clojure">{:status :error
+ :kind :limit_exceeded
+ :reason :llm_cost_microusd
+ :retryable? false
+ :details {:limit :llm_cost_microusd
+           :limit_value 1
+           :remaining 1
+           :requested 8585}}</code></pre><p>PTC-Lisp equality is type-sensitive even though JSON projection renders a
+keyword value as its name string. Therefore
+<code class="inline">(= &quot;limit_exceeded&quot; (get response :kind))</code> is false, while
+<code class="inline">(= :limit_exceeded (get response :kind))</code> is true. Preserve the authenticated
+envelope when ending the run so the command retains its limit classification:</p><pre><code class="clojure language-clojure">(let [response (tool/llm-request request)]
+  (if (= :limit_exceeded (get response :kind))
+    (fail response)
+    response))</code></pre><p>A workflow that reads past a recoverable error can still <code class="inline">return</code> and the
 command exits <code class="inline">0</code>. Refusing an aggregate <code class="inline">llm_total_tokens</code> or
 <code class="inline">llm_cost_microusd</code> reservation is the same class of recoverable value, with
 <code class="inline">reason</code> naming the budget. Aborting that exact envelope reports
@@ -356,7 +388,7 @@ Other frontend setup and persistence failures retain <code class="inline">repl/c
 Shared argument-parser refusals still use their existing <code class="inline">arguments/CODE</code>
 diagnostic and exit <code class="inline">2</code>. Catalog messages never include a resource path,
 selected run reference, or private payload. Any internal reason classified at
-this boundary but outside the closed vocabulary becomes <code class="inline">profile_setup_failed</code>.</p><p>The table is generated from the catalog the REPL frontend dispatches on:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Code</th><th style="text-align: left;">Refusal</th><th style="text-align: left;">Public message</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">ambiguous_selected_trace</code></td><td style="text-align: left;">Both sanitized and private trace candidates exist.</td><td style="text-align: left;">selected run has ambiguous trace candidates</td></tr><tr><td style="text-align: left;"><code class="inline">catalog_limit_exceeded</code></td><td style="text-align: left;">Catalog entry, file, retained-memory, heap, or listing bounds were exceeded.</td><td style="text-align: left;">private run catalog exceeded its capture limits</td></tr><tr><td style="text-align: left;"><code class="inline">duplicate_inspection_run</code></td><td style="text-align: left;">More than one selected artifact claims the same inspection run identity.</td><td style="text-align: left;">selected inspection set contains a duplicate run identity</td></tr><tr><td style="text-align: left;"><code class="inline">duplicate_selected_run</code></td><td style="text-align: left;">The same run reference was supplied more than once.</td><td style="text-align: left;">selected run set contains a duplicate reference</td></tr><tr><td style="text-align: left;"><code class="inline">inspection_correlation_missing</code></td><td style="text-align: left;">The selected trace and sealed evidence do not prove one correlation.</td><td style="text-align: left;">selected trace and inspection artifacts do not correlate</td></tr><tr><td style="text-align: left;"><code class="inline">invalid_run_reference</code></td><td style="text-align: left;">A --run value is not a canonical PTC command run reference.</td><td style="text-align: left;">selected run reference is invalid</td></tr><tr><td style="text-align: left;"><code class="inline">malformed_source</code></td><td style="text-align: left;">Selected metadata or sealed evidence failed structural validation.</td><td style="text-align: left;">analysis source is malformed</td></tr><tr><td style="text-align: left;"><code class="inline">profile_evaluation_failed</code></td><td style="text-align: left;">A profile form failed for a reason outside the source-capture vocabulary.</td><td style="text-align: left;">profile evaluation failed</td></tr><tr><td style="text-align: left;"><code class="inline">profile_setup_failed</code></td><td style="text-align: left;">An unclassified internal setup failure was closed at the frontend boundary.</td><td style="text-align: left;">private analysis profile setup failed</td></tr><tr><td style="text-align: left;"><code class="inline">result_limit_exceeded</code></td><td style="text-align: left;">A catalog page or selected-analysis result could not fit its result bound.</td><td style="text-align: left;">profile evaluation result exceeded its byte limit</td></tr><tr><td style="text-align: left;"><code class="inline">selected_inspection_missing</code></td><td style="text-align: left;">No sealed inspection artifact exists for a selected run.</td><td style="text-align: left;">selected inspection artifact is missing</td></tr><tr><td style="text-align: left;"><code class="inline">selected_inspection_not_regular</code></td><td style="text-align: left;">The exact selected inspection candidate is not a regular file.</td><td style="text-align: left;">selected inspection artifact is not a regular file</td></tr><tr><td style="text-align: left;"><code class="inline">selected_run_mismatch</code></td><td style="text-align: left;">Embedded run or trace identity disagrees with the selected candidate.</td><td style="text-align: left;">selected source identity does not match its run reference</td></tr><tr><td style="text-align: left;"><code class="inline">selected_set_limit_exceeded</code></td><td style="text-align: left;">More than sixteen run references were selected for one session.</td><td style="text-align: left;">selected run set exceeds the 16-run limit</td></tr><tr><td style="text-align: left;"><code class="inline">selected_trace_missing</code></td><td style="text-align: left;">No trace candidate exists for a selected run.</td><td style="text-align: left;">selected trace is missing</td></tr><tr><td style="text-align: left;"><code class="inline">selected_trace_not_regular</code></td><td style="text-align: left;">The exact selected trace candidate is not a regular file.</td><td style="text-align: left;">selected trace is not a regular file</td></tr><tr><td style="text-align: left;"><code class="inline">source_changed</code></td><td style="text-align: left;">A selected source or cursor identity changed while it was being verified.</td><td style="text-align: left;">analysis source changed during immutable capture</td></tr><tr><td style="text-align: left;"><code class="inline">source_limit_exceeded</code></td><td style="text-align: left;">Aggregate bytes, per-artifact records, index entries, or heap were exceeded.</td><td style="text-align: left;">selected analysis source exceeded its admission limits</td></tr><tr><td style="text-align: left;"><code class="inline">source_retained_limit_exceeded</code></td><td style="text-align: left;">The immutable trace projection or inspection index retained too much memory.</td><td style="text-align: left;">selected analysis source exceeded its retained-memory limit</td></tr><tr><td style="text-align: left;"><code class="inline">source_unavailable</code></td><td style="text-align: left;">A source root became unavailable or its bounded capture deadline elapsed.</td><td style="text-align: left;">analysis source is unavailable or capture timed out</td></tr><tr><td style="text-align: left;"><code class="inline">unsupported_schema</code></td><td style="text-align: left;">A selected trace or inspection artifact uses an unsupported version.</td><td style="text-align: left;">analysis source uses an unsupported schema version</td></tr></tbody></table></div><h3 id="diagnose-a-failed-run">Diagnose a failed run</h3><p>The command reports a closed phase/code pair. If a workflow deliberately calls
+this boundary but outside the closed vocabulary becomes <code class="inline">profile_setup_failed</code>.</p><p>The table is generated from the catalog the REPL frontend dispatches on:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Code</th><th style="text-align: left;">Refusal</th><th style="text-align: left;">Public message</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">ambiguous_selected_trace</code></td><td style="text-align: left;">Both sanitized and private trace candidates exist.</td><td style="text-align: left;">selected run has ambiguous trace candidates</td></tr><tr><td style="text-align: left;"><code class="inline">catalog_limit_exceeded</code></td><td style="text-align: left;">Catalog entry, file, retained-memory, heap, or listing bounds were exceeded.</td><td style="text-align: left;">private run catalog exceeded its capture limits</td></tr><tr><td style="text-align: left;"><code class="inline">duplicate_inspection_run</code></td><td style="text-align: left;">More than one selected artifact claims the same inspection run identity.</td><td style="text-align: left;">selected inspection set contains a duplicate run identity</td></tr><tr><td style="text-align: left;"><code class="inline">duplicate_selected_run</code></td><td style="text-align: left;">The same run reference was supplied more than once.</td><td style="text-align: left;">selected run set contains a duplicate reference</td></tr><tr><td style="text-align: left;"><code class="inline">inspection_correlation_missing</code></td><td style="text-align: left;">The selected trace and sealed evidence do not prove one correlation.</td><td style="text-align: left;">selected trace and inspection artifacts do not correlate</td></tr><tr><td style="text-align: left;"><code class="inline">invalid_run_reference</code></td><td style="text-align: left;">A --run value is not a canonical PTC command run reference.</td><td style="text-align: left;">selected run reference is invalid</td></tr><tr><td style="text-align: left;"><code class="inline">malformed_source</code></td><td style="text-align: left;">Selected metadata or sealed evidence failed structural validation.</td><td style="text-align: left;">analysis source is malformed</td></tr><tr><td style="text-align: left;"><code class="inline">profile_evaluation_failed</code></td><td style="text-align: left;">A profile form failed for a reason outside the source-capture vocabulary.</td><td style="text-align: left;">profile evaluation failed</td></tr><tr><td style="text-align: left;"><code class="inline">profile_setup_failed</code></td><td style="text-align: left;">An unclassified internal setup failure was closed at the frontend boundary.</td><td style="text-align: left;">private analysis profile setup failed</td></tr><tr><td style="text-align: left;"><code class="inline">result_limit_exceeded</code></td><td style="text-align: left;">A catalog page or selected-analysis result could not fit its result bound.</td><td style="text-align: left;">profile evaluation result exceeded its byte limit</td></tr><tr><td style="text-align: left;"><code class="inline">selected_inspection_missing</code></td><td style="text-align: left;">No sealed inspection artifact exists for a selected run.</td><td style="text-align: left;">selected inspection artifact is missing</td></tr><tr><td style="text-align: left;"><code class="inline">selected_inspection_not_regular</code></td><td style="text-align: left;">The exact selected inspection candidate is not a regular file.</td><td style="text-align: left;">selected inspection artifact is not a regular file</td></tr><tr><td style="text-align: left;"><code class="inline">selected_run_mismatch</code></td><td style="text-align: left;">Embedded run or trace identity disagrees with the selected candidate.</td><td style="text-align: left;">selected source identity does not match its run reference</td></tr><tr><td style="text-align: left;"><code class="inline">selected_set_limit_exceeded</code></td><td style="text-align: left;">More than sixteen run references were selected for one session.</td><td style="text-align: left;">selected run set exceeds the 16-run limit</td></tr><tr><td style="text-align: left;"><code class="inline">selected_trace_missing</code></td><td style="text-align: left;">No trace candidate exists for a selected run.</td><td style="text-align: left;">selected trace is missing</td></tr><tr><td style="text-align: left;"><code class="inline">selected_trace_not_regular</code></td><td style="text-align: left;">The exact selected trace candidate is not a regular file.</td><td style="text-align: left;">selected trace is not a regular file</td></tr><tr><td style="text-align: left;"><code class="inline">source_changed</code></td><td style="text-align: left;">A selected source or cursor identity changed while it was being verified.</td><td style="text-align: left;">analysis source changed during immutable capture</td></tr><tr><td style="text-align: left;"><code class="inline">source_limit_exceeded</code></td><td style="text-align: left;">Aggregate bytes, per-artifact records, index entries, or heap were exceeded.</td><td style="text-align: left;">selected analysis source exceeded its admission limits</td></tr><tr><td style="text-align: left;"><code class="inline">source_retained_limit_exceeded</code></td><td style="text-align: left;">The immutable trace projection or inspection index retained too much memory.</td><td style="text-align: left;">selected analysis source exceeded its retained-memory limit; for whole-directory private-run-analysis-v2 capture, select exact runs with --run RUN_ID</td></tr><tr><td style="text-align: left;"><code class="inline">source_unavailable</code></td><td style="text-align: left;">A source root became unavailable or its bounded capture deadline elapsed.</td><td style="text-align: left;">analysis source is unavailable or capture timed out</td></tr><tr><td style="text-align: left;"><code class="inline">unsupported_schema</code></td><td style="text-align: left;">A selected trace or inspection artifact uses an unsupported version.</td><td style="text-align: left;">analysis source uses an unsupported schema version</td></tr></tbody></table></div><h3 id="diagnose-a-failed-run">Diagnose a failed run</h3><p>The command reports a closed phase/code pair. If a workflow deliberately calls
 <code class="inline">fail</code>, its value is not copied into the command diagnostic. The Kernel API and
 canonical <code class="inline">run-stopped</code> event retain only a safe taxonomy:</p><ul><li>a map whose <code class="inline">kind</code> is recognized retains that readable kind;</li><li>an authenticated <code class="inline">agent.core</code> turn-limit failure additionally retains the
 fixed <code class="inline">agent_turns</code> name, the effective integer ceiling from 1 through 128,
@@ -436,13 +468,24 @@ event schemas,
 sanitization, filtering, pagination, and source classes. The
 <a href="/reference/repl/">Kernel REPL guide</a> covers longer investigations.</p><h2 id="inspect-a-private-model-conversation">Inspect a private model conversation</h2><p>Capture canonical and inspection artifacts in separate trusted locations. The
 credential-free
-<a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/kernel-inspection-lab">Kernel inspection lab</a>
+<a href="https://github.com/andreasronge/ptc_runner/tree/main/scripts/labs/inspection-lab">Kernel inspection lab</a>
 creates a correlated pair without a live model.</p><p>For one transcript, avoid a REPL:</p><pre><code class="console language-console">mkdir -p tmp/transcript
 ptc transcript RUN_ID \
   --traces tmp/traces \
   --inspection tmp/inspection \
   --private-unattended \
-  --private-output tmp/transcript/conversation.private.json</code></pre><p>Each selected model turn carries the provider-neutral <code class="inline">request_hash</code> used by
+  --private-output tmp/transcript/conversation.private.json \
+  --envelope tmp/transcript/command-envelope.json</code></pre><p>On success the command prints one JSON line containing <code class="inline">command</code>, the selected
+run under <code class="inline">run_ref</code>, the absolute output <code class="inline">path</code>, and the number of published
+<code class="inline">turns</code>. The optional envelope receives the same result in the V4 command
+contract.
+The frontend-owned transcript command publishes this success envelope only
+after its private document is complete; a transcript refusal retains its
+existing <code class="inline">transcript/</code> diagnostic and publishes neither file.</p><p>Transcript document schema version 2 scopes <code class="inline">conversation.complete?</code> with the
+top-level <code class="inline">complete_scope: &quot;model_conversation&quot;</code>. Its top-level <code class="inline">not_included</code>
+list names evidence outside that scope: <code class="inline">prelude_sources</code>, <code class="inline">capability_schemas</code>,
+and the run <code class="inline">result</code>. The list comes from the <code class="inline">turns</code> collection catalog entry;
+the transcript does not include those surfaces.</p><p>Each selected model turn carries the provider-neutral <code class="inline">request_hash</code> used by
 <code class="inline">llm_replay</code> fixtures. The underlying owner-only inspection artifact carries
 the same value as <code class="inline">payload.request_hash</code> on the <code class="inline">llm-request</code>
 <code class="inline">capability-input</code> record. A private replay miss keeps that hash out of its
@@ -478,90 +521,9 @@ source, effective components, capability payloads, prints, diagnostics, and
 terminal values. The attached-terminal and unattended switches are accident
 guards, not access control; treat every downstream sink as private.</p><p>To walk the same capture from an ordinary application rather than a session,
 <a href="/reference/debug-navigation/">Debug a failed run</a> installs it as a snapshot
-provider and follows typed evidence links with the shipped <code class="inline">debug.nav</code> prelude.</p><h2 id="browse-traces-in-the-viewer">Browse traces in the Viewer</h2><pre><code class="console language-console">ptc viewer ptc-project.json --env-file .env</code></pre><p>The project document supplies the trace root and optional inspection root, plus
-the port, browser-opening preference, REPL setting, and private-data grant. The
-Viewer pins the selected data and can open a bounded analysis REPL over an
-immutable capture. <code class="inline">--port</code> overrides the project's port; <code class="inline">0</code> asks the
-operating system for a free one and is the project default. Startup prints the
-selected address. If an explicitly selected port is occupied, the command
-probes loopback: another PTC Viewer is reported with its exact project document
-path, while any other listener is reported as an occupied service. The command
-runs in the foreground until <code class="inline">Ctrl+C</code>, and opens a browser only when the project
-asks for it <em>and</em> a terminal is attached.</p><p>Directory discovery expects producer-owned <code class="inline">&lt;run-id&gt;.jsonl</code> and
-<code class="inline">&lt;run-id&gt;.private.jsonl</code> names, each containing exactly that one run and one
-trace identity. The run list reports bounded damaged-source evidence when a
-stable malformed, mismatched, split, or conflicting component is isolated;
-unrelated valid runs remain available. A selected namespace change during
-capture fails the refresh rather than installing a partial generation.</p><p>The Viewer does not search the invocation directory or its parents for a
-<code class="inline">.env</code> file. Environment-backed provider credentials come from the inherited
-process environment, the project's <code class="inline">host.env_file</code>, or an explicit
-<code class="inline">--env-file FILE</code>. The command-line file is resolved when the Viewer starts
-and overrides the project's environment-file reference for every workflow or
-mission launched from its Live tab. It is read only when the selected provider
-actually requires an environment credential.</p><p>The Viewer ships inside the standalone release and the container image. It is
-not part of the published Hex package, where <code class="inline">ptc doctor</code> reports it as an
-unavailable optional companion and <code class="inline">ptc viewer</code> says so rather than failing
-obscurely. See the
-<a href="https://github.com/andreasronge/ptc_runner/tree/main/ptc_viewer">Viewer documentation</a>
-for its complete HTTP API.</p><h3 id="expose-it-deliberately-or-not-at-all">Expose it deliberately, or not at all</h3><p>The Viewer has no authentication and can display private inspection records
-when the project grants them, so it binds <code class="inline">127.0.0.1</code> and reaches nothing else.
-<code class="inline">--listen 0.0.0.0</code> is the only way to change that, it accepts no other address,
-and it prints a warning when used. Authenticated remote Viewer hosting is not a
-goal of this command.</p><p>A container is the one place the wildcard is routine, because it is not an
-exposure decision there. Inside a container <code class="inline">127.0.0.1</code> is the container's own
-loopback, while a published port forwards to the container's external
-interface, so a loopback bind refuses every connection a <code class="inline">-p</code> mapping delivers.
-Binding <code class="inline">0.0.0.0</code> <em>inside the container's network namespace</em> is what makes the
-mapping reachable, and the host-side exposure decision moves to the publish
-rule:</p><pre><code class="console language-console">image=ghcr.io/andreasronge/ptc_runner:VERSION
-docker run --rm \
-  --user &quot;$(id -u):$(id -g)&quot; \
-  --env HOME=/tmp \
-  -p 127.0.0.1:4123:4123 \
-  -v &quot;$PWD:/work&quot; \
-  &quot;$image&quot; viewer /work/ptc-project.json --listen 0.0.0.0 --port 4123</code></pre><p>The <code class="inline">127.0.0.1:</code> prefix on <code class="inline">-p</code> is what keeps this equivalent to a loopback
-bind. Writing <code class="inline">-p 4123:4123</code> instead publishes an unauthenticated trace browser
-to every host that can reach the machine. The command cannot enforce that
-prefix; you must write it. The user mapping preserves access to the
-mounted project's owner-only artifacts; do not run this form from a root shell.</p><h3 id="watch-and-launch-live-runs">Watch and launch live runs</h3><p>A Kernel run reports to the Live tab when <code class="inline">PTC_VIEWER_URL</code> names the Viewer:</p><pre><code class="console language-console">PTC_VIEWER_URL=http://127.0.0.1:4123 ptc run ptc.json</code></pre><p>The reporter is best-effort and does not alter the run result. Frames are
-correlated to their owning run, and the terminal frame is published only after
-provider cleanup and trace-event finalization establish the actual
-outcome. A timeout failure names the binding limit, its configured duration,
-and the manifest key that raises it, in both the launch diagnostic and the
-ended Live card; for example, <code class="inline">parallel_timeout_ms limit 60000 ms was exceeded during execution; raise limits.parallel_timeout_ms in the manifest, and the installed host ceiling if it is lower</code>. Mission
-sessions currently show their bounded command-output tail in the launch panel
-instead of streaming frames.</p><p>An ended workflow card offers <strong>View result</strong>. That action captures a fresh,
-internally consistent trace snapshot, confirms that the matching run exists,
-and then opens its detail view in the Runs tab. The Viewer therefore does not
-need to be restarted after a run it launched.</p><p>The ordinary project command also configures the Live project details and one
-fixed launch target from that same project document. The browser may edit
-workflow input or choose one declared mission, but it cannot choose a project,
-manifest, working directory, or command:</p><pre><code class="console language-console">ptc viewer ptc-project.json --env-file .env</code></pre><p>Viewer-launched workflow cards use the manifest label and workflow entry as
-their human-facing title, while retaining the <code class="inline">cmd-...</code> value as the stable run
-identifier. The Live tab and <code class="inline">GET /api/live/runs</code> list newest first, and each
-card shows when the Viewer first saw that run, so an edited ceiling cannot be
-read off an older card as a stale enforcement.</p><p>The command is already a long-running PtcRunner host, so Viewer-started work
-runs inside that BEAM instance under the ordinary execution-session owner. A
-host-injected adapter receives a semantic workflow or mission request and a
-direct live-frame sink; no <code class="inline">mix</code> or <code class="inline">ptc</code> child process is started. The adapter
-dispatches the named project through the same command engine, so its host,
-environment, and artifact defaults remain authoritative.</p><p>Live browser reads require a page opened at <code class="inline">localhost</code>, <code class="inline">127.0.0.1</code>, or
-<code class="inline">::1</code>; mutations additionally require the page's same-origin nonce. A reporter
-connecting from a non-loopback address must send the configured token through
-<code class="inline">PTC_VIEWER_TOKEN</code>. Generate a new value for each Viewer process, for example
-with <code class="inline">openssl rand -hex 32</code>.</p><p>When a host-published port makes the browser's network peer non-loopback, open
-the Live tab once with the same token:</p><pre><code class="text language-text">http://localhost:4123/?live_token=THE_TOKEN#/live</code></pre><p>The page removes the query parameter after bootstrapping and authenticates all
-Live API reads and mutations with the token. The SSE stream carries it in its
-own encoded query because the browser EventSource API cannot set headers.</p><p>For Docker, keep the Viewer bound to <code class="inline">0.0.0.0</code> <em>inside</em> the container and keep
-the published host port on loopback. Viewer-started runs report directly inside
-the container process. A separately started run in the same container can
-report over container loopback. A host-side run can use
-<code class="inline">PTC_VIEWER_URL=http://127.0.0.1:4123</code>; another container must instead use the
-Viewer container's service name on a shared Docker network (for example,
-<code class="inline">PTC_VIEWER_URL=http://viewer:4123</code>) or an explicitly configured host-gateway
-address. Both must set the matching <code class="inline">PTC_VIEWER_TOKEN</code>. This protects live
-ingestion and browser mutations; it does not turn the trace browser into an
-authenticated remote service, so <code class="inline">-p 4123:4123</code> remains unsafe.</p><h2 id="test-a-workflow">Test a workflow</h2><p>Use deterministic fixtures for normal tests. Assert the business value and
+provider and follows typed evidence links with the shipped <code class="inline">debug.nav</code> prelude.</p><h2 id="browse-traces-in-the-viewer">Browse traces in the Viewer</h2><pre><code class="console language-console">ptc viewer PROJECT.json [--port PORT] [--listen ADDRESS] [--env-file FILE]</code></pre><p>The Viewer opens captured traces and watches or launches live runs for one
+project. See the <a href="/reference/viewer/">Viewer reference</a> for its display, startup,
+exposure, authentication, and live-reporting contract.</p><h2 id="test-a-workflow">Test a workflow</h2><p>Use deterministic fixtures for normal tests. Assert the business value and
 semantic error classification, not timestamps, run references, or remaining
 milliseconds.</p><p>One shell-level check can use the stable envelope:</p><pre><code class="console language-console">ptc init kernel-tutorial --example kernel-tutorial
 artifact_dir=&quot;$(mktemp -d)&quot;
@@ -575,7 +537,7 @@ path; the <a href="/guides/quickstart/">Quickstart</a> keeps one deliberately sm
 application boundary these commands enforce.</li><li><a href="/reference/host-installation/">Host configuration</a> defines provider installation.</li><li><a href="/guides/building-agents/">Building agents</a> explains the agent policy producing
 the runs.</li></ul>
 </article>
-<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/mcp/">&larr; MCP reference</a><a class="pager-next" href="/reference/repl/">REPL reference &rarr;</a></nav>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/mcp/">&larr; MCP reference</a><a class="pager-next" href="/reference/viewer/">Viewer reference &rarr;</a></nav>
 <footer>
   Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/reference/cli.md">Edit this
   page on GitHub</a>.

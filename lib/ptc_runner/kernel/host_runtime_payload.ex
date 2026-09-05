@@ -92,6 +92,18 @@ defmodule PtcRunner.Kernel.HostRuntimePayload do
   def resolve_credentials(_payload, _names), do: {:error, :invalid_host_runtime_payload}
 
   @doc false
+  @spec any_environment_credential?(t(), [binary()]) :: boolean()
+  def any_environment_credential?(%__MODULE__{} = payload, names) when is_list(names) do
+    with_host(payload, fn host ->
+      Enum.any?(names, fn name ->
+        match?({:ok, %{source: :env}}, Map.fetch(host.credentials, name))
+      end)
+    end) == true
+  end
+
+  def any_environment_credential?(_payload, _names), do: false
+
+  @doc false
   @spec oauth_authorities(t(), [binary()]) :: {:ok, map()} | {:error, term()}
   def oauth_authorities(%__MODULE__{} = payload, selected_names) when is_list(selected_names),
     do: with_host(payload, &HostInstallation.owner_call(&1, {:oauth_authorities, selected_names}))
