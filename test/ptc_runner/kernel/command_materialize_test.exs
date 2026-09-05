@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.CommandMaterializeTest do
   use ExUnit.Case, async: false
 
+  alias PtcRunner.Kernel.CommandApplicationDiagnostic
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandEntry
   alias PtcRunner.Kernel.CommandMaterialize
@@ -507,6 +508,82 @@ defmodule PtcRunner.Kernel.CommandMaterializeTest do
     refute File.exists?(exported)
   end
 
+  @tag :tmp_dir
+  test "an --out directory is usable wherever the operator owns it", %{tmp_dir: dir} do
+    root = Path.join(dir, "app")
+    File.mkdir!(root)
+    manifest = write_application(root)
+    authored = Path.join(dir, "authored.clj")
+    File.write!(authored, @authored)
+
+    # `.hidden` leads with a dot and `Upper` carries an uppercase letter, so
+    # neither spells a portable application logical name; `regular` does, and
+    # `outside` is not under the application root at all. The grammar decides
+    # how a descriptor is read, never whether the destination is usable.
+    for parent <- [".hidden", "Upper", "regular"], out = Path.join([root, parent, "helper"]) do
+      File.mkdir!(Path.dirname(out))
+
+      assert {:ok, outcome} = materialize(manifest, out, authored)
+      assert outcome.envelope["result"]["mode"] == "candidate"
+      assert File.read!(Path.join(out, "candidate.clj")) == @authored
+      assert descriptor_runs?(manifest, out)
+    end
+
+    outside = Path.join([dir, "outside", "helper"])
+    File.mkdir!(Path.dirname(outside))
+
+    assert {:ok, outcome} = materialize(manifest, outside, authored)
+    assert outcome.envelope["result"]["mode"] == "candidate"
+    assert descriptor_runs?(manifest, outside)
+  end
+
+  @tag :tmp_dir
+  test "an --out destination outside the grammar keeps every other refusal", %{tmp_dir: dir} do
+    root = Path.join(dir, "app")
+    File.mkdir!(root)
+    manifest = write_application(root)
+    authored = Path.join(dir, "authored.clj")
+    File.write!(authored, @authored)
+
+    missing = Path.join([root, ".hidden", "absent", "helper"])
+    assert {:error, outcome} = materialize(manifest, missing, authored)
+    assert outcome.envelope["error"]["code"] == "candidate_destination_parent_missing"
+
+    permissive = Path.join(root, ".Loose")
+    File.mkdir!(permissive)
+    File.chmod!(permissive, 0o777)
+    assert {:error, outcome} = materialize(manifest, Path.join(permissive, "helper"), authored)
+    assert outcome.envelope["error"]["code"] == "candidate_destination_parent_unsafe"
+
+    taken = Path.join([root, ".hidden", "helper"])
+    File.mkdir_p!(taken)
+    assert {:error, outcome} = materialize(manifest, taken, authored)
+    assert outcome.envelope["error"]["code"] == "candidate_destination_exists"
+
+    refused = Path.join([root, ".hidden", "refused"])
+    File.write!(authored, String.replace(@authored, ~S|{:signature "(n :int) -> :int"}|, ""))
+    assert {:error, outcome} = materialize(manifest, refused, authored)
+    assert outcome.envelope["error"]["code"] == "candidate_refused"
+    refute File.exists?(refused)
+  end
+
+  test "a gate that refuses the published descriptor renders as an application diagnostic" do
+    # The gate re-acquires through the descriptor materialize just wrote, so a
+    # base edited between the two acquisitions refuses there. Sealing this pair
+    # is what keeps that outcome out of `internal/internal_error`.
+    diagnostic =
+      CommandApplicationDiagnostic.project(
+        :materialize,
+        {:source_role, :component_override, :override_base_hash_mismatch}
+      )
+
+    outcome =
+      CommandOutcome.error(:materialize, "cmd-00000000000000000000000001", diagnostic)
+
+    assert outcome.envelope["error"]["phase"] == "application"
+    assert outcome.envelope["error"]["code"] == "override_invalid"
+  end
+
   test "sealed materialize success requires an absolute destination" do
     run_ref = "cmd-00000000000000000000000001"
 
@@ -523,6 +600,34 @@ defmodule PtcRunner.Kernel.CommandMaterializeTest do
         "directory" => "candidate"
       })
     end
+  end
+
+  defp materialize(manifest, out, authored) do
+    CommandEngine.dispatch([
+      "materialize",
+      manifest,
+      "--workflow",
+      "--component",
+      "helper",
+      "--out",
+      out,
+      "--source",
+      authored
+    ])
+  end
+
+  # A destination `materialize` accepts must still be one `run` can load the
+  # descriptor from; the two agreeing is the point of the rule.
+  defp descriptor_runs?(manifest, out) do
+    assert {:ok, outcome} =
+             CommandEngine.dispatch([
+               "run",
+               manifest,
+               "--component-override-descriptor",
+               Path.join(out, "descriptor.json")
+             ])
+
+    outcome.envelope["status"] == "ok"
   end
 
   defp write_application(dir) do

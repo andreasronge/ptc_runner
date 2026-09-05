@@ -259,7 +259,10 @@ from a source checkout) exports installed source with <code class="inline">--sou
 publishes a gated candidate with <code class="inline">--source</code>/<code class="inline">--out</code>, as shown in
 <a href="/guides/components-and-preludes/#change-the-prompt-on-a-run">Inspect and customize components</a>.</p><p>Both <code class="inline">ptc validate</code> and <code class="inline">ptc run</code> accept the descriptor switch. Validation
 compiles and checks the replacement without provider acquisition; running uses
-the same verified candidate in the immutable workflow or mission bundle.</p><h2 id="read-results-and-failures">Read results and failures</h2><p>A successful normal run prints the compact JSON result value. A private run
+the same verified candidate in the immutable workflow or mission bundle.</p><p>Keep the descriptor in any directory you own, under the application or outside
+it, and under any directory name. A name outside the portable logical-name
+grammar — a leading dot, an uppercase segment — restricts neither
+<code class="inline">ptc materialize --out</code> nor <code class="inline">--component-override-descriptor</code>.</p><h2 id="read-results-and-failures">Read results and failures</h2><p>A successful normal run prints the compact JSON result value. A private run
 does not print its value. The V4 envelope records the result class, artifact
 states, bounded usage, retained-memory counts, and the closed diagnostic when
 one exists.</p><p>Capability failures normally enter PTC-Lisp as recoverable envelopes so the

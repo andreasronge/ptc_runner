@@ -613,6 +613,41 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
   end
 
   @tag :tmp_dir
+  test "an in-root descriptor loads under any directory name", %{tmp_dir: directory} do
+    candidate = @source <> "\n(def candidate true)"
+    descriptor = override_descriptor(@source, candidate)
+
+    # `.private` leads with a dot and `Candidates` carries an uppercase letter,
+    # so neither relative path spells a portable logical name. The logical-name
+    # grammar decides how the descriptor is read, not whether the operator may
+    # keep it there: `outside` sits above the root and always loaded.
+    documents =
+      Enum.reduce(
+        [".private", "Candidates", "reviews"],
+        fixture_documents(),
+        fn parent, documents ->
+          documents
+          |> Map.put(Path.join(parent, "override.json"), descriptor)
+          |> Map.put(Path.join(parent, "candidate.clj"), candidate)
+        end
+      )
+
+    root = Path.join(directory, "app")
+    manifest_path = write_documents(root, documents)
+    write_documents(Path.join(directory, "outside"), %{"override.json" => descriptor})
+    File.write!(Path.join([directory, "outside", "candidate.clj"]), candidate)
+
+    expected = ComponentOverride.hash(candidate)
+
+    for parent <- [".private", "Candidates", "reviews", "../outside"] do
+      assert {:ok, package, _input} =
+               acquire_override(manifest_path, Path.join([root, parent, "override.json"]))
+
+      assert [%{"source_hash" => ^expected}] = package.component_overrides
+    end
+  end
+
+  @tag :tmp_dir
   test "nested override references resolve identically in both adapters", %{tmp_dir: directory} do
     descriptor =
       Jason.encode!(%{
@@ -852,6 +887,12 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
 
   defp override_descriptor(base, candidate) do
     override_descriptor("app", base, candidate)
+  end
+
+  defp acquire_override(manifest_path, descriptor_path) do
+    ApplicationPackage.acquire_directory(manifest_path,
+      component_override_descriptor: descriptor_path
+    )
   end
 
   defp override_descriptor(component_id, base, candidate) do

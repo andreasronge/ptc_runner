@@ -5557,7 +5557,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
        )},
       {{:doctor, :connect},
        diagnostic_for_row(DiagnosticCatalog.fetch!(:result_cleanup, :result_invalid))},
-      {:validate, diagnostic_for_row(DiagnosticCatalog.fetch!(:application, :override_invalid))},
+      # `doctor` accepts no `--component-override-descriptor`, so it is the
+      # static mode that can never be told an override is invalid; `validate`
+      # and `materialize` both acquire through one and render the code.
+      {:doctor, diagnostic_for_row(DiagnosticCatalog.fetch!(:application, :override_invalid))},
       {:validate,
        diagnostic_for_row(DiagnosticCatalog.fetch!(:application, :event_identity_conflict))},
       {:help, diagnostic_for_row(DiagnosticCatalog.fetch!(:arguments, :conflicting_arguments))}
@@ -9129,6 +9132,35 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                "kind" => "component_override",
                "name" => "component-override.json"
              }
+    end
+  end
+
+  @tag :tmp_dir
+  test "validate reports a refused override descriptor like run does", %{tmp_dir: directory} do
+    application = write_application(directory, "validate-override", valid_manifest())
+    digest = "sha256:" <> String.duplicate("0", 64)
+    descriptor = Path.join(directory, "stale-override.json")
+
+    File.write!(
+      descriptor,
+      Jason.encode!(%{
+        "target" => %{"environment" => "workflow"},
+        "component_id" => "INVALID",
+        "base_source_hash" => digest,
+        "source_hash" => digest,
+        "path" => "candidate.clj"
+      })
+    )
+
+    for command <- ["validate", "run"] do
+      outcome =
+        assert_error(
+          [command, application, "--component-override-descriptor", descriptor],
+          "application",
+          "override_invalid"
+        )
+
+      assert outcome.envelope["error"]["path"] == "/component_id"
     end
   end
 

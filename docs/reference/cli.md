@@ -270,6 +270,11 @@ Both `ptc validate` and `ptc run` accept the descriptor switch. Validation
 compiles and checks the replacement without provider acquisition; running uses
 the same verified candidate in the immutable workflow or mission bundle.
 
+Keep the descriptor in any directory you own, under the application or outside
+it, and under any directory name. A name outside the portable logical-name
+grammar — a leading dot, an uppercase segment — restricts neither
+`ptc materialize --out` nor `--component-override-descriptor`.
+
 ## Read results and failures
 
 A successful normal run prints the compact JSON result value. A private run

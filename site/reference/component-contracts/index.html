@@ -193,7 +193,11 @@ neither you nor root, is <code class="inline">source_out_parent_unsafe</code> or
 <code class="inline">candidate_destination_parent_unsafe</code>; an existing destination remains
 <code class="inline">source_out_destination_exists</code> or <code class="inline">candidate_destination_exists</code>. Create the
 parent with <code class="inline">mkdir -p</code>, restrict it with <code class="inline">chmod go-w</code>, or choose a path you
-own, and rerun.</p><p>Candidate mode keeps the existing 1 MiB replacement bound. Installed
+own, and rerun.</p><p>The directory's name is not part of that rule. A leading dot
+(<code class="inline">.private/candidate</code>) or an uppercase segment (<code class="inline">Candidates/agent-prompt</code>) is
+as usable as <code class="inline">review/candidate</code>, inside the application or outside it: the
+portable logical-name grammar names application documents and does not
+constrain where you keep a candidate.</p><p>Candidate mode keeps the existing 1 MiB replacement bound. Installed
 inspection and <code class="inline">--source-out</code> can return a larger accepted component; submitting
 those bytes as a candidate is refused with the existing too-large diagnostic.
 <code class="inline">--from-result</code> reads one string through an RFC 6901 pointer instead of
@@ -211,7 +215,11 @@ descriptor contains the replacement instruction, not the source itself:</p><pre>
   &quot;path&quot;: &quot;candidate.clj&quot;
 }</code></pre><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Field</th><th style="text-align: left;">Meaning</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">target</code></td><td style="text-align: left;">The workflow bundle, or one exact mission bundle</td></tr><tr><td style="text-align: left;"><code class="inline">component_id</code></td><td style="text-align: left;">An already-selected component whose source will be replaced</td></tr><tr><td style="text-align: left;"><code class="inline">base_source_hash</code></td><td style="text-align: left;">Hash of the installed source the candidate was derived from</td></tr><tr><td style="text-align: left;"><code class="inline">source_hash</code></td><td style="text-align: left;">Hash of the candidate source bytes</td></tr><tr><td style="text-align: left;"><code class="inline">path</code></td><td style="text-align: left;">Candidate source path relative to the descriptor directory</td></tr><tr><td style="text-align: left;"><code class="inline">provenance</code></td><td style="text-align: left;">Optional claims about how the candidate was authored</td></tr></tbody></table></div><p>For a mission component, use
 <code class="inline">{&quot;environment&quot;: &quot;mission&quot;, &quot;mission&quot;: &quot;reader&quot;}</code> as the target. The
-candidate path is confined to the descriptor directory. PtcRunner verifies
+candidate path is confined to the descriptor directory. A descriptor under the
+application root whose relative path also spells a portable logical name is
+read through the confined application source; every other descriptor is read
+from its filesystem path. That choice decides only how the bytes are read, and
+never whether the directory is usable. PtcRunner verifies
 both hashes before compiling: <code class="inline">source_hash</code> prevents substituted candidate
 bytes, while <code class="inline">base_source_hash</code> rejects a candidate built for a component that
 has since changed. The source is read once, and those verified bytes are the
