@@ -435,15 +435,18 @@ from a wrong component. A live model given that earlier capture correctly
 refused to name a component for exactly this reason. What a run generates is
 what a later run can prove.
 
-Confirming the diagnosis is a separate step: edit `target/pricing.rule.clj`,
-remove the stale capture, and rerun the target.
+Confirming the diagnosis is a separate step: materialize a proposed component
+with `ptc materialize --from-result`, then rerun with its
+`--component-override-descriptor`. Keep the failed capture so the proposal
+remains tied to its original evidence. The example README walks repair,
+independent validation, and reuse on another task.
 
 ## Let a model do the walking
 
 The same mission works for an agent. `debugger-agent/` in the example replaces
-the deterministic walk with the shipped agent loop over the same authority. It
-is the one part of the example that needs a credential, named on the command
-line so no environment file has to live inside the example directory:
+the deterministic walk with the shipped agent loop over the same authority. Like the repair agent, it
+needs a credential, named on the command line so no environment file has to
+live inside the example directory:
 
 ```console
 ptc run debug-a-failed-run/debugger-agent.ptc-project.json --env-file .env
@@ -477,7 +480,7 @@ explicit decision so an abstention is a first-class answer rather than an empty
 diagnosis slot:
 
 ```json
-"input": {"value": {"task": "...", "agent": {"max_turns": 14, "mission": "evidence"}}},
+"input": {"value": {"task": "...", "agent": {"max_turns": 20, "mission": "evidence"}}},
 "contracts": {"result_schema": {"path": "report.schema.json"}}
 ```
 
@@ -485,50 +488,88 @@ The agent loop runs inside one workflow evaluation, so `workflow_timeout_ms`
 must cover every model turn, not one call. Its installed default of 30 s ends a
 multi-turn investigation mid-flight; the example raises the host ceiling and
 the manifest together.
+The example also requests `normal_event_count: 1024` so trace capture has
+headroom for its 20-turn investigation. Raising the turn budget alone does not
+raise the event budget.
+
+### Improve the debugging workflow itself
+
+`run-self-improvement.sh` in the materialized example runs a seeded workflow
+repair followed by application diagnosis and repair. It requires an OpenRouter
+environment file and uses the model configured in `self-host.json` and
+`self-improver-host.json`.
+
+| Stage | Application | Evidence and result |
+| --- | --- | --- |
+| Capture the debugging failure | `self-debugger.ptc.json` | `debug.start/context` selects the first relationship without checking its kind or state; this intentional defect stops initial navigation. |
+| Propose a helper repair | `self-improver.ptc.json` | An agent navigates the debugging workflow's capture and edits only its `debug.start` component. |
+| Check the helper | `self-check.ptc.json` | The candidate's source page must equal a page reached through a complete referenced-source relationship. Two projects exercise different application captures without model calls. |
+| Diagnose the application | `self-debugger.ptc.json` with the helper override | Initial evidence seeds the agent; the agent still reads dependencies and source to establish a diagnosis. |
+| Propose an application repair | `self-repair.ptc.json` | A separate agent receives the diagnosis as untrusted evidence and checks it against the application's structural incident packet. |
+| Validate the application | `target.ptc-project.json` with the application override | The original workflow checks three inputs, including two absent from the failed capture. |
+
+The script creates its output directories because example initialization omits
+empty directories. It stops on an unexpected exit, an unmaterializable proposal,
+a failed helper check, an investigation without a diagnosis, or a failed
+application case. Candidates are selected through override descriptors; the
+installed source and failure captures remain unchanged. The intentional helper
+defect makes the demonstration repeatable; it is not a newly discovered defect
+in the shipped `debug.nav` library.
+
+The example's `repair.edit/propose` function accepts a run ID, a target map,
+exact before/after edits, a cause, and evidence strings. It reads one frozen
+component through `debug.nav`, requires every before fragment to occur exactly
+once, and assembles the complete candidate and source hash from that record.
+The target names the component, environment, function, and mission when needed.
+Absent, repeated, empty, or unchanged fragments return `edit_error` for
+correction. A successful proposal completes through `repair.terminal/propose`.
+This avoids asking the model to reproduce hashes or unchanged source. It does
+not establish that the edit is correct: materialization and independent checks
+remain required. `self-repair` grants navigation to its synthesis mission so
+this helper can read the selected immutable source.
+
+This is one bounded improvement cycle. It does not install a global prelude,
+change model weights, or repeatedly adopt candidates without a host policy.
 
 ### What to expect
 
-Four limits showed up repeatedly while this example was built against a live
-model, and all four are worth designing around.
+The example's self-improvement path repairs a navigation helper, then runs an
+agent investigation and a separately validated application repair. The original
+packet-based repair and deterministic walk remain available as smaller paths.
+`debugger-agent-ambiguous.ptc-project.json` and
+`debugger-agent-workflow-control.ptc-project.json` select the other two captures
+without changing the navigation prompt.
 
-**Traversal beats budget.** Told only to "read the boundary error", the model
-looped on the public `activity` collection for eight turns and never reached
-`execution_errors`. Naming the collections and the intended order — API
-vocabulary, not answer hints — moved it onto the typed relationships
-immediately. Generic navigation authority does not imply a generic traversal
-plan.
+**Start with a traversal plan, then follow the evidence.** The navigation task
+starts with errors, generated programs, and their frozen source relationships.
+A dependency leaf is not a reason to stop. The workflow connects mission
+results and authors their programs; its frozen source may explain a failure
+that no mission dependency does. Stop when the evidence supports an attribution
+or identifies what remains undetermined. A turn limit means the investigation
+is unfinished.
 
-**Available tools postpone conclusions.** With the evidence chain fully read by
-turn 7, the model spent its remaining turns re-reading unrelated collections.
-An explicit stopping rule in the task fixed it. Treat an exhausted turn limit
-as an unfinished investigation, not an absent cause.
+**Separate a mismatch from its cause.** Two components may each account for a
+wrong total. Without a contract that distinguishes them, the correct report is
+`insufficient-evidence`, even when all sources have been read. The example's
+result contract requires a component for `diagnosed` and omits it for an
+abstention. That enforces report shape, not causal correctness.
 
-**Report shape is a separate failure mode.** One run reached the right evidence
-and returned a report missing a single required field. The bounded contract
-feedback named exactly that field; the model resumed exploring instead of
-correcting. Stating the contract's fields in the task removed the problem.
+**Validate the proposed behavior independently.** A source hash or a matching
+excerpt can establish grounding in captured source. Neither proves that the
+source caused the failure. A successful rerun of the observed task can also
+be a memorized answer. The repair example ships host-owned suites whose inputs
+are absent from the incident packet, plus a fresh task for reusing the same
+candidate. Suite execution currently uses the checkout-only `mix ptc.repair`;
+standalone `ptc materialize` and `ptc run` support explicit candidate trials.
+The example README gives both paths. Acceptance criteria stay outside the
+candidate, so removing its own failure check does not make a wrong result pass.
 
-**What the run generated decides what the debugger can prove.** Against the
-current capture, whose generated program carries both the order and the
-required total, the live model traced the branching chain and correctly named
-`pricing.rule`, citing that `pricing.base` returns the subtotal unchanged while
-the rule adds 2. Against an earlier capture whose program referenced
-`data/params` instead of the literal order, the same configuration correctly
-returned `insufficient-evidence`, reasoning that without the input value a
-wrong input and a wrong component are indistinguishable. Both answers were
-right about their own evidence.
-
-**A contract-valid report is still not a correct one.** A third run returned a
-confident `diagnosed` report whose evidence lines were all accurate and
-genuinely read, and whose conclusion was wrong — it blamed the component that
-never calls the unused decoy. Nothing in the substrate could have prevented
-that, because the substrate deliberately does not choose a diagnosis. Treat a
-single sample as one opinion.
-
-That is the reason this layer stops where it does. Where a claim is
-mechanically testable, test it: apply the proposed change and run it against
-host-owned cases before believing it. The model may diagnose and author;
-whether a change is accepted stays with the host.
+**Preserve the distinction between repair and adoption.** The example retains a
+candidate descriptor and selects it explicitly on later runs. It does not
+rewrite its installed source or automatically adopt changes. Repeated
+self-improvement would additionally require a host policy for validation,
+adoption, and later regression checks. Passing a small suite establishes only
+those tested behaviors.
 
 ## Scope and limits
 
@@ -541,10 +582,9 @@ This substrate is structural navigation, not automatic debugging:
   produced no program leaves nothing to walk;
 - host validation, not a model report, decides whether a repair is accepted.
 
-The one shape it demonstrably covers is a complete single-call failure whose
-relevant source lies inside the called component's dependency closure.
-Discovery outside that closure, and repair of nonlocal or weakly specified
-defects, are not established.
+The supplied cases exercise a dependency defect, a workflow-routing defect,
+and an underdetermined mismatch. Success remains specific to the evidence
+visited and the inputs validated; broader failures require their own checks.
 
 ## Next steps
 

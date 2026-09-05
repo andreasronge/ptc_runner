@@ -27,8 +27,9 @@ checkout-only. It is listed at the end of this page.
 
 ## How an example tree is laid out
 
-Every runnable step is a pair: a project document beside a directory of the
-same name.
+Most numbered steps pair a project document with a directory of the same name.
+The self-improvement workflow shares component files through manifests at the
+example root; its script creates the artifact directories before running.
 
 ```
 kernel-tutorial/
@@ -98,8 +99,10 @@ The `reader` mission holds only a read tool over one directory and the
 in either mission cannot reach the other's authority. It is the runnable form
 of a write kept behind its own mission.
 
-`debug-a-failed-run` pairs a failing target with the debuggers that read its
-evidence. `target.ptc-project.json` fails on purpose;
+`debug-a-failed-run` includes `run-self-improvement.sh`: a seeded debugging
+workflow failure, an agent-proposed helper repair, checks against two captures,
+an application investigation, and an application repair checked on three inputs.
+The same tree retains the individual debuggers and packet-based repair path. `target.ptc-project.json` fails on purpose;
 `debugger.ptc-project.json` walks the evidence deterministically and
 `debugger-agent.ptc-project.json` walks it with a model.
 `repair-agent.ptc-project.json` extends the incident into a phased agent run

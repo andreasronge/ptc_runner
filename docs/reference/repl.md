@@ -16,8 +16,9 @@ environments deliberately separate:
 | Private catalog profile | `--profile private-run-catalog-v1` | fixed code-owned mission | safe metadata from bounded trace and inspection probes |
 
 Successful definitions and exact `*1`, `*2`, and `*3` history persist for one
-command. A failed form preserves the previously committed state. Profile and
-manifest modes are mutually exclusive because they carry different authority.
+command. A failed form preserves the previously committed state. Explicit
+`--manifest` and profile modes are mutually exclusive. A profile may use
+`--project` to derive capture directories without loading the application.
 
 All three modes render successful values with the same bounded structural
 preview used for model observations. Collection items, nesting, nodes, strings,
@@ -71,8 +72,10 @@ ptc repl --project ptc-project.json -e '(workflow/helper data/input)'
 
 `--project` supplies the project's application, host, and lazy environment
 defaults while preserving the manifest REPL input grammar. It conflicts with
-`--manifest`, `--profile`, and `--describe-profile`; an explicit
-`--host-config` or `--env-file` overrides the matching project reference.
+`--manifest` and `--describe-profile`; an explicit `--host-config` or
+`--env-file` overrides the matching project reference. With `--profile`, the
+project supplies artifact directories instead of application authority, as
+described under [Query public traces](#query-public-traces).
 
 A provider-bearing manifest requires `--host-config`. The session performs the
 same audited-local checks, acquires one provider session, and reuses it for
@@ -792,7 +795,8 @@ ptc repl \
 ```
 
 `--output` and `--private-output` may atomically publish the value of exactly
-one non-interactive public or private profile evaluation. They do not replace
+one non-interactive public or private profile `-e`/`--eval` evaluation. Script
+and stdin inputs do not support these output switches. They do not replace
 existing files.
 
 ## Next steps

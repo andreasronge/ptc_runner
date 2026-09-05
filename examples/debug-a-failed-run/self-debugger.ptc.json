@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "id": "self.debugger",
+        "path": "self-debugger/main.clj",
+        "dependencies": [
+          "agent.core",
+          "kernel"
+        ]
+      },
+      {
+        "library": "agent.core"
+      },
+      {
+        "library": "kernel"
+      }
+    ],
+    "entry": "self.debugger/run"
+  },
+  "missions": {
+    "evidence": {
+      "components": [
+        {
+          "library": "debug.nav"
+        },
+        {
+          "id": "debug.start",
+          "path": "self-debugger/debug.start.clj",
+          "dependencies": [
+            "debug.nav"
+          ]
+        }
+      ],
+      "providers": [
+        "debug.nav",
+        "failed-run-traces"
+      ]
+    }
+  },
+  "contracts": {
+    "result_schema": {
+      "path": "debugger-agent/report.schema.json"
+    }
+  },
+  "input": {
+    "value": {
+      "task": "Investigate the failed application using the initial context and evidence navigation. Read generated code, follow complete source relationships and relevant dependency branches, and inspect workflow source when needed. Explain the violated requirement and identify the faulty component only when the evidence supports it. An assertion mismatch alone does not establish which implementation is wrong. Return decision, cause, evidence, and component_id only for a diagnosis. Use diagnosed for an established contract violation; otherwise use insufficient-evidence and explain the missing requirement.",
+      "agent": {
+        "max_turns": 20,
+        "mission": "evidence",
+        "max_observation_chars": 8192
+      }
+    }
+  },
+  "providers": {
+    "workflow": [
+      {
+        "name": "deepseek"
+      }
+    ],
+    "mission": [
+      {
+        "name": "debug.nav"
+      },
+      {
+        "name": "failed-run-traces",
+        "config": {
+          "expose": false
+        }
+      }
+    ]
+  },
+  "limits": {
+    "run_duration_ms": 600000,
+    "workflow_timeout_ms": 540000,
+    "evaluation_timeout_ms": 480000,
+    "normal_event_count": 1024
+  },
+  "events": {
+    "policy": "private"
+  },
+  "labels": {
+    "name": "debug-a-failed-run-agent",
+    "tags": {
+      "mode": "agent"
+    }
+  }
+}

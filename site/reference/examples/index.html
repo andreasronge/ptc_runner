@@ -62,7 +62,7 @@ follows, and the aspect each one demonstrates.">
 <li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
 <li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
 <li><a href="/guides/inspecting-source-and-programs/">Inspect source and generated programs</a></li>
-<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Improve a debugging workflow</a></li>
 <li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
 </ul>
 
@@ -112,8 +112,9 @@ atomically. The copy is complete: it carries its own application manifests,
 host document, PTC-Lisp sources, and data, plus the same <code class="inline">AGENTS.md</code> routing
 card the scaffold ships and a generated <code class="inline">.env</code> stub when the tree names one.
 Nothing resolves back to a checkout, so the copy runs from wherever you put it.</p><p>One tree, <code class="inline">dabstep-fraud</code>, downloads its dataset before it runs and is
-checkout-only. It is listed at the end of this page.</p><h2 id="how-an-example-tree-is-laid-out">How an example tree is laid out</h2><p>Every runnable step is a pair: a project document beside a directory of the
-same name.</p><pre><code>kernel-tutorial/
+checkout-only. It is listed at the end of this page.</p><h2 id="how-an-example-tree-is-laid-out">How an example tree is laid out</h2><p>Most numbered steps pair a project document with a directory of the same name.
+The self-improvement workflow shares component files through manifests at the
+example root; its script creates the artifact directories before running.</p><pre><code>kernel-tutorial/
   ptc-host.json                     installed providers, shared by the steps
   01-orders.ptc-project.json        the thing you run
   01-orders/
@@ -137,8 +138,10 @@ decisions. Every step selects a provider.</p><div class="table-wrap"><table><the
 The <code class="inline">reader</code> mission holds only a read tool over one directory and the
 <code class="inline">writer</code> mission holds only a write tool over another, so a generated program
 in either mission cannot reach the other's authority. It is the runnable form
-of a write kept behind its own mission.</p><p><code class="inline">debug-a-failed-run</code> pairs a failing target with the debuggers that read its
-evidence. <code class="inline">target.ptc-project.json</code> fails on purpose;
+of a write kept behind its own mission.</p><p><code class="inline">debug-a-failed-run</code> includes <code class="inline">run-self-improvement.sh</code>: a seeded debugging
+workflow failure, an agent-proposed helper repair, checks against two captures,
+an application investigation, and an application repair checked on three inputs.
+The same tree retains the individual debuggers and packet-based repair path. <code class="inline">target.ptc-project.json</code> fails on purpose;
 <code class="inline">debugger.ptc-project.json</code> walks the evidence deterministically and
 <code class="inline">debugger-agent.ptc-project.json</code> walks it with a model.
 <code class="inline">repair-agent.ptc-project.json</code> extends the incident into a phased agent run

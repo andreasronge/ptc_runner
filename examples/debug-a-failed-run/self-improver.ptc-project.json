@@ -1,0 +1,17 @@
+{
+  "kind": "ptc-project",
+  "version": 1,
+  "application": {
+    "path": "self-improver.ptc.json"
+  },
+  "host": {
+    "path": "self-improver-host.json"
+  },
+  "artifacts": {
+    "root": "self-improver/.ptc",
+    "trace": true,
+    "inspection": true,
+    "result": true,
+    "envelope": true
+  }
+}

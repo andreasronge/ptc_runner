@@ -1,55 +1,51 @@
-# Debug a failed run
+# Improve a debugging workflow
 
-Follow a failed run from its immutable trace into private inspection only when
-the trace cannot answer the question.
+Repair a debugging workflow from its failed trace. Then use the improved
+workflow to navigate application code and validate an application repair.
 
-## What failed?
+## Run the example
 
-Start with the trace:
-
-```console
-ptc viewer ptc-project.json
-```
-
-Or query it with the fixed analysis profile:
-
-```console
-ptc repl --project ptc-project.json \
-  --profile run-analysis-v1 \
-  -e '(analysis/runs {"status" "error"})'
-```
-
-Use the run ID to open its activity, terminal reason, evaluations, tool use,
-limits, and completeness flags. Public traces deliberately omit prompts,
-responses, generated source, and tool payloads.
-
-If the run retained private inspection, authorize that profile separately and
-write unattended output to an owner-controlled file. That path is not the
-default. For live attached source, see
-[Inspect source and generated programs](inspecting-source-and-programs.md).
-
-## Can another run inspect the failure?
-
-The checked-in debugging example demonstrates another useful pattern: one
-ordinary PtcRunner application can navigate a frozen failed capture through the
-shipped `debug.nav` library without gaining filesystem, network, model, or
-nested-evaluation access.
+Initialize a fresh example directory:
 
 ```console
 ptc init debug-a-failed-run --example debug-a-failed-run
-ptc run debug-a-failed-run/target.ptc-project.json
-ptc run debug-a-failed-run/debugger.ptc-project.json
 ```
 
-The same example optionally closes the loop: a repair agent proposes a
-complete replacement or abstains, and a later `ptc run` can try that
-candidate through `--component-override-descriptor` without editing a
-file. The README materialized beside the example walks the path.
+This creates the example applications and `run-self-improvement.sh`.
+Run the script with your OpenRouter environment file:
 
-## Where is the complete evidence contract?
+```console
+sh debug-a-failed-run/run-self-improvement.sh /absolute/path/to/.env
+```
 
-Use the [debug-navigation reference](../reference/debug-navigation.md) for the
-complete evidence graph, typed links, collections, resources, pagination,
-private-inspection rules, and model-assisted navigation contract. The
-[TraceLog and run-analysis reference](../maintainers/trace-log-contract.md) owns
-the event schema.
+The script captures two failures, asks an agent to repair its navigation
+helper, checks the helper on two applications, and investigates the original
+application. A second repair step proposes an application edit and tests it on
+three inputs.
+
+A successful run ends with:
+
+```text
+Completed: helper checks, trace navigation, and three application validation cases. Artifacts: self-improvement-results
+```
+
+The helper's starting defect is seeded for the example. Model runs can vary;
+the script stops when a stage fails.
+
+## Read the proposed improvement
+
+Inspect the helper proposal through PTC:
+
+```console
+ptc repl --project debug-a-failed-run/self-improver.ptc-project.json \
+  --profile private-run-analysis-v2 --private-unattended --preview-chars 6000 \
+  -e '(let [r (first (get (analysis/runs {"status" "ok"}) "items"))] (select-keys (get-in (analysis/open (get r "run_id")) ["result" "value"]) ["component_id" "cause" "candidate_source"]))'
+```
+
+This prints the selected component, explanation, and replacement source.
+The example README explains how to inspect the investigation and final repair.
+Candidates and validation results remain in `self-improvement-results`;
+the original source files remain unchanged.
+
+See [debug navigation](../reference/debug-navigation.md) for the workflow stages
+and [components](../reference/component-contracts.md) for candidate checks.

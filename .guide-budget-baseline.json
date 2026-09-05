@@ -44,10 +44,10 @@
       "tics": 0.7
     },
     "docs/guides/debugging-a-failed-run.md": {
-      "words": 247,
-      "density": 1.4,
+      "words": 230,
+      "density": 1.2,
       "blockers": 0,
-      "tics": 0.5
+      "tics": 0.0
     },
     "docs/guides/designing-agent-workflows.md": {
       "words": 677,

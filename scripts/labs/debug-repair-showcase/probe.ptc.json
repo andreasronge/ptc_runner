@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "id": "main",
+        "path": "probe/main.clj",
+        "dependencies": [
+          "kernel"
+        ]
+      },
+      {
+        "library": "kernel"
+      }
+    ],
+    "entry": "main/run"
+  },
+  "missions": {
+    "evidence": {
+      "components": [
+        {
+          "library": "debug.nav"
+        },
+        {
+          "id": "debug.view",
+          "path": "debug.view.clj",
+          "dependencies": [
+            "debug.nav"
+          ]
+        }
+      ],
+      "providers": [
+        "debug.nav",
+        "failed-run-traces"
+      ]
+    }
+  },
+  "providers": {
+    "mission": [
+      {
+        "name": "debug.nav"
+      },
+      {
+        "name": "failed-run-traces",
+        "config": {
+          "expose": false
+        }
+      }
+    ]
+  },
+  "events": {
+    "policy": "private"
+  },
+  "input": {
+    "value": {}
+  }
+}

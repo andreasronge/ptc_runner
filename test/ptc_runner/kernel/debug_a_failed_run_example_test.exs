@@ -39,8 +39,15 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
     assert {target_output, 5} = run(Path.join(example, "target.ptc-project.json"))
     assert target_output =~ "execution/explicit_failure"
 
-    assert {debugger_output, 0} = run(Path.join(example, "debugger.ptc-project.json"))
-    assert Jason.decode!(debugger_output) == %{"artifact_class" => "private", "status" => "ok"}
+    # Mix may write a build-lock notice to the merged diagnostic stream.
+    # The command envelope is the machine-readable boundary, not that stream.
+    envelope_path = Path.join(directory, "debugger-envelope.json")
+
+    assert {_debugger_output, 0} =
+             run(Path.join(example, "debugger.ptc-project.json"), ["--envelope", envelope_path])
+
+    assert %{"command" => "run", "status" => "ok"} =
+             envelope_path |> File.read!() |> Jason.decode!()
 
     evidence = private_result!(Path.join(example, "debugger/.ptc/results"))
 
@@ -217,6 +224,30 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
     end
 
     refute File.exists?(Path.join(directory, "candidate-refused"))
+  end
+
+  test "a diagnosis must name a component, while an abstention must leave attribution open" do
+    schema =
+      @example
+      |> Path.join("debugger-agent/report.schema.json")
+      |> File.read!()
+      |> Jason.decode!()
+
+    assert {:ok, contract} = ValueContract.compile(schema)
+
+    report = %{
+      "decision" => "diagnosed",
+      "cause" => "the workflow routes a different value than the preceding mission returned",
+      "evidence" => ["the generated call and frozen workflow disagree with the workflow contract"]
+    }
+
+    refute ValueContract.valid?(contract, report)
+    assert ValueContract.valid?(contract, Map.put(report, "component_id", "main"))
+    refute ValueContract.valid?(contract, Map.put(report, "component_id", ""))
+
+    abstention = Map.put(report, "decision", "insufficient-evidence")
+    assert ValueContract.valid?(contract, abstention)
+    refute ValueContract.valid?(contract, Map.put(abstention, "component_id", "main"))
   end
 
   test "the repair report contract permits a workflow target without a mission" do
@@ -426,6 +457,67 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
              "reservation_id" => "reservation:order-17",
              "status" => "scheduled"
            }
+
+    # Reuse the exact validated candidate on a task absent from both the
+    # captured incident and validation suite, without changing installed code.
+    next_result = Path.join(directory, "next-order.private.json")
+
+    assert {_output, 0} =
+             run(target, [
+               "--component-override-descriptor",
+               Path.join(out, "descriptor.json"),
+               "--input",
+               Path.join(example, "next-order.json"),
+               "--private-output",
+               next_result
+             ])
+
+    assert Jason.decode!(File.read!(next_result)) == %{
+             "destination" => "east-depot",
+             "reservation_id" => "reservation:order-204",
+             "status" => "scheduled"
+           }
+
+    assert File.read!(Path.join(example, "target-workflow-control/main.clj")) == base
+
+    # A candidate that memorizes the observed answer must not qualify merely
+    # because it returns successfully. Host-owned comparisons catch it.
+    memorized =
+      String.replace(
+        candidate,
+        "(return shipment)",
+        ~S|(return {"destination" "north-depot" "reservation_id" "reservation:order-17" "status" "scheduled"})|
+      )
+
+    report = report_path |> File.read!() |> Jason.decode!()
+    File.write!(report_path, Jason.encode!(Map.put(report, "candidate_source", memorized)))
+    rejected_trial = Path.join(directory, "memorized-trial")
+
+    capture_io(fn ->
+      assert_raise Mix.Error, ~r/validation/, fn ->
+        Repair.run([
+          Path.join(example, "target-workflow-control/ptc.json"),
+          "--report",
+          report_path,
+          "--out",
+          Path.join(directory, "memorized-candidate"),
+          "--validation-suite",
+          Path.join(example, "repair-agent/workflow-control-suite.json"),
+          "--validation-out",
+          rejected_trial,
+          "--allow-live-validation"
+        ])
+      end
+    end)
+
+    rejected = rejected_trial |> Path.join("report.json") |> File.read!() |> Jason.decode!()
+    assert rejected["outcome"] == "fail"
+
+    assert Enum.map(rejected["cases"], &{&1["name"], &1["status"]}) == [
+             {"observed-order", "pass"},
+             {"held-out-order", "fail"},
+             {"held-out-identifiers", "fail"}
+           ]
   end
 
   # The packet builder is deterministic once a capture exists, so its honesty
@@ -542,10 +634,126 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
     assert narrowed["completeness"]["generated_sources_truncated"] == true
   end
 
+  @tag :tmp_dir
+  @tag :nightly
+  @tag timeout: 180_000
+  test "a repaired navigation helper works across application captures without replacing its source",
+       %{tmp_dir: directory} do
+    example = Path.join(directory, "example")
+    File.cp_r!(@example, example)
+
+    assert {_, 5} = run(Path.join(example, "target.ptc-project.json"))
+    assert {_, 5} = run(Path.join(example, "self-check.ptc-project.json"))
+
+    source_path = Path.join(example, "self-debugger/debug.start.clj")
+    source = File.read!(source_path)
+
+    candidate =
+      String.replace(
+        source,
+        ~S|(first (get generated "relationships"))|,
+        ~S|(first (filter #(and (= "complete" (get % "state")) (= "referenced_prelude_source" (get % "rel"))) (get generated "relationships")))|
+      )
+
+    refute candidate == source
+    candidate_path = Path.join(directory, "candidate.clj")
+    File.write!(candidate_path, candidate)
+    output = Path.join(directory, "candidate")
+
+    assert {_, 0} =
+             ptc_command([
+               "materialize",
+               Path.join(example, "self-debugger.ptc-project.json"),
+               "--target-mission",
+               "evidence",
+               "--component",
+               "debug.start",
+               "--source",
+               candidate_path,
+               "--out",
+               output
+             ])
+
+    override = ["--component-override-descriptor", Path.join(output, "descriptor.json")]
+    assert {_, 0} = run(Path.join(example, "self-check.ptc-project.json"), override)
+    assert {_, 5} = run(Path.join(example, "target-workflow-control.ptc-project.json"))
+    assert {_, 0} = run(Path.join(example, "self-check-workflow.ptc-project.json"), override)
+    assert File.read!(source_path) == source
+  end
+
+  @tag :tmp_dir
+  @tag :nightly
+  @tag timeout: 180_000
+  test "exact edits refuse bad fragments and copy the frozen hash and untouched source",
+       %{tmp_dir: directory} do
+    example = Path.join(directory, "example")
+    File.cp_r!(@example, example)
+    assert {_, 5} = run(Path.join(example, "target.ptc-project.json"))
+
+    manifest =
+      example
+      |> Path.join("self-repair.ptc.json")
+      |> File.read!()
+      |> Jason.decode!()
+      |> Map.delete("contracts")
+      |> Map.put("workflow", %{
+        "components" => [
+          %{"id" => "probe", "path" => "probe.clj", "dependencies" => ["kernel"]},
+          %{"library" => "kernel"}
+        ],
+        "entry" => "probe/run"
+      })
+      |> update_in(["providers"], &Map.delete(&1, "workflow"))
+
+    File.write!(Path.join(example, "probe.ptc.json"), Jason.encode!(manifest))
+
+    File.write!(Path.join(example, "probe.clj"), ~S"""
+    (ns probe "Check source edits at the command boundary.")
+    (defn run [_input]
+      (return
+        (kernel/eval "synthesize"
+          (program
+            (let [id (get (first (get (debug.nav/runs {"status" "error"}) "items")) "run_id")
+                  target {"component_id" "pricing.rule" "environment" "mission" "mission_name" "pricing" "function_id" "pricing.rule/apply-standard"}
+                  absent (repair.edit/propose id target [{"before" "ABSENT" "after" "new"}] "test" ["source"])
+                  repeated (repair.edit/propose id target [{"before" "subtotal" "after" "value"}] "test" ["source"])
+                  identical (repair.edit/propose id target [{"before" "same" "after" "same"}] "test" ["source"])]
+              (if (every? #(string? (get % "edit_error")) [absent repeated identical])
+                (repair.edit/propose id target [{"before" "(+ subtotal 2)" "after" "(+ subtotal 20)"}] "test" ["source"])
+                (fail "invalid edit was not refused")))))))
+    """)
+
+    result = Path.join(directory, "proposal.private.json")
+
+    assert {_, 0} =
+             run(Path.join(example, "probe.ptc.json"), [
+               "--host-config",
+               Path.join(example, "self-host.json"),
+               "--private-output",
+               result
+             ])
+
+    assert %{"outcome" => "returned", "value" => proposal} =
+             result |> File.read!() |> Jason.decode!()
+
+    original = File.read!(Path.join(example, "target/pricing.rule.clj"))
+    assert proposal["base_source_hash"] == ComponentOverride.hash(original)
+
+    assert proposal["candidate_source"] ==
+             String.replace(original, "(+ subtotal 2)", "(+ subtotal 20)")
+
+    assert proposal["target_mission"] == "pricing"
+    assert proposal["component_id"] == "pricing.rule"
+  end
+
   defp run(project, extra_args \\ []) do
+    ptc_command(["run", project] ++ extra_args)
+  end
+
+  defp ptc_command(arguments) do
     System.cmd(
       System.find_executable("mix"),
-      ["ptc", "run", project] ++ extra_args,
+      ["ptc" | arguments],
       cd: @root,
       env: [{"MIX_ENV", "test"}, {"MIX_QUIET", "1"}],
       stderr_to_stdout: true
