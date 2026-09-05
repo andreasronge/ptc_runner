@@ -8,12 +8,12 @@
     "failed-run-traces": {
       "source": "ptc_private_trace_snapshot",
       "installation_revision": "failed-run-traces-v1",
-      "directory": "target-workflow-control/.ptc/traces"
+      "directory": "variants/target-workflow-control/.ptc/traces"
     },
     "debug.nav": {
       "source": "ptc_inspection_snapshot",
       "installation_revision": "failed-run-inspection-v1",
-      "directory": "target-workflow-control/.ptc/inspection"
+      "directory": "variants/target-workflow-control/.ptc/inspection"
     },
     "deepseek": {
       "source": "llm",

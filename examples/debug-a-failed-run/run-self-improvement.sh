@@ -37,7 +37,7 @@ echo '3. Check the helper on two different frozen applications, without model ca
 ptc run self-check.ptc-project.json \
   --component-override-descriptor "$results/helper/descriptor.json" \
   --private-output "$results/helper-check.private.json"
-expect_failure target-workflow-control.ptc-project.json
+expect_failure variants/target-workflow-control.ptc-project.json
 ptc run self-check-workflow.ptc-project.json \
   --component-override-descriptor "$results/helper/descriptor.json" \
   --private-output "$results/helper-workflow-check.private.json"

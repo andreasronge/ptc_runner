@@ -107,8 +107,9 @@ keeps the smaller pieces: `target.ptc-project.json` fails on purpose,
 `debugger.ptc-project.json` walks the evidence deterministically,
 `debugger-agent.ptc-project.json` walks it with a model, and
 `repair-agent.ptc-project.json` proposes a replacement component or abstains.
-The `-ambiguous` and `-workflow-control` variants change the failure so the
-same debuggers and repair agent meet a different shape.
+The `variants/` directory holds two other failure shapes, an underdetermined
+mismatch and a workflow-routing defect, so the same debuggers and repair agent
+meet more than one bug.
 
 `llm-replay` serves one recorded model response from `replay.jsonl`. It needs
 no credential and performs no network activity, which makes it the tree to copy

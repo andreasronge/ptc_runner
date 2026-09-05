@@ -146,8 +146,9 @@ keeps the smaller pieces: <code class="inline">target.ptc-project.json</code> fa
 <code class="inline">debugger.ptc-project.json</code> walks the evidence deterministically,
 <code class="inline">debugger-agent.ptc-project.json</code> walks it with a model, and
 <code class="inline">repair-agent.ptc-project.json</code> proposes a replacement component or abstains.
-The <code class="inline">-ambiguous</code> and <code class="inline">-workflow-control</code> variants change the failure so the
-same debuggers and repair agent meet a different shape.</p><p><code class="inline">llm-replay</code> serves one recorded model response from <code class="inline">replay.jsonl</code>. It needs
+The <code class="inline">variants/</code> directory holds two other failure shapes, an underdetermined
+mismatch and a workflow-routing defect, so the same debuggers and repair agent
+meet more than one bug.</p><p><code class="inline">llm-replay</code> serves one recorded model response from <code class="inline">replay.jsonl</code>. It needs
 no credential and performs no network activity, which makes it the tree to copy
 when building a test that must not call a provider.</p><h2 id="the-example-that-needs-a-checkout">The example that needs a checkout</h2><p><a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/dabstep-fraud"><code class="inline">dabstep-fraud</code></a>
 runs three agent loops over 138,236 payment rows and reviews a stage's answer

@@ -138,7 +138,7 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
     example = Path.join(directory, "debug-a-failed-run")
     File.cp_r!(@example, example)
 
-    for artifact <- ~w(target/.ptc debugger/.ptc repair-agent/.ptc target-ambiguous/.ptc) do
+    for artifact <- ~w(target/.ptc debugger/.ptc repair-agent/.ptc variants/target-ambiguous/.ptc) do
       File.rm_rf!(Path.join(example, artifact))
     end
 
@@ -379,15 +379,16 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
     example = Path.join(directory, "debug-a-failed-run")
     File.cp_r!(@example, example)
 
-    for artifact <- ~w(target-workflow-control/.ptc repair-agent-workflow-control/.ptc) do
+    for artifact <-
+          ~w(variants/target-workflow-control/.ptc variants/repair-agent-workflow-control/.ptc) do
       File.rm_rf!(Path.join(example, artifact))
     end
 
-    target = Path.join(example, "target-workflow-control.ptc-project.json")
+    target = Path.join(example, "variants/target-workflow-control.ptc-project.json")
     assert {target_output, 5} = run(target)
     assert target_output =~ "execution/explicit_failure"
 
-    base = File.read!(Path.join(example, "target-workflow-control/main.clj"))
+    base = File.read!(Path.join(example, "variants/target-workflow-control/main.clj"))
 
     candidate =
       String.replace(
@@ -425,7 +426,7 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
     output =
       capture_io(fn ->
         Repair.run([
-          Path.join(example, "target-workflow-control/ptc.json"),
+          Path.join(example, "variants/target-workflow-control/ptc.json"),
           "--report",
           report_path,
           "--out",
@@ -452,11 +453,12 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
                Path.join(out, "descriptor.json")
              ])
 
-    assert private_result!(Path.join(example, "target-workflow-control/.ptc/results")) == %{
-             "destination" => "north-depot",
-             "reservation_id" => "reservation:order-17",
-             "status" => "scheduled"
-           }
+    assert private_result!(Path.join(example, "variants/target-workflow-control/.ptc/results")) ==
+             %{
+               "destination" => "north-depot",
+               "reservation_id" => "reservation:order-17",
+               "status" => "scheduled"
+             }
 
     # Reuse the exact validated candidate on a task absent from both the
     # captured incident and validation suite, without changing installed code.
@@ -478,7 +480,7 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
              "status" => "scheduled"
            }
 
-    assert File.read!(Path.join(example, "target-workflow-control/main.clj")) == base
+    assert File.read!(Path.join(example, "variants/target-workflow-control/main.clj")) == base
 
     # A candidate that memorizes the observed answer must not qualify merely
     # because it returns successfully. Host-owned comparisons catch it.
@@ -496,7 +498,7 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
     capture_io(fn ->
       assert_raise Mix.Error, ~r/validation/, fn ->
         Repair.run([
-          Path.join(example, "target-workflow-control/ptc.json"),
+          Path.join(example, "variants/target-workflow-control/ptc.json"),
           "--report",
           report_path,
           "--out",
@@ -533,11 +535,12 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
     example = Path.join(directory, "debug-a-failed-run")
     File.cp_r!(@example, example)
 
-    for artifact <- ~w(target-workflow-control/.ptc repair-agent/.ptc) do
+    for artifact <- ~w(variants/target-workflow-control/.ptc repair-agent/.ptc) do
       File.rm_rf!(Path.join(example, artifact))
     end
 
-    assert {_output, 5} = run(Path.join(example, "target-workflow-control.ptc-project.json"))
+    assert {_output, 5} =
+             run(Path.join(example, "variants/target-workflow-control.ptc-project.json"))
 
     File.write!(Path.join(example, "repair-agent/probe.clj"), """
     (ns probe "Deterministic packet acquisition entry." {:visibility :prompt})
@@ -587,7 +590,7 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
         "kind" => "ptc-project",
         "version" => 1,
         "application" => %{"path" => "repair-agent/probe-ptc.json"},
-        "host" => %{"path" => "ptc-host-workflow-control.json"},
+        "host" => %{"path" => "variants/ptc-host-workflow-control.json"},
         "artifacts" => %{
           "root" => "repair-agent/.ptc",
           "trace" => true,
@@ -676,7 +679,7 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
 
     override = ["--component-override-descriptor", Path.join(output, "descriptor.json")]
     assert {_, 0} = run(Path.join(example, "self-check.ptc-project.json"), override)
-    assert {_, 5} = run(Path.join(example, "target-workflow-control.ptc-project.json"))
+    assert {_, 5} = run(Path.join(example, "variants/target-workflow-control.ptc-project.json"))
     assert {_, 0} = run(Path.join(example, "self-check-workflow.ptc-project.json"), override)
     assert File.read!(source_path) == source
   end
