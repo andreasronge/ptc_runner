@@ -154,17 +154,20 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
     end
   end
 
-  test "the debug-a-failed-run README walks the standalone executable, not Mix" do
+  test "the debugging README leads to a standalone self-improvement script and walkthrough" do
     assert {:ok, files} = ExampleLibrary.fetch("debug-a-failed-run")
     readme = files["README.md"]
+    script = files["run-self-improvement.sh"]
 
-    refute readme =~ "mix ptc"
-    refute readme =~ "examples/debug-a-failed-run/"
-    assert readme =~ "ptc run debug-a-failed-run/target.ptc-project.json"
-    assert readme =~ "ptc run debug-a-failed-run/repair-agent.ptc-project.json"
-    assert readme =~ "--component-override-descriptor"
-    assert readme =~ "does not prove the candidate"
-    assert readme =~ "ptc docs debugging-a-failed-run"
+    assert readme =~ "sh debug-a-failed-run/run-self-improvement.sh"
+    assert readme =~ "[the annotated walkthrough](WALKTHROUGH.md)"
+    assert is_binary(files["WALKTHROUGH.md"])
+    refute script =~ "mix ptc"
+    assert script =~ "expect_failure target.ptc-project.json"
+    assert script =~ "ptc run self-improver.ptc-project.json"
+    assert script =~ "ptc run self-repair.ptc-project.json"
+    assert script =~ "--component-override-descriptor"
+    assert script =~ "self-debugger/validation/*.json"
   end
 
   @tag :tmp_dir
