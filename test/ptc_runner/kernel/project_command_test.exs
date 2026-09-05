@@ -242,7 +242,7 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     assert presentation.exit_status == CommandFrontend.envelope_failure_exit_status()
     assert presentation.stderr =~ "envelope/destination_parent_unavailable"
     assert presentation.stderr =~ missing
-    assert presentation.stderr =~ "mkdir -p #{missing}"
+    assert presentation.stderr =~ "mkdir -p '#{missing}'"
     refute presentation.stderr =~ "owner-only (0700)"
     refute File.exists?(missing)
   end
@@ -261,8 +261,8 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     presentation = run_project(project_path)
 
     assert presentation.exit_status == CommandFrontend.envelope_failure_exit_status()
-    assert presentation.stderr =~ "#{outer} does not exist"
-    assert presentation.stderr =~ "mkdir -p #{inner}"
+    assert presentation.stderr =~ "#{inspect(outer)} does not exist"
+    assert presentation.stderr =~ "mkdir -p '#{inner}'"
 
     File.mkdir_p!(inner)
     assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project_path])
@@ -283,8 +283,8 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
 
     assert presentation.exit_status == CommandFrontend.envelope_failure_exit_status()
     assert presentation.stderr =~ "envelope/destination_parent_unsafe"
-    assert presentation.stderr =~ "#{parent} is writable by group or other"
-    assert presentation.stderr =~ "chmod go-w #{parent}"
+    assert presentation.stderr =~ "#{inspect(parent)} is writable by group or other"
+    assert presentation.stderr =~ "chmod go-w '#{parent}'"
     refute presentation.stderr =~ "mkdir -p"
   end
 
@@ -373,6 +373,62 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     assert presentation.exit_status == 7
     assert presentation.stderr =~ "destination/invalid_destination"
     refute File.exists?(Path.join(target, "missing-artifact-parent"))
+  end
+
+  # Past a dangling symlink the shallowest missing path is the link's target,
+  # not the link: `mkdir -p` on the link's own name fails, because the link
+  # already exists.
+  @tag :tmp_dir
+  test "a missing ancestor behind a symlink offers the target as the remedy", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "demo")
+    project_path = project_with_artifact_root(target, "alias/.ptc")
+    resolved = Path.join(target, "missing-target")
+    File.ln_s!("missing-target", Path.join(target, "alias"))
+
+    presentation = run_project(project_path)
+
+    assert presentation.exit_status == CommandFrontend.envelope_failure_exit_status()
+    assert presentation.stderr =~ "#{inspect(resolved)} does not exist"
+    assert presentation.stderr =~ "mkdir -p '#{resolved}'"
+    refute presentation.stderr =~ "mkdir -p '#{Path.join(target, "alias")}'"
+
+    File.mkdir_p!(resolved)
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project_path])
+    assert File.dir?(Path.join(resolved, ".ptc"))
+  end
+
+  # A symlink target is filesystem content, not something the operator typed,
+  # and stderr is a terminal. The bytes must be shown, never obeyed, and a
+  # command a reader cannot safely paste is not offered at all. C1 controls and
+  # bidirectional overrides are valid UTF-8, so escaping only the ASCII range
+  # would leave both a terminal injection and a visual spoof.
+  @tag :tmp_dir
+  test "a hostile symlink target is escaped and offers no pasteable command", %{
+    tmp_dir: directory
+  } do
+    for {name, hostile} <- [
+          {"esc", "gone\e[31m;rm -rf $HOME"},
+          {"c1", "gone" <> <<0x9B::utf8>> <> "31m"},
+          {"bidi", "gone" <> <<0x202E::utf8>> <> "txt.sh"}
+        ] do
+      File.mkdir_p!(Path.join(directory, name))
+      target = Path.join([directory, name, "demo"])
+      project_path = project_with_artifact_root(target, "alias/.ptc")
+      File.ln_s!(hostile, Path.join(target, "alias"))
+
+      presentation = run_project(project_path)
+
+      assert presentation.exit_status == CommandFrontend.envelope_failure_exit_status()
+      refute presentation.stderr =~ hostile
+      refute presentation.stderr =~ "mkdir -p"
+      assert presentation.stderr =~ "does not exist"
+      # The remedy degrades to words; `inspect/1` renders a path holding a C1
+      # control as a byte list rather than a quoted string, which is equally
+      # safe and equally unusable as a command.
+      assert presentation.stderr =~ "create "
+    end
   end
 
   # A sticky world-writable directory — /tmp is the everyday one — is accepted,

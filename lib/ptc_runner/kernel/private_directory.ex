@@ -221,7 +221,7 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
   cause it can no longer see.
   """
   @type parent_fault ::
-          {:missing, binary()}
+          {:missing, binary(), binary()}
           | {:unsafe_mode, binary()}
           | {:foreign_owner, binary()}
           | :none
@@ -235,6 +235,12 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
   bare "unusable parent". Pass the anchored path those checks used, so the
   answer describes the directory they refused rather than one resolved against
   a since-changed working directory.
+
+  A missing ancestor answers with two paths: the shallowest one that does not
+  exist, which is what went wrong, and the fully resolved parent the walk was
+  reaching for, which is what has to be created. They differ once a symlink is
+  involved — creating the link's own name would fail, because the link already
+  exists.
 
   It walks the ancestry a second time, so an ancestor repaired in between is
   reported as it is now; the refusal itself is not revisited. When the second
@@ -260,7 +266,7 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
   # Ownership and mode are separate refusals with separate remedies: `chmod`
   # cannot fix a directory another user owns, and a foreign owner is not made
   # safe by narrowing its mode.
-  defp classify_fault({:error, {:private_directory_parent_unsafe, faulted}}, uid) do
+  defp classify_fault({:error, {:private_directory_parent_unsafe, faulted, _intended}}, uid) do
     case File.lstat(faulted, time: :posix) do
       {:ok, %File.Stat{uid: owner}} when owner not in [0, uid] -> {:foreign_owner, faulted}
       {:ok, %File.Stat{}} -> {:unsafe_mode, faulted}
@@ -268,9 +274,9 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
     end
   end
 
-  defp classify_fault({:error, {:private_directory_parent_unavailable, faulted}}, _uid) do
+  defp classify_fault({:error, {:private_directory_parent_unavailable, faulted, intended}}, _uid) do
     case File.lstat(faulted) do
-      {:error, :enoent} -> {:missing, faulted}
+      {:error, :enoent} -> {:missing, faulted, intended}
       _present_or_unreadable -> :none
     end
   end
@@ -376,24 +382,24 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
   defp safe_parent_hierarchy(path, uid) do
     case locate_parent_fault(path, uid) do
       :ok -> :ok
-      {:error, {reason, _faulted}} -> {:error, reason}
+      {:error, {reason, _faulted, _intended}} -> {:error, reason}
     end
   end
 
   # The located form of the hierarchy walk: every refusal carries the exact
-  # directory that earned it, so a caller can name the path a reader must fix
-  # instead of reporting the whole ancestry as unusable.
+  # directory that earned it, plus the path the walk was resolving toward, so
+  # a caller can both name what went wrong and name what has to be created.
   defp locate_parent_fault(path, uid) do
     with :ok <- validate_directory("/", uid) do
       parent = Path.dirname(path)
       resolve_components("/", tl(Path.split(parent)), 0, uid)
     end
   rescue
-    _exception -> {:error, {:private_directory_parent_unavailable, path}}
+    _exception -> {:error, {:private_directory_parent_unavailable, path, path}}
   end
 
   defp resolve_components(current, _components, hops, _uid) when hops > 40,
-    do: {:error, {:private_directory_parent_unavailable, current}}
+    do: {:error, {:private_directory_parent_unavailable, current, current}}
 
   defp resolve_components(current, [], _hops, uid), do: validate_directory(current, uid)
 
@@ -417,19 +423,23 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
              {:ok, target_root, target_components} <- symlink_target(current, target) do
           resolve_components(target_root, target_components ++ rest, hops + 1, uid)
         else
-          {:error, {reason, faulted}}
+          {:error, {reason, faulted, intended}}
           when reason in [
                  :private_directory_parent_unsafe,
                  :private_directory_parent_unavailable
                ] ->
-            {:error, {reason, faulted}}
+            {:error, {reason, faulted, intended}}
 
           _error ->
-            {:error, {:private_directory_parent_unavailable, candidate}}
+            {:error, {:private_directory_parent_unavailable, candidate, candidate}}
         end
 
+      # The intended path keeps the components still unwalked, so a caller can
+      # create every level at once — and, past a symlink, create the resolved
+      # target rather than the link's own name, which already exists.
       _missing_or_invalid ->
-        {:error, {:private_directory_parent_unavailable, candidate}}
+        {:error,
+         {:private_directory_parent_unavailable, candidate, Path.join([candidate | rest])}}
     end
   end
 
@@ -437,7 +447,7 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
     case Path.type(target) do
       :absolute -> {:ok, "/", tl(Path.split(target))}
       :relative -> {:ok, current, Path.split(target)}
-      _other -> {:error, {:private_directory_parent_unavailable, current}}
+      _other -> {:error, {:private_directory_parent_unavailable, current, current}}
     end
   end
 
@@ -447,7 +457,7 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
         safe_directory(path, stat, uid)
 
       _invalid ->
-        {:error, {:private_directory_parent_unavailable, path}}
+        {:error, {:private_directory_parent_unavailable, path, path}}
     end
   end
 
@@ -457,7 +467,7 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
   defp safe_symlink(path, %File.Stat{uid: owner}, uid) do
     if owner in [0, uid],
       do: :ok,
-      else: {:error, {:private_directory_parent_unsafe, path}}
+      else: {:error, {:private_directory_parent_unsafe, path, path}}
   end
 
   # Every controlling directory must be owned by this process authority or
@@ -468,7 +478,7 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
 
     if owner_safe? and mode_safe?,
       do: :ok,
-      else: {:error, {:private_directory_parent_unsafe, path}}
+      else: {:error, {:private_directory_parent_unsafe, path, path}}
   end
 
   defp writable_directory(stat, uid, groups),

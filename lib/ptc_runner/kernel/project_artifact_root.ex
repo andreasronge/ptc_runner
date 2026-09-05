@@ -68,14 +68,14 @@ defmodule PtcRunner.Kernel.ProjectArtifactRoot do
   # ancestors: a directory above the root is the caller's, and its mode and
   # ownership are not this command's to choose. Naming the ancestor that
   # stopped the creation is therefore the whole remedy. A missing ancestor
-  # carries the requested parent too, because `mkdir -p` on the parent creates
-  # every level, while creating only the shallowest one fails again on the next.
+  # carries the resolved parent too, because `mkdir -p` on it creates every
+  # level at once, and past a symlink names the target rather than the link.
   defp parent_failure(root) do
     anchored = anchored(root)
 
     case PrivateDirectory.parent_fault(anchored) do
-      {:missing, path} ->
-        {:error, {:project_artifact_root_parent_missing, path, Path.dirname(anchored)}}
+      {:missing, path, parent} ->
+        {:error, {:project_artifact_root_parent_missing, path, parent}}
 
       {:unsafe_mode, path} ->
         {:error, {:project_artifact_root_parent_unsafe_mode, path}}

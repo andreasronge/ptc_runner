@@ -150,9 +150,16 @@ back to the generic publication failure:
 | any other refusal, such as a parent you own but cannot write to | `envelope/publication_failed` | make the parent writable, or point `artifacts.root` elsewhere |
 
 The missing-ancestor message names the shallowest missing directory and offers
-`mkdir -p` on the root's parent, so one command creates every level rather than
-only the first. These arrive on stderr with exit 74, because the envelope that
-would normally carry a diagnostic is the artifact that could not be written.
+`mkdir -p` on the resolved parent, so one command creates every level rather
+than only the first. Where a symlink stands in the ancestry the two differ: the
+message names the link's target, because creating the link's own name would
+fail on a path that already exists.
+
+Every path is printed quoted and escaped, since a symlink target is filesystem
+content rather than something you typed, and a suggested command is offered
+only when its path holds no control characters. These arrive on stderr with
+exit 74, because the envelope that would normally carry a diagnostic is the
+artifact that could not be written.
 
 That last-resort channel is what carries the directory name, so the table above
 describes a run that publishes an envelope — the `ptc init` default, and any

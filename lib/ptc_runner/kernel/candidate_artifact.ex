@@ -211,7 +211,7 @@ defmodule PtcRunner.Kernel.CandidateArtifact do
   # repaired falls back to `fallback`.
   defp destination_error(anchored, fallback) do
     case PrivateDirectory.parent_fault(anchored) do
-      {:missing, _path} -> :candidate_destination_parent_missing
+      {:missing, _path, _parent} -> :candidate_destination_parent_missing
       {:unsafe_mode, _path} -> :candidate_destination_parent_unsafe
       {:foreign_owner, _path} -> :candidate_destination_parent_unsafe
       :none -> fallback

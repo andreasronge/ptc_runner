@@ -435,7 +435,7 @@ defmodule PtcRunner.Kernel.Materialize do
   # remediable, and only a code that separates them says which remedy applies.
   defp source_out_parent_error(anchored) do
     case PrivateDirectory.parent_fault(anchored) do
-      {:missing, _faulted} -> :source_out_parent_missing
+      {:missing, _faulted, _parent} -> :source_out_parent_missing
       {:unsafe_mode, _faulted} -> :source_out_parent_unsafe
       {:foreign_owner, _faulted} -> :source_out_parent_unsafe
       :none -> :source_out_parent_unusable
