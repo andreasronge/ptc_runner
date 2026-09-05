@@ -432,9 +432,9 @@ completion semantics omit that catalog field.
 Every collection the private inspection record counts also carries
 `item_count`, the number of items that run retained for it. A zero is a
 measured zero for that run, not an unread or withheld page. `activity` is
-canonical rather than retained and `turns` is compiled from retained
-exchanges, so neither owns a retained count and both omit the field, as does
-every collection on a capture with no private inspection record.
+canonical rather than retained, so it is the only collection that owns no
+retained count and omits the field, as does every collection on a capture
+with no private inspection record.
 The `turns` entry also owns the transcript projection boundary:
 `projection_scope: "model_conversation"` and `projection_not_included` name
 the scope certified by a published transcript and the evidence surfaces it

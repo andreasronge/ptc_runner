@@ -61,6 +61,7 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
               "collections" => collections
             }} = RunAnalysis.query(analysis, :open, %{"run_id" => run_id})
 
+    assert counts["turns"] == 1
     assert counts["capability_calls"] == 1
     assert counts["provider_exchanges"] == 1
     assert counts["incomplete_model_exchanges"] == 0
@@ -76,10 +77,11 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
 
     assert Enum.find(collections, &(&1["name"] == "provider_exchanges"))["item_count"] == 1
     assert Enum.find(collections, &(&1["name"] == "capability_calls"))["item_count"] == 1
+    assert Enum.find(collections, &(&1["name"] == "turns"))["item_count"] == 1
 
     assert collections
            |> Enum.reject(&Map.has_key?(&1, "item_count"))
-           |> Enum.map(& &1["name"]) == ~w(activity turns)
+           |> Enum.map(& &1["name"]) == ~w(activity)
 
     assert Enum.find(collections, &(&1["name"] == "activity")) ==
              %{
@@ -210,6 +212,31 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
                "run_id" => run_id,
                "collection" => "activity",
                "limit" => 101
+             })
+  end
+
+  @tag :tmp_dir
+  test "a run that called no model reports a measured zero turn count", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create_result!(root, 42)
+    {:ok, trace} = TraceSnapshot.start({:private_authorized_directory, fixture.traces})
+    {:ok, inspection} = InspectionSnapshot.start({:directory, fixture.inspection}, trace)
+    on_exit(fn -> InspectionSnapshot.stop(inspection) end)
+    on_exit(fn -> TraceSnapshot.stop(trace) end)
+    assert {:ok, analysis} = RunAnalysis.new(trace, inspection)
+
+    assert {:ok, %{"inspection" => %{"counts" => counts}, "collections" => collections}} =
+             RunAnalysis.query(analysis, :open, %{"run_id" => fixture.run_id})
+
+    assert counts["turns"] == 0
+
+    turns = Enum.find(collections, &(&1["name"] == "turns"))
+    assert turns["available?"]
+    assert turns["item_count"] == 0
+
+    assert {:ok, %{"items" => []}} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => fixture.run_id,
+               "collection" => "turns"
              })
   end
 
