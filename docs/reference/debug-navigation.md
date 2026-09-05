@@ -452,6 +452,10 @@ live inside the example directory:
 ptc run debug-a-failed-run/debugger-agent.ptc-project.json --env-file .env
 ```
 
+One run with the shipped model diagnosed `pricing.rule` in 19 turns for about
+half a cent. The budget is 30 turns because model runs vary, and a run that
+reaches it reports an unfinished investigation, not a diagnosis.
+
 Keep `debug.nav` as the mission's only domain authority and select a model into
 the workflow:
 

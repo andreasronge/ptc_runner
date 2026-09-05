@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PtcRunner</title>
-<meta name="description" content="PtcRunner is a runtime for self-improving agents: the agent loop is a replaceable library, not the runtime, so you can change what an agent does without expanding what it may do.">
+<meta name="description" content="PtcRunner is a runtime for building self-improving agents: the agent loop is a replaceable library, not the runtime, so you can change what an agent does without expanding what it may do.">
 <link rel="canonical" href="https://ptc-runner.dev/">
 <meta property="og:title" content="PtcRunner">
 <meta property="og:description" content="A runtime for Code Mode agents. Bounded programs, explicit limits, recorded evidence.">
@@ -104,18 +104,36 @@
        alt="" aria-hidden="true">
   <div>
     <h1>PtcRunner</h1>
-    <p class="kicker">A runtime for self-improving agents</p>
+    <p class="kicker">A runtime for building self-improving agents</p>
   </div>
 </header>
 
-<p class="lead"><strong>Build AI agents that are bounded in what they can do, easy to
-change, observable in operation, and designed to improve from evidence.</strong></p>
+<p class="lead"><strong>Build loops that check their work and recover from evidence.</strong></p>
+
+<p>Bound execution, inspect failures, verify outcomes, and test changes before adopting
+them.</p>
 
 <ul>
 <li><strong>A language for agents</strong> — small, typed, and limited to the tools you
 approved, discovered in a REPL rather than listed in the prompt.</li>
 <li><strong>A runtime for agent services</strong> — built for bounded, traceable jobs and
 many concurrent requests, without a desktop, workspace, or container for every agent.</li>
+</ul>
+
+<h2>Three examples</h2>
+
+<ul class="links">
+  <li><a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/dabstep-fraud">DABStep
+    fraud analysis</a>
+    — <span class="desc">Process 138,236 payment records within a bounded mission heap, and
+    check calculations before accepting an answer.</span></li>
+  <li><a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/support-triage">Support
+    triage</a>
+    — <span class="desc">Combine model flexibility with deterministic business rules and
+    separately granted capabilities.</span></li>
+  <li><a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/debug-a-failed-run">Self-improvement</a>
+    — <span class="desc">Use a failed run's evidence to propose and validate a workflow
+    repair.</span></li>
 </ul>
 
 <h2>Why not a coding agent?</h2>
@@ -202,6 +220,15 @@ PtcRunner itself is a large codebase, written mostly by models over half a year,
 measure.</p>
 
 <h2>Improves from evidence</h2>
+
+<p>Evidence gets used during a run or after it, and the two are different jobs. The
+<a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/dabstep-fraud">DABStep
+example</a> works during the run: two blind analyses and a reviewer each compute payment totals, and
+workflow code accepts the answer only when all three tables agree to the cent. The
+<a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/debug-a-failed-run">repair
+example</a> works after one: it reads a failed run's evidence, changes a candidate component
+for future execution, and validates that candidate on inputs the model never saw. One accepts
+or rejects an answer now. The other accepts or rejects a change to the workflow itself.</p>
 
 <p>Every run records a trace, and a custom workflow decides <em>where</em> code evaluates.
 In the shipped

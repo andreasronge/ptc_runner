@@ -29,7 +29,7 @@ defmodule PtcRunner.Kernel.ExampleLibrary do
     {"kernel-tutorial", "examples/kernel-tutorial",
      "Seven numbered projects: deterministic workflow, structured model extraction, file agent, multi-turn agent, signature feedback, deliberate cost-budget refusal, parallel model fan-out"},
     {"support-triage", "examples/support-triage",
-     "Three numbered projects growing one support-inbox scenario: one bounded question, a triage policy as a mission API, two specialist missions with a result contract"},
+     "Three numbered projects growing one support-inbox scenario: one bounded question, a triage policy as a mission API, two specialist missions with a result contract, plus a provider-free check that the escalation mission is denied the triage grants"},
     {"debug-a-failed-run", "examples/debug-a-failed-run",
      "An agent repairs its own debugging workflow, then uses it to diagnose and repair an application"},
     {"llm-replay", "examples/llm-replay",

@@ -105,8 +105,7 @@ grants:
 The workflow passes only the triage result forward and validates the final
 report. Its local returned-value helper uses the documented
 [fail-outcome path](../agent-library-reference.md#agent-core-fail-outcome) to
-keep the original diagnostic on abort; quarantined is also local. Materialize
-the example with ptc init support-triage --example support-triage.
+keep the original diagnostic on abort; quarantined is also local.
 
 ```clojure
 (defn run [input]
@@ -144,7 +143,9 @@ ptc run support-triage/03-specialists.ptc-project.json
 Two rules carry this step.
 
 - A specialist is a mission. The escalation model cannot read the ticket pool
-  because it was never granted it.
+  because it was never granted it. The
+  [boundary check](../reference/examples.md#what-each-tree-demonstrates) shows
+  that refusal without a model.
 - A consumer gets a contract. The runtime enforces the schema, so the shape of
   the report is a property of the run.
 

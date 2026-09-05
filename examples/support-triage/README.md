@@ -20,7 +20,7 @@ single bounded question into a two-specialist workflow with a result contract:
    holds only the routing policy — and validates the final report against a
    result contract.
 
-Each project has a project document in this directory. All three select the
+Each step has a project document in this directory. All three select the
 trusted `deepseek` model alias and require a non-empty `OPENROUTER_API_KEY`.
 Keep the generated comment-only `.env` and export the variable, or replace its
 comment with a non-empty assignment in that file. Assigned file values override
@@ -60,3 +60,40 @@ capability or reading the wider ticket pool directly. It does not filter the
 handoff, so this example provides no data-flow guarantee. The scheduled live
 test checks each escalation's id, priority, team, and first action against the
 policy; only the summary prose goes unchecked.
+
+## Watch a denied capability
+
+`mission-boundary-check` is not a fourth design step. It is a deterministic
+check on the grants step 03 declares. It reuses the same two mission
+definitions, selects no provider, and names no host document, so it needs no
+key and no network:
+
+```console
+ptc run support-triage/mission-boundary-check.ptc-project.json
+```
+
+```json
+{"denied":{"mission":"escalation",
+           "mission_component":"invalid_form: unknown namespace triage.rules/",
+           "mission_data":"runtime_error: data/tickets is not a granted data name. Granted: (none)"},
+ "granted":{"mission":"triage","probe_priority":55,"tickets_visible":6}}
+```
+
+`mission-boundary-check/check.clj` sends the same two `(program ...)` literals
+to both missions. One counts `data/tickets`; the other calls
+`triage.rules/priority`. Both belong to the `triage` grant and neither to the
+`escalation` one, so the two refusals have different shapes. The data
+reference is a runtime refusal that also lists the data names that mission does
+hold, which here is none. The component call never compiles, because that
+namespace is not in the escalation bundle at all. The source is identical
+either way, so the grant is what decided, not the program.
+
+The check exits 0 while the boundary holds and fails with exit status 5 if
+either program ever answers inside `escalation`, or if a refusal arrives that
+is not the one a missing grant produces. Those are the regressions it exists
+to catch. `ptc validate` prints the same two grant sets without running
+anything:
+
+```console
+ptc validate support-triage/mission-boundary-check.ptc-project.json
+```
