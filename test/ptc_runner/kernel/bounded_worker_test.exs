@@ -7,6 +7,11 @@ defmodule PtcRunner.Kernel.BoundedWorkerTest do
   test "timeout kills the worker without leaking monitor or result messages" do
     parent = self()
 
+    # The deadline is armed before the worker is spawned, so the budget has to
+    # cover the spawn's scheduling latency as well: a 1 ms budget under a loaded
+    # scheduler killed the worker before it ran, and the test then waited for a
+    # message that was never sent. The worker blocks forever once it has
+    # reported in, so a generous budget changes only how long the test takes.
     assert {:error, :timeout} =
              BoundedWorker.run(
                fn ->
@@ -16,7 +21,7 @@ defmodule PtcRunner.Kernel.BoundedWorkerTest do
                    :never -> :unexpected
                  end
                end,
-               timeout_ms: 1,
+               timeout_ms: 500,
                max_heap_words: 10_000
              )
 
