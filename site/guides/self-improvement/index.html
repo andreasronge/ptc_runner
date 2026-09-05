@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Let an agent improve its own workflow · PtcRunner</title>
-<meta name="description" content="Run a debugging workflow that repairs its own navigation helper, then uses the
-repaired helper to diagnose and fix an application. You end with a checked
-candi…">
+<meta name="description" content="Run a debugging workflow that repairs its own navigation helper, the component
+that reads a failed run's captured evidence before any model call. The repaired
+…">
 <link rel="canonical" href="https://ptc-runner.dev/guides/self-improvement/">
 <meta property="og:title" content="Let an agent improve its own workflow · PtcRunner">
-<meta property="og:description" content="Run a debugging workflow that repairs its own navigation helper, then uses the
-repaired helper to diagnose and fix an application. You end with a checked
-candi…">
+<meta property="og:description" content="Run a debugging workflow that repairs its own navigation helper, the component
+that reads a failed run's captured evidence before any model call. The repaired
+…">
 <meta property="og:url" content="https://ptc-runner.dev/guides/self-improvement/">
 <meta property="og:type" content="article">
 <link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
@@ -103,16 +103,19 @@ candi…">
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="let-an-agent-improve-its-own-workflow">Let an agent improve its own workflow</h1><p>Run a debugging workflow that repairs its own navigation helper, then uses the
-repaired helper to diagnose and fix an application. You end with a checked
-candidate for each fix and the source files you started with.</p><h2 id="run-the-example">Run the example</h2><p>Initialize a fresh copy and run the script with your OpenRouter environment
+<h1 id="let-an-agent-improve-its-own-workflow">Let an agent improve its own workflow</h1><p>Run a debugging workflow that repairs its own navigation helper, the component
+that reads a failed run's captured evidence before any model call. The repaired
+helper then diagnoses and fixes an application. You end with a checked candidate
+for each fix and the source files you started with.</p><h2 id="run-the-example">Run the example</h2><p>Initialize a fresh copy and run the script with your OpenRouter environment
 file:</p><pre><code class="console language-console">ptc init debug-a-failed-run --example debug-a-failed-run
-sh debug-a-failed-run/run-self-improvement.sh /absolute/path/to/.env</code></pre><p>The script runs five stages:</p><ul><li>Run the application and the debugging workflow. Both fail on purpose.</li><li>Let an agent read the workflow's failed trace and edit its helper.</li><li>Check the proposed helper on two captured applications, without a model.</li><li>Run the repaired workflow to diagnose the application failure.</li><li>Let a second agent propose the application fix, then validate it on three inputs.</li></ul><p>A successful run ends with:</p><pre><code class="text language-text">Completed: helper checks, trace navigation, and three application validation cases. Artifacts: self-improvement-results</code></pre><p>Model runs vary. The script stops at the first failed stage and leaves its
+sh debug-a-failed-run/run-self-improvement.sh /absolute/path/to/.env</code></pre><p>The script captures two failures, lets an agent repair the helper, checks that
+helper on two captures without a model, and then diagnoses and repairs the
+application. A successful run ends with:</p><pre><code class="text language-text">Completed: helper checks, trace navigation, and three application validation cases. Artifacts: self-improvement-results</code></pre><p>Model runs vary. The script stops at the first failed stage and leaves its
 artifacts in <code class="inline">self-improvement-results</code>.</p><h2 id="read-the-proposed-edit">Read the proposed edit</h2><p>Print the component the agent chose and its explanation:</p><pre><code class="console language-console">ptc repl --project debug-a-failed-run/self-improver.ptc-project.json \
   --profile private-run-analysis-v2 --private-unattended \
-  -e '(let [r (first (get (analysis/runs {&quot;status&quot; &quot;ok&quot;}) &quot;items&quot;))] (select-keys (get-in (analysis/open (get r &quot;run_id&quot;)) [&quot;result&quot; &quot;value&quot;]) [&quot;component_id&quot; &quot;cause&quot;]))'</code></pre><pre><code class="text language-text">{&quot;cause&quot; &quot;debug.start/context blindly selected the first relationship from generated_sources without checking rel, state, or filters, attempting to follow an unavailable relationship&quot; &quot;component_id&quot; &quot;debug.start&quot;}</code></pre><p>Add <code class="inline">&quot;candidate_source&quot;</code> to the key list to print the replacement source. The
-example README shows what the agent saw before it wrote that edit, and how to
-inspect the investigation and the application fix the same way.</p><p>See <a href="/reference/debug-navigation/">debug navigation</a> for the evidence
+  -e '(let [r (first (get (analysis/runs {&quot;status&quot; &quot;ok&quot;}) &quot;items&quot;))] (select-keys (get-in (analysis/open (get r &quot;run_id&quot;)) [&quot;result&quot; &quot;value&quot;]) [&quot;component_id&quot; &quot;cause&quot;]))'</code></pre><pre><code class="text language-text">{&quot;cause&quot; &quot;debug.start/context blindly selected the first relationship from generated_sources without checking rel, state, or filters, attempting to follow an unavailable relationship&quot; &quot;component_id&quot; &quot;debug.start&quot;}</code></pre><p>Add &quot;candidate_source&quot; to the key list to print the replacement source. The
+example README explains what navigation means, shows what the agent saw before
+it wrote that edit, and inspects the application fix the same way.</p><p>See <a href="/reference/debug-navigation/">debug navigation</a> for the evidence
 contract and <a href="/reference/component-contracts/">components</a> for how a
 candidate is checked.</p>
 </article>

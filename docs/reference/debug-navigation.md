@@ -499,11 +499,20 @@ navigate, propose, validate cycle to the debugging workflow itself, then uses
 the repaired workflow on the application. It needs an OpenRouter environment
 file; `self-host.json` and `self-improver-host.json` select the model.
 
+A **navigation helper** is a workflow's own component that walks a capture
+before any model call and hands the result to an agent as untrusted evidence.
+The split matters for what a repair loop can reach. `debug.nav` is kernel
+prelude source and is frozen. Which run to open, which relationship to start
+from, and how much to hand the model is per-workflow policy, so it belongs in
+the workflow's components, where a host can inspect it, select a candidate over
+it, and let an agent repair it. The seeded defect is a helper that follows a
+relationship without reading its `state`.
+
 | Stage | Project | What decides the outcome |
 | --- | --- | --- |
 | Capture the workflow failure | `self-debugger` | `debug.start/context` takes the first relationship regardless of kind or state. The defect is seeded. |
 | Propose a helper repair | `self-improver` | An agent navigates the workflow's own capture and edits only `debug.start`. |
-| Check the helper | `self-check`, `self-check-workflow` | The helper's source page must equal a page reached through a complete referenced-source relationship, on two captures, without a model. |
+| Check the helper | `self-check`, `self-check-workflow` | The helper's source page must equal a page reached through a complete referenced-source relationship, without a model, on the pricing capture and on the `variants/target-workflow-control` capture. |
 | Diagnose the application | `self-debugger` with the helper override | The agent still reads dependencies and source before naming a component. |
 | Propose an application repair | `self-repair` | A separate agent receives the diagnosis as untrusted evidence plus an independent incident packet. |
 | Validate the application | `target` with the application override | Three inputs, two of them absent from the failure capture. |
