@@ -49,16 +49,21 @@
     prompt))
 
 (defn- review [input analyzer-result programs]
-  (get (returned-outcome
-         "review"
-         (agent.core/run-outcome
-           (bounded-prompt (dabstep.review/prompt input analyzer-result programs))
-           {"mission" "review"
-            "model" (get input "reviewer_model")
-            "max_turns" (get input "review_turns")
-            "return_contract" "findings"
-            "retain_programs" (get input "review_turns")}))
-       :value))
+  (let [outcome
+        (agent.core/run-outcome
+          (bounded-prompt (dabstep.review/prompt input analyzer-result programs))
+          {"mission" "review"
+           "model" (get input "reviewer_model")
+           "max_turns" (get input "review_turns")
+           "return_contract" "findings"
+           "retain_programs" (get input "review_turns")
+           "max_corrections" 1
+           "verify" (fn [candidate]
+                      (dabstep.review/verify-findings
+                        (get analyzer-result "derivations") candidate))})]
+    (if (= :verification-failed (get outcome :kind))
+      (assoc (get-in outcome [:verification "evidence"]) "verified" false)
+      (assoc (get (returned-outcome "review" outcome) :value) "verified" true))))
 
 (defn run [input]
   (let [analysis (derive-once input "analysis")
@@ -78,7 +83,8 @@
                            (concat (get analysis "programs") (get recheck "programs"))))
         measured (get findings "countries")
         top-r (dabstep.review/top-country measured)
-        agreed (and (= top-a top-b top-r)
+        agreed (and (true? (get findings "verified"))
+                    (= top-a top-b top-r)
                     (dabstep.review/same-measurements? countries-a countries-b)
                     (dabstep.review/same-measurements? countries-a measured))]
     (return {"ok" true

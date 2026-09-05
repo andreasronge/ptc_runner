@@ -1671,6 +1671,198 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute_receive {:agent_request, _outcome_second}
   end
 
+  @tag :verification
+  test "verification corrects a candidate in the same transcript and turn budget" do
+    {:ok, config} =
+      agent_config([agent_return("bad", "(return 1)"), agent_return("fixed", "(return 2)")])
+
+    source = ~S"""
+    (return (agent.core/run-outcome "Compute" {"max_turns" 2
+      "verify" (fn [candidate] (if (= (get candidate :value) 2)
+        {"status" "accepted"}
+        {"status" "rejected" "feedback" "The measurement does not match. Recompute."}))}))
+    """
+
+    assert {:ok, %{value: %{"status" => "returned", "value" => 2}}} = Kernel.run(source, config)
+    assert_receive {:agent_request, _first}
+    assert_receive {:agent_request, second}
+    assert Jason.encode!(second) =~ "The measurement does not match"
+
+    annotations =
+      config.event_sink
+      |> EventSink.events()
+      |> Enum.filter(
+        &(&1.type == "workflow-annotation" and &1.data.annotation_type == "agent-verification")
+      )
+
+    assert Enum.map(annotations, & &1.data.data) == [
+             %{"status" => "rejected"},
+             %{"status" => "accepted"}
+           ]
+
+    refute inspect(annotations) =~ "The measurement does not match"
+    refute_receive {:agent_request, _extra}
+  end
+
+  @tag :verification
+  test "verification never accepts a rejected or unresolved candidate" do
+    for {status, turns} <- [{"rejected", 1}, {"unresolved", 3}] do
+      {:ok, config} = agent_config([agent_return("candidate", "(return 1)")])
+
+      source = """
+      (return (agent.core/run-outcome "Compute" {"max_turns" #{turns}
+        "verify" (fn [_] {"status" "#{status}" "feedback" "No evidence."})}))
+      """
+
+      assert {:ok, %{value: %{"status" => "subject-failure", "kind" => "verification-failed"}}} =
+               Kernel.run(source, config)
+
+      assert_receive {:agent_request, _first}
+      refute_receive {:agent_request, _extra}
+    end
+  end
+
+  @tag :verification
+  test "verification stops after a prior successful write or unknown effect" do
+    for effect <- [:write, :unknown] do
+      parent = self()
+
+      {:ok, capability} =
+        Capability.new(
+          name: "commit",
+          effect: effect,
+          input_schema: %{"type" => "object"},
+          callback: fn _ ->
+            send(parent, :verification_write)
+            {:ok, 1}
+          end
+        )
+
+      {:ok, config} =
+        agent_config(
+          [
+            agent_return("write", "(tool/commit {})"),
+            agent_return("candidate", "(return 1)"),
+            agent_return("must-not-run", "(return 2)")
+          ],
+          [],
+          mission_capabilities: [capability]
+        )
+
+      assert {:ok,
+              %{
+                value: %{
+                  "kind" => "verification-failed",
+                  "error" => %{"reason" => "unsafe-effects"}
+                }
+              }} =
+               Kernel.run(
+                 ~S"""
+                 (return (agent.core/run-outcome "Compute" {"max_turns" 3
+                   "verify" (fn [_] {"status" "rejected" "feedback" "Recompute."})}))
+                 """,
+                 config
+               )
+
+      assert_receive :verification_write
+      assert_receive {:agent_request, _}
+      assert_receive {:agent_request, _}
+      refute_receive {:agent_request, _}
+      refute_receive :verification_write
+    end
+  end
+
+  @tag :verification
+  test "invalid verification reports fail instead of accepting a candidate" do
+    for report <- [~S|{"status" "yes"}|, ~S|{"status" "rejected"}|, ~S|true|] do
+      {:ok, config} = agent_config([agent_return("candidate", "(return 1)")])
+
+      assert {:error, _} =
+               Kernel.run(
+                 """
+                 (return (agent.core/run-outcome "Compute" {"max_turns" 2
+                   "verify" (fn [_] #{report})}))
+                 """,
+                 config
+               )
+
+      assert_receive {:agent_request, _}
+      refute_receive {:agent_request, _}
+    end
+  end
+
+  @tag :verification
+  test "correction count cannot replenish the turn budget" do
+    {:ok, config} = agent_config([agent_return("candidate", "(return 1)")])
+
+    assert {:ok, %{value: %{"kind" => "verification-failed"}}} =
+             Kernel.run(
+               ~S"""
+               (return (agent.core/run-outcome "Compute" {"max_turns" 1 "max_corrections" 128
+                 "verify" (fn [_] {"status" "rejected" "feedback" "Recompute."})}))
+               """,
+               config
+             )
+
+    assert_receive {:agent_request, _}
+    refute_receive {:agent_request, _}
+  end
+
+  @tag :verification
+  test "return schema is checked before the verifier receives the candidate" do
+    binding =
+      phase_contract_binding(
+        %{
+          "type" => "object",
+          "required" => ["n"],
+          "properties" => %{"n" => %{"type" => "integer"}}
+        },
+        "integer.schema.json"
+      )
+
+    {:ok, config} =
+      agent_config(
+        [
+          agent_return("bad-shape", ~S|(return "invalid")|),
+          agent_return("good-shape", ~S|(return {"n" 2})|)
+        ],
+        [],
+        phase_return_contracts: %{"number" => binding}
+      )
+
+    assert {:ok, %{value: %{"status" => "returned", "value" => %{"n" => 2}}}} =
+             Kernel.run(
+               ~S"""
+               (return (agent.core/run-outcome "Compute" {"max_turns" 2 "return_contract" "number"
+                 "verify" (fn [candidate]
+                   (if (integer? (get-in candidate [:value "n"]))
+                     {"status" "accepted"}
+                     (fail {:kind :unvalidated-candidate})))}))
+               """,
+               config
+             )
+  end
+
+  @tag :verification
+  test "correction allowance stops rejections even when model turns remain" do
+    for corrections <- [0, 1] do
+      responses = Enum.map(1..4, &agent_return("candidate-#{&1}", "(return 1)"))
+      {:ok, config} = agent_config(responses)
+
+      assert {:ok, %{value: %{"kind" => "verification-failed"}}} =
+               Kernel.run(
+                 """
+                 (return (agent.core/run-outcome "Compute" {"max_turns" 4 "max_corrections" #{corrections}
+                   "verify" (fn [_] {"status" "rejected" "feedback" "Recompute."})}))
+                 """,
+                 config
+               )
+
+      for _ <- 0..corrections, do: assert_receive({:agent_request, _})
+      refute_receive {:agent_request, _}
+    end
+  end
+
   test "run-outcome retain_programs is opt-in and keeps the current outcome shape when omitted" do
     response = agent_return("sum", ~S|(return {"sum" 42})|)
     {:ok, omitted} = agent_config([response])

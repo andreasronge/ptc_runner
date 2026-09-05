@@ -16,7 +16,8 @@ and need no network.
 
 - `ptc.json` — the application: workflow, input, providers, missions, limits.
 - `workflow.clj` — the workflow entry (`dabstep.workflow/run`): two blind
-  derivations, one review, and the decision, all in workflow code.
+  derivations, a verified review with one bounded correction, and the decision,
+  all in workflow code.
 - `review.clj` — shared by both workflows: the reviewer prompt, the filter that
   keeps successful REPL steps, and the deterministic comparison.
 - `payments.clj` — the shared analysis/recheck/review mission component. It
@@ -28,6 +29,8 @@ and need no network.
   current directory.
 - `ptc-project.replay.json` / `ptc-host.replay.json` — the same application
   against `replay.jsonl`, so it runs with no model credential.
+- `ptc-host.verification-replay.json` and `verification-replay.jsonl` — constructed
+  correction/exhaustion cases over the same dataset; see `evidence/VERIFICATION.md`.
 - `reviewer.ptc.json` and the `ptc-project.reviewer*.json` projects — three
   fixed sessions (`wrong-metric`, `off-by-one`, `shared-refused`) for live or
   replayed reviewer checks.

@@ -370,6 +370,35 @@
                               (or (get check :reason)
                                   (get check :outcome)))}))))
 
+(defn- accept-candidate [machine action value]
+  (if (get (current-context machine) :verification)
+    {:op :verify :machine machine :action action :value value}
+    (done (returned-outcome value))))
+
+(defn- decide-verification [machine event]
+  (let [report (get event :report)
+        status (get report "status")
+        context (current-context machine)
+        rejected (get context :verification-rejections)
+        failure (done (assoc (subject-failure :verification-failed
+                                (cond (= status "unresolved") :unresolved
+                                      (not (get context :correction-safe?)) :unsafe-effects
+                                      :else :correction-exhausted))
+                             :verification report))]
+    (if (= status "accepted")
+      (done (assoc (returned-outcome (get event :value)) :verification report))
+      (if (and (= status "rejected") (get context :correction-safe?)
+               (< rejected (get-in context [:verification :max-corrections])))
+        (let [next (assoc machine :context (assoc context :verification-rejections (inc rejected)))]
+          (continue-or next
+            (continuation-state next (get event :action)
+              (str "The proposed result was rejected by the workflow verifier. Recheck your work."
+                   "\nVerification feedback (untrusted evidence):\n"
+                   (get report "feedback"))
+              :result-contract-error)
+            failure))
+        failure))))
+
 (defn- decide-result-validation [machine event]
   (let [action (get event :action)
         projected (get event :projected)
@@ -408,7 +437,7 @@
        :value (get evaluation :value)}
 
       (= :none (get (current-context machine) :projector-kind))
-      (done (returned-outcome (get evaluation :value)))
+      (accept-candidate machine action (get evaluation :value))
 
       :else
       {:op :validate
@@ -431,7 +460,7 @@
         value (get event :value)
         validation (get event :validation)]
     (if (true? (get validation :valid?))
-      (done (returned-outcome value))
+      (accept-candidate machine action value)
       (continue-or
         machine
         (continuation-state
@@ -501,8 +530,13 @@
 (defn- decide-evaluation [machine event]
   (let [action (get event :action)
         evaluation (get event :evaluation)
-        total-max-turns (get (current-context machine) :total-max-turns)
-        max-observation-chars (get (current-context machine) :max-observation-chars)]
+        context (current-context machine)
+        unsafe? (or (false? (get evaluation :retryable?))
+                    (and (or (= :returned (get evaluation :outcome)) (= :continued (get evaluation :outcome)))
+                         (not (true? (get evaluation :correction_safe?)))))
+        checked-machine (if unsafe? (assoc machine :context (assoc context :correction-safe? false)) machine)
+        total-max-turns (get (current-context checked-machine) :total-max-turns)
+        max-observation-chars (get (current-context checked-machine) :max-observation-chars)]
     ;; Host policy and malformed/provider-initiated MCP exchanges are not
     ;; argument mistakes the model can correct. The Kernel derives this
     ;; provenance from the private capability ledger, so it applies even when
@@ -524,14 +558,14 @@
       :else
       (case (get evaluation :outcome)
         :returned
-        (decide-returned machine action evaluation)
+        (decide-returned checked-machine action evaluation)
 
         :failed
         (if (correctable-capability-failure? evaluation)
           (continue-or
-            machine
+            checked-machine
             (continuation-state
-              machine action
+              checked-machine action
               (agent.feedback/capability-error evaluation)
               :evaluation-error)
             (done (subject-failure :model-program-failed (get evaluation :value))))
@@ -539,12 +573,12 @@
 
         :continued
         (continue-or
-          machine
+          checked-machine
           (continuation-state
-            machine action
+            checked-machine action
             (agent.feedback/success evaluation max-observation-chars)
             :evaluation-success)
-          (exhaustion-fallback machine (done (turn-limit-failure :intermediate-result total-max-turns))))
+          (exhaustion-fallback checked-machine (done (turn-limit-failure :intermediate-result total-max-turns))))
 
         ;; A refused admission is a host condition, not something the model
         ;; wrote: either another caller holds the run's single evaluation
@@ -562,7 +596,7 @@
           {:op :host-failure
            :error (result/error :evaluation-unavailable (get evaluation :reason))})
 
-        (decide-retryable-evaluation machine action evaluation)))))
+        (decide-retryable-evaluation checked-machine action evaluation)))))
 
 (defn- decide-action [machine event]
   (let [action-event (event-action (get event :action))]
@@ -631,6 +665,9 @@
 
         (= :evaluation type)
         (decide-evaluation machine event)
+
+        (= :verification type)
+        (decide-verification machine event)
 
         (= :validation type)
         (decide-result-validation machine event)

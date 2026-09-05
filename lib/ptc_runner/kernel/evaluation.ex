@@ -25,6 +25,11 @@ defmodule PtcRunner.Kernel.Evaluation do
   keys. `agent.core` authenticates that exact boolean and strips both keys
   before observation rendering.
 
+  Successful evaluations also carry `:correction_safe?`, derived from the
+  capability ledger and call counters. It is false after a write or unknown
+  effect. Agent verification accumulates this fact across turns before allowing
+  a rejected candidate to be corrected; it does not authorize external rollback.
+
   Continued and returned evaluations atomically commit native memory and exact
   bounded history before exposing only an inert public value. Continued results
   additionally expose bounded chronological prints for the next agent turn.
@@ -587,8 +592,12 @@ defmodule PtcRunner.Kernel.Evaluation do
 
     case RunState.commit_evaluation(state, lease, step.memory, candidate_history) do
       :ok ->
+        {_activity?, unsafe?} =
+          evaluation_activity(state, environment, step, mission_calls_before)
+
         step
         |> classify_success(projected_return)
+        |> Map.put(:correction_safe?, not unsafe?)
         |> Map.put(
           :continuation_effect,
           if(match?({:__ptc_return__, _value}, step.return),

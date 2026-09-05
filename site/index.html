@@ -125,8 +125,8 @@ many concurrent requests, without a desktop, workspace, or container for every a
 <ul class="links">
   <li><a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/dabstep-fraud">DABStep
     fraud analysis</a>
-    — <span class="desc">Process 138,236 payment records within a bounded mission heap, and
-    check calculations before accepting an answer.</span></li>
+    — <span class="desc">Process 138,236 payment records within a bounded mission heap.
+    Check calculations, attempt a bounded correction, and withhold unverified answers.</span></li>
   <li><a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/support-triage">Support
     triage</a>
     — <span class="desc">Combine model flexibility with deterministic business rules and
@@ -224,7 +224,8 @@ measure.</p>
 <p>Evidence gets used during a run or after it, and the two are different jobs. The
 <a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/dabstep-fraud">DABStep
 example</a> works during the run: two blind analyses and a reviewer each compute payment totals, and
-workflow code accepts the answer only when all three tables agree to the cent. The
+workflow code allows one bounded correction when the reviewer differs from two agreeing analyses.
+It accepts the answer only when all three tables agree to the cent. The
 <a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/debug-a-failed-run">repair
 example</a> works after one: it reads a failed run's evidence, changes a candidate component
 for future execution, and validates that candidate on inputs the model never saw. One accepts

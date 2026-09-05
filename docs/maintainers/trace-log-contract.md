@@ -1235,6 +1235,7 @@ to the caller and does not fail the evaluation:
 | --- | --- |
 | `"progress"` | `{"stage": started \| planning \| executing \| validating \| completed \| failed}` — that key and no other |
 | `"agent-action"` | `{"turn": 0..127, "max_turns": 1..128, "invocation": "agent-<16 lowercase hex>", "kind": tool-call \| protocol-error \| provider-error \| max-calls \| model-output-truncated}`, or that plus `{"phase": 0..7, "phase_turn": 0..127, "mission": <name>}` — exactly four keys or exactly seven |
+| `agent-verification` | exactly `status`: `accepted`, `rejected`, or `unresolved`; no candidate, feedback, or verifier evidence |
 
 Keyword types and keys normalize (`:phase-turn` → `"phase_turn"`). A phased
 `agent-action` takes all three phase keys or none. Callers provide every field

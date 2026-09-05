@@ -94,21 +94,32 @@ defmodule PtcRunner.CLIProgressTest do
   end
 
   test "a blocked stderr consumer cannot block startup or completion" do
-    writer = fn _bytes -> receive do: (:never -> :ok) end
-    started = System.monotonic_time(:millisecond)
+    parent = self()
 
-    pid =
-      CLIProgress.start(%{application: "app.json"},
-        progress_writer: writer,
-        progress_columns: fn -> {:error, :enotsup} end
-      )
+    writer = fn _bytes ->
+      send(parent, {:writer_blocked, self()})
+      receive do: (:never -> :ok)
+    end
 
-    assert is_pid(pid)
-    assert System.monotonic_time(:millisecond) - started < 100
+    startup =
+      Task.async(fn ->
+        pid =
+          CLIProgress.start(%{application: "app.json"},
+            progress_writer: writer,
+            progress_columns: fn -> {:error, :enotsup} end
+          )
+
+        send(parent, {:progress_started, pid})
+        receive do: (:finish -> CLIProgress.finish(pid, presentation()))
+      end)
+
+    # Keep the owner alive while proving startup returns despite blocked IO.
+    assert_receive {:writer_blocked, pid}, 2_000
+    assert_receive {:progress_started, ^pid}, 2_000
     ref = Process.monitor(pid)
-    assert :ok = CLIProgress.finish(pid, presentation())
-    assert System.monotonic_time(:millisecond) - started < 500
-    assert_receive {:DOWN, ^ref, :process, ^pid, :killed}
+    send(startup.pid, :finish)
+    assert :ok = Task.await(startup, 2_000)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :killed}, 2_000
   end
 
   test "early failure clears the preparing line and the title cannot inject controls" do
@@ -177,7 +188,10 @@ defmodule PtcRunner.CLIProgressTest do
       spawn(fn ->
         pid =
           CLIProgress.start(%{application: "app.json"},
-            progress_writer: fn _bytes -> receive do: (:never -> :ok) end,
+            progress_writer: fn _bytes ->
+              receive do: (:monitor_ready -> send(parent, :monitor_ready))
+              receive do: (:never -> :ok)
+            end,
             progress_columns: fn -> :error end
           )
 
@@ -187,6 +201,8 @@ defmodule PtcRunner.CLIProgressTest do
 
     assert_receive {:owned_progress, pid}
     ref = Process.monitor(pid)
+    send(pid, :monitor_ready)
+    assert_receive :monitor_ready
     Process.exit(owner, :kill)
     assert_receive {:DOWN, ^ref, :process, ^pid, :killed}
   end

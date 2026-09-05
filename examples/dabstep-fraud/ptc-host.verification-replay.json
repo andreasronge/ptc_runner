@@ -1,0 +1,66 @@
+{
+  "limits": {
+    "evaluation_heap_words": 5000000
+  },
+  "install": {
+    "deepseek": {
+      "source": "llm_replay",
+      "installation_revision": "dabstep-verification-v1",
+      "fixtures": "verification-replay.jsonl",
+      "accepts_data": [
+        "normal",
+        "private_inspection"
+      ]
+    },
+    "luna": {
+      "source": "llm_replay",
+      "installation_revision": "dabstep-verification-v1",
+      "fixtures": "verification-replay.jsonl",
+      "accepts_data": [
+        "normal",
+        "private_inspection"
+      ]
+    },
+    "payments_data": {
+      "source": "mcp",
+      "installation_revision": "ptc-fs-mcp-0.2.0-payments-csv",
+      "accepts_data": [
+        "normal",
+        "private_inspection"
+      ],
+      "transport": {
+        "type": "stdio",
+        "command": "npx",
+        "cwd": ".",
+        "args": [
+          "-y",
+          "ptc-fs-mcp@0.2.0",
+          "--root",
+          "data",
+          "--include",
+          "payments.csv",
+          "--max-read-bytes",
+          "500000",
+          "--max-result-bytes",
+          "1000000"
+        ],
+        "inherit_environment": true,
+        "env": {},
+        "start_timeout_ms": 60000
+      },
+      "tools": {
+        "read_text_file": {
+          "as": "workspace.read",
+          "effect": "read",
+          "model_visible": false,
+          "inspection_capture": "digest_results"
+        }
+      },
+      "ceilings": {
+        "timeout_ms": 30000,
+        "max_catalog_tools": 8,
+        "max_result_bytes": 1048576
+      }
+    }
+  }
+}
