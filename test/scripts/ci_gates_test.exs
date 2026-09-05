@@ -58,6 +58,17 @@ defmodule PtcRunner.Scripts.CIGatesTest do
              "CI= MIX_ENV=test HEX_SPONSOR=false ERL_FLAGS= PWD=. :: dialyzer --format github"
   end
 
+  @tag :nightly
+  test "a failed Dialyzer gate never publishes its PLT" do
+    %{marker: marker} = fake = fake_mix()
+
+    {_output, status} =
+      run_gate(@core_dialyzer, fake, env: [{"CI", nil}, {"MIX_GATE_EXIT", "7"}])
+
+    assert status == 7
+    assert Path.wildcard(Path.join(Path.dirname(marker), "cache/**/*.plt")) == []
+  end
+
   test "non-test gates preserve an explicit CI state" do
     %{marker: marker} = fake = fake_mix()
 
@@ -232,7 +243,13 @@ defmodule PtcRunner.Scripts.CIGatesTest do
   defp run_gate(script, %{marker: marker, path: path}, opts) do
     System.cmd(script, Keyword.get(opts, :args, []),
       cd: @root,
-      env: @git_env ++ [{"PATH", path}, {"MIX_MARKER", marker}] ++ Keyword.get(opts, :env, []),
+      env:
+        @git_env ++
+          [
+            {"PATH", path},
+            {"MIX_MARKER", marker},
+            {"PTC_PROJECT_PLT_CACHE", Path.join(Path.dirname(marker), "cache")}
+          ] ++ Keyword.get(opts, :env, []),
       stderr_to_stdout: true
     )
   end
@@ -261,6 +278,7 @@ defmodule PtcRunner.Scripts.CIGatesTest do
     rel="${rel#/}"
     printf 'CI=%s MIX_ENV=%s HEX_SPONSOR=%s ERL_FLAGS=%s PWD=%s :: %s\n' \\
       "$CI" "$MIX_ENV" "$HEX_SPONSOR" "${ERL_FLAGS:-}" "${rel:-.}" "$*" >> "$MIX_MARKER"
+    exit "${MIX_GATE_EXIT:-0}"
     """)
 
     File.chmod!(mix, 0o755)

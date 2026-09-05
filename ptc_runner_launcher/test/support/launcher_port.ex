@@ -104,7 +104,7 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
   def open(opts) when is_list(opts) do
     with :ok <- supported_platform(),
          {:ok, config} <- validate_options(opts),
-         {:ok, launcher} <- launcher_path(),
+         {:ok, launcher} <- launcher_path(opts),
          {:ok, payload} <- bootstrap(config) do
       open_started_launcher(launcher, payload, config)
     end
@@ -263,7 +263,8 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
       :grace_ms,
       :stderr_bytes,
       :start_timeout_ms,
-      :executable_sha256
+      :executable_sha256,
+      :launcher_path
     ]
 
     with true <- Keyword.keyword?(opts),
@@ -344,7 +345,20 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
     Map.merge(inherited, explicit)
   end
 
-  defp launcher_path, do: PtcRunnerLauncher.executable_path()
+  # Only this test client can select an instrumented launcher. The public
+  # companion and the production MCP transport always use the shipped binary.
+  defp launcher_path(opts) do
+    case Keyword.fetch(opts, :launcher_path) do
+      {:ok, path} when is_binary(path) ->
+        if valid_absolute_path?(path), do: {:ok, path}, else: {:error, :invalid_mcp_stdio_launch}
+
+      {:ok, _invalid} ->
+        {:error, :invalid_mcp_stdio_launch}
+
+      :error ->
+        PtcRunnerLauncher.executable_path()
+    end
+  end
 
   defp bootstrap(config) do
     environment = Enum.sort_by(config.env, &elem(&1, 0))

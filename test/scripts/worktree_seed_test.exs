@@ -226,6 +226,7 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
              "mise|trust --yes #{worktree}/mise.toml|#{worktree}|0022",
              "hooks|#{worktree}|0022",
              "mise|install|#{worktree}|0022",
+             "mise|exec -- python3 #{Path.join(Path.dirname(@script), "project-plt-cache.py")} restore|#{worktree}|0022",
              "mise|exec -- mix deps.get|#{worktree}|0022",
              "mise|exec -- mix deps.get|#{worktree}/ptc_viewer|0022",
              "mise|exec -- mix deps.get|#{worktree}/ptc_runner_launcher|0022",
@@ -329,7 +330,12 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
 
   # Real PLTs are one external term; the seed proves a staged copy decodes
   # before promoting it, so fixture PLTs must decode too.
-  defp plt_binary, do: :erlang.term_to_binary({:file_plt, :fixture})
+  defp plt_binary do
+    :erlang.term_to_binary(
+      {:file_plt, :fixture, [], %{}, %{}, %{}, %{}, %{}, %{}, []},
+      [:compressed]
+    )
+  end
 
   defp write!(repo, path, contents) do
     full_path = Path.join(repo, path)

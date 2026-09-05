@@ -71,6 +71,7 @@ initialize_worktree() {
       die "could not trust the pinned mise configuration in $dst"
     bash scripts/install-hooks.sh
     "$mise_bin" install
+    "$mise_bin" exec -- python3 "$SCRIPT_DIR/project-plt-cache.py" restore
     "$mise_bin" exec -- mix deps.get
     (cd ptc_viewer && "$mise_bin" exec -- mix deps.get)
     (cd ptc_runner_launcher && "$mise_bin" exec -- mix deps.get)
@@ -290,7 +291,7 @@ seed_worktree() {
       echo "   ⏭️  $artifact — already present"
     elif mkdir -p "$staging" "$(dirname "$dst/$artifact")" &&
       clone_tree "$src/$artifact" "$tmp" &&
-      scrub_seed_artifact "$artifact" "$tmp" &&
+      scrub_seed_artifact "$artifact" "$tmp" "$src" "$dst" &&
       promote_seed_artifact "$tmp" "$dst/$artifact"; then
       echo "   🌱 $artifact"
       seeded=$((seeded + 1))
@@ -313,12 +314,12 @@ seed_worktree() {
 #    a torn copy, and dialyxir raises on an invalid PLT rather than
 #    rebuilding it — each staged PLT must prove it decodes before promotion.
 scrub_seed_artifact() {
-  local artifact="$1" tmp_tree="$2" plt
+  local artifact="$1" tmp_tree="$2" source="$3" destination="$4" plt
   if [ "$artifact" = "priv/plts" ]; then
     rm -f "$tmp_tree"/*.hash
     for plt in "$tmp_tree"/*.plt; do
       [ -e "$plt" ] || continue
-      plt_decodes "$plt" || return 1
+      plt_decodes "$plt" "$source" "$destination" || return 1
     done
   fi
 }
@@ -327,23 +328,12 @@ scrub_seed_artifact() {
 # must decode as exactly that: `[used]` demands the term consume every byte
 # (bare binary_to_term/1 tolerates trailing garbage), and the record tag
 # rejects a complete-but-foreign term. Together they prove the snapshot is
-# whole regardless of what the source's writer was doing at the time. Needs
-# erl on PATH; without it the artifact is simply not seeded.
+# whole regardless of what the source's writer was doing at the time. The
+# shared validator also relocates the file/checksum list to the new checkout
+# without changing checksums; Dialyzer still validates the destination BEAMs.
+# Unknown layouts are not seeded. Needs Python 3 and erl on PATH.
 plt_decodes() {
-  PTC_SEED_PLT="$1" erl -noshell -eval '
-    P = os:getenv("PTC_SEED_PLT"),
-    R = case file:read_file(P) of
-          {ok, Bin} ->
-            try binary_to_term(Bin, [used]) of
-              {T, Used}
-                when is_tuple(T), element(1, T) =:= file_plt,
-                     Used =:= byte_size(Bin) -> 0;
-              _ -> 1
-            catch _:_ -> 1
-            end;
-          _ -> 1
-        end,
-    halt(R).' 2>/dev/null
+  python3 "$SCRIPT_DIR/project-plt-cache.py" validate "$@"
 }
 
 # Promotion must be a no-replace operation: a bare `mv` whose destination

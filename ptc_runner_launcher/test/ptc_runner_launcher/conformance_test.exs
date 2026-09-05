@@ -6,25 +6,7 @@ defmodule PtcRunnerLauncher.ConformanceTest do
   @fixture Path.expand("../fixtures/mcp_stdio_launcher_fixture.sh", __DIR__)
   @native_fixture Path.expand("../fixtures/mcp_stdio_native_fixture.c", __DIR__)
 
-  # The identity hash is the only interval long enough to swap an executable
-  # into, so the raced target is large enough that hashing it is still running
-  # when the replacement lands: 64 MiB takes a third of a second here, and the
-  # swap fires 80 ms in.
-  #
-  # The delay is deliberately biased early. Landing before the target is opened
-  # only costs the case its coverage -- the launcher hashes the impostor and
-  # refuses on identity. Landing after `execve` would be worse than useless on
-  # macOS, because an interpreted target is reopened by its interpreter through
-  # a path no launcher check covers, and the case would then go red over a
-  # documented limitation rather than a regression. Startup alone rules out
-  # reaching `execve` within 80 ms of a 64 MiB target.
-  #
-  # This is a probe rather than a gate: nothing here can tell coverage from a
-  # miss, and making it deterministic would mean a synchronization point inside
-  # a binary whose job is deciding what may execute. What it cannot do is pass
-  # while the impostor runs.
-  @race_target_mebibytes 64
-  @race_swap_delay_ms 80
+  @hash_race_fixture Path.expand("../fixtures/mcp_stdio_hash_race_fixture.c", __DIR__)
 
   setup_all do
     compiler = System.find_executable("cc") || flunk("C compiler is unavailable")
@@ -578,27 +560,48 @@ defmodule PtcRunnerLauncher.ConformanceTest do
   end
 
   @tag :tmp_dir
-  @tag :slow
   test "a replacement landing during the identity hash never reaches exec", %{tmp_dir: dir} do
     authorized = Path.join(dir, "server")
     impostor = Path.join(dir, "impostor")
-    on_exit(fn -> File.rm_rf(dir) end)
+    marker = Path.join(dir, "swapped")
+    fixture = Path.join(dir, "hash-race-launcher")
+    compiler = System.find_executable("cc") || flunk("C compiler is unavailable")
 
-    frozen = write_padded_script(authorized, "AUTHORIZED-EXECUTED", @race_target_mebibytes)
-    write_padded_script(impostor, "IMPOSTOR-EXECUTED", 0)
+    for {path, output} <- [{authorized, "AUTHORIZED-EXECUTED"}, {impostor, "IMPOSTOR-EXECUTED"}] do
+      File.write!(path, "#!/bin/sh\nprintf '#{output}\\n'\nread _ || true\n")
+      File.chmod!(path, 0o700)
+    end
 
-    racer =
-      Task.async(fn ->
-        # Deliberate scaffolding, not a wait for a result: the interval under
-        # test is defined by wall-clock position inside the launcher's hash and
-        # the launcher publishes nothing to synchronize on.
-        Process.sleep(@race_swap_delay_ms)
-        :file.rename(impostor, authorized)
-      end)
+    frozen = executable_sha256(authorized)
+
+    # Compile the actual launcher with read interposed only in this fixture.
+    # The replacement happens after the first executable read, so neither CPU
+    # speed nor interpreter startup can move the swap outside the hash window.
+    assert {_, 0} =
+             System.cmd(
+               compiler,
+               [
+                 "-D_GNU_SOURCE",
+                 "-D_DARWIN_C_SOURCE",
+                 "-std=c11",
+                 "-Wall",
+                 "-Wextra",
+                 "-Werror",
+                 "-Wpedantic",
+                 "-DPTC_RACE_TARGET=#{inspect(authorized)}",
+                 "-DPTC_RACE_IMPOSTOR=#{inspect(impostor)}",
+                 "-DPTC_RACE_MARKER=#{inspect(marker)}",
+                 "-o",
+                 fixture,
+                 @hash_race_fixture
+               ],
+               stderr_to_stdout: true
+             )
 
     result =
       MCPStdioLauncher.open(
         executable: authorized,
+        launcher_path: fixture,
         executable_sha256: frozen,
         cwd: dir,
         args: [],
@@ -607,7 +610,8 @@ defmodule PtcRunnerLauncher.ConformanceTest do
         start_timeout_ms: 30_000
       )
 
-    assert :ok = Task.await(racer, 30_000)
+    assert File.read!(marker) == "during-hash"
+    refute File.exists?(impostor)
 
     # Refused on macOS, where the path is what gets executed; on Linux the held
     # descriptor still carries the authorized target through. Either is a safe
@@ -846,28 +850,6 @@ defmodule PtcRunnerLauncher.ConformanceTest do
       )
 
     launcher
-  end
-
-  # Returns the SHA-256 of what was written, hashed as it goes: reading a target
-  # this size back just to freeze its identity would cost more than the launch
-  # under test.
-  defp write_padded_script(path, marker, mebibytes) do
-    # Waits for stdin EOF rather than exiting on its own, so closing the
-    # launcher finishes as a close instead of racing a server exit.
-    header = "#!/bin/sh\nprintf '#{marker}\\n'\nread _ || true\nexit 0\n#"
-    padding = :binary.copy("x", 1024 * 1024)
-
-    digest =
-      File.open!(path, [:write, :binary], fn handle ->
-        Enum.reduce([header | List.duplicate(padding, mebibytes)], :crypto.hash_init(:sha256), fn
-          chunk, context ->
-            IO.binwrite(handle, chunk)
-            :crypto.hash_update(context, chunk)
-        end)
-      end)
-
-    File.chmod!(path, 0o700)
-    :crypto.hash_final(digest)
   end
 
   defp executable_sha256(executable) do
