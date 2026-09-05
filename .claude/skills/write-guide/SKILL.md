@@ -28,7 +28,8 @@ needs it, leave a link. Then stop.
 - Title: a verb phrase such as `Debug a failed run`, never a topic.
 - First paragraph: one or two sentences saying what the reader ends up with.
   The site uses it as the card text, so no prerequisite, no command, and no
-  audience label.
+  audience label. It must be at most 160 characters, which is shorter than two
+  ordinary sentences; put the rest in a second paragraph.
 - One runnable path. A second path is a second page.
 - Every step shows the command and what it prints. When the last line is
   deterministic JSON, add the `ptc-guide-e2e` annotation described in
