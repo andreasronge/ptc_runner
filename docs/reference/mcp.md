@@ -100,30 +100,46 @@ That per-operation value is the lowest of:
 
 - the installation's `ceilings.timeout_ms` in `ptc-host.json`, default `5000`;
 - for a mission provider, the manifest's `limits.evaluation_timeout_ms`,
-  default `1000`; and
+  default `30000`; and
 - the provider entry's own `config.timeout_ms` under the manifest's `providers`,
   when it sets one. It may only narrow the two above, never widen them — a
   larger value is refused as an invalid selection.
 
-Every one of them must be wide enough, because the lowest wins. Raising one
-while another stays at its default changes nothing. In `ptc.json`:
-
-```json
-{"limits": {"evaluation_timeout_ms": 20000}}
-```
-
-and in `ptc-host.json`, beside the installation's `transport`:
+Every one of them must be wide enough, because the lowest wins — raising one
+that is not the lowest changes nothing. On stock defaults the lowest is the
+installed ceiling, at `5000`, and the mission budget is already `30000`, so any
+budget up to `30000` needs only the ceiling raised, in `ptc-host.json` beside
+the installation's `transport`:
 
 ```json
 {"ceilings": {"timeout_ms": 20000}}
+```
+
+Past `30000` the mission budget becomes the lowest in turn, so a wider one takes
+both: `{"ceilings": {"timeout_ms": 40000}}` in `ptc-host.json`, and in
+`ptc.json`:
+
+```json
+{"limits": {"evaluation_timeout_ms": 40000}}
+```
+
+Both sit inside the run clock. `limits.run_duration_ms` bounds the complete run,
+active preflight and provider acquisition included, and it too defaults to
+`30000`, so a per-operation budget past that is only reachable with headroom
+there as well — sized for the whole sequence rather than one operation:
+
+```json
+{"limits": {"run_duration_ms": 120000}}
 ```
 
 `start_timeout_ms` inside the stdio transport bounds one step: the launcher
 handshake that spawns the child. The runtime applies it as
 `min(start_timeout_ms, remaining transport-start budget)`, so it can only narrow,
 never widen, the values above — but once those are raised past its `5000`
-default, that default becomes the narrower cap on the handshake. Raise it too if
-the step that expires is the spawn rather than the answer:
+default, that default becomes the narrower cap on the handshake. On stock
+defaults it and the installed ceiling are both `5000`, so the spawn step has
+`5000` ms whichever one you raise alone. Raise it too if the step that expires is
+the spawn rather than the answer:
 
 ```json
 {"start_timeout_ms": 15000}
@@ -140,7 +156,7 @@ loaded machine, is the usual cause.
 ## Run the checked-in file agent
 
 The tutorial launches [`ptc-fs-mcp@0.1.0`](https://www.npmjs.com/package/ptc-fs-mcp)
-through `npx`. It requires Node.js 22 or newer and `npx`; the first run may
+through `npx`. It requires Node.js 20.19 or newer and `npx`; the first run may
 download that package.
 
 ```console

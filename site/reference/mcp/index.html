@@ -162,22 +162,32 @@ it to each step separately: once to starting the transport, which for stdio
 covers launcher staging and the child spawn, and again to each discovery request,
 beginning with <code class="inline">server/discover</code>. It is not a single budget for the whole
 sequence, so a slow start and a slow answer can add up past any one of them.</p><p>That per-operation value is the lowest of:</p><ul><li>the installation's <code class="inline">ceilings.timeout_ms</code> in <code class="inline">ptc-host.json</code>, default <code class="inline">5000</code>;</li><li>for a mission provider, the manifest's <code class="inline">limits.evaluation_timeout_ms</code>,
-default <code class="inline">1000</code>; and</li><li>the provider entry's own <code class="inline">config.timeout_ms</code> under the manifest's <code class="inline">providers</code>,
+default <code class="inline">30000</code>; and</li><li>the provider entry's own <code class="inline">config.timeout_ms</code> under the manifest's <code class="inline">providers</code>,
 when it sets one. It may only narrow the two above, never widen them — a
-larger value is refused as an invalid selection.</li></ul><p>Every one of them must be wide enough, because the lowest wins. Raising one
-while another stays at its default changes nothing. In <code class="inline">ptc.json</code>:</p><pre><code class="json language-json">{&quot;limits&quot;: {&quot;evaluation_timeout_ms&quot;: 20000}}</code></pre><p>and in <code class="inline">ptc-host.json</code>, beside the installation's <code class="inline">transport</code>:</p><pre><code class="json language-json">{&quot;ceilings&quot;: {&quot;timeout_ms&quot;: 20000}}</code></pre><p><code class="inline">start_timeout_ms</code> inside the stdio transport bounds one step: the launcher
+larger value is refused as an invalid selection.</li></ul><p>Every one of them must be wide enough, because the lowest wins — raising one
+that is not the lowest changes nothing. On stock defaults the lowest is the
+installed ceiling, at <code class="inline">5000</code>, and the mission budget is already <code class="inline">30000</code>, so any
+budget up to <code class="inline">30000</code> needs only the ceiling raised, in <code class="inline">ptc-host.json</code> beside
+the installation's <code class="inline">transport</code>:</p><pre><code class="json language-json">{&quot;ceilings&quot;: {&quot;timeout_ms&quot;: 20000}}</code></pre><p>Past <code class="inline">30000</code> the mission budget becomes the lowest in turn, so a wider one takes
+both: <code class="inline">{&quot;ceilings&quot;: {&quot;timeout_ms&quot;: 40000}}</code> in <code class="inline">ptc-host.json</code>, and in
+<code class="inline">ptc.json</code>:</p><pre><code class="json language-json">{&quot;limits&quot;: {&quot;evaluation_timeout_ms&quot;: 40000}}</code></pre><p>Both sit inside the run clock. <code class="inline">limits.run_duration_ms</code> bounds the complete run,
+active preflight and provider acquisition included, and it too defaults to
+<code class="inline">30000</code>, so a per-operation budget past that is only reachable with headroom
+there as well — sized for the whole sequence rather than one operation:</p><pre><code class="json language-json">{&quot;limits&quot;: {&quot;run_duration_ms&quot;: 120000}}</code></pre><p><code class="inline">start_timeout_ms</code> inside the stdio transport bounds one step: the launcher
 handshake that spawns the child. The runtime applies it as
 <code class="inline">min(start_timeout_ms, remaining transport-start budget)</code>, so it can only narrow,
 never widen, the values above — but once those are raised past its <code class="inline">5000</code>
-default, that default becomes the narrower cap on the handshake. Raise it too if
-the step that expires is the spawn rather than the answer:</p><pre><code class="json language-json">{&quot;start_timeout_ms&quot;: 15000}</code></pre><p>When a budget expires, the closed result is <code class="inline">provider_acquisition_timeout</code>,
+default, that default becomes the narrower cap on the handshake. On stock
+defaults it and the installed ceiling are both <code class="inline">5000</code>, so the spawn step has
+<code class="inline">5000</code> ms whichever one you raise alone. Raise it too if the step that expires is
+the spawn rather than the answer:</p><pre><code class="json language-json">{&quot;start_timeout_ms&quot;: 15000}</code></pre><p>When a budget expires, the closed result is <code class="inline">provider_acquisition_timeout</code>,
 which is retryable and distinct from <code class="inline">provider_unavailable</code>. It reports only
 that the clock ran out: the step that expired may have been the spawn or the
 discovery answer, so PtcRunner cannot say the server was reached, only that it
 never received the response needed to prove a protocol mismatch. Raise the
 budgets and run it again. A first launch on a cold npm cache, or any launch on a
 loaded machine, is the usual cause.</p><h2 id="run-the-checked-in-file-agent">Run the checked-in file agent</h2><p>The tutorial launches <a href="https://www.npmjs.com/package/ptc-fs-mcp"><code class="inline">ptc-fs-mcp@0.1.0</code></a>
-through <code class="inline">npx</code>. It requires Node.js 22 or newer and <code class="inline">npx</code>; the first run may
+through <code class="inline">npx</code>. It requires Node.js 20.19 or newer and <code class="inline">npx</code>; the first run may
 download that package.</p><pre><code class="console language-console">ptc init kernel-tutorial --example kernel-tutorial
 ptc doctor kernel-tutorial/03-file-agent.ptc-project.json</code></pre><p>Passive doctor validates the application, resolves <code class="inline">npx</code>, and checks the
 selected installation without loading the model credential or starting the
