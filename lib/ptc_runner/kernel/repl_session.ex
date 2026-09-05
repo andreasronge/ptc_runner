@@ -902,6 +902,7 @@ defmodule PtcRunner.Kernel.ReplSession do
          evaluation_id,
          started_ms
        ) do
+    :ok = RunState.record_capability_denial(session.state, step.fail.reason)
     next = increment_error(session)
 
     case emit_evaluation_stopped(
@@ -1335,6 +1336,7 @@ defmodule PtcRunner.Kernel.ReplSession do
          started_ms
        ) do
     _ = RunState.release_evaluation(session.state, lease)
+    :ok = RunState.record_capability_denial(session.state, step.fail.reason)
     next = increment_error(session)
 
     case emit_evaluation_stopped(

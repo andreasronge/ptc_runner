@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.AgentCoreCharacterizationTest do
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.EvaluatorEvidence
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
@@ -213,6 +214,41 @@ defmodule PtcRunner.Kernel.AgentCoreCharacterizationTest do
       assert_receive {:agent_request, first}
       refute_receive {:agent_request, _second}
       assert first["system"] =~ "TERMINAL-ONLY PHASE"
+    end
+
+    # #1787's repro, made deterministic: every turn calls a capability the
+    # mission was never granted, so the loop exhausts its turns. Before the
+    # denial counter and the catalogued kind, the public evidence for this run
+    # was indistinguishable from a model that was merely slow.
+    test "a turn-limited denial names unknown_tool and counts every denied call" do
+      responses = [
+        tool_call("first", ~S|(return (tool/vault.read {}))|),
+        tool_call("second", ~S|(return (tool/vault.read {}))|)
+      ]
+
+      {:ok, config} = agent_config(responses)
+
+      source = ~S"""
+      (agent.core/run-phased-result-value
+        "Read the vault."
+        {"phases" [{"mission" "default" "max_turns" 2}]})
+      """
+
+      assert {:error, %{reason: :runtime_limit_exceeded} = error} = Kernel.run(source, config)
+
+      assert %{
+               limit: :agent_turns,
+               limit_value: 2,
+               limit_reason: :evaluation_error,
+               last_evaluator_failure: %{kind: :unknown_tool}
+             } = error.details
+
+      assert error.usage.capability_denials == %{"unknown_tool" => 2}
+
+      assert EvaluatorEvidence.envelope_value(:normal, error) == %{
+               "kind" => "unknown_tool",
+               "message" => "a capability this environment does not grant was called"
+             }
     end
 
     test "an unsafe failure transitions with closing? preserved into the next phase" do

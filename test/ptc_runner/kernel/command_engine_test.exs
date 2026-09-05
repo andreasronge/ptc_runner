@@ -622,6 +622,178 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              "evaluation: type_error: a PTC-Lisp operation received a value of the wrong type"
   end
 
+  # The control #1787 was filed on: two runs of one manifest and one program,
+  # differing only in which mission the input names. Before the counter existed
+  # the denied arm's public evidence was indistinguishable from a workflow that
+  # merely ran out of turns.
+  @tag :tmp_dir
+  test "two arms differing only in the named mission publish a denial or none", %{
+    tmp_dir: directory
+  } do
+    marker = Path.join(directory, "two-arm-methods")
+    host_path = write_host_config(directory, "two-arm-stdio", connect_host_config(marker))
+    application = write_application(directory, "two-arm-authority", two_arm_manifest())
+    root = Path.dirname(application)
+
+    File.write!(
+      Path.join(root, "main.clj"),
+      ~S"""
+      (ns app)
+      (defn run [input]
+        (let [attempt (kernel/eval-source (get input "mission")
+                        "(return (tool/workspace.structured {\"query\" \"x\"}))")]
+          (return {"outcome" (get attempt "outcome")})))
+      """
+    )
+
+    granted = Path.join(root, "granted.json")
+    denied = Path.join(root, "denied.json")
+    File.write!(granted, ~s({"mission":"custodian"}))
+    File.write!(denied, ~s({"mission":"restricted"}))
+
+    run = fn input ->
+      assert {:ok, %CommandOutcome{} = outcome} =
+               CommandEngine.dispatch([
+                 "run",
+                 application,
+                 "--host-config",
+                 host_path,
+                 "--input",
+                 input
+               ])
+
+      assert_schema_valid(outcome.envelope)
+      outcome.envelope
+    end
+
+    authorized = run.(granted)
+    assert authorized["result"]["value"] == %{"outcome" => "returned"}
+    assert authorized["execution"]["usage"]["capability_denials"] == %{}
+
+    assert authorized["execution"]["usage"]["capability_calls"] == %{
+             "mission/workspace.structured" => 1
+           }
+
+    unauthorized = run.(denied)
+    assert unauthorized["result"]["value"] == %{"outcome" => "evaluation_error"}
+    assert unauthorized["execution"]["usage"]["capability_denials"] == %{"unknown_tool" => 1}
+    assert unauthorized["execution"]["usage"]["capability_calls"] == %{}
+  end
+
+  # #1787: an ungranted mission's denied call left no public trace at all —
+  # `capability_refusals` cannot see it, because a name that never resolved has
+  # no installed callback to wrap. The run below recovers and exits `0`, which
+  # is exactly the case `last_evaluation_error` alone would still publish
+  # nothing for.
+  @tag :tmp_dir
+  test "a denied mission call is counted even when the run then completes ok", %{
+    tmp_dir: directory
+  } do
+    manifest = mission_eval_manifest()
+    application = write_application(directory, "denied-mission-call", manifest)
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S"""
+      (ns app)
+      (defn run [_input]
+        (let [attempt (kernel/eval-source "restricted" "(return (tool/vault.read {}))")]
+          (return {"outcome" (get attempt "outcome") "kind" (get attempt "kind")})))
+      """
+    )
+
+    assert {:ok, %CommandOutcome{} = outcome} = CommandEngine.dispatch(["run", application])
+
+    assert outcome.envelope["status"] == "ok"
+
+    assert outcome.envelope["result"]["value"] == %{
+             "outcome" => "evaluation_error",
+             "kind" => "unknown_tool"
+           }
+
+    assert outcome.envelope["execution"]["usage"]["capability_denials"] == %{"unknown_tool" => 1}
+    assert outcome.envelope["execution"]["usage"]["capability_calls"] == %{}
+    assert_schema_valid(outcome.envelope)
+  end
+
+  # The mission program is model-authored, so the name it invents must not
+  # become a key in a public map. The class is the runtime's own, and the unit
+  # is the stopped evaluation: the third program names two undefined tools and
+  # is still one denial, because one denial ends one evaluation.
+  @tag :tmp_dir
+  test "an invented capability name never becomes a denial key", %{tmp_dir: directory} do
+    manifest = mission_eval_manifest()
+    application = write_application(directory, "invented-capability-name", manifest)
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S"""
+      (ns app)
+      (defn run [_input]
+        (let [first (kernel/eval-source "restricted" "(return (tool/anything-it-likes {}))")
+              second (kernel/eval-source "restricted" "(return (tool/or-this-one {}))")
+              third (kernel/eval-source "restricted"
+                      "(do (tool/one-more {}) (return (tool/and-another {})))")]
+          (return [(get first "kind") (get second "kind") (get third "kind")])))
+      """
+    )
+
+    assert {:ok, %CommandOutcome{} = outcome} = CommandEngine.dispatch(["run", application])
+
+    assert outcome.envelope["result"]["value"] == [
+             "unknown_tool",
+             "unknown_tool",
+             "unknown_tool"
+           ]
+
+    assert outcome.envelope["execution"]["usage"]["capability_denials"] == %{"unknown_tool" => 3}
+
+    encoded = Jason.encode!(outcome.envelope)
+    refute encoded =~ "anything-it-likes"
+    refute encoded =~ "or-this-one"
+    refute encoded =~ "one-more"
+    refute encoded =~ "and-another"
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "a private run counts the denial without naming its kind", %{tmp_dir: directory} do
+    manifest = mission_eval_manifest()
+    application = write_application(directory, "private-denied-mission", manifest)
+    input = Path.join(Path.dirname(application), "private-input.json")
+    output = Path.join(directory, "private-result.json")
+    File.write!(input, ~s({}))
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S"""
+      (ns app)
+      (defn run [_input]
+        (let [attempt (kernel/eval-source "restricted" "(return (tool/vault.read {}))")]
+          (return (get attempt "kind"))))
+      """
+    )
+
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch([
+               "run",
+               application,
+               "--private-input",
+               input,
+               "--private-output",
+               output
+             ])
+
+    assert outcome.envelope["artifact_class"] == "private"
+    assert outcome.envelope["execution"]["last_evaluation_error"] == nil
+
+    # The counter is a runtime-owned class, so it survives private redaction;
+    # the denied name and the evaluator text do not.
+    assert outcome.envelope["execution"]["usage"]["capability_denials"] == %{"unknown_tool" => 1}
+    refute Jason.encode!(outcome.envelope) =~ "vault.read"
+    assert_schema_valid(outcome.envelope)
+  end
+
   @tag :tmp_dir
   test "arity, not_callable, and loop evaluator failures publish exact public kinds", %{
     tmp_dir: directory
@@ -9310,6 +9482,45 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     refute Jason.encode!(outcome.envelope) =~ "ov-escape"
     refute Jason.encode!(outcome.envelope) =~ "escape.clj"
+  end
+
+  defp two_arm_manifest do
+    valid_manifest(%{
+      "workflow" => %{
+        "components" => [
+          %{"id" => "app", "path" => "main.clj", "dependencies" => ["kernel"]},
+          %{"library" => "kernel"}
+        ],
+        "entry" => "app/run"
+      },
+      "providers" => %{
+        "workflow" => [],
+        "mission" =>
+          provider_entries([
+            {"workspace", %{"allow" => ["workspace.structured"], "timeout_ms" => 5_000}}
+          ])
+      },
+      "missions" => %{
+        "custodian" => %{"providers" => ["workspace"]},
+        "restricted" => %{}
+      },
+      "limits" => %{"evaluation_timeout_ms" => 5_000}
+    })
+  end
+
+  # `kernel/eval-source` is the only route to a runtime denial: a workflow that
+  # names an undeclared capability is refused statically, before the run.
+  defp mission_eval_manifest do
+    valid_manifest(%{
+      "workflow" => %{
+        "components" => [
+          %{"id" => "app", "path" => "main.clj", "dependencies" => ["kernel"]},
+          %{"library" => "kernel"}
+        ],
+        "entry" => "app/run"
+      },
+      "missions" => %{"restricted" => %{}}
+    })
   end
 
   defp http_mcp_host(endpoint) do

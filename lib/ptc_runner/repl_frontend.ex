@@ -135,6 +135,11 @@ defmodule PtcRunner.ReplFrontend do
   alias PtcRunner.ReplError
   alias PtcRunner.ReplLineEditor, as: LineEditor
 
+  # Catalogued kinds whose fixed public sentence drops detail a local session
+  # needs: the offending type, and the denied capability name with the granted
+  # inventory beside it.
+  @detailed_repl_kinds [:type_error, :unknown_tool]
+
   @spec run(CommandArguments.t(), CommandRuntime.t()) ::
           :ok | {:error, binary()} | {:error, atom(), binary()}
   def run(arguments, runtime), do: run(arguments, runtime, [])
@@ -1809,14 +1814,18 @@ defmodule PtcRunner.ReplFrontend do
     info(preview.text)
   end
 
+  # Normal REPL diagnostics keep the evaluator's own text for kinds whose
+  # public evidence is a fixed sentence: the denied name and the granted
+  # inventory are what make a local session actionable, and neither reaches
+  # the command envelope.
   defp format_error(
-         %{fail: %{reason: :type_error, message: message}} = step,
+         %{fail: %{reason: reason, message: message}} = step,
          session,
          render
        )
-       when is_binary(message) do
-    body = String.replace_prefix(message, "type_error: ", "")
-    "Error (type_error): " <> mission_hint(step, session, render) <> body
+       when reason in @detailed_repl_kinds and is_binary(message) do
+    body = String.replace_prefix(message, "#{reason}: ", "")
+    "Error (#{reason}): " <> mission_hint(step, session, render) <> body
   end
 
   defp format_error(

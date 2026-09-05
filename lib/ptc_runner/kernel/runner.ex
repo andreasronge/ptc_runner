@@ -340,6 +340,11 @@ defmodule PtcRunner.Kernel.Runner do
         end
 
       {:error, step} ->
+        # A workflow that calls a capability its bundle never granted is denied
+        # by the same evaluator path a mission is, and the count has to land
+        # before the terminal usage projection below reads it.
+        :ok = RunState.record_capability_denial(state, step.fail.reason)
+
         capture_execution_failure(
           config,
           state,

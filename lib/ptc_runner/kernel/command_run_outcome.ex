@@ -880,6 +880,8 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
          {:ok, events_dropped} <- count_map(Map.get(usage, :events_dropped, %{})),
          {:ok, capability_refusals} <-
            count_map(Map.get(usage, :capability_refusals, %{}), 192),
+         {:ok, capability_denials} <-
+           count_map(Map.get(usage, :capability_denials, %{}), 64),
          values <-
            %{
              "remaining_ms" => Map.get(usage, :remaining_ms),
@@ -893,6 +895,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
              "evaluation_continuation_bytes" => Map.get(usage, :evaluation_continuation_bytes),
              "events_dropped" => events_dropped,
              "capability_refusals" => capability_refusals,
+             "capability_denials" => capability_denials,
              "llm_budget" => llm_budget,
              "llm_spend" => llm_spend
            }

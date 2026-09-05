@@ -49,6 +49,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   @capability_name "^(?:workflow|mission)/[a-z][a-z0-9._/-]{0,127}$(?![\\s\\S])"
   @capability_refusal_class "(?:[a-z][a-z0-9_]{0,63}|unknown|sha256:[0-9a-f]{64})"
   @capability_refusal_key "^(?:workflow|mission)/#{@capability_refusal_class}/#{@capability_refusal_class}$(?![\\s\\S])"
+  @capability_denial_key "^[a-z][a-z0-9_]{0,63}$(?![\\s\\S])"
   @installation_revision ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @event_type "^[a-z][a-z0-9-]{0,127}$(?![\\s\\S])"
   @json_pointer "^(?:/(?:[^~/]|~[01])*)*$(?![\\s\\S])"
@@ -1815,8 +1816,15 @@ defmodule PtcRunner.Kernel.CommandContract do
         SafeMetadata.capability_refusal_map_limit() + 1
       )
 
+    denial_counts =
+      count_map(
+        @capability_denial_key,
+        ["$overflow"],
+        SafeMetadata.capability_denial_map_limit() + 1
+      )
+
     required =
-      ~w(remaining_ms capability_calls subordinate_evaluations evaluations_by_mission protocol_errors agent_protocol_errors evaluation_memory_bytes evaluation_history_bytes evaluation_continuation_bytes events_dropped capability_refusals llm_budget llm_spend llm_usage_state llm_usage llm_usage_by_model unattributed_model_calls)
+      ~w(remaining_ms capability_calls subordinate_evaluations evaluations_by_mission protocol_errors agent_protocol_errors evaluation_memory_bytes evaluation_history_bytes evaluation_continuation_bytes events_dropped capability_refusals capability_denials llm_budget llm_spend llm_usage_state llm_usage llm_usage_by_model unattributed_model_calls)
 
     common = %{
       "remaining_ms" => nonnegative_integer(),
@@ -1830,6 +1838,7 @@ defmodule PtcRunner.Kernel.CommandContract do
       "evaluation_continuation_bytes" => nonnegative_integer(),
       "events_dropped" => event_counts,
       "capability_refusals" => refusal_counts,
+      "capability_denials" => denial_counts,
       "llm_budget" => llm_budget_schema(),
       "llm_spend" => llm_spend_schema()
     }

@@ -569,6 +569,27 @@ defmodule PtcRunner.Kernel.RunState do
       when is_binary(key) and byte_size(key) in 1..192,
       do: safe_call(state, {:record_capability_refusal, key}, :ok)
 
+  @doc """
+  Records one evaluation a denied capability call stopped, under its class.
+
+  A denial is a call the environment rejected before any callback ran, so
+  `record_capability_refusal/2` can never see it: there is no installed
+  callback to wrap. The unit is the stopped evaluation, not the call — a
+  denial ends its evaluation, and one program's undefined names are reported
+  together — so this counts how many evaluations a boundary stopped, and an
+  uncatalogued reason is not counted at all. The count is observational.
+  Distinct class keys are capped at
+  `SafeMetadata.capability_denial_map_limit/0`; further classes increment
+  `$overflow`.
+  """
+  @spec record_capability_denial(t(), term()) :: :ok
+  def record_capability_denial(state, reason) do
+    case SafeMetadata.capability_denial_key(reason) do
+      {:ok, key} -> safe_call(state, {:record_capability_denial, key}, :ok)
+      :error -> :ok
+    end
+  end
+
   @doc false
   @spec record_llm_usage(t(), binary(), binary(), atom(), map() | nil) :: :ok | {:error, :closed}
   def record_llm_usage(state, alias_name, revision, status, usage)
@@ -748,6 +769,7 @@ defmodule PtcRunner.Kernel.RunState do
        protocol_errors: 0,
        agent_protocol_errors: 0,
        capability_refusals: %{},
+       capability_denials: %{},
        llm_budget: %{
          total_tokens: new_ledger(limits.llm_total_tokens),
          cost: new_ledger(limits.llm_cost_microusd)
@@ -1387,6 +1409,24 @@ defmodule PtcRunner.Kernel.RunState do
       when is_binary(key) and byte_size(key) in 1..192 do
     {:reply, :ok,
      %{state | capability_refusals: put_capability_refusal(state.capability_refusals, key)}}
+  end
+
+  def handle_call(
+        {token, {:record_capability_denial, key}},
+        _from,
+        %{token: token} = state
+      )
+      when is_binary(key) and byte_size(key) in 1..64 do
+    {:reply, :ok,
+     %{
+       state
+       | capability_denials:
+           put_class_count(
+             state.capability_denials,
+             key,
+             SafeMetadata.capability_denial_map_limit()
+           )
+     }}
   end
 
   def handle_call(
@@ -2610,18 +2650,22 @@ defmodule PtcRunner.Kernel.RunState do
   defp capability_limits(limits, :mission),
     do: {limits.mission_capability_calls, limits.mission_capability_calls_per_name}
 
-  defp put_capability_refusal(refusals, key) do
-    limit = SafeMetadata.capability_refusal_map_limit()
+  defp put_capability_refusal(refusals, key),
+    do: put_class_count(refusals, key, SafeMetadata.capability_refusal_map_limit())
 
+  # Both class-keyed usage maps name at most `limit` distinct classes and fold
+  # the rest into `$overflow`, so terminal usage can reserve one bounded shape
+  # for each of them.
+  defp put_class_count(counts, key, limit) do
     cond do
-      Map.has_key?(refusals, key) ->
-        Map.update!(refusals, key, &(&1 + 1))
+      Map.has_key?(counts, key) ->
+        Map.update!(counts, key, &(&1 + 1))
 
-      map_size(Map.delete(refusals, "$overflow")) < limit ->
-        Map.put(refusals, key, 1)
+      map_size(Map.delete(counts, "$overflow")) < limit ->
+        Map.put(counts, key, 1)
 
       true ->
-        Map.update(refusals, "$overflow", 1, &(&1 + 1))
+        Map.update(counts, "$overflow", 1, &(&1 + 1))
     end
   end
 
@@ -2636,6 +2680,7 @@ defmodule PtcRunner.Kernel.RunState do
       protocol_errors: state.protocol_errors,
       agent_protocol_errors: state.agent_protocol_errors,
       capability_refusals: state.capability_refusals,
+      capability_denials: state.capability_denials,
       llm_budget: llm_budget_projection(state.llm_budget),
       llm_spend: LLMUsageSummary.spend(state.llm_usage),
       evaluation_memory_bytes:
