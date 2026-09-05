@@ -174,6 +174,12 @@ neither you nor root, is `source_out_parent_unsafe` or
 parent with `mkdir -p`, restrict it with `chmod go-w`, or choose a path you
 own, and rerun.
 
+The directory's name is not part of that rule. A leading dot
+(`.private/candidate`) or an uppercase segment (`Candidates/agent-prompt`) is
+as usable as `review/candidate`, inside the application or outside it: the
+portable logical-name grammar names application documents and does not
+constrain where you keep a candidate.
+
 Candidate mode keeps the existing 1 MiB replacement bound. Installed
 inspection and `--source-out` can return a larger accepted component; submitting
 those bytes as a candidate is refused with the existing too-large diagnostic.
@@ -213,7 +219,11 @@ descriptor contains the replacement instruction, not the source itself:
 
 For a mission component, use
 `{"environment": "mission", "mission": "reader"}` as the target. The
-candidate path is confined to the descriptor directory. PtcRunner verifies
+candidate path is confined to the descriptor directory. A descriptor under the
+application root whose relative path also spells a portable logical name is
+read through the confined application source; every other descriptor is read
+from its filesystem path. That choice decides only how the bytes are read, and
+never whether the directory is usable. PtcRunner verifies
 both hashes before compiling: `source_hash` prevents substituted candidate
 bytes, while `base_source_hash` rejects a candidate built for a component that
 has since changed. The source is read once, and those verified bytes are the

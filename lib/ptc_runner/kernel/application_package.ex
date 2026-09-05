@@ -434,15 +434,21 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
               {:error, _reason} = error -> source_error(error, :component_override)
             end
 
-          {:error, :outside_application_source} ->
+          # The descriptor is an operator-selected file, not an application
+          # document, so the logical-name grammar decides only how it is read,
+          # never whether the directory holding it is usable. A path under the
+          # root that also spells a portable logical name is read through the
+          # confined source, so its bytes are charged there; every other path
+          # is loaded by filesystem path. Refusing an in-root `.private/` or
+          # `Candidates/` while the same directory one level outside the root
+          # loads would make resolution order, not safety, decide. `--input`
+          # above already falls back the same way.
+          {:error, reason} when reason in [:outside_application_source, :invalid_logical_name] ->
             ComponentOverride.load(path)
             |> case do
               {:ok, override} -> {:ok, {override, :external}}
               {:error, _reason} = error -> source_error(error, :component_override)
             end
-
-          {:error, :invalid_logical_name} ->
-            source_error({:error, :invalid_override_descriptor}, :component_override)
         end
     end
   end

@@ -1166,6 +1166,16 @@ defmodule PtcRunner.Kernel.CommandContract do
               code in @project_codes,
        do: true
 
+  # Two static modes acquire an application through a component override
+  # descriptor and can therefore be told it is invalid: `validate` takes one
+  # from `--component-override-descriptor`, and `materialize` re-acquires
+  # through the descriptor it just published, which a base edited between the
+  # two acquisitions refuses. `doctor` accepts no descriptor, so
+  # `override_invalid` stays out of the static union rather than joining it.
+  defp diagnostic_pair_allowed?(mode, :application, :override_invalid)
+       when mode in [:validate, :materialize],
+       do: true
+
   defp diagnostic_pair_allowed?(mode, :application, code)
        when mode in [:validate, :doctor, {:doctor, :connect}, :materialize] and
               code in @static_application_codes,
