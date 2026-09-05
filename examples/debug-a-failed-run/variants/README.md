@@ -1,7 +1,7 @@
 # Alternative failure shapes
 
 The example's main story seeds one defect: a helper follows a relationship it
-cannot follow. These trees give the same debugger and repair agent two other
+cannot follow. These trees give the debuggers and the repair path two other
 shapes to meet, so a passing run is not evidence about one bug only.
 
 | Tree | Failure shape |
@@ -21,8 +21,10 @@ ptc run debug-a-failed-run/variants/target-ambiguous.ptc-project.json
 ptc run debug-a-failed-run/repair-agent-ambiguous.ptc-project.json --env-file .env
 ```
 
-The repair entry points stay in the parent directory because a PTC project
-document cannot name a path above itself, and both reuse `repair-agent/ptc.json`
-from there. Everything they read — the host document and the captured
-application — lives here. `mix help ptc.repair` runs their validation suites
-from a checkout.
+The ambiguous repair entry point stays in the parent directory because a PTC
+project document cannot name a path above itself, and it reuses
+`repair-agent/ptc.json` from there. Everything it reads — the host document and
+the captured application — lives here. The workflow-control shape has no live
+repair entry point: the main story's stage 3 checks the repaired helper against
+its capture, and `repair-agent/workflow-control-suite.json` validates a
+candidate for it through `mix ptc.repair` from a checkout.

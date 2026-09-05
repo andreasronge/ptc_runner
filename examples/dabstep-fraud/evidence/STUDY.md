@@ -75,7 +75,10 @@ scanned every page, then compared its ratio-ranked winner against the option
 with the largest absolute fraud volume and vetoed the right answer
 (`cmd-7xx3se058f8jn6wqfbkqy4qm71`). A reviewer that can veto is a second
 single point of failure; a reviewer that must show its measurement is
-evidence.
+evidence. That third run is also the one the README's program comes from:
+its analysis stage was stopped at the 40 MB heap ceiling on turn 3 and wrote
+the streaming program on turn 4, and its recheck stage separately exceeded
+the retained-definitions limit (`evaluation_memory_bytes`) on turn 10.
 
 **Shared-defect counterfactual, 2026-09-03.** Thirty reviewer-only runs over
 three defects both analyzers shared, with and without showing the reviewer

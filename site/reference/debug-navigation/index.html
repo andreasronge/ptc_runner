@@ -331,7 +331,9 @@ remains tied to its original evidence. The example README walks repair,
 independent validation, and reuse on another task.</p><h2 id="let-a-model-do-the-walking">Let a model do the walking</h2><p>The same mission works for an agent. <code class="inline">debugger-agent/</code> in the example replaces
 the deterministic walk with the shipped agent loop over the same authority. Like the repair agent, it
 needs a credential, named on the command line so no environment file has to
-live inside the example directory:</p><pre><code class="console language-console">ptc run debug-a-failed-run/debugger-agent.ptc-project.json --env-file .env</code></pre><p>Keep <code class="inline">debug.nav</code> as the mission's only domain authority and select a model into
+live inside the example directory:</p><pre><code class="console language-console">ptc run debug-a-failed-run/debugger-agent.ptc-project.json --env-file .env</code></pre><p>One run with the shipped model diagnosed <code class="inline">pricing.rule</code> in 19 turns for about
+half a cent. The budget is 30 turns because model runs vary, and a run that
+reaches it reports an unfinished investigation, not a diagnosis.</p><p>Keep <code class="inline">debug.nav</code> as the mission's only domain authority and select a model into
 the workflow:</p><pre><code class="json language-json">&quot;workflow&quot;: {&quot;components&quot;: [{&quot;library&quot;: &quot;agent.main&quot;}], &quot;entry&quot;: &quot;agent.main/run&quot;},
 &quot;missions&quot;: {
   &quot;evidence&quot;: {

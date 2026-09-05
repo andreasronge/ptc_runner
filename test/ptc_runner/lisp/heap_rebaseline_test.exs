@@ -34,11 +34,22 @@ defmodule PtcRunner.Lisp.HeapRebaselineTest do
     %{"rows" => fn _args -> Enum.take(rows, 3) end}
   end
 
+  # One sample is noisy in one direction only: the first call pays code
+  # loading, and a garbage collection of the caller's heap, which holds the
+  # granted map, is charged to the caller as reductions. An enumeration of the
+  # map would show in every sample, so the minimum is the cost of the work.
+  @reduction_samples 5
+
   defp caller_reductions(fun) do
-    {:reductions, before_run} = Process.info(self(), :reductions)
-    fun.()
-    {:reductions, after_run} = Process.info(self(), :reductions)
-    after_run - before_run
+    1..@reduction_samples
+    |> Enum.map(fn _sample ->
+      :erlang.garbage_collect()
+      {:reductions, before_run} = Process.info(self(), :reductions)
+      fun.()
+      {:reductions, after_run} = Process.info(self(), :reductions)
+      after_run - before_run
+    end)
+    |> Enum.min()
   end
 
   describe "host-granted data is excluded from the program budget (F3 regression)" do

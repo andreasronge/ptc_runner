@@ -1,7 +1,9 @@
 # PtcRunner
 
-**Build AI agents that are bounded in what they can do, easy to change,
-observable in operation, and designed to improve from evidence.**
+**Build loops that check their work and recover from evidence.**
+
+Bound execution, inspect failures, verify outcomes, and test changes before
+adopting them.
 
 - **A language for agents** — small, typed, and limited to the tools you
   approved, discovered in a REPL rather than listed in the prompt.

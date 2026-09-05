@@ -140,8 +140,7 @@ grants:</p><pre><code class="json language-json">&quot;missions&quot;: {
 }</code></pre><p>The workflow passes only the triage result forward and validates the final
 report. Its local returned-value helper uses the documented
 <a href="/reference/agent-library-reference/#agent-core-fail-outcome">fail-outcome path</a> to
-keep the original diagnostic on abort; quarantined is also local. Materialize
-the example with ptc init support-triage --example support-triage.</p><pre><code class="clojure language-clojure">(defn run [input]
+keep the original diagnostic on abort; quarantined is also local.</p><pre><code class="clojure language-clojure">(defn run [input]
   (let [ranked (returned-value
                  (agent.core/run-outcome (get input &quot;triage_task&quot;)
                                          {&quot;mission&quot; &quot;triage&quot; &quot;max_turns&quot; 4}))]
@@ -161,7 +160,9 @@ no such guarantee; trusted workflow code must perform that filtering.</p><pre><c
   {&quot;id&quot;:&quot;T-1005&quot;,&quot;priority&quot;:52,&quot;team&quot;:&quot;sre&quot;,
    &quot;first_action&quot;:&quot;page the on-call engineer&quot;}],
  &quot;summary&quot;:&quot;Four breached tickets were classified and escalated.&quot;}</code></pre><p>Two rules carry this step.</p><ul><li>A specialist is a mission. The escalation model cannot read the ticket pool
-because it was never granted it.</li><li>A consumer gets a contract. The runtime enforces the schema, so the shape of
+because it was never granted it. The
+<a href="/reference/examples/#what-each-tree-demonstrates">boundary check</a> shows
+that refusal without a model.</li><li>A consumer gets a contract. The runtime enforces the schema, so the shape of
 the report is a property of the run.</li></ul><p>An invalid candidate receives correction feedback while turns remain; the
 <a href="/reference/agent-library-reference/#agent-core-run">agent library reference</a>
 describes that loop.</p><h2 id="where-to-go-next">Where to go next</h2><p><a href="/guides/agent-workflow-patterns/">Choose a workflow shape</a> names the shapes these

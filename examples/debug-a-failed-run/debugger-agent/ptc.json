@@ -30,7 +30,7 @@
     "value": {
       "task": "A captured run failed. Determine why it did not produce the required value, using only evidence you actually read.\nStart in this order: list runs and select the failed one; open it; read execution_errors; read generated_sources to obtain the exact generated programs; follow their complete typed relationships to frozen prelude sources and dependencies. Follow relationship objects exactly as received. Do not invent filters or pass a run id where an evaluation id is expected.\nA dependency leaf is not a stopping condition. Read the relevant branches. If they do not explain the failure, inspect the workflow's frozen prelude_sources: the workflow environment authors generated mission programs and connects mission results.\nStop when the evidence distinguishes one faulty implementation from its callers, dependencies, contracts, and input, or when you can explain why it cannot. A numerical mismatch alone is not a diagnosis. If multiple components could each account for it and no contract distinguishes them, abstain.\nReturn exactly decision, cause (a string), evidence (an array of strings), and component_id only for a diagnosis. Use diagnosed only when a source you read contradicts its contract or the required values and explains the failure; name that component. Otherwise use insufficient-evidence, explain what remains undetermined in cause, and omit component_id. Reaching a turn limit is an unfinished investigation, not evidence for a diagnosis.",
       "agent": {
-        "max_turns": 20,
+        "max_turns": 30,
         "mission": "evidence"
       }
     }
