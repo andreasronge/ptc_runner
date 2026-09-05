@@ -27,6 +27,8 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   @agent_action_kinds ~w(tool-call protocol-error provider-error max-calls model-output-truncated)
   @failure_kinds ~w(
     invalid-agent-config
+    invalid-verification
+    verification-failed
     invalid-input
     invalid-prompt
     invalid-transcript
@@ -157,6 +159,9 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   @doc """
   Returns whether an annotation belongs to the finite canonical vocabulary.
 
+  `"agent-verification"` carries only a `status` from accepted, rejected, or
+  unresolved. It never carries candidate values, verifier feedback, or evidence.
+
   `"progress"` carries exactly one enumerated `stage`. `"agent-action"` is
   the shipped agent loop's coarse per-turn record: `turn` (an integer from 0
   through 127), `max_turns` (1 through 128), a runtime-authored opaque
@@ -203,6 +208,10 @@ defmodule PtcRunner.Kernel.SafeMetadata do
       is_binary(mission) and
       mission =~ ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   end
+
+  def annotation?("agent-verification", %{"status" => status} = data)
+      when map_size(data) == 1 and status in ["accepted", "rejected", "unresolved"],
+      do: true
 
   def annotation?(_type, _data), do: false
 

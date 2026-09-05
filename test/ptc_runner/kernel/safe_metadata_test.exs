@@ -123,7 +123,8 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
       {"progress", ["stage"]},
       {"agent-action", ["turn", "max_turns", "invocation", "kind"]},
       {"agent-action",
-       ["turn", "max_turns", "invocation", "kind", "phase", "phase_turn", "mission"]}
+       ["turn", "max_turns", "invocation", "kind", "phase", "phase_turn", "mission"]},
+      {"agent-verification", ["status"]}
     ]
 
     test "annotation?/2 accepting clauses are exactly the published rows" do
@@ -133,7 +134,22 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
     test "docs/maintainers/trace-log-contract.md publishes those types, keys, and enumerations" do
       source = File.read!(@source)
       section = workflow_annotation_section(File.read!(@contract))
-      [progress_row, agent_row] = published_table_rows(section)
+      [progress_row, agent_row, verification_row] = published_table_rows(section)
+      assert verification_row =~ "agent-verification"
+      assert verification_row =~ "exactly `status`"
+
+      for status <- ~w(accepted rejected unresolved) do
+        assert verification_row =~ status
+        assert SafeMetadata.annotation?("agent-verification", %{"status" => status})
+      end
+
+      refute SafeMetadata.annotation?("agent-verification", %{"status" => "unknown"})
+
+      refute SafeMetadata.annotation?("agent-verification", %{
+               "status" => "accepted",
+               "feedback" => "private"
+             })
+
       stages = attribute_list(source, :progress_stages)
       kinds = attribute_list(source, :agent_action_kinds)
       bounds = annotation_field_bounds(source)
@@ -402,8 +418,8 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
       |> Enum.filter(&String.starts_with?(&1, "| `"))
       |> Enum.reject(&String.contains?(&1, "annotation_type"))
 
-    assert length(rows) == 2,
-           "expected exactly two published annotation rows, got: #{inspect(rows)}"
+    assert length(rows) == 3,
+           "expected exactly three published annotation rows, got: #{inspect(rows)}"
 
     rows
   end

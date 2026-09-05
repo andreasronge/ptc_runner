@@ -103,6 +103,38 @@ all 138,236 rows and was stopped at the evaluation heap ceiling:
 
 Eight per-country pairs instead of 138,236 rows.
 
+## Verify and correct within the run
+
+The reviewer now proposes its measurements through `agent.core/run-outcome`'s
+`verify` callback. Deterministic workflow code compares them with both blind
+derivations. When those two agree but the reviewer differs, the same reviewer
+gets discrepancy feedback and at most one correction, within its original
+`review_turns` budget. It must recompute rather than copy the expected totals.
+If the blind derivations disagree, verification is unresolved immediately.
+If the corrected measurements still disagree, or no correction turn is
+available, the answer stays `Not Applicable`. Other agent or provider failures
+remain failed runs.
+
+This improves the current result, not the workflow source. The verifier is
+workflow code; the reviewer retains only its read-only payment API. An
+`agent-verification` trace annotation records each accepted, rejected, or
+unresolved decision. Agreement is still evidence, not proof against a mistake
+all three derivations share. The existing recorded cohort below predates this
+verification-and-correction path.
+
+Replay a deliberately biased reviewer, followed by a corrected measurement:
+
+```console
+ptc run ptc-project.replay.json --host-config ptc-host.verification-replay.json --input inputs/luna.json
+```
+
+That returns `B. BE`. With `--input inputs/verification-exhausted.json`, the
+reviewer has only one turn: the same biased measurement is rejected and the
+result is `Not Applicable`. Both commands still need the downloaded dataset.
+The fixture is a constructed regression, not a recording of a model making
+and correcting that error. [Verification evidence](evidence/VERIFICATION.md)
+records its construction and the separate live probe.
+
 ## The flow
 
 ```text

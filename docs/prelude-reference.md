@@ -196,6 +196,22 @@ the previous transcript. Subject failures that need authenticated later
 propagation include an opaque `:failure-token`; preserve it by passing the
 original outcome to `fail-outcome`.
 
+Set `verify` to a workflow-owned function receiving a candidate map with
+`:status :candidate`, `:value`, and optional retained programs. It returns a
+map with string `status`: accepted, rejected, or unresolved. Rejected and
+unresolved reports require a nonblank `feedback` string of at most 2048
+characters. Optional `evidence` remains workflow data. The final outcome
+carries the report under `:verification`; a failed verification never
+returns `:status :returned` or a top-level `:value`.
+
+`max_corrections` defaults to 1 (0 through 128). Rejection keeps the same
+transcript and consumes remaining max_turns; unresolved stops immediately.
+No correction follows a write or unknown effect in any prior agent turn.
+The callback runs under workflow authority and deadlines: keep it read-only
+and explicitly narrow authority with kernel/eval-with when needed. Callback
+errors and invalid reports fail the workflow. Verification is standalone,
+run-outcome only, and follows return_contract validation when selected.
+
 Set `retain_programs` to an integer from 1 through 128 to attach admitted
 generated programs on the returned outcome. Omitted or nil keeps the current
 outcome shape. When set, every returned outcome includes `:programs` and
@@ -207,7 +223,7 @@ are capped at 2,048 characters and raw evaluation values are never retained.
 - **Kind:** `function`
 - **Visibility:** `prompt`
 - **Effect:** `unknown`
-- **Contract:** `(task :string, cfg {model :string?, mission :string?, return_contract :any?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?, retain_programs :any?}) -> :any`
+- **Contract:** `(task :string, cfg {model :string?, mission :string?, return_contract :any?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?, retain_programs :any?, verify :any?, max_corrections :any?}) -> :any`
 - **Backing requirements:** `tool:kernel-agent-config-failure`, `tool:kernel-agent-outcome-failure`, `tool:kernel-agent-protocol-error`, `tool:kernel-check-source`, `tool:kernel-eval`, `tool:kernel-llm-provider-failure`, `tool:kernel-mission-model-context`, `tool:kernel-phase-return-contract-failure`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
 
 ##### `agent.core/run-phased-result-value`

@@ -419,7 +419,40 @@ kinds become stable fingerprints. Exact failure values, prompts, generated
 source, and capability payloads require an authorized private inspection
 artifact. Built-in LLM adapters retain only a bounded provider status and
 human-readable reason there; request bodies, raw response bodies, headers, and
-transport causes are not retained as provider-error details.</p><h2 id="retry-and-effect-safety">Retry and effect safety</h2><p>The loop retries only while another turn remains. Retryability also depends on
+transport causes are not retained as provider-error details.</p><h2 id="verify-a-proposed-result">Verify a proposed result</h2><p><code class="inline">agent.core/run-outcome</code> accepts an optional workflow-owned <code class="inline">verify</code> function.
+It runs after a candidate satisfies the optional <code class="inline">return_contract</code>, before the
+loop reports a returned result. It receives <code class="inline">{:status :candidate :value value}</code>
+plus <code class="inline">:programs</code> and <code class="inline">:programs-omitted</code> when retention is enabled.</p><pre><code class="clojure language-clojure">(agent.core/run-outcome task
+  {&quot;mission&quot; &quot;analysis&quot; &quot;max_turns&quot; 4 &quot;max_corrections&quot; 1
+   &quot;verify&quot; (fn [candidate]
+              (let [checked (kernel/eval-with &quot;verification&quot;
+                              (program (return (checks/verify data/params)))
+                              {&quot;candidate&quot; (get candidate :value)})]
+                (if (= :returned (get checked &quot;outcome&quot;))
+                  (get checked &quot;value&quot;)
+                  (fail {:kind :verification-unavailable}))))})</code></pre><p>Here <code class="inline">checks/verify</code> is an application component in a separately granted
+mission; selecting the callback grants the proposing agent no new tools. The
+callback can also perform a deterministic comparison directly in workflow
+code, as DABStep does. The application supplies the meaning of correctness.</p><p>The report uses string keys:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;"><code class="inline">status</code></th><th style="text-align: left;">Behavior</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">accepted</code></td><td style="text-align: left;">Return the candidate as <code class="inline">:status :returned</code>.</td></tr><tr><td style="text-align: left;"><code class="inline">rejected</code></td><td style="text-align: left;">Feed back the discrepancy and allow a correction if safe and budgeted.</td></tr><tr><td style="text-align: left;"><code class="inline">unresolved</code></td><td style="text-align: left;">Stop immediately without accepting the candidate.</td></tr></tbody></table></div><p>Rejected and unresolved reports require nonblank <code class="inline">feedback</code> of at most 2,048
+characters. Optional <code class="inline">evidence</code> is returned to the workflow, not appended to
+the model conversation. The last report is attached as <code class="inline">:verification</code>.
+Unresolved, unsafe, or exhausted verification returns <code class="inline">:subject-failure</code> with
+<code class="inline">:kind :verification-failed</code>, no top-level <code class="inline">:value</code>, and reason <code class="inline">:unresolved</code>,
+<code class="inline">:unsafe-effects</code>, or <code class="inline">:correction-exhausted</code>.</p><p><code class="inline">max_corrections</code> defaults to 1 and accepts 0 through 128. It does not add
+turns: each correction uses the original <code class="inline">max_turns</code>, transcript, mission
+state, and run-wide resource budgets. A successful evaluation's state remains
+committed when its candidate is rejected; verification is not rollback.
+Any write or unknown effect in the loop prevents further verification-driven
+correction. Accepted candidates may have effects; acceptance does not prove
+that an external action happened unless the verifier checks it.</p><p>The callback runs as trusted workflow code under existing workflow and run
+deadlines. Keep verification read-only. The runtime's effect guard covers
+agent evaluations, not arbitrary effects a workflow callback chooses to make.
+Callback errors, invalid reports, and resource failures fail the workflow;
+they are not treated as rejection. Only standalone <code class="inline">run-outcome</code> supports
+verification; phased and fail-fast entries reject this configuration.</p><p>An <code class="inline">agent-verification</code> annotation records only accepted, rejected, or
+unresolved. Candidate values and feedback remain in workflow data and, when
+enabled, private inspection. These annotations describe workflow decisions,
+not runtime attestations of business correctness.</p><h2 id="retry-and-effect-safety">Retry and effect safety</h2><p>The loop retries only while another turn remains. Retryability also depends on
 whether repeating a program could repeat an effect the Kernel cannot undo:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Observed activity before failure</th><th style="text-align: left;">Retry policy</th></tr></thead><tbody><tr><td style="text-align: left;">No capability call</td><td style="text-align: left;">Correctable.</td></tr><tr><td style="text-align: left;">Only declared <code class="inline">read</code> capabilities</td><td style="text-align: left;">Correctable.</td></tr><tr><td style="text-align: left;">Only reserved mission runtime routes</td><td style="text-align: left;">Correctable.</td></tr><tr><td style="text-align: left;">Any declared <code class="inline">write</code> capability</td><td style="text-align: left;">Do not repeat.</td></tr><tr><td style="text-align: left;">Any capability with missing effect metadata</td><td style="text-align: left;">Do not repeat.</td></tr></tbody></table></div><p>Runtime routes such as capability discovery and usage queries are treated as
 safe reads. A resource kill after reads remains correctable because it commits
 no Lisp state and repeats no external mutation.</p><p>Read failures preserve their provider retry classification. Once a write may

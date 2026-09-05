@@ -560,6 +560,65 @@ artifact. Built-in LLM adapters retain only a bounded provider status and
 human-readable reason there; request bodies, raw response bodies, headers, and
 transport causes are not retained as provider-error details.
 
+## Verify a proposed result
+
+`agent.core/run-outcome` accepts an optional workflow-owned `verify` function.
+It runs after a candidate satisfies the optional `return_contract`, before the
+loop reports a returned result. It receives `{:status :candidate :value value}`
+plus `:programs` and `:programs-omitted` when retention is enabled.
+
+```clojure
+(agent.core/run-outcome task
+  {"mission" "analysis" "max_turns" 4 "max_corrections" 1
+   "verify" (fn [candidate]
+              (let [checked (kernel/eval-with "verification"
+                              (program (return (checks/verify data/params)))
+                              {"candidate" (get candidate :value)})]
+                (if (= :returned (get checked "outcome"))
+                  (get checked "value")
+                  (fail {:kind :verification-unavailable}))))})
+```
+
+Here `checks/verify` is an application component in a separately granted
+mission; selecting the callback grants the proposing agent no new tools. The
+callback can also perform a deterministic comparison directly in workflow
+code, as DABStep does. The application supplies the meaning of correctness.
+
+The report uses string keys:
+
+| `status` | Behavior |
+| --- | --- |
+| `accepted` | Return the candidate as `:status :returned`. |
+| `rejected` | Feed back the discrepancy and allow a correction if safe and budgeted. |
+| `unresolved` | Stop immediately without accepting the candidate. |
+
+Rejected and unresolved reports require nonblank `feedback` of at most 2,048
+characters. Optional `evidence` is returned to the workflow, not appended to
+the model conversation. The last report is attached as `:verification`.
+Unresolved, unsafe, or exhausted verification returns `:subject-failure` with
+`:kind :verification-failed`, no top-level `:value`, and reason `:unresolved`,
+`:unsafe-effects`, or `:correction-exhausted`.
+
+`max_corrections` defaults to 1 and accepts 0 through 128. It does not add
+turns: each correction uses the original `max_turns`, transcript, mission
+state, and run-wide resource budgets. A successful evaluation's state remains
+committed when its candidate is rejected; verification is not rollback.
+Any write or unknown effect in the loop prevents further verification-driven
+correction. Accepted candidates may have effects; acceptance does not prove
+that an external action happened unless the verifier checks it.
+
+The callback runs as trusted workflow code under existing workflow and run
+deadlines. Keep verification read-only. The runtime's effect guard covers
+agent evaluations, not arbitrary effects a workflow callback chooses to make.
+Callback errors, invalid reports, and resource failures fail the workflow;
+they are not treated as rejection. Only standalone `run-outcome` supports
+verification; phased and fail-fast entries reject this configuration.
+
+An `agent-verification` annotation records only accepted, rejected, or
+unresolved. Candidate values and feedback remain in workflow data and, when
+enabled, private inspection. These annotations describe workflow decisions,
+not runtime attestations of business correctness.
+
 ## Retry and effect safety
 
 The loop retries only while another turn remains. Retryability also depends on

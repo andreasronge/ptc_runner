@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.DabstepReviewerRegressionTest do
   @moduletag timeout: 600_000
 
   alias PtcRunner.Kernel.ApplicationPackage
+  alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.TestSupport.RunLifecycle
@@ -52,6 +53,36 @@ defmodule PtcRunner.Kernel.DabstepReviewerRegressionTest do
              "top_country" => %{"analysis" => "BE", "recheck" => "BE", "review" => "BE"},
              "problems" => []
            }
+  end
+
+  test "command replay corrects a seeded reviewer error and withholds it without turns" do
+    project = Path.join(@example, "ptc-project.replay.json")
+    host = Path.join(@example, "ptc-host.verification-replay.json")
+
+    for {input, expected} <- [
+          {"luna.json", "B. BE"},
+          {"verification-exhausted.json", "Not Applicable"}
+        ] do
+      assert {:ok, outcome} =
+               CommandEngine.dispatch([
+                 "run",
+                 project,
+                 "--host-config",
+                 host,
+                 "--input",
+                 Path.join([@example, "inputs", input])
+               ])
+
+      assert outcome.exit_status == 0, inspect(outcome.envelope)
+      assert outcome.envelope["result"]["value"]["value"] == expected
+      assert outcome.envelope["result"]["value"]["agreed"] == (expected == "B. BE")
+
+      assert [%{"alias" => "luna", "calls" => calls, "usage_calls" => 0, "usage" => usage}] =
+               outcome.envelope["execution"]["usage"]["llm_usage"]
+
+      assert calls == if(expected == "B. BE", do: 4, else: 3)
+      assert usage == %{}
+    end
   end
 
   defp run(input_name, application \\ @application, host_path \\ @host) do

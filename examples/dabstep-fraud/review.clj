@@ -81,3 +81,25 @@
                    (let [[fb tb] (get vb country)]
                      (and (same-cent? fa fb) (same-cent? ta tb))))
                  va))))
+
+(defn verify-findings
+  "Accept a review only when its measurements match both blind derivations.
+  Disagreement between the blind derivations is unresolved, not a reason to
+  coach the reviewer toward either one. Feedback reveals no expected totals."
+  [derivations candidate]
+  (let [a (get (first derivations) "countries")
+        b (get (second derivations) "countries")
+        findings (get candidate :value)
+        measured (get findings "countries")]
+    (cond
+      (not (same-measurements? a b))
+      {"status" "unresolved" "feedback" "The blind derivations disagree. No measurement is accepted."
+       "evidence" findings}
+
+      (same-measurements? a measured)
+      {"status" "accepted" "evidence" findings}
+
+      :else
+      {"status" "rejected"
+       "feedback" "Your measurements disagree with both blind derivations. Independently recompute from the source, checking pagination, column selection, and aggregation. Do not copy their totals."
+       "evidence" findings})))

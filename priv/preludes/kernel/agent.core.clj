@@ -146,8 +146,21 @@
       :else
       (bounded-option cfg "retain_programs" nil 128))))
 
+(defn- verification-options [cfg allowed?]
+  (let [verify (get cfg "verify")
+        corrections (get cfg "max_corrections" 1)]
+    (if (nil? verify)
+      (if (contains? cfg "max_corrections")
+        (fail (result/error :invalid-agent-config :verification-required))
+        nil)
+      (if (and allowed? (fn? verify) (not (contains? cfg "phases"))
+               (integer? corrections) (<= 0 corrections 128))
+        {:verify verify :max-corrections corrections}
+        (fail (result/error :invalid-agent-config :invalid-verification))))))
+
 (defn- loop-context [cfg projector-kind retain-allowed?]
-  (let [standalone-contract (resolve-standalone-contract cfg projector-kind)
+  (let [verification (verification-options cfg (and retain-allowed? (= projector-kind :none)))
+        standalone-contract (resolve-standalone-contract cfg projector-kind)
         retain-programs (retain-programs-option cfg retain-allowed?)
         trusted-cfg (dissoc cfg "result_contract" "result_contract_mode"
                             "return_contract" "phase_return_contract"
@@ -155,7 +168,7 @@
                             "standalone_return_contract"
                             "standalone_return_contract_name"
                             "standalone_return_contract_projection"
-                            "retain_programs")
+                            "retain_programs" "verify" "max_corrections")
         default-max-turns (bounded-option trusted-cfg "max_turns" 4 128)
         phases (resolve-phase-contracts (configured-phases trusted-cfg default-max-turns))
         total-max-turns (reduce + 0 (map #(get % "max_turns") phases))
@@ -174,7 +187,10 @@
                              "result_contract" presentation
                              "result_contract_mode" projector-kind
                              "standalone_return_contract" standalone-contract)]
-    {:effective-cfg effective-cfg
+    {:verification verification
+     :verification-rejections 0
+     :correction-safe? true
+     :effective-cfg effective-cfg
      :phases phases
      :total-max-turns total-max-turns
      :consolidate-at-turns-remaining consolidate-at-turns-remaining
@@ -518,6 +534,21 @@
       :else
       (fail (result/error :unknown-command op)))))
 
+(defn- verify-candidate [machine value ring]
+  (let [verify (get-in machine [:context :verification :verify])
+        report (verify (attach-programs {:status :candidate :value value} ring))
+        status (get report "status")
+        feedback (get report "feedback")]
+    (if (and (map? report)
+             (contains? #{"accepted" "rejected" "unresolved"} status)
+             (or (= "accepted" status)
+                 (and (string? feedback) (not (blank? feedback)) (<= (count feedback) 2048))))
+      (do
+        ;; Candidate values and feedback stay in workflow/private evidence.
+        (workflow.event/annotate "agent-verification" {"status" status})
+        report)
+      (fail (result/error :invalid-verification :invalid-report)))))
+
 (defn- run-outcome*
   "Runs the agent loop and distinguishes model-authored completion, a bounded
   subject-attributable failure, and a bounded provider failure.
@@ -620,6 +651,13 @@
                            :validation validation}
                      ring))
 
+            (= :verify op)
+            (let [next (get cmd :machine)
+                  value (get cmd :value)
+                  report (verify-candidate next value ring)]
+              (recur next {:type :verification :action (get cmd :action)
+                           :value value :report report} ring))
+
             (= :done op)
             (attach-programs (get cmd :outcome) ring)
 
@@ -642,6 +680,22 @@
   propagation include an opaque `:failure-token`; preserve it by passing the
   original outcome to `fail-outcome`.
 
+  Set `verify` to a workflow-owned function receiving a candidate map with
+  `:status :candidate`, `:value`, and optional retained programs. It returns a
+  map with string `status`: accepted, rejected, or unresolved. Rejected and
+  unresolved reports require a nonblank `feedback` string of at most 2048
+  characters. Optional `evidence` remains workflow data. The final outcome
+  carries the report under `:verification`; a failed verification never
+  returns `:status :returned` or a top-level `:value`.
+
+  `max_corrections` defaults to 1 (0 through 128). Rejection keeps the same
+  transcript and consumes remaining max_turns; unresolved stops immediately.
+  No correction follows a write or unknown effect in any prior agent turn.
+  The callback runs under workflow authority and deadlines: keep it read-only
+  and explicitly narrow authority with kernel/eval-with when needed. Callback
+  errors and invalid reports fail the workflow. Verification is standalone,
+  run-outcome only, and follows return_contract validation when selected.
+
   Set `retain_programs` to an integer from 1 through 128 to attach admitted
   generated programs on the returned outcome. Omitted or nil keeps the current
   outcome shape. When set, every returned outcome includes `:programs` and
@@ -649,7 +703,7 @@
   both the requested count and a fixed 2,000,000 UTF-8-byte source ceiling.
   Each entry also carries a bounded execution summary; ordinary observations
   are capped at 2,048 characters and raw evaluation values are never retained."
-  {:signature "(task :string, cfg {model :string?, mission :string?, return_contract :any?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?, retain_programs :any?}) -> :any"}
+  {:signature "(task :string, cfg {model :string?, mission :string?, return_contract :any?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?, retain_programs :any?, verify :any?, max_corrections :any?}) -> :any"}
   [task cfg]
   (record-outcome-failure (run-outcome* task cfg :none :outcome)))
 
