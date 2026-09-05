@@ -3,6 +3,7 @@ defmodule PtcRunner.ReplFrontendTest do
 
   import ExUnit.CaptureIO
 
+  alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.SafeMetadata
@@ -1162,6 +1163,39 @@ defmodule PtcRunner.ReplFrontendTest do
     refute output =~ File.cwd!()
   end
 
+  test "the default format prints the whole private profile contract" do
+    output = capture_io(fn -> run_repl(["--describe-profile", "private-run-analysis-v2"]) end)
+
+    refute output =~ "…"
+    refute output =~ "#<preview truncated"
+    assert output =~ ~S|"input_modes" ["interactive" "load"]|
+    assert output =~ ~S|"evaluation_heap_words"|
+    assert output =~ ~S|"workflow_capability_calls_per_name"|
+    assert output =~ ~S|"summary" "Analyze exact private evidence correlated to canonical traces"|
+  end
+
+  test "--preview-chars is refused beside --describe-profile and the help line says so" do
+    assert_raise Mix.Error, ~r/arguments\/invalid_arguments/, fn ->
+      run_repl(["--describe-profile", "private-run-analysis-v2", "--preview-chars", "4000"])
+    end
+
+    assert {:ok, help} = CommandEngine.prepare(["help", "repl"])
+
+    descriptions =
+      Map.new(help.envelope["result"]["options"], fn option ->
+        {hd(option["switches"]), option["description"]}
+      end)
+
+    assert descriptions["--preview-chars COUNT"] =~ "--describe-profile prints its contract whole"
+    assert descriptions["--continue-on-error"] =~ "with --profile"
+  end
+
+  test "--continue-on-error is refused outside profile mode" do
+    assert_raise Mix.Error, ~r/arguments\/invalid_arguments/, fn ->
+      run_repl(["--continue-on-error", "-e", "(+ 1 1)", "-e", "(+ 2 2)"])
+    end
+  end
+
   test "unknown profiles report the accepted profile ids" do
     assert_raise Mix.Error,
                  ~r/unsupported session profile; accepted: private-run-analysis-v2, private-run-catalog-v1, run-analysis-v1/,
@@ -1426,6 +1460,133 @@ defmodule PtcRunner.ReplFrontendTest do
 
     assert selected_ids == [second_run]
     assert MapSet.new(whole_ids) == MapSet.new([first_run, second_run])
+  end
+
+  @tag :tmp_dir
+  test "human private analysis keeps map keys whole and names the unabbreviated value", %{
+    tmp_dir: directory
+  } do
+    fixture = PrivateInspectionFixture.create!(directory)
+
+    args = [
+      "--profile",
+      "private-run-analysis-v2",
+      "--resource",
+      "traces=#{fixture.traces}",
+      "--resource",
+      "inspection=#{fixture.inspection}",
+      "--session-trace-dir",
+      fixture.output,
+      "--private-unattended",
+      "-e",
+      ~s|(analysis/open "#{fixture.run_id}")|
+    ]
+
+    output = capture_io(fn -> run_repl(args) end)
+
+    # Long field names survive the ceiling that truncates the values beside them.
+    assert output =~ ~S|"counts" {"capability_calls" 1|
+    assert output =~ ~S|"subordinate_source_checks" 0|
+    assert output =~ ~S|"workflow_capability_calls" 1|
+    assert output =~ ~S|"mission_capability_calls" 1|
+    assert output =~ "#<preview truncated:"
+
+    narrow = capture_io(fn -> run_repl(args ++ ["--preview-chars", "200"]) end)
+
+    assert narrow =~ "#<preview truncated:"
+    assert narrow =~ "--format jsonl publishes the unabbreviated result.value"
+  end
+
+  @tag :tmp_dir
+  test "a load-only session is not told to add a format its input mode refuses", %{
+    tmp_dir: directory
+  } do
+    fixture = PrivateInspectionFixture.create!(directory)
+    setup_file = Path.join(directory, "setup.clj")
+    File.write!(setup_file, ~s|(analysis/open "#{fixture.run_id}")|)
+
+    output =
+      capture_io(fn ->
+        run_repl([
+          "--profile",
+          "private-run-analysis-v2",
+          "--resource",
+          "traces=#{fixture.traces}",
+          "--resource",
+          "inspection=#{fixture.inspection}",
+          "--session-trace-dir",
+          fixture.output,
+          "--private-unattended",
+          "--preview-chars",
+          "200",
+          "--load",
+          setup_file
+        ])
+      end)
+
+    assert output =~ "#<preview truncated:"
+    refute output =~ "result.value"
+  end
+
+  @tag :tmp_dir
+  test "a load form in a session that also evaluates is told where the whole value is", %{
+    tmp_dir: directory
+  } do
+    fixture = PrivateInspectionFixture.create!(directory)
+    setup_file = Path.join(directory, "setup.clj")
+    File.write!(setup_file, ~s|(analysis/open "#{fixture.run_id}")|)
+
+    output =
+      capture_io(fn ->
+        run_repl([
+          "--profile",
+          "private-run-analysis-v2",
+          "--resource",
+          "traces=#{fixture.traces}",
+          "--resource",
+          "inspection=#{fixture.inspection}",
+          "--session-trace-dir",
+          fixture.output,
+          "--private-unattended",
+          "--preview-chars",
+          "200",
+          "--load",
+          setup_file,
+          "-e",
+          "42"
+        ])
+      end)
+
+    assert output =~ "--format jsonl publishes the unabbreviated result.value"
+  end
+
+  @tag :tmp_dir
+  test "a value no JSON projection can carry is not offered as a structured field", %{
+    tmp_dir: directory
+  } do
+    fixture = PrivateInspectionFixture.create!(directory)
+
+    output =
+      capture_io(fn ->
+        run_repl([
+          "--profile",
+          "private-run-analysis-v2",
+          "--resource",
+          "traces=#{fixture.traces}",
+          "--resource",
+          "inspection=#{fixture.inspection}",
+          "--session-trace-dir",
+          fixture.output,
+          "--private-unattended",
+          "--preview-chars",
+          "200",
+          "-e",
+          "(set (range 0 400))"
+        ])
+      end)
+
+    assert output =~ "#<preview truncated:"
+    refute output =~ "result.value"
   end
 
   test "private_unattended admits eval and jsonl output, reaching source preflight" do

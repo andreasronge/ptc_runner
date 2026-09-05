@@ -358,13 +358,14 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           key: :preview_chars,
           type: :integer,
           syntax: ["--preview-chars COUNT"],
-          description: "REPL structural preview character ceiling"
+          description:
+            "REPL structural preview character ceiling; --describe-profile prints its contract whole and does not accept it"
         },
         %{
           key: :continue_on_error,
           type: :boolean,
           syntax: ["--continue-on-error"],
-          description: "continue later repeated evaluations after an error"
+          description: "with --profile, continue later repeated evaluations after an error"
         },
         %{
           key: :private_terminal,

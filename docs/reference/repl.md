@@ -28,6 +28,16 @@ explicit and includes sampled map keys where available. The exact native value
 still remains in session history; use `*1`, `(describe *1)`, `take`, `get-in`,
 `select-keys`, or `reduce` to inspect or summarize a smaller part.
 
+Map keys do not take a share of that budget. A key renders against the whole
+key ceiling at every nesting depth — 67 rendered characters, enough for 64
+plain ones and fewer where escaping expands them — and only the remainder is
+charged to its value, because a truncated value stays identifiable from what
+survives while a truncated key does not. A map that cannot fit therefore shows
+fewer entries with intact names, followed by the usual `...` marker, rather
+than every name stubbed, and a key past the ceiling keeps an elided prefix. A
+value small enough to render exactly is printed whole, keys included, without
+either ceiling.
+
 The default output ceiling is 2,048 characters. Set it for direct, manifest,
 or profile sessions with `--preview-chars` (64–65,536):
 
@@ -397,6 +407,11 @@ The description includes fixed resources, components, namespaces,
 capabilities, limits, and policies, but no paths, source, processes, callbacks,
 or credentials.
 
+Both formats print the contract whole. It is a small fixed document that holds
+no evaluated value, so it does not pass through the structural preview, and
+`--format` is the only switch `--describe-profile` accepts. `--preview-chars`
+is refused beside it and has nothing to widen.
+
 ## Discover a private run catalog
 
 Use `private-run-catalog-v1` to select a cohort before admitting any run's
@@ -750,7 +765,31 @@ When their lifecycle stages are reached, records appear in this order:
 Validation or setup can therefore emit only `command-error`; persistence
 failure follows earlier records without claiming `session-closed`. Records use
 schema version 1. Evaluation records contain the bounded mission result and no
-extra raw-source copy. A profile selection or immutable source-capture refusal
+extra raw-source copy.
+
+An evaluation record carries the value twice. `result.value` is the
+unabbreviated JSON projection, and `result.formatted` is the same bounded
+structural preview the human format prints, with `result.formatted_truncated`,
+`result.formatted_caps_hit`, and `result.formatted_sampled_keys` beside it.
+Parse `value`; read `formatted`. `--preview-chars` widens `formatted` only, so
+a truncated preview is not a reason to raise it while `value_available` is
+true.
+
+A projection that cannot be built takes one of three shapes, and they differ in
+more than `value`:
+
+- A value no JSON encoding accepts keeps the evaluation's own `status` and
+  reports `value_available` false with `value` null. `formatted` still holds
+  the preview.
+- An encoding over `terminal_result_bytes`, or a projection that exhausts the
+  evaluation heap or timeout, turns the evaluation into `status` `error` with
+  `outcome` `result_exceeded`. `value` is null and `formatted` still holds the
+  preview.
+- A whole assembled result over `terminal_result_bytes` — the result object,
+  not the record around it — is replaced by the same `result_exceeded` error
+  carrying neither `value` nor `formatted`.
+
+A profile selection or immutable source-capture refusal
 also carries its stable `code`; stderr uses the same identity as `repl/CODE`.
 The generated table in the [CLI reference](cli.md#profile-frontend-diagnostics)
 is the complete vocabulary. Shared argument-parser refusals remain
@@ -780,8 +819,10 @@ Roles are `resource.NAME`, `session_trace`, `session_trace_auto`, `output`, and
 spellings that reach one directory through a symbolic link. The object carries
 no path.
 
-By default, one failed expression stops later ones. Continue requested
-expressions while preserving the final nonzero status with:
+By default, one failed expression stops later ones. `--continue-on-error`
+continues the requested expressions while preserving the final nonzero status.
+It requires `--profile` and at least two `--eval` forms, and is refused in
+direct, manifest, and `--inspect-only` sessions:
 
 ```console
 ptc repl \
