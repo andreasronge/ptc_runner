@@ -1586,6 +1586,16 @@ defmodule PtcRunner.ReplFrontendTest do
              "provider_exchanges" => 0
            }
 
+    catalog = Map.new(opened["collections"], &{&1["name"], &1})
+
+    assert catalog["provider_exchanges"]["available?"]
+    assert catalog["provider_exchanges"]["item_count"] == 0
+    assert catalog["model_exchanges"]["item_count"] == 2
+    assert catalog["capability_calls"]["item_count"] == 2
+    assert catalog["prelude_sources"]["item_count"] == 0
+    refute Map.has_key?(catalog["activity"], "item_count")
+    refute Map.has_key?(catalog["turns"], "item_count")
+
     assert Enum.map(model_page["items"], & &1["complete?"]) == [true, false]
     assert Enum.map(capability_page["items"], & &1["complete?"]) == [true, false]
 

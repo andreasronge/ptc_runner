@@ -74,6 +74,13 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
              "projection_not_included" => ~w(prelude_sources capability_schemas result)
            }
 
+    assert Enum.find(collections, &(&1["name"] == "provider_exchanges"))["item_count"] == 1
+    assert Enum.find(collections, &(&1["name"] == "capability_calls"))["item_count"] == 1
+
+    assert collections
+           |> Enum.reject(&Map.has_key?(&1, "item_count"))
+           |> Enum.map(& &1["name"]) == ~w(activity turns)
+
     assert Enum.find(collections, &(&1["name"] == "activity")) ==
              %{
                "authority" => "public",
@@ -1158,6 +1165,7 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
 
     assert Enum.find(collections, &(&1["name"] == "activity"))["available?"]
     refute Enum.find(collections, &(&1["name"] == "turns"))["available?"]
+    refute Enum.any?(collections, &Map.has_key?(&1, "item_count"))
 
     assert {:ok, %{"items" => [_ | _]}} =
              RunAnalysis.query(analysis, :read, %{
