@@ -10,6 +10,41 @@ the agent never saw. No checked-in source changes.
 One run with Gemini 3.8 Flash took 21 model calls and about nine cents. Model
 runs vary, and the script stops at the first failed stage.
 
+## The failure, the edit, and the check
+
+The seeded bug is one line in `self-debugger/debug.start.clj`. The helper takes
+the first relationship of the first generated program, although its docstring
+says relationship order has no meaning:
+
+```clojure
+relationship (first (get generated "relationships"))
+```
+
+That first relationship is `producing_turn`, which the host has proved does not
+exist for a deterministic program, so the workflow fails before it reads any
+source.
+
+The improving agent gets the task, the `debug.nav` library, and
+`repair.edit/propose`. The task names the contract to keep. It does not name the
+application, the faulty line, or the replacement. It submitted this in place of
+the line above:
+
+```clojure
+(first (filter (fn [r] (and (= (get r "rel") "referenced_prelude_source")
+                           (= (get r "state") "complete")
+                           (not (nil? (get r "filters")))))
+               (get generated "relationships")))
+```
+
+Nothing checked in changes. The host materializes that source as a candidate
+component, checks it against two captured applications without a model, and
+then runs the repaired workflow to diagnose and repair a broken application on
+three inputs. A successful run ends with:
+
+```text
+Completed: helper checks, trace navigation, and three application validation cases. Artifacts: self-improvement-results
+```
+
 ## What navigation means here
 
 A failed PTC run leaves an immutable capture: the boundary failure, every
@@ -87,29 +122,9 @@ stage 5  self-repair reads the diagnosis   -> application-proposal.private.json
 
 ## What the agent saw and did
 
-The seeded bug is one line in `self-debugger/debug.start.clj`. The helper takes
-the first relationship of the first generated program, although its docstring
-says relationship order has no meaning:
-
-```clojure
-relationship (first (get generated "relationships"))
-```
-
-That is the `producing_turn` relationship above, so the workflow fails before it
-reads any source.
-
-The improving agent gets the task, the `debug.nav` library, and
-`repair.edit/propose`. The task names the contract to keep. It does not name the
-application, the faulty line, or the replacement. On its sixth model call the
-agent read the failing program's relationships and found the same two rows. Two
-calls later it submitted this replacement for the line above:
-
-```clojure
-(first (filter (fn [r] (and (= (get r "rel") "referenced_prelude_source")
-                           (= (get r "state") "complete")
-                           (not (nil? (get r "filters")))))
-               (get generated "relationships")))
-```
+On its sixth model call the agent read the failing program's relationships and
+found the same two rows the table above shows. Two calls later it submitted the
+replacement quoted at the top of this page.
 
 The model supplied only a before fragment and an after fragment.
 `repair.edit/propose` copied the source hash and the unchanged bytes from the

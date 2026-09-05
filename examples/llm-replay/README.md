@@ -3,6 +3,19 @@
 This example serves one provider-neutral language-model response from a local
 JSON Lines fixture. It needs no credential and performs no network activity.
 
+It exists so a run can be repeated with the model held still. Copy this tree
+when you want a test, a demo, or a baseline that must not call a provider: the
+manifest selects a model alias the way any application does, and only
+`ptc-host.json` decides that the alias is answered from a file. Swap that one
+installation back to a live model and nothing else has to change.
+
+`request_hash` is what ties a fixture line to a request. It is computed over
+the provider-neutral request the workflow built, before any provider adapter
+sees it, so the fixture is not tied to the vendor that recorded it. Matching is
+exact by construction: change the system prompt, the messages, the tools, or
+the schema and the request produces a different hash, so the run misses rather
+than replaying an answer recorded for another question.
+
 Run it from the repository root:
 
 ```console

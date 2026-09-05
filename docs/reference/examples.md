@@ -3,8 +3,30 @@
 This is the complete inventory of shipped example trees, the layout every tree
 follows, and the aspect each one demonstrates.
 
-Read the trees in the order listed: each one assumes the surface the one
-before it introduced.
+## Pick by purpose
+
+Every row names the tree and the document to run first, so nothing has to be
+traversed in order to find the one thing you came for.
+
+| You want | Tree | Start with |
+| --- | --- | --- |
+| A first run with no credential | `kernel-tutorial` | `01-orders.ptc-project.json` |
+| One model call with a structured-output schema | `kernel-tutorial` | `02-deepseek-extract.ptc-project.json` |
+| An agent loop holding a tool over MCP | `kernel-tutorial` | `03-file-agent.ptc-project.json` |
+| The feedback a failed signature check returns | `kernel-tutorial` | `05-signature-feedback.ptc-project.json` |
+| A deliberate limit refusal and its exit status | `kernel-tutorial` | `06-cost-budget.ptc-project.json` |
+| Many model requests in parallel, then one synthesis | `kernel-tutorial` | `07-parallel-fan-out.ptc-project.json` |
+| A workflow composing deterministic rules with a model | `support-triage` | `02-domain-api.ptc-project.json` |
+| Two named missions granted different capabilities | `support-triage` | `03-specialists.ptc-project.json` |
+| A write kept behind its own mission | `named-mission-reader-writer` | `ptc-project.json` |
+| Replaying a recorded model response | `llm-replay` | `ptc-project.json` |
+| Verifying a result inside the run that produced it | `dabstep-fraud` | `ptc-project.json`, after `fetch-data.sh` |
+| Repairing a workflow from a failed run's evidence | `debug-a-failed-run` | `run-self-improvement.sh` |
+
+## The shipped trees
+
+The trees below are listed in learning order: each one assumes the surface
+the one before it introduced.
 
 Five trees are embedded in the executable and materialize anywhere:
 
@@ -23,7 +45,9 @@ card the scaffold ships and a generated `.env` stub when the tree names one.
 Nothing resolves back to a checkout, so the copy runs from wherever you put it.
 
 One tree, `dabstep-fraud`, downloads its dataset before it runs and is
-checkout-only. It is listed at the end of this page.
+checkout-only. Its replay project reads the same downloaded file, so replay
+removes the model calls but not the download. It is listed at the end of this
+page.
 
 ## How an example tree is laid out
 

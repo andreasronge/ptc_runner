@@ -10,6 +10,99 @@ can say `B. BE` without doing that arithmetic. This example is about knowing
 whether it did, and about what happens when the model you ask to check is a
 model too.
 
+## What you can watch it do
+
+- **Work through a table one page at a time and keep almost nothing.** The
+  dataset is 138,236 rows. A generated program pages through it with
+  `read-page` and carries eight per-country pairs, so a whole scan is 49 reads
+  and a handful of numbers. The page and capture sizes are in
+  [`evidence/STUDY.md`](evidence/STUDY.md#keeping-the-evidence-small).
+- **Turn a memory limit into a better program.** `ptc.json` sets
+  `evaluation_heap_words` to 5,000,000, which is 40 MB for each program
+  evaluation inside a mission. That ceiling is per evaluation; it is not a cap
+  on total application memory. A program that tries to hold every row is
+  stopped and rolled back, and the loop hands the model that fact as feedback.
+  Every DeepSeek run in the
+  [integrated cohort](evidence/STUDY.md#cohorts) then rewrote it as a streaming
+  aggregation.
+- **Check the arithmetic before accepting the answer.** Two blind analyses and a
+  reviewer each compute the per-country totals, and `workflow.clj` publishes
+  the letter only when all three tables agree to the cent. That comparison is workflow code, tested without a
+  model in `test/ptc_runner/kernel/dabstep_review_comparison_test.exs`, and it
+  catches all three seeded regressions replayed in
+  [`evidence/STUDY.md`](evidence/STUDY.md#replay-fixtures).
+
+## Run it
+
+Requirements: a current `ptc` build, Node/npm for the pinned filesystem MCP
+server, `curl`, and an OpenRouter key for live runs.
+
+Download the dataset first. Both the live and the replay project read
+`data/payments.csv` through the filesystem MCP server, so replay removes the
+model calls, not the download:
+
+```console
+./fetch-data.sh
+ptc validate ptc-project.json
+```
+
+Live, with a key:
+
+```console
+ptc run ptc-project.json --input inputs/deepseek.json \
+  --env-file /absolute/path/to/private.env --envelope out.json
+```
+
+Without a key:
+
+```console
+ptc run ptc-project.replay.json --input inputs/luna.json --envelope out-replay.json
+```
+
+The result value:
+
+```json
+{"ok": true, "value": "B. BE", "agreed": true,
+ "top_country": {"analysis": "BE", "recheck": "BE", "review": "BE"},
+ "problems": []}
+```
+
+The replay run returns exactly that. It executes three retained programs from a
+live Luna run against the pinned data, 147 reads, and makes no model network
+calls. What the fixture is and is not is in
+[`evidence/STUDY.md`](evidence/STUDY.md#replay-fixtures).
+
+Live runs vary. `inputs/deepseek.json` uses DeepSeek for both analyzers and
+GPT-5.6 Luna for the review; `inputs/luna.json` uses Luna throughout. A live
+run makes 6 to 17 model calls and costs under a cent. Nine of the ten runs in
+the [integrated cohort](evidence/STUDY.md#cohorts) agreed on `B. BE`, some of
+them with a reviewer problem recorded beside the answer; the tenth failed.
+
+## A program it generated
+
+The analyzers write their own PTC-Lisp. This is what a DeepSeek analyzer wrote
+in run `cmd-7xx3se058f8jn6wqfbkqy4qm71` after an earlier attempt tried to keep
+all 138,236 rows and was stopped at the evaluation heap ceiling:
+
+```clojure
+(defn process-page [acc page]
+  (reduce (fn [m row]
+            (let [country (get row 0) amount (get row 1) fraud? (get row 2)
+                  cur (get m country {:total 0.0 :fraud 0.0})]
+              (assoc m country {:total (+ (:total cur) amount)
+                                :fraud (if fraud? (+ (:fraud cur) amount) (:fraud cur))})))
+          acc (get page "rows")))
+
+(defn read-all-pages [cursor acc]
+  (let [page (dabstep.payments/read-page cursor cols)
+        next-cursor (get page "next_cursor")]
+    (if (nil? next-cursor)
+      (process-page acc page)
+      (recur next-cursor (process-page acc page)))))
+```
+
+Eight per-country pairs instead of 138,236 rows.
+
 ## The flow
 
 ```text
@@ -27,12 +120,6 @@ problems it found. `workflow.clj` ranks the three tables and publishes the
 answer only when all three agree to the cent. The reviewer's problems are
 published beside the answer and never used to pick it.
 
-```json
-{"ok": true, "value": "B. BE", "agreed": true,
- "top_country": {"analysis": "BE", "recheck": "BE", "review": "BE"},
- "problems": []}
-```
-
 Four things PtcRunner does here that carry over to other workflows:
 
 - **Retained programs.** `agent.core/run-outcome` with `"retain_programs"`
@@ -45,30 +132,6 @@ Four things PtcRunner does here that carry over to other workflows:
   bad shape back to the model before the workflow ever sees it.
 - **The decision is code.** `review.clj` compares tables; it is tested
   without a model in `test/ptc_runner/kernel/dabstep_review_comparison_test.exs`.
-
-## Run it
-
-Requirements: a current `ptc` build, Node/npm for the pinned filesystem MCP
-server, `curl`, and an OpenRouter key for live runs.
-
-```console
-./fetch-data.sh
-ptc validate ptc-project.json
-ptc run ptc-project.json --input inputs/deepseek.json \
-  --env-file /absolute/path/to/private.env --envelope out.json
-```
-
-`inputs/deepseek.json` uses DeepSeek for both analyzers and GPT-5.6 Luna for
-the review; `inputs/luna.json` uses Luna throughout. A live run makes 6 to 17
-model calls and costs under a cent. Without a key:
-
-```console
-ptc run ptc-project.replay.json --input inputs/luna.json --envelope out-replay.json
-```
-
-That executes three retained programs from a live Luna run against the pinned
-data, 147 reads, and returns the result above. What the fixture is and is not
-is in [`evidence/STUDY.md`](evidence/STUDY.md#replay-fixtures).
 
 ## What the reviewer sees
 
@@ -165,8 +228,8 @@ ptc run ptc-project.reviewer-replay.json --input inputs/reviewer-wrong-metric.js
 ## Two moments from live runs
 
 **The heap ceiling.** In every DeepSeek run at least one analyzer first
-tried to keep all 138,236 rows. The sandbox killed it at 40 MB, rolled the
-program back, and the loop fed this back:
+tried to keep all 138,236 rows. The sandbox stopped it at the 40 MB evaluation
+ceiling, rolled the program back, and the loop fed this back:
 
 ```text
 The program exceeded the mission heap budget and was stopped. The failed
@@ -177,37 +240,19 @@ use reduce for a compact summary ... The program cannot raise this limit.
 TURN BUDGET: 13 turns remain, including the next program.
 ```
 
-The next program from the same model, run `cmd-7xx3se058f8jn6wqfbkqy4qm71`:
-
-```clojure
-(defn process-page [acc page]
-  (reduce (fn [m row]
-            (let [country (get row 0) amount (get row 1) fraud? (get row 2)
-                  cur (get m country {:total 0.0 :fraud 0.0})]
-              (assoc m country {:total (+ (:total cur) amount)
-                                :fraud (if fraud? (+ (:fraud cur) amount) (:fraud cur))})))
-          acc (get page "rows")))
-
-(defn read-all-pages [cursor acc]
-  (let [page (dabstep.payments/read-page cursor cols)
-        next-cursor (get page "next_cursor")]
-    (if (nil? next-cursor)
-      (process-page acc page)
-      (recur next-cursor (process-page acc page)))))
-```
-
-Eight per-country pairs instead of 138,236 rows. A run's recording is about
-270 KB because the read mapping keeps an identity for each page instead of its
-bytes; capturing the same 49 reads in full would take 74 MB. The arithmetic is
-in the study notes.
+The streaming aggregation shown above is what the same model wrote next. A
+run's recording is about 270 KB because the read mapping keeps an identity for
+each page instead of its bytes; capturing the same 49 reads in full would take
+74 MB. The arithmetic is in
+[`evidence/STUDY.md`](evidence/STUDY.md#keeping-the-evidence-small).
 
 **Why the verdict is code.** An earlier version let the reviewer approve or
 reject in words. Live, it approved without running a program, then raised five
 objections to a correct answer, then scanned every page correctly and vetoed
 the right answer by comparing its ratio winner against the largest absolute
 volume. A reviewer that can veto is a second single point of failure. A
-reviewer that must show its measurement is evidence. Run references are in the
-study notes.
+reviewer that must show its measurement is evidence. Those three run references
+are in [`evidence/STUDY.md`](evidence/STUDY.md#cohorts).
 
 ## Look inside a run
 
@@ -232,9 +277,9 @@ per mission in a browser.
 
 | | Runs | Outcome |
 |---|---:|---|
-| Live three-stage runs, 2026-09-03 | 10 | 9 agreed on `B. BE`; 1 DeepSeek run failed after handing `read-page` a cursor it made up |
-| Seeded regressions, replayed nightly | 3 | all caught by the comparison; the recorded review names the defect in two, and in the third gets the table right and the words muddled |
-| Shared-defect reviews ([#1802](https://github.com/andreasronge/ptc_runner/issues/1802)) | 30 | 28 of 29 measured the true table; none copied the defective program; shown the programs, the reviewer used one call and 49 reads every time |
+| [Live three-stage runs, 2026-09-03](evidence/STUDY.md#cohorts) | 10 | 9 agreed on `B. BE`; 1 DeepSeek run failed after handing `read-page` a cursor it made up |
+| [Seeded regressions, replayed nightly](evidence/STUDY.md#replay-fixtures) | 3 | all caught by the comparison; the recorded review names the defect in two, and in the third gets the table right and the words muddled |
+| [Shared-defect reviews](https://github.com/andreasronge/ptc_runner/issues/1802) | 30 | 28 of 29 measured the true table; none copied the defective program; shown the programs, the reviewer used one call and 49 reads every time |
 
 Observations of one task on one day, not a benchmark score. Run references,
 the earlier single-stage cohort, the reader's guarantees, capture sizes, and
