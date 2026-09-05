@@ -1,16 +1,70 @@
 {
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["decision", "cause", "evidence"],
-  "properties": {
-    "decision": {"type": "string", "enum": ["diagnosed", "insufficient-evidence"]},
-    "cause": {"type": "string", "minLength": 1, "maxLength": 2000},
-    "component_id": {"type": "string", "minLength": 1, "maxLength": 128},
-    "evidence": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 20,
-      "items": {"type": "string", "minLength": 1, "maxLength": 500}
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision",
+        "cause",
+        "evidence",
+        "component_id"
+      ],
+      "properties": {
+        "decision": {
+          "type": "string",
+          "const": "diagnosed"
+        },
+        "cause": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "component_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision",
+        "cause",
+        "evidence"
+      ],
+      "properties": {
+        "decision": {
+          "type": "string",
+          "const": "insufficient-evidence"
+        },
+        "cause": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      }
     }
-  }
+  ]
 }

@@ -435,15 +435,18 @@ from a wrong component. A live model given that earlier capture correctly
 refused to name a component for exactly this reason. What a run generates is
 what a later run can prove.
 
-Confirming the diagnosis is a separate step: edit `target/pricing.rule.clj`,
-remove the stale capture, and rerun the target.
+Confirming the diagnosis is a separate step: materialize a proposed component
+with `ptc materialize --from-result`, then rerun with its
+`--component-override-descriptor`. Keep the failed capture so the proposal
+remains tied to its original evidence. The example README walks repair,
+independent validation, and reuse on another task.
 
 ## Let a model do the walking
 
 The same mission works for an agent. `debugger-agent/` in the example replaces
-the deterministic walk with the shipped agent loop over the same authority. It
-is the one part of the example that needs a credential, named on the command
-line so no environment file has to live inside the example directory:
+the deterministic walk with the shipped agent loop over the same authority. Like the repair agent, it
+needs a credential, named on the command line so no environment file has to
+live inside the example directory:
 
 ```console
 ptc run debug-a-failed-run/debugger-agent.ptc-project.json --env-file .env
@@ -477,7 +480,7 @@ explicit decision so an abstention is a first-class answer rather than an empty
 diagnosis slot:
 
 ```json
-"input": {"value": {"task": "...", "agent": {"max_turns": 14, "mission": "evidence"}}},
+"input": {"value": {"task": "...", "agent": {"max_turns": 20, "mission": "evidence"}}},
 "contracts": {"result_schema": {"path": "report.schema.json"}}
 ```
 
@@ -485,6 +488,47 @@ The agent loop runs inside one workflow evaluation, so `workflow_timeout_ms`
 must cover every model turn, not one call. Its installed default of 30 s ends a
 multi-turn investigation mid-flight; the example raises the host ceiling and
 the manifest together.
+The example also requests `normal_event_count: 1024` so trace capture has
+headroom for its 20-turn investigation. Raising the turn budget alone does not
+raise the event budget.
+
+### Improve the debugging workflow itself
+
+`run-self-improvement.sh` in the materialized example applies the same
+navigate, propose, validate cycle to the debugging workflow itself, then uses
+the repaired workflow on the application. It needs an OpenRouter environment
+file; `self-host.json` and `self-improver-host.json` select the model.
+
+A **navigation helper** is a workflow's own component that walks a capture
+before any model call and hands the result to an agent as untrusted evidence.
+The split matters for what a repair loop can reach. `debug.nav` is kernel
+prelude source and is frozen. Which run to open, which relationship to start
+from, and how much to hand the model is per-workflow policy, so it belongs in
+the workflow's components, where a host can inspect it, select a candidate over
+it, and let an agent repair it. The seeded defect is a helper that follows a
+relationship without reading its `state`.
+
+| Stage | Project | What decides the outcome |
+| --- | --- | --- |
+| Capture the workflow failure | `self-debugger` | `debug.start/context` takes the first relationship regardless of kind or state. The defect is seeded. |
+| Propose a helper repair | `self-improver` | An agent navigates the workflow's own capture and edits only `debug.start`. |
+| Check the helper | `self-check`, `self-check-workflow` | The helper's source page must equal a page reached through a complete referenced-source relationship, without a model, on the pricing capture and on the `variants/target-workflow-control` capture. |
+| Diagnose the application | `self-debugger` with the helper override | The agent still reads dependencies and source before naming a component. |
+| Propose an application repair | `self-repair` | A separate agent receives the diagnosis as untrusted evidence plus an independent incident packet. |
+| Validate the application | `target` with the application override | Three inputs, two of them absent from the failure capture. |
+
+`repair.edit/propose` takes a run ID, a target map naming the component,
+environment, function, and mission, a vector of exact before/after edits, a
+cause, and evidence strings. It reads one frozen component through
+`debug.nav`, requires every before fragment to occur exactly once, and builds
+the candidate and its base source hash from that record. A missing, repeated,
+empty, or unchanged fragment returns `edit_error` for correction; a valid edit
+completes through `repair.terminal/propose`. The helper establishes that the
+candidate is grounded in captured source, not that the edit is correct.
+
+Candidates are selected through override descriptors; installed source and
+captures stay unchanged. This is one bounded cycle. Adopting a candidate and
+rechecking earlier cases is a host policy the example leaves out.
 
 ### What to expect
 
@@ -541,10 +585,9 @@ This substrate is structural navigation, not automatic debugging:
   produced no program leaves nothing to walk;
 - host validation, not a model report, decides whether a repair is accepted.
 
-The one shape it demonstrably covers is a complete single-call failure whose
-relevant source lies inside the called component's dependency closure.
-Discovery outside that closure, and repair of nonlocal or weakly specified
-defects, are not established.
+The supplied cases exercise a dependency defect, a workflow-routing defect,
+and an underdetermined mismatch. Success remains specific to the evidence
+visited and the inputs validated; broader failures require their own checks.
 
 ## Next steps
 

@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "library": "agent.main"
+      }
+    ],
+    "entry": "agent.main/run"
+  },
+  "missions": {
+    "evidence": {
+      "components": [
+        {
+          "library": "debug.nav"
+        },
+        {
+          "id": "repair.edit",
+          "path": "repair-agent/edit.clj",
+          "dependencies": [
+            "debug.nav",
+            "repair.terminal"
+          ]
+        },
+        {
+          "id": "repair.terminal",
+          "path": "repair-agent/repair.terminal.clj"
+        }
+      ],
+      "providers": [
+        "debug.nav",
+        "failed-run-traces"
+      ]
+    }
+  },
+  "contracts": {
+    "result_schema": {
+      "path": "repair-agent/report.schema.json"
+    }
+  },
+  "input": {
+    "value": {
+      "task": "The captured debugging workflow failed before finishing. Inspect its execution error, generated programs, and the frozen debug.start source. Repair that workflow component so it follows its documented navigation contract. Do not repair the application it was investigating or change the installed debug.nav library. Use only captured evidence, preserve exports and dependencies, and make no assumptions about relationship order or application names. Propose the smallest exact source edit with repair.edit/propose; the helper copies the frozen hash and unchanged source. An edit_error is recoverable. Finish through that action, or repair.terminal/abstain if the evidence is insufficient. The host will validate your candidate before using it.",
+      "agent": {
+        "max_turns": 12,
+        "max_observation_chars": 8192,
+        "mission": "evidence"
+      }
+    }
+  },
+  "providers": {
+    "workflow": [
+      {
+        "name": "deepseek"
+      }
+    ],
+    "mission": [
+      {
+        "name": "debug.nav"
+      },
+      {
+        "name": "failed-run-traces",
+        "config": {
+          "expose": false
+        }
+      }
+    ]
+  },
+  "limits": {
+    "run_duration_ms": 600000,
+    "workflow_timeout_ms": 540000,
+    "evaluation_timeout_ms": 480000,
+    "normal_event_count": 1024
+  },
+  "events": {
+    "policy": "private"
+  },
+  "labels": {
+    "name": "debug-a-failed-run-agent",
+    "tags": {
+      "mode": "agent"
+    }
+  }
+}

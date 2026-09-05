@@ -45,7 +45,7 @@ defmodule PtcRunner.Kernel.DocumentationLibrary do
     {"project-configuration", "docs/guides/project-configuration.md"},
     {"connecting-tools-with-mcp", "docs/guides/connecting-tools-with-mcp.md"},
     {"running-and-debugging", "docs/guides/running-and-debugging.md"},
-    {"debugging-a-failed-run", "docs/guides/debugging-a-failed-run.md"},
+    {"self-improvement", "docs/guides/self-improvement.md"},
     {"evaluating-with-replay", "docs/guides/evaluating-with-replay.md"},
     {"kernel-repl", "docs/guides/kernel-repl.md"},
     {"inspect-source", "docs/guides/inspecting-source-and-programs.md"},

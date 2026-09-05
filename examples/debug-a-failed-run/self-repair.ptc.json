@@ -1,0 +1,129 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "id": "repair.preloaded",
+        "path": "repair-agent/preloaded.clj",
+        "dependencies": [
+          "agent.core",
+          "kernel"
+        ]
+      },
+      {
+        "library": "agent.core"
+      },
+      {
+        "library": "kernel"
+      }
+    ],
+    "entry": "repair.preloaded/run"
+  },
+  "missions": {
+    "case-derived": {
+      "components": [
+        {
+          "library": "debug.nav"
+        },
+        {
+          "id": "debug.workspace",
+          "path": "repair-agent/workspace.clj",
+          "dependencies": [
+            "debug.nav"
+          ]
+        },
+        {
+          "id": "debug.case",
+          "path": "repair-agent/case.clj",
+          "dependencies": [
+            "debug.nav",
+            "debug.workspace"
+          ]
+        }
+      ],
+      "providers": [
+        "debug.nav",
+        "failed-run-traces"
+      ]
+    },
+    "synthesize": {
+      "components": [
+        {
+          "id": "repair.terminal",
+          "path": "repair-agent/repair.terminal.clj"
+        },
+        {
+          "id": "repair.edit",
+          "path": "repair-agent/edit.clj",
+          "dependencies": [
+            "debug.nav",
+            "repair.terminal"
+          ]
+        },
+        {
+          "library": "debug.nav"
+        }
+      ],
+      "providers": [
+        "debug.nav",
+        "failed-run-traces"
+      ]
+    }
+  },
+  "contracts": {
+    "result_schema": {
+      "path": "repair-agent/report.schema.json"
+    }
+  },
+  "input": {
+    "value": {
+      "task": "Verify the diagnosis against the frozen incident packet. Use repair.edit/propose for the smallest justified source edit, or repair.terminal/abstain if the evidence is insufficient. Never copy source hashes or unchanged source; the helper supplies them from the capture.",
+      "context_mission": "case-derived",
+      "agent": {
+        "phases": [
+          {
+            "mission": "synthesize",
+            "max_turns": 4,
+            "instruction": "Finish with one top-level repair.edit/propose or repair.terminal/abstain call. An edit_error is recoverable; correct it on the next turn. Do not wrap the terminal action in return."
+          }
+        ],
+        "max_observation_chars": 8192,
+        "max_transcript_chars": 262144
+      }
+    }
+  },
+  "providers": {
+    "workflow": [
+      {
+        "name": "deepseek"
+      }
+    ],
+    "mission": [
+      {
+        "name": "debug.nav"
+      },
+      {
+        "name": "failed-run-traces",
+        "config": {
+          "expose": false
+        }
+      }
+    ]
+  },
+  "limits": {
+    "run_duration_ms": 300000,
+    "workflow_timeout_ms": 300000,
+    "evaluation_timeout_ms": 60000,
+    "subordinate_evaluations": 10,
+    "normal_event_count": 1024
+  },
+  "events": {
+    "policy": "private"
+  },
+  "labels": {
+    "name": "debug-a-failed-run-repair",
+    "tags": {
+      "mode": "agent"
+    }
+  }
+}

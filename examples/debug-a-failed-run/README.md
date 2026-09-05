@@ -1,243 +1,200 @@
-# Debug a failed run with another PTC run
+# Let an agent improve its own debugging workflow
 
-This credential-free pair shows one PTC application navigating another
-application's immutable failed run. No model, network access, or credential is
-involved: both runs are deterministic.
+A debugging workflow fails because of a bug in its navigation helper — the one
+component that reads a failed run's captured evidence before any model call. An
+agent reads that failed run, proposes an exact edit to the helper, and the host
+checks the edit without a model. The repaired workflow then diagnoses a broken
+application, and a second agent proposes a fix that the host validates on inputs
+the agent never saw. No checked-in source changes.
 
-`target/` prices an order through `orders` → `pricing.tax`, which branches to
-`pricing.base` and `pricing.rule`. The rule adds 2 while its own docstring
-states the flat charge is 20 and the captured call requires the subtotal plus
-20, so the run fails. `pricing.discount` is an unused decoy: nothing in the
-failing call reaches it.
+One run with Gemini 3.8 Flash took 21 model calls and about nine cents. Model
+runs vary, and the script stops at the first failed stage.
 
-`debugger/` installs the target's frozen trace and inspection directories as
-snapshot providers and walks the evidence with the shipped `debug.nav` prelude.
-It reports what the evidence shows and how completely the host proved each
-edge. It never names a suspect.
+## What navigation means here
+
+A failed PTC run leaves an immutable capture: the boundary failure, every
+program the run generated, the results those programs returned, and the frozen
+source of every component they called. A later run reads that capture through
+`debug.nav`, a shipped prelude. Nothing is guessed: each evidence item carries
+typed relationships that name their own target collection and exact filter, and
+a walk follows them:
+
+```clojure
+(let [run (first (get (debug.nav/runs {"status" "error" "limit" 1}) "items"))
+      program (first (get (debug.nav/read (get run "run_id")
+                                          {"collection" "generated_sources" "limit" 1})
+                          "items"))]
+  (get program "relationships"))
+```
+
+Run against the debugging workflow's own failed run — the capture the improving
+agent reads — that returns two relationships:
+
+| `rel` | `state` | What it means |
+| --- | --- | --- |
+| `producing_turn` | `unavailable` | the host proved there is none; a deterministic program has no model turn |
+| `referenced_prelude_source` | `complete` | the component the program called, with an exact filter |
+
+Following the second returns the page of source an investigation starts from.
+Following the first fails the program: a relationship proved absent carries no
+filter to follow. Reading `state` before following is the whole skill, and it is
+the skill the seeded bug lacks.
+
+A **navigation helper** is a small component that performs that walk on the
+workflow's behalf and hands the result to the agent as untrusted evidence, so
+the model starts from real evidence instead of spending turns discovering it.
+`self-debugger/debug.start.clj` holds this one: a single function,
+`debug.start/context`, which selects the latest failed run, its first generated
+program, and one page of source.
+
+## Why the helper is not a shipped prelude
+
+`debug.nav` is core. It ships in the kernel preludes and its source is frozen.
+Which run to open, which program to read, which relationship to start from, and
+how much to hand the model is policy, and that differs per workflow. Policy
+lives in the workflow's own components, where it stays inspectable, overridable,
+and — here — improvable. A helper promoted into the core prelude would be frozen
+source with nothing for an agent to edit, and this loop would have no subject.
+
+## The loop
+
+`run-self-improvement.sh` runs five stages:
+
+1. Run the application and the debugging workflow. Both fail on purpose.
+2. Let an agent read the workflow's own failed trace and edit its helper.
+3. Check the proposed helper on two captured applications, without a model.
+4. Run the improved workflow to diagnose the application failure.
+5. Let a second agent propose the application fix, then validate it on three inputs.
+
+Each proposal leaves the tree alone. The model's source is materialized into a
+candidate component with its own descriptor, and a later run selects that
+descriptor on the command line. The installed files are never written, which is
+why the last check can assert they are byte-identical.
+
+```text
+stage 1  target                            -> capture A  broken pricing
+         self-debugger                     -> capture B  the helper's own failure
+stage 2  self-improver reads B             -> helper-proposal.private.json
+         ptc materialize                   -> helper/descriptor.json
+stage 3  self-check          + descriptor  -> replays capture A, no model
+         variants/target-workflow-control  -> capture C  broken fulfillment
+         self-check-workflow + descriptor  -> replays capture C, no model
+stage 4  self-debugger       + descriptor  -> diagnosis.private.json, from capture A
+stage 5  self-repair reads the diagnosis   -> application-proposal.private.json
+         ptc materialize                   -> application/descriptor.json
+         target              + descriptor  -> three inputs, pass or fail
+```
+
+## What the agent saw and did
+
+The seeded bug is one line in `self-debugger/debug.start.clj`. The helper takes
+the first relationship of the first generated program, although its docstring
+says relationship order has no meaning:
+
+```clojure
+relationship (first (get generated "relationships"))
+```
+
+That is the `producing_turn` relationship above, so the workflow fails before it
+reads any source.
+
+The improving agent gets the task, the `debug.nav` library, and
+`repair.edit/propose`. The task names the contract to keep. It does not name the
+application, the faulty line, or the replacement. On its sixth model call the
+agent read the failing program's relationships and found the same two rows. Two
+calls later it submitted this replacement for the line above:
+
+```clojure
+(first (filter (fn [r] (and (= (get r "rel") "referenced_prelude_source")
+                           (= (get r "state") "complete")
+                           (not (nil? (get r "filters")))))
+               (get generated "relationships")))
+```
+
+The model supplied only a before fragment and an after fragment.
+`repair.edit/propose` copied the source hash and the unchanged bytes from the
+frozen capture, and it refuses a fragment that is missing or occurs twice. When
+the model had to return the whole file instead, it miscopied hashes and source.
+This one helper is what made the loop reliable.
+
+The repaired workflow then handed its first source page to the investigating
+agent. On its third call that agent followed both dependencies of `pricing.tax`
+in one program. It saw that `pricing.base` returns its input unchanged while
+`pricing.rule` promises a charge of 20 and adds 2. Following only the first
+dependency would have missed the bug. The repair agent received that diagnosis
+as untrusted evidence and changed `(+ subtotal 2)` to `(+ subtotal 20)`.
+
+## What counts as success
+
+The model's explanation is not the acceptance check. The host:
+
+- materializes and compiles each candidate;
+- checks the helper on the pricing capture and on the fulfillment capture in
+  `variants/target-workflow-control`, so a helper that only works on the run it
+  was written from does not pass;
+- reruns the application on the observed order and on two inputs absent from
+  the failure capture;
+- confirms afterwards that the original source files are byte-identical.
 
 ## Run it
 
-Capture the failed run first. It exits nonzero by design:
-
 ```console
 ptc init debug-a-failed-run --example debug-a-failed-run
-ptc run debug-a-failed-run/target.ptc-project.json
+sh debug-a-failed-run/run-self-improvement.sh /absolute/path/to/.env
 ```
 
-Then navigate that capture:
+The environment file holds an OpenRouter key and stays outside the example.
+`self-host.json` and `self-improver-host.json` select the model. A successful
+run ends with:
+
+```text
+Completed: helper checks, trace navigation, and three application validation cases. Artifacts: self-improvement-results
+```
+
+Start each full run from a fresh initialized directory. A failed stage leaves
+its artifacts in `self-improvement-results`.
+
+## Look inside
+
+Read the helper proposal:
 
 ```console
-ptc run debug-a-failed-run/debugger.ptc-project.json
-ptc viewer debug-a-failed-run/debugger.ptc-project.json
+ptc repl --project debug-a-failed-run/self-improver.ptc-project.json \
+  --profile private-run-analysis-v2 --private-unattended --preview-chars 6000 \
+  -e '(let [r (first (get (analysis/runs {"status" "ok"}) "items"))] (get-in (analysis/open (get r "run_id")) ["result" "value"]))'
 ```
 
-The debugger is a private run, so its value goes to
-`debug-a-failed-run/debugger/.ptc/results/` rather than stdout:
+Use `self-debugger.ptc-project.json` for the investigation and
+`self-repair.ptc-project.json` for the application fix. The `model_exchanges`
+collection holds every request the model received and the program it generated
+in reply. `(analysis/open "RUN_ID")` lists the collections, `analysis/read`
+pages through one, and `ptc help transcript` exports a whole conversation.
 
-```console
-cat debug-a-failed-run/debugger/.ptc/results/*.private.json
-```
+## Files
 
-It reports the boundary failure, the exact generated program including the
-required total, the complete frozen dependency closure, and the source of each.
-The decoy never appears, because the walk follows frozen dependency edges
-rather than the manifest component list, and `closure_complete` says whether
-the walk saw the whole closure or stopped early.
+The story is six files:
 
-## Check the diagnosis
-
-The evidence supports one change: `pricing.rule/apply-standard` adds 2 where
-the captured call requires 20. Edit `target/pricing.rule.clj`, remove the stale
-capture, and rerun the target to see it pass:
-
-```console
-rm -rf debug-a-failed-run/target/.ptc
-ptc run debug-a-failed-run/target.ptc-project.json
-```
-
-## Optional: let a model walk it
-
-`debugger-agent/` runs the shipped agent loop over the same authority. It is
-the one part of this example that needs a credential. Name the environment file
-on the command line rather than placing one in this directory, which ships
-inside the published package:
-
-```console
-ptc run debug-a-failed-run/debugger-agent.ptc-project.json --env-file .env
-cat debug-a-failed-run/debugger-agent/.ptc/results/*.private.json
-```
-
-Selecting the inspection snapshot fixes the run's class to
-`private_inspection`, so the model installation declares
-`"accepts_data": ["normal", "private_inspection"]`. That is an operator
-decision to send captured private evidence to a model vendor.
-
-A verified live run traced the branching chain and correctly named
-`pricing.rule`. Earlier runs, against a capture whose generated program did not
-carry the order values, correctly abstained instead — and one run was
-confidently wrong, blaming `orders` for not calling the unused decoy. That is
-the point of the decoy, and the reason this layer reports evidence rather than
-choosing a diagnosis.
-
-## Optional: close the loop with a generated repair
-
-`repair-agent/` extends the same incident into a bounded repair loop: the host
-assembles an immutable incident packet from the capture before model turn one,
-a phased agent run reads it under a tool-free `synthesize` mission, and the
-model completes through exactly one typed terminal action —
-`repair.terminal/propose` with a complete replacement component, or
-`repair.terminal/abstain` with the missing evidence. The result contract
-refuses anything else.
-
-One repair application covers three planted incidents. Each arm swaps only the
-snapshot install; the agent manifest and prompt never change:
-
-| Arm | Planted defect | Expected decision |
-| --- | --- | --- |
-| `target/` | `pricing.rule` adds 2 where its own contract states the flat charge is 20 | propose replacing `pricing.rule` |
-| `target-ambiguous/` | two constant charges sum to the wrong total, and no contract pins either one | abstain with `insufficient-evidence` |
-| `target-workflow-control/` | the workflow routes the order id where inventory's reservation id belongs; both missions are correct | propose replacing workflow `main`, omitting `target_mission` |
-
-How a run executes, in order. The manifest's entry,
-`repair.preloaded/run`, is trusted workflow code. Before any model call it
-uses `kernel/eval-with` to evaluate one embedded program inside the
-`case-derived` mission — the room that holds `debug.nav` and the snapshot
-providers — and that program returns the incident packet. The packet reaches
-the model only as escaped, untrusted text in its first user message. Every
-program the model then writes is evaluated in the `synthesize` mission, whose
-only exports are the two terminal actions. So the mission evaluations you see
-in a trace are one host-authored packet build plus one per model turn:
-evidence flows down into the prompt, and authority never flows with it.
-
-Capture the failure, then let the model propose:
-
-```console
-ptc run debug-a-failed-run/target.ptc-project.json
-ptc run debug-a-failed-run/repair-agent.ptc-project.json --env-file .env
-cat debug-a-failed-run/repair-agent/.ptc/results/*.private.json
-```
-
-A verified live run proposed replacing `pricing.rule` with the 20-unit charge
-its docstring states, citing the contradiction between the implementation and
-its own contract. The proposal is model-authored and untrusted; nothing has
-been executed or changed yet.
-
-Promotion is a separate, explicit decision. Write the proposal's
-`candidate_source` next to a `--component-override-descriptor` that binds it
-to the installed component. The descriptor fields are defined in
-`ptc docs components`. That path re-runs the original case; it does not
-prove the candidate against extra cases the model never saw.
-
-Write the proposal's `candidate_source` to
-`debug-a-failed-run/candidate/pricing.rule.clj` with no extra bytes — a
-trailing newline that was not in the field fails the `source_hash` check.
-Hash those file bytes as `sha256:` followed by 64 lowercase hex digits
-(`shasum -a 256` on macOS, `sha256sum` on Linux). Copy `base_source_hash`,
-`component_id`, and the mission name from the proposal into a sibling
-descriptor:
-
-```json
-{
-  "target": {"environment": "mission", "mission": "pricing"},
-  "component_id": "pricing.rule",
-  "base_source_hash": "sha256:<from the proposal>",
-  "source_hash": "sha256:<digest of pricing.rule.clj>",
-  "path": "pricing.rule.clj"
-}
-```
-
-Then run the same failing target under that override without editing any
-installed file:
-
-```console
-ptc run debug-a-failed-run/target.ptc-project.json \
-  --component-override-descriptor debug-a-failed-run/candidate/descriptor.json
-```
-
-The run that exited 5 now exits 0 with `{"total":120}`. Passing this one
-observed case does not prove the candidate unique or correct beyond it.
-
-### The abstain arm
-
-`target-ambiguous/` plants a failure the evidence cannot attribute: two
-constant components sum to the wrong total, and no contract pins either one.
-The same repair agent — same manifest, same prompt, only the snapshot install
-differs — must refuse to guess:
-
-```console
-ptc run debug-a-failed-run/target-ambiguous.ptc-project.json
-ptc run debug-a-failed-run/repair-agent-ambiguous.ptc-project.json --env-file .env
-cat debug-a-failed-run/repair-agent-ambiguous/.ptc/results/*.private.json
-```
-
-A verified live run returned `insufficient-evidence`, naming exactly the
-ambiguity: either component could absorb the difference, and one observed case
-cannot distinguish them. Do not promote an abstention: there is no candidate
-to override with.
-
-### The workflow-control arm
-
-`target-workflow-control/` changes the failure class without changing the
-repair machinery. Inventory correctly returns a reservation identifier and
-shipping correctly preserves the identifier it receives. The workflow calls
-both missions in the right order but routes the incoming order identifier into
-shipping instead of the reservation identifier returned by inventory. Its
-cross-step invariant catches the mismatch and fails the run.
-
-This arm tests whether diagnosis is overfit to faulty mission components. The
-incident packet includes both generated mission programs, the frozen mission
-source closure, and the bounded workflow source set. It does not name which
-source is faulty. A repair must target the workflow `main` component — omitting
-`target_mission`, because a workflow target has none — and leave the two
-correct mission components unchanged:
-
-```console
-ptc run debug-a-failed-run/target-workflow-control.ptc-project.json
-ptc run debug-a-failed-run/repair-agent-workflow-control.ptc-project.json --env-file .env
-cat debug-a-failed-run/repair-agent-workflow-control/.ptc/results/*.private.json
-```
-
-Promotion again uses a hand-authored override rather than editing the example.
-A workflow descriptor names only the workflow bundle:
-
-```json
-{
-  "target": {"environment": "workflow"},
-  "component_id": "main",
-  "base_source_hash": "sha256:<from the proposal>",
-  "source_hash": "sha256:<digest of main.clj>",
-  "path": "main.clj"
-}
-```
-
-```console
-ptc run debug-a-failed-run/target-workflow-control.ptc-project.json \
-  --component-override-descriptor debug-a-failed-run/candidate/descriptor.json
-```
-
-## What each file does
-
-| Path | Role |
+| File | Role |
 | --- | --- |
-| `target/ptc.json` | the failing application and its `pricing` mission |
-| `target.ptc-project.json` | captures trace, inspection, result, and envelope under `target/.ptc` |
-| `ptc-host.json` | installs the target's capture as `failed-run-traces` and `debug.nav` |
-| `debugger/ptc.json` | selects `debug.nav` and the snapshot providers into the `evidence` mission |
-| `debugger/evidence.walk.clj` | the bounded walk over runs, errors, generated source, and prelude source |
-| `debugger-agent/ptc.json` | the optional live-model variant over the same mission authority |
-| `repair-agent/ptc.json` | the phased repair agent: packet acquisition, then a tool-free terminal decision |
-| `repair-agent/preloaded.clj` | host workflow that acquires the incident packet before model turn one |
-| `repair-agent/case.clj`, `repair-agent/workspace.clj` | the packet projection and the derived frozen working set |
-| `repair-agent/repair.terminal.clj` | the two typed terminal actions: propose a replacement, or abstain |
-| `repair-agent/suite.json` | extra validation cases the model never saw |
-| `target-ambiguous/` | the underdetermined variant whose evidence supports no single repair |
-| `target-workflow-control/` | the variant whose defect is workflow value routing between two correct missions |
-| `repair-agent/workflow-control-suite.json` | extra cases for the workflow repair, including identifier shapes the model never saw |
+| `run-self-improvement.sh` | The five stages. |
+| `self-debugger/debug.start.clj` | The navigation helper with the seeded bug. |
+| `self-debugger/check.clj` | Host check of a proposed helper. |
+| `repair-agent/edit.clj` | Exact edits over frozen source. |
+| `self-debugger/repair-input.clj` | Hands the diagnosis to the repair agent as untrusted evidence. |
+| `self-debugger/validation/` | The three application inputs. |
 
-The inspection snapshot provider must be selected under the alias `debug.nav`,
-because the shipped prelude binds `<alias>.runs`, `<alias>.open`, and
-`<alias>.read`.
+Everything else is supporting material. `target/` is the broken application and
+`self-*` are the five projects the script runs. `debugger/` walks the same
+evidence deterministically, `debugger-agent/` walks it with a model, and
+`repair-agent/` proposes a replacement component or abstains. `variants/` holds
+two other failure shapes and explains itself.
 
-Inspection artifacts hold generated source, capability payloads, and frozen
-component sources. They are not sanitized traces and should not be shared as
-such. The complete walkthrough is in `ptc docs debugging-a-failed-run`.
+## Limits
+
+This is one bounded cycle. It edits a copy, validates it on a handful of inputs,
+and stops. Adopting a candidate, and rechecking earlier cases after adoption, is
+a host policy this example leaves out. The seeded defect is also a footgun the
+library could close: `debug.nav/follow` fails loudly on a relationship it cannot
+follow, but nothing yet offers the filtered selector every caller writes by
+hand. See `ptc docs debug` for the evidence contract and `ptc docs repl` for
+private analysis.

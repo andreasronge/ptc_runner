@@ -1,0 +1,20 @@
+{
+  "kind": "ptc-project",
+  "version": 1,
+  "application": {
+    "path": "self-check.ptc.json"
+  },
+  "host": {
+    "path": "self-check-workflow-host.json"
+  },
+  "artifacts": {
+    "root": "self-check-workflow/.ptc",
+    "trace": true,
+    "inspection": true,
+    "result": true,
+    "envelope": true
+  },
+  "viewer": {
+    "private": true
+  }
+}

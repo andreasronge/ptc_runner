@@ -60,7 +60,7 @@
 <li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
 <li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
 <li><a href="/guides/inspecting-source-and-programs/">Inspect source and generated programs</a></li>
-<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/self-improvement/">Let an agent improve its own workflow</a></li>
 <li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
 </ul>
 
@@ -324,11 +324,14 @@ evidence. The capture would still show the check and the whole source chain,
 but not the value checked, and a wrong input would then be indistinguishable
 from a wrong component. A live model given that earlier capture correctly
 refused to name a component for exactly this reason. What a run generates is
-what a later run can prove.</p><p>Confirming the diagnosis is a separate step: edit <code class="inline">target/pricing.rule.clj</code>,
-remove the stale capture, and rerun the target.</p><h2 id="let-a-model-do-the-walking">Let a model do the walking</h2><p>The same mission works for an agent. <code class="inline">debugger-agent/</code> in the example replaces
-the deterministic walk with the shipped agent loop over the same authority. It
-is the one part of the example that needs a credential, named on the command
-line so no environment file has to live inside the example directory:</p><pre><code class="console language-console">ptc run debug-a-failed-run/debugger-agent.ptc-project.json --env-file .env</code></pre><p>Keep <code class="inline">debug.nav</code> as the mission's only domain authority and select a model into
+what a later run can prove.</p><p>Confirming the diagnosis is a separate step: materialize a proposed component
+with <code class="inline">ptc materialize --from-result</code>, then rerun with its
+<code class="inline">--component-override-descriptor</code>. Keep the failed capture so the proposal
+remains tied to its original evidence. The example README walks repair,
+independent validation, and reuse on another task.</p><h2 id="let-a-model-do-the-walking">Let a model do the walking</h2><p>The same mission works for an agent. <code class="inline">debugger-agent/</code> in the example replaces
+the deterministic walk with the shipped agent loop over the same authority. Like the repair agent, it
+needs a credential, named on the command line so no environment file has to
+live inside the example directory:</p><pre><code class="console language-console">ptc run debug-a-failed-run/debugger-agent.ptc-project.json --env-file .env</code></pre><p>Keep <code class="inline">debug.nav</code> as the mission's only domain authority and select a model into
 the workflow:</p><pre><code class="json language-json">&quot;workflow&quot;: {&quot;components&quot;: [{&quot;library&quot;: &quot;agent.main&quot;}], &quot;entry&quot;: &quot;agent.main/run&quot;},
 &quot;missions&quot;: {
   &quot;evidence&quot;: {
@@ -345,11 +348,33 @@ so the model installation must declare
 captured private evidence, including generated source, frozen component source,
 and failure detail, to be sent to a model vendor. Enable it only when intended.</p><p>Name the mission that holds the evidence, and require a result contract with an
 explicit decision so an abstention is a first-class answer rather than an empty
-diagnosis slot:</p><pre><code class="json language-json">&quot;input&quot;: {&quot;value&quot;: {&quot;task&quot;: &quot;...&quot;, &quot;agent&quot;: {&quot;max_turns&quot;: 14, &quot;mission&quot;: &quot;evidence&quot;}}},
+diagnosis slot:</p><pre><code class="json language-json">&quot;input&quot;: {&quot;value&quot;: {&quot;task&quot;: &quot;...&quot;, &quot;agent&quot;: {&quot;max_turns&quot;: 20, &quot;mission&quot;: &quot;evidence&quot;}}},
 &quot;contracts&quot;: {&quot;result_schema&quot;: {&quot;path&quot;: &quot;report.schema.json&quot;}}</code></pre><p>The agent loop runs inside one workflow evaluation, so <code class="inline">workflow_timeout_ms</code>
 must cover every model turn, not one call. Its installed default of 30 s ends a
 multi-turn investigation mid-flight; the example raises the host ceiling and
-the manifest together.</p><h3 id="what-to-expect">What to expect</h3><p>Four limits showed up repeatedly while this example was built against a live
+the manifest together.
+The example also requests <code class="inline">normal_event_count: 1024</code> so trace capture has
+headroom for its 20-turn investigation. Raising the turn budget alone does not
+raise the event budget.</p><h3 id="improve-the-debugging-workflow-itself">Improve the debugging workflow itself</h3><p><code class="inline">run-self-improvement.sh</code> in the materialized example applies the same
+navigate, propose, validate cycle to the debugging workflow itself, then uses
+the repaired workflow on the application. It needs an OpenRouter environment
+file; <code class="inline">self-host.json</code> and <code class="inline">self-improver-host.json</code> select the model.</p><p>A <strong>navigation helper</strong> is a workflow's own component that walks a capture
+before any model call and hands the result to an agent as untrusted evidence.
+The split matters for what a repair loop can reach. <code class="inline">debug.nav</code> is kernel
+prelude source and is frozen. Which run to open, which relationship to start
+from, and how much to hand the model is per-workflow policy, so it belongs in
+the workflow's components, where a host can inspect it, select a candidate over
+it, and let an agent repair it. The seeded defect is a helper that follows a
+relationship without reading its <code class="inline">state</code>.</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Stage</th><th style="text-align: left;">Project</th><th style="text-align: left;">What decides the outcome</th></tr></thead><tbody><tr><td style="text-align: left;">Capture the workflow failure</td><td style="text-align: left;"><code class="inline">self-debugger</code></td><td style="text-align: left;"><code class="inline">debug.start/context</code> takes the first relationship regardless of kind or state. The defect is seeded.</td></tr><tr><td style="text-align: left;">Propose a helper repair</td><td style="text-align: left;"><code class="inline">self-improver</code></td><td style="text-align: left;">An agent navigates the workflow's own capture and edits only <code class="inline">debug.start</code>.</td></tr><tr><td style="text-align: left;">Check the helper</td><td style="text-align: left;"><code class="inline">self-check</code>, <code class="inline">self-check-workflow</code></td><td style="text-align: left;">The helper's source page must equal a page reached through a complete referenced-source relationship, without a model, on the pricing capture and on the <code class="inline">variants/target-workflow-control</code> capture.</td></tr><tr><td style="text-align: left;">Diagnose the application</td><td style="text-align: left;"><code class="inline">self-debugger</code> with the helper override</td><td style="text-align: left;">The agent still reads dependencies and source before naming a component.</td></tr><tr><td style="text-align: left;">Propose an application repair</td><td style="text-align: left;"><code class="inline">self-repair</code></td><td style="text-align: left;">A separate agent receives the diagnosis as untrusted evidence plus an independent incident packet.</td></tr><tr><td style="text-align: left;">Validate the application</td><td style="text-align: left;"><code class="inline">target</code> with the application override</td><td style="text-align: left;">Three inputs, two of them absent from the failure capture.</td></tr></tbody></table></div><p><code class="inline">repair.edit/propose</code> takes a run ID, a target map naming the component,
+environment, function, and mission, a vector of exact before/after edits, a
+cause, and evidence strings. It reads one frozen component through
+<code class="inline">debug.nav</code>, requires every before fragment to occur exactly once, and builds
+the candidate and its base source hash from that record. A missing, repeated,
+empty, or unchanged fragment returns <code class="inline">edit_error</code> for correction; a valid edit
+completes through <code class="inline">repair.terminal/propose</code>. The helper establishes that the
+candidate is grounded in captured source, not that the edit is correct.</p><p>Candidates are selected through override descriptors; installed source and
+captures stay unchanged. This is one bounded cycle. Adopting a candidate and
+rechecking earlier cases is a host policy the example leaves out.</p><h3 id="what-to-expect">What to expect</h3><p>Four limits showed up repeatedly while this example was built against a live
 model, and all four are worth designing around.</p><p><strong>Traversal beats budget.</strong> Told only to &quot;read the boundary error&quot;, the model
 looped on the public <code class="inline">activity</code> collection for eight turns and never reached
 <code class="inline">execution_errors</code>. Naming the collections and the intended order — API
@@ -379,10 +404,9 @@ mechanically testable, test it: apply the proposed change and run it against
 host-owned cases before believing it. The model may diagnose and author;
 whether a change is accepted stays with the host.</p><h2 id="scope-and-limits">Scope and limits</h2><p>This substrate is structural navigation, not automatic debugging:</p><ul><li>it reports evidence and typed links, and never selects a diagnosis;</li><li>the walk follows dependency edges only — not callers, data flow, or
 capability side effects;</li><li>it assumes a captured failure with retained generated source; a run that
-produced no program leaves nothing to walk;</li><li>host validation, not a model report, decides whether a repair is accepted.</li></ul><p>The one shape it demonstrably covers is a complete single-call failure whose
-relevant source lies inside the called component's dependency closure.
-Discovery outside that closure, and repair of nonlocal or weakly specified
-defects, are not established.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/reference/repl/">Kernel REPL</a> covers <code class="inline">private-run-analysis-v2</code> for
+produced no program leaves nothing to walk;</li><li>host validation, not a model report, decides whether a repair is accepted.</li></ul><p>The supplied cases exercise a dependency defect, a workflow-routing defect,
+and an underdetermined mismatch. Success remains specific to the evidence
+visited and the inputs validated; broader failures require their own checks.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/reference/repl/">Kernel REPL</a> covers <code class="inline">private-run-analysis-v2</code> for
 interactive or unattended investigation of the same capture.</li><li><a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/maintainers/trace-log-contract.md">TraceLog and run-analysis reference</a> defines
 every collection,
 filter, relationship, and completeness field.</li><li><a href="/reference/cli/">Running and debugging</a> documents artifacts,

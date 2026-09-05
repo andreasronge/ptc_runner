@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Debug a failed run · PtcRunner</title>
-<meta name="description" content="Follow a failed run from its immutable trace into private inspection only when
-the trace cannot answer the question.">
-<link rel="canonical" href="https://ptc-runner.dev/guides/debugging-a-failed-run/">
-<meta property="og:title" content="Debug a failed run · PtcRunner">
-<meta property="og:description" content="Follow a failed run from its immutable trace into private inspection only when
-the trace cannot answer the question.">
-<meta property="og:url" content="https://ptc-runner.dev/guides/debugging-a-failed-run/">
+<title>Let an agent improve its own workflow · PtcRunner</title>
+<meta name="description" content="A debugging workflow repairs its own navigation helper, then uses the repaired
+helper to diagnose and fix an application.">
+<link rel="canonical" href="https://ptc-runner.dev/guides/self-improvement/">
+<meta property="og:title" content="Let an agent improve its own workflow · PtcRunner">
+<meta property="og:description" content="A debugging workflow repairs its own navigation helper, then uses the repaired
+helper to diagnose and fix an application.">
+<meta property="og:url" content="https://ptc-runner.dev/guides/self-improvement/">
 <meta property="og:type" content="article">
 <link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/style.css">
@@ -62,7 +62,7 @@ the trace cannot answer the question.">
 <li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
 <li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
 <li><a href="/guides/inspecting-source-and-programs/">Inspect source and generated programs</a></li>
-<li><a href="/guides/debugging-a-failed-run/" class="current" aria-current="page">Debug a failed run</a></li>
+<li><a href="/guides/self-improvement/" class="current" aria-current="page">Let an agent improve its own workflow</a></li>
 <li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
 </ul>
 
@@ -101,31 +101,24 @@ the trace cannot answer the question.">
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="debug-a-failed-run">Debug a failed run</h1><p>Follow a failed run from its immutable trace into private inspection only when
-the trace cannot answer the question.</p><h2 id="what-failed">What failed?</h2><p>Start with the trace:</p><pre><code class="console language-console">ptc viewer ptc-project.json</code></pre><p>Or query it with the fixed analysis profile:</p><pre><code class="console language-console">ptc repl --project ptc-project.json \
-  --profile run-analysis-v1 \
-  -e '(analysis/runs {&quot;status&quot; &quot;error&quot;})'</code></pre><p>Use the run ID to open its activity, terminal reason, evaluations, tool use,
-limits, and completeness flags. Public traces deliberately omit prompts,
-responses, generated source, and tool payloads.</p><p>If the run retained private inspection, authorize that profile separately and
-write unattended output to an owner-controlled file. That path is not the
-default. For live attached source, see
-<a href="/guides/inspecting-source-and-programs/">Inspect source and generated programs</a>.</p><h2 id="can-another-run-inspect-the-failure">Can another run inspect the failure?</h2><p>The checked-in debugging example demonstrates another useful pattern: one
-ordinary PtcRunner application can navigate a frozen failed capture through the
-shipped <code class="inline">debug.nav</code> library without gaining filesystem, network, model, or
-nested-evaluation access.</p><pre><code class="console language-console">ptc init debug-a-failed-run --example debug-a-failed-run
-ptc run debug-a-failed-run/target.ptc-project.json
-ptc run debug-a-failed-run/debugger.ptc-project.json</code></pre><p>The same example optionally closes the loop: a repair agent proposes a
-complete replacement or abstains, and a later <code class="inline">ptc run</code> can try that
-candidate through <code class="inline">--component-override-descriptor</code> without editing a
-file. The README materialized beside the example walks the path.</p><h2 id="where-is-the-complete-evidence-contract">Where is the complete evidence contract?</h2><p>Use the <a href="/reference/debug-navigation/">debug-navigation reference</a> for the
-complete evidence graph, typed links, collections, resources, pagination,
-private-inspection rules, and model-assisted navigation contract. The
-<a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/maintainers/trace-log-contract.md">TraceLog and run-analysis reference</a> owns
-the event schema.</p>
+<h1 id="let-an-agent-improve-its-own-workflow">Let an agent improve its own workflow</h1><p>A debugging workflow repairs its own navigation helper, then uses the repaired
+helper to diagnose and fix an application.</p><p>The helper reads a failed run's captured evidence before any model call. You end
+with a checked candidate for each fix and the source files you started with.</p><h2 id="run-the-example">Run the example</h2><p>Initialize a fresh copy and run the script with your OpenRouter environment
+file:</p><pre><code class="console language-console">ptc init debug-a-failed-run --example debug-a-failed-run
+sh debug-a-failed-run/run-self-improvement.sh /absolute/path/to/.env</code></pre><p>The script captures two failures, lets an agent repair the helper, checks that
+helper on two captures without a model, and then diagnoses and repairs the
+application. A successful run ends with:</p><pre><code class="text language-text">Completed: helper checks, trace navigation, and three application validation cases. Artifacts: self-improvement-results</code></pre><p>Model runs vary. The script stops at the first failed stage and leaves its
+artifacts in <code class="inline">self-improvement-results</code>.</p><h2 id="read-the-proposed-edit">Read the proposed edit</h2><p>Print the component the agent chose and its explanation:</p><pre><code class="console language-console">ptc repl --project debug-a-failed-run/self-improver.ptc-project.json \
+  --profile private-run-analysis-v2 --private-unattended \
+  -e '(let [r (first (get (analysis/runs {&quot;status&quot; &quot;ok&quot;}) &quot;items&quot;))] (select-keys (get-in (analysis/open (get r &quot;run_id&quot;)) [&quot;result&quot; &quot;value&quot;]) [&quot;component_id&quot; &quot;cause&quot;]))'</code></pre><pre><code class="text language-text">{&quot;cause&quot; &quot;debug.start/context blindly selected the first relationship from generated_sources without checking rel, state, or filters, attempting to follow an unavailable relationship&quot; &quot;component_id&quot; &quot;debug.start&quot;}</code></pre><p>Add &quot;candidate_source&quot; to the key list to print the replacement source. The
+example README explains what navigation means, shows what the agent saw before
+it wrote that edit, and inspects the application fix the same way.</p><p>See <a href="/reference/debug-navigation/">debug navigation</a> for the evidence
+contract and <a href="/reference/component-contracts/">components</a> for how a
+candidate is checked.</p>
 </article>
 <nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/inspecting-source-and-programs/">&larr; Inspect source and generated programs</a><a class="pager-next" href="/guides/evaluating-with-replay/">Evaluate changes with replay &rarr;</a></nav>
 <footer>
-  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/debugging-a-failed-run.md">Edit this
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/self-improvement.md">Edit this
   page on GitHub</a>.
 </footer>
 

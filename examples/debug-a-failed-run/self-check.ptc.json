@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "id": "self.check",
+        "path": "self-debugger/check.clj",
+        "dependencies": [
+          "kernel"
+        ]
+      },
+      {
+        "library": "kernel"
+      }
+    ],
+    "entry": "self.check/run"
+  },
+  "missions": {
+    "evidence": {
+      "components": [
+        {
+          "library": "debug.nav"
+        },
+        {
+          "id": "debug.start",
+          "path": "self-debugger/debug.start.clj",
+          "dependencies": [
+            "debug.nav"
+          ]
+        }
+      ],
+      "providers": [
+        "debug.nav",
+        "failed-run-traces"
+      ]
+    }
+  },
+  "input": {
+    "value": {}
+  },
+  "providers": {
+    "mission": [
+      {
+        "name": "debug.nav"
+      },
+      {
+        "name": "failed-run-traces",
+        "config": {
+          "expose": false
+        }
+      }
+    ]
+  },
+  "limits": {
+    "run_duration_ms": 600000,
+    "workflow_timeout_ms": 540000,
+    "evaluation_timeout_ms": 480000,
+    "normal_event_count": 1024
+  },
+  "events": {
+    "policy": "private"
+  },
+  "labels": {
+    "name": "debug-a-failed-run-agent",
+    "tags": {
+      "mode": "agent"
+    }
+  }
+}

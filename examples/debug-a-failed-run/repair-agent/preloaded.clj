@@ -31,7 +31,7 @@
        "<untrusted_ptc_output source=\"incident-context\">"
        (escape-evidence (json/generate-string context))
        "</untrusted_ptc_output>\n"
-       "This is a synthesis phase with no evidence-navigation functions. "
+       "Use the terminal actions available in this synthesis phase. "
        "Return the best evidence-backed report from this packet."))
 
 (defn run

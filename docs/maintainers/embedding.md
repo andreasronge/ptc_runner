@@ -288,8 +288,11 @@ the validated candidate without editing any file. Passing cases prove only
 those host-selected inputs and installed providers; include held-out cases
 when semantic generalization matters. The checked-in `debug-a-failed-run`
 example closes this loop end to end, including the abstention arm. The README
-materialized by the binary walks `ptc run` and a hand-authored override; this
-Mix task is the gated checkout path.
+materialized by the binary walks a self-improvement script using
+`ptc materialize --from-result` and candidate trials on independent inputs.
+The separate host-owned suites also include inputs absent from the incident
+packet; use `mix help ptc.repair` for this checkout task. `ptc repair` is not a
+standalone command.
 
 ## Next steps
 

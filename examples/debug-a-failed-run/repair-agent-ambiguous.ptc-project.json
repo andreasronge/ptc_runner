@@ -6,10 +6,10 @@
     "path": "repair-agent/ptc.json"
   },
   "host": {
-    "path": "ptc-host-ambiguous.json"
+    "path": "variants/ptc-host-ambiguous.json"
   },
   "artifacts": {
-    "root": "repair-agent-ambiguous/.ptc",
+    "root": "variants/repair-agent-ambiguous/.ptc",
     "trace": true,
     "inspection": true,
     "result": true,

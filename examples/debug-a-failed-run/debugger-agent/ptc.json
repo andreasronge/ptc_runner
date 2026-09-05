@@ -1,39 +1,71 @@
 {
   "version": 1,
   "workflow": {
-    "components": [{"library": "agent.main"}],
+    "components": [
+      {
+        "library": "agent.main"
+      }
+    ],
     "entry": "agent.main/run"
   },
   "missions": {
     "evidence": {
-      "components": [{"library": "debug.nav"}],
-      "providers": ["debug.nav", "failed-run-traces"]
+      "components": [
+        {
+          "library": "debug.nav"
+        }
+      ],
+      "providers": [
+        "debug.nav",
+        "failed-run-traces"
+      ]
     }
   },
   "contracts": {
-    "result_schema": {"path": "report.schema.json"}
+    "result_schema": {
+      "path": "report.schema.json"
+    }
   },
   "input": {
     "value": {
-      "task": "A captured run failed. Determine why it did not produce the value it was required to produce, using only evidence you actually read.\nWork in this order: list runs and select the failed one; open it; read its execution_errors collection; read its generated_sources collection to obtain the exact program the run generated; then use debug.nav/follow on the typed relationships those items carry to reach the prelude source the program called, and keep following dependency relationships until an item has none.\nFollow a relationship object exactly as you received it, and only when its state is \"complete\". Do not invent filters, and do not pass a run id where an evaluation id is expected.\nStopping rule: as soon as you have read a source with no further complete dependency relationship, make the very next program your final report. Do not gather more evidence after that point.\nThe report is an object with exactly these fields: \"decision\", \"cause\" (a string), \"evidence\" (an array of strings), and \"component_id\" only when you name one. Use decision \"diagnosed\" with the responsible component_id only when the source you read identifies one; otherwise use decision \"insufficient-evidence\" and let \"cause\" name what is missing.",
-      "agent": {"max_turns": 14, "mission": "evidence"}
+      "task": "A captured run failed. Determine why it did not produce the required value, using only evidence you actually read.\nStart in this order: list runs and select the failed one; open it; read execution_errors; read generated_sources to obtain the exact generated programs; follow their complete typed relationships to frozen prelude sources and dependencies. Follow relationship objects exactly as received. Do not invent filters or pass a run id where an evaluation id is expected.\nA dependency leaf is not a stopping condition. Read the relevant branches. If they do not explain the failure, inspect the workflow's frozen prelude_sources: the workflow environment authors generated mission programs and connects mission results.\nStop when the evidence distinguishes one faulty implementation from its callers, dependencies, contracts, and input, or when you can explain why it cannot. A numerical mismatch alone is not a diagnosis. If multiple components could each account for it and no contract distinguishes them, abstain.\nReturn exactly decision, cause (a string), evidence (an array of strings), and component_id only for a diagnosis. Use diagnosed only when a source you read contradicts its contract or the required values and explains the failure; name that component. Otherwise use insufficient-evidence, explain what remains undetermined in cause, and omit component_id. Reaching a turn limit is an unfinished investigation, not evidence for a diagnosis.",
+      "agent": {
+        "max_turns": 20,
+        "mission": "evidence"
+      }
     }
   },
   "providers": {
-    "workflow": [{"name": "deepseek"}],
+    "workflow": [
+      {
+        "name": "deepseek"
+      }
+    ],
     "mission": [
-      {"name": "debug.nav"},
-      {"name": "failed-run-traces", "config": {"expose": false}}
+      {
+        "name": "debug.nav"
+      },
+      {
+        "name": "failed-run-traces",
+        "config": {
+          "expose": false
+        }
+      }
     ]
   },
   "limits": {
     "run_duration_ms": 600000,
     "workflow_timeout_ms": 540000,
-    "evaluation_timeout_ms": 480000
+    "evaluation_timeout_ms": 480000,
+    "normal_event_count": 1024
   },
-  "events": {"policy": "private"},
+  "events": {
+    "policy": "private"
+  },
   "labels": {
     "name": "debug-a-failed-run-agent",
-    "tags": {"mode": "agent"}
+    "tags": {
+      "mode": "agent"
+    }
   }
 }

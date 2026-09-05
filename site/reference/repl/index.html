@@ -62,7 +62,7 @@ private-session contract.">
 <li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
 <li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
 <li><a href="/guides/inspecting-source-and-programs/">Inspect source and generated programs</a></li>
-<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/self-improvement/">Let an agent improve its own workflow</a></li>
 <li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
 </ul>
 
@@ -104,8 +104,9 @@ private-session contract.">
 <h1 id="repl-reference">REPL reference</h1><p>This is the complete interactive, unattended, analysis-profile, and
 private-session contract.</p><p><code class="inline">ptc repl</code> keeps its workflow, manifest-mission, and code-owned profile
 environments deliberately separate:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Session</th><th style="text-align: left;">Selection</th><th style="text-align: left;">Environment</th><th style="text-align: left;">Authority</th></tr></thead><tbody><tr><td style="text-align: left;">Direct scratchpad</td><td style="text-align: left;">no selector</td><td style="text-align: left;">fresh workflow</td><td style="text-align: left;">core REPL only</td></tr><tr><td style="text-align: left;">Manifest workflow</td><td style="text-align: left;"><code class="inline">--project</code> or <code class="inline">--manifest</code></td><td style="text-align: left;">manifest workflow</td><td style="text-align: left;">workflow capabilities and model routes</td></tr><tr><td style="text-align: left;">Manifest mission</td><td style="text-align: left;"><code class="inline">--project</code> or <code class="inline">--manifest</code> plus <code class="inline">--mission NAME</code></td><td style="text-align: left;">selected manifest mission</td><td style="text-align: left;">direct mission capabilities plus provider dependency closure</td></tr><tr><td style="text-align: left;">Public analysis profile</td><td style="text-align: left;"><code class="inline">--profile run-analysis-v1</code></td><td style="text-align: left;">fixed code-owned mission</td><td style="text-align: left;">immutable traces</td></tr><tr><td style="text-align: left;">Private analysis profile</td><td style="text-align: left;"><code class="inline">--profile private-run-analysis-v2</code></td><td style="text-align: left;">fixed code-owned mission</td><td style="text-align: left;">correlated traces and private inspection records</td></tr><tr><td style="text-align: left;">Private catalog profile</td><td style="text-align: left;"><code class="inline">--profile private-run-catalog-v1</code></td><td style="text-align: left;">fixed code-owned mission</td><td style="text-align: left;">safe metadata from bounded trace and inspection probes</td></tr></tbody></table></div><p>Successful definitions and exact <code class="inline">*1</code>, <code class="inline">*2</code>, and <code class="inline">*3</code> history persist for one
-command. A failed form preserves the previously committed state. Profile and
-manifest modes are mutually exclusive because they carry different authority.</p><p>All three modes render successful values with the same bounded structural
+command. A failed form preserves the previously committed state. Explicit
+<code class="inline">--manifest</code> and profile modes are mutually exclusive. A profile may use
+<code class="inline">--project</code> to derive capture directories without loading the application.</p><p>All three modes render successful values with the same bounded structural
 preview used for model observations. Collection items, nesting, nodes, strings,
 characters, and UTF-8 bytes are bounded during traversal, so displaying a large
 value does not first build its complete printable representation. Truncation is
@@ -129,8 +130,10 @@ ptc repl --manifest ptc.json --host-config ptc-host.json
 ptc repl --manifest ptc.json -e '(workflow/helper data/input)'
 ptc repl --project ptc-project.json -e '(workflow/helper data/input)'</code></pre><p><code class="inline">--project</code> supplies the project's application, host, and lazy environment
 defaults while preserving the manifest REPL input grammar. It conflicts with
-<code class="inline">--manifest</code>, <code class="inline">--profile</code>, and <code class="inline">--describe-profile</code>; an explicit
-<code class="inline">--host-config</code> or <code class="inline">--env-file</code> overrides the matching project reference.</p><p>A provider-bearing manifest requires <code class="inline">--host-config</code>. The session performs the
+<code class="inline">--manifest</code> and <code class="inline">--describe-profile</code>; an explicit <code class="inline">--host-config</code> or
+<code class="inline">--env-file</code> overrides the matching project reference. With <code class="inline">--profile</code>, the
+project supplies artifact directories instead of application authority, as
+described under <a href="#query-public-traces">Query public traces</a>.</p><p>A provider-bearing manifest requires <code class="inline">--host-config</code>. The session performs the
 same audited-local checks, acquires one provider session, and reuses it for
 every expression. Direct and profile modes reject host configuration.</p><p>The interactive line loop has a dedicated bounded lifetime profile. Selection
 depends on the input grammar, never TTY detection: argumentless <code class="inline">ptc repl</code>
@@ -553,7 +556,8 @@ expressions while preserving the final nonzero status with:</p><pre><code class=
   -e '(def runs (analysis/runs {}))' \
   -e 'missing-name' \
   -e '(count (get runs &quot;items&quot;))'</code></pre><p><code class="inline">--output</code> and <code class="inline">--private-output</code> may atomically publish the value of exactly
-one non-interactive public or private profile evaluation. They do not replace
+one non-interactive public or private profile <code class="inline">-e</code>/<code class="inline">--eval</code> evaluation. Script
+and stdin inputs do not support these output switches. They do not replace
 existing files.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/reference/cli/">Running and debugging</a> covers run artifacts and
 the Viewer.</li><li><a href="/reference/source-inspection/">Source inspection</a> covers attached components,
 <code class="inline">--inspect-only</code>, and admitted programs.</li><li><a href="/reference/application-manifest/">Manifests and capabilities</a> covers attached

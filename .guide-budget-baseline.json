@@ -43,15 +43,9 @@
       "blockers": 1,
       "tics": 0.7
     },
-    "docs/guides/debugging-a-failed-run.md": {
-      "words": 247,
-      "density": 1.4,
-      "blockers": 0,
-      "tics": 0.5
-    },
     "docs/guides/designing-agent-workflows.md": {
-      "words": 677,
-      "density": 2.0,
+      "words": 673,
+      "density": 1.2,
       "blockers": 0,
       "tics": 0.0
     },
@@ -112,6 +106,12 @@
     "docs/guides/running-and-debugging.md": {
       "words": 329,
       "density": 2.2,
+      "blockers": 0,
+      "tics": 0.0
+    },
+    "docs/guides/self-improvement.md": {
+      "words": 265,
+      "density": 0.5,
       "blockers": 0,
       "tics": 0.0
     },

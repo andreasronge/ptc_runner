@@ -31,7 +31,7 @@ defmodule PtcRunner.Kernel.ExampleLibrary do
     {"support-triage", "examples/support-triage",
      "Three numbered projects growing one support-inbox scenario: one bounded question, a triage policy as a mission API, two specialist missions with a result contract"},
     {"debug-a-failed-run", "examples/debug-a-failed-run",
-     "A failing project plus the deterministic and agent debuggers that read its evidence"},
+     "An agent repairs its own debugging workflow, then uses it to diagnose and repair an application"},
     {"llm-replay", "examples/llm-replay",
      "A frozen-model project with the replay fixture its host document selects"},
     {"named-mission-reader-writer", "examples/named-mission-reader-writer",

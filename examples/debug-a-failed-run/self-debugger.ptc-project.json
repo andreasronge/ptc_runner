@@ -1,0 +1,20 @@
+{
+  "kind": "ptc-project",
+  "version": 1,
+  "application": {
+    "path": "self-debugger.ptc.json"
+  },
+  "host": {
+    "path": "self-host.json"
+  },
+  "artifacts": {
+    "root": "self-debugger/.ptc",
+    "trace": true,
+    "inspection": true,
+    "result": true,
+    "envelope": true
+  },
+  "viewer": {
+    "private": true
+  }
+}

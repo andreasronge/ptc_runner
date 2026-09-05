@@ -27,8 +27,9 @@ checkout-only. It is listed at the end of this page.
 
 ## How an example tree is laid out
 
-Every runnable step is a pair: a project document beside a directory of the
-same name.
+Most numbered steps pair a project document with a directory of the same name.
+The self-improvement workflow shares component files through manifests at the
+example root; its script creates the artifact directories before running.
 
 ```
 kernel-tutorial/
@@ -98,14 +99,17 @@ The `reader` mission holds only a read tool over one directory and the
 in either mission cannot reach the other's authority. It is the runnable form
 of a write kept behind its own mission.
 
-`debug-a-failed-run` pairs a failing target with the debuggers that read its
-evidence. `target.ptc-project.json` fails on purpose;
-`debugger.ptc-project.json` walks the evidence deterministically and
-`debugger-agent.ptc-project.json` walks it with a model.
-`repair-agent.ptc-project.json` extends the incident into a phased agent run
-whose only terminal actions are to propose a replacement component or to
-abstain. The `-ambiguous` and `-workflow-control` variants change the failure
-so the same debuggers and repair agent meet a different shape.
+`debug-a-failed-run` is the self-improvement example. `run-self-improvement.sh`
+runs a debugging workflow that fails on purpose, lets an agent repair the
+workflow's own navigation helper, checks that helper without a model, then uses
+the repaired workflow to diagnose and repair an application. The same tree
+keeps the smaller pieces: `target.ptc-project.json` fails on purpose,
+`debugger.ptc-project.json` walks the evidence deterministically,
+`debugger-agent.ptc-project.json` walks it with a model, and
+`repair-agent.ptc-project.json` proposes a replacement component or abstains.
+The `variants/` directory holds two other failure shapes, an underdetermined
+mismatch and a workflow-routing defect, so the same debuggers and repair agent
+meet more than one bug.
 
 `llm-replay` serves one recorded model response from `replay.jsonl`. It needs
 no credential and performs no network activity, which makes it the tree to copy
