@@ -39,30 +39,6 @@ request that completes one deletes it. Code documentation must not link to
 `docs/plans/`; move durable contracts into module docs, guides, or retained
 specifications first.
 
-## Managed agents (PtcManager)
-
-When `PTC_MANAGED_OPERATION_CONTEXT` is set, PtcManager started you through
-Herdr. It already created and initialized this worktree through
-`.ptc-manager.yml`, and its task prompt says what you may do on GitHub. Do not
-run `scripts/worktree.sh` at all: `new` would nest a second worktree and `gc`
-removes worktrees that PtcManager still tracks. Run expensive commands as
-`$PTC_OPERATION_WRAPPER run --label <build|test|lint|verify> -- <command>`;
-the pre-push hook already wraps itself.
-
-The task prompt states a number of independent reviews. It counts cold Codex
-review sessions on the finished change: `0` skips review, `1` is one
-cumulative base-guarded review at the PR boundary, `2` adds one incremental
-review of the draft before it, and `3` adds an adversarial `challenge` of the
-finished change. Follow each session through its `followup`; never cold-review
-a byte-identical tree twice.
-
-## Independent review
-
-When independent Codex review is required, follow the
-[coding-agent review workflow](docs/maintainers/coding-agent-review.md).
-Rebase onto `origin/main` before the final cumulative review and rerun the
-gates on the rebased tree.
-
 ## Commits and pull requests
 
 Use a concise Conventional Commit subject, e.g. `feat(mcp): add stateful
@@ -139,9 +115,9 @@ body. An assignee marks the issue as taken.
 
 ### Worktrees
 
-Unless PtcManager started you (see above), never start work in the shared
-checkout — create a worktree before the first edit, even for a plan-only
-document. `scripts/worktree.sh new <branch> [issue]` branches from
+Work in an isolated worktree, using the prepared worktree when the task
+provides one. Otherwise, create a worktree before the first edit, even for a
+plan-only document. `scripts/worktree.sh new <branch> [issue]` branches from
 `origin/main`, claims the issue when given (assign, comment, refuse one
 already taken), and seeds and initializes the worktree. `scripts/worktree.sh
 gc` removes worktrees merged into `origin/main` that are clean and a day idle
