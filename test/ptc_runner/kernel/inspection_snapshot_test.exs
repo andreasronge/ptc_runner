@@ -817,6 +817,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
     assert {:ok,
             %{
               "counts" => %{
+                "turns" => 1,
                 "model_exchanges" => 2,
                 "incomplete_model_exchanges" => 1,
                 "capability_calls" => 2,

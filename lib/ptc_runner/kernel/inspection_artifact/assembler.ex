@@ -856,6 +856,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
       Enum.reject(pairs, fn {_id, input} -> capability_class(input) == :model end)
 
     counts = %{
+      "turns" => length(conversation.turns),
       "model_exchanges" => length(model),
       "incomplete_model_exchanges" =>
         Enum.count(model, fn {id, _} -> not Map.has_key?(state.outputs, id) end),
@@ -872,7 +873,6 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
       "explicit_failure_values" => length(state.execution_meta.failures)
     }
 
-    _ = conversation
     insert(state, :count, {state.run_id, :summary}, counts)
   end
 
