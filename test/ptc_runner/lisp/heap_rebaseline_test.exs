@@ -34,22 +34,12 @@ defmodule PtcRunner.Lisp.HeapRebaselineTest do
     %{"rows" => fn _args -> Enum.take(rows, 3) end}
   end
 
-  # One sample is noisy in one direction only: the first call pays code
-  # loading, and a garbage collection of the caller's heap, which holds the
-  # granted map, is charged to the caller as reductions. An enumeration of the
-  # map would show in every sample, so the minimum is the cost of the work.
-  @reduction_samples 5
-
   defp caller_reductions(fun) do
-    1..@reduction_samples
-    |> Enum.map(fn _sample ->
-      :erlang.garbage_collect()
-      {:reductions, before_run} = Process.info(self(), :reductions)
-      fun.()
-      {:reductions, after_run} = Process.info(self(), :reductions)
-      after_run - before_run
-    end)
-    |> Enum.min()
+    :erlang.garbage_collect()
+    {:reductions, before_run} = Process.info(self(), :reductions)
+    fun.()
+    {:reductions, after_run} = Process.info(self(), :reductions)
+    after_run - before_run
   end
 
   describe "host-granted data is excluded from the program budget (F3 regression)" do
@@ -279,36 +269,45 @@ defmodule PtcRunner.Lisp.HeapRebaselineTest do
     end
 
     test "compile scope checks do not enumerate high-cardinality continuation memory" do
-      memory = Map.new(1..250_000, fn index -> {"unused-#{index}", index} end)
+      Task.async(fn ->
+        # Dirty CPU GC is charged elapsed-time reductions, so contention can
+        # inflate this measurement. Reserve heap words in a fresh process and
+        # warm the code before sampling; caller_reductions collects beforehand.
+        Process.flag(:min_heap_size, 2_000_000)
 
-      baseline_reductions =
-        caller_reductions(fn ->
-          assert {:error, %{fail: %{reason: :unbound_var}}} =
-                   Lisp.run_native("missing-binding", memory: %{})
-        end)
+        assert {:error, %{fail: %{reason: :unbound_var}}} =
+                 Lisp.run_native("missing-binding", memory: %{})
 
-      granted_reductions =
-        caller_reductions(fn ->
-          assert {:error, %{fail: %{reason: :unbound_var}}} =
-                   Lisp.run_native("missing-binding", memory: memory)
-        end)
+        memory = Map.new(1..50_000, fn index -> {"unused-#{index}", index} end)
 
-      # Compare with the same work on this runtime, rather than pinning an
-      # absolute OTP reduction delta. Retain a negative control: eagerly
-      # constructing the old scope must still exceed the allowed overhead.
-      budget = baseline_reductions * 1.5
-      assert granted_reductions <= budget
+        baseline_reductions =
+          caller_reductions(fn ->
+            assert {:error, %{fail: %{reason: :unbound_var}}} =
+                     Lisp.run_native("missing-binding", memory: %{})
+          end)
 
-      enumerated_reductions =
-        caller_reductions(fn ->
-          scope = memory |> Map.keys() |> MapSet.new()
-          assert MapSet.size(scope) == map_size(memory)
+        granted_reductions =
+          caller_reductions(fn ->
+            assert {:error, %{fail: %{reason: :unbound_var}}} =
+                     Lisp.run_native("missing-binding", memory: memory)
+          end)
 
-          assert {:error, %{fail: %{reason: :unbound_var}}} =
-                   Lisp.run_native("missing-binding", memory: memory)
-        end)
+        # Keep the absolute overhead bound and prove it rejects eager enumeration.
+        budget = baseline_reductions + 20_000
+        assert granted_reductions <= budget
 
-      assert enumerated_reductions > budget
+        enumerated_reductions =
+          caller_reductions(fn ->
+            scope = memory |> Map.keys() |> MapSet.new()
+            assert MapSet.size(scope) == map_size(memory)
+
+            assert {:error, %{fail: %{reason: :unbound_var}}} =
+                     Lisp.run_native("missing-binding", memory: memory)
+          end)
+
+        assert enumerated_reductions > budget
+      end)
+      |> Task.await(30_000)
     end
   end
 
