@@ -279,7 +279,7 @@ defmodule PtcRunner.Lisp.HeapRebaselineTest do
     end
 
     test "compile scope checks do not enumerate high-cardinality continuation memory" do
-      memory = Map.new(1..50_000, fn index -> {"unused-#{index}", index} end)
+      memory = Map.new(1..250_000, fn index -> {"unused-#{index}", index} end)
 
       baseline_reductions =
         caller_reductions(fn ->
@@ -293,7 +293,22 @@ defmodule PtcRunner.Lisp.HeapRebaselineTest do
                    Lisp.run_native("missing-binding", memory: memory)
         end)
 
-      assert granted_reductions <= baseline_reductions + 20_000
+      # Compare with the same work on this runtime, rather than pinning an
+      # absolute OTP reduction delta. Retain a negative control: eagerly
+      # constructing the old scope must still exceed the allowed overhead.
+      budget = baseline_reductions * 1.5
+      assert granted_reductions <= budget
+
+      enumerated_reductions =
+        caller_reductions(fn ->
+          scope = memory |> Map.keys() |> MapSet.new()
+          assert MapSet.size(scope) == map_size(memory)
+
+          assert {:error, %{fail: %{reason: :unbound_var}}} =
+                   Lisp.run_native("missing-binding", memory: memory)
+        end)
+
+      assert enumerated_reductions > budget
     end
   end
 

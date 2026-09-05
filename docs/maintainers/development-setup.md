@@ -65,9 +65,34 @@ with the seed, so do not seed from a checkout whose `deps/` you have edited.
 The staging, atomic promotion, and PLT rules are documented in the seeding
 section of `scripts/worktree.sh`.
 
-To warm the cache, keep the main checkout built: `mix compile` and
-`mix dialyzer` there make every subsequent worktree cheap. To fill gaps in an
-existing worktree (artifacts already present are left untouched):
+Project PLTs also have a shared snapshot cache at
+`~/.cache/ptc_runner/project_plts` (override with `PTC_PROJECT_PLT_CACHE`).
+Initialization restores a private copy when the main-checkout seed did not
+provide one. `scripts/ci/core-dialyzer.sh`, used by pre-push, restores missing
+PLTs and publishes after successful analysis. Failed gates never publish.
+The cache key includes the actual Erlang/ERTS and Elixir versions, OS,
+architecture, `mix.exs`, and `mix.lock`; a lockfile change can use the newest
+snapshot with otherwise identical settings as an incremental starting point.
+Hashing all of `mix.exs` deliberately invalidates more than just PLT options.
+GitHub Actions retains its existing cache, and non-test Mix environments do
+not publish to this cache.
+
+Both the main-checkout seed and shared snapshots relocate the PLT's absolute
+BEAM paths to the destination checkout while preserving their checksums.
+Otherwise Dialyzer would remove and re-add every dependency from the old path.
+Shared snapshots store checkout paths under a placeholder prefix; the cache
+only supports the checked classic PLT record layout and skips unknown layouts.
+Dialyzer still checks the actual destination BEAM contents.
+
+Snapshots are validated before atomic publication under a nonblocking OS
+lock. Readers copy a complete snapshot under the same lock, validate it, and
+remove Dialyxir's shortcut hash so it rechecks the worktree's modules. Cache
+failure or a busy lock falls back to ordinary Dialyzer work. Existing local
+PLTs are left untouched. Python 3 and the pinned BEAM runtime are required,
+as they are for the existing hooks and toolchain.
+
+Keep the main checkout built with `mix compile` to warm dependency and build
+seeds. To fill gaps in an existing worktree:
 
 ```bash
 scripts/worktree.sh seed          # seed the current worktree
