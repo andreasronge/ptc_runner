@@ -18,6 +18,7 @@ traversed in order to find the one thing you came for.
 | Many model requests in parallel, then one synthesis | `kernel-tutorial` | `07-parallel-fan-out.ptc-project.json` |
 | A workflow composing deterministic rules with a model | `support-triage` | `02-domain-api.ptc-project.json` |
 | Two named missions granted different capabilities | `support-triage` | `03-specialists.ptc-project.json` |
+| A denied capability at a mission boundary, with no provider | `support-triage` | `mission-boundary-check.ptc-project.json` |
 | A write kept behind its own mission | `named-mission-reader-writer` | `ptc-project.json` |
 | Replaying a recorded model response | `llm-replay` | `ptc-project.json` |
 | Verifying a result inside the run that produced it | `dabstep-fraud` | `ptc-project.json`, after `fetch-data.sh` |
@@ -109,13 +110,14 @@ and 05 need no credential.
 | `07-parallel-fan-out` | Twelve model requests through `pmap`, then one synthesis request |
 
 `support-triage` grows one support-inbox scenario through three design
-decisions. Every step selects a provider.
+decisions. Every numbered step selects a provider.
 
 | Step | Aspect |
 | --- | --- |
 | `01-one-question` | Tickets granted as mission data, one bounded question, no tools |
 | `02-domain-api` | A prompt-visible mission API the model composes, instead of tool relay |
 | `03-specialists` | Two named missions with different grants, and a result contract |
+| `mission-boundary-check` | A denied capability, no provider: the escalation mission refused the triage grants |
 
 `named-mission-reader-writer` is one workflow coordinating two agent loops.
 The `reader` mission holds only a read tool over one directory and the

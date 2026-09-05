@@ -46,4 +46,106 @@ defmodule PtcRunner.Kernel.SupportTriageExamplesTest do
     assert envelope["result"]["mission_bundle_hashes"] |> Map.keys() |> Enum.sort() ==
              ["escalation", "triage"]
   end
+
+  @tag :tmp_dir
+  test "the boundary check denies the triage grants inside the escalation mission", %{
+    tmp_dir: tmp_dir
+  } do
+    tree = copy_tree!(tmp_dir)
+    project_path = Path.join(tree, "mission-boundary-check.ptc-project.json")
+
+    # The check needs neither a model nor a credential, so it names no host
+    # document and no environment file. A copy without a `.env` still runs.
+    assert {:ok, project} = ProjectConfig.load(project_path)
+    assert project.host == nil
+    assert project.env_file == nil
+    refute File.exists?(Path.join(tree, ".env"))
+
+    assert {:ok, %CommandOutcome{} = outcome} = CommandEngine.dispatch(["run", project_path])
+    assert outcome.exit_status == 0, inspect(outcome.envelope, pretty: true)
+    assert outcome.envelope["execution"]["usage"]["llm_usage"] == []
+
+    assert outcome.envelope["result"]["value"] == %{
+             "granted" => %{
+               "mission" => "triage",
+               "tickets_visible" => 6,
+               "probe_priority" => 55
+             },
+             "denied" => %{
+               "mission" => "escalation",
+               "mission_data" =>
+                 "runtime_error: data/tickets is not a granted data name. Granted: (none)",
+               "mission_component" => "invalid_form: unknown namespace triage.rules/"
+             }
+           }
+  end
+
+  test "the boundary check runs the specialist step's own mission definitions" do
+    # The check copies step 03's missions and policy files, because a manifest
+    # cannot reference files above its own directory. This keeps the copy
+    # honest: a grant changed in step 03 must change here too.
+    assert manifest!("mission-boundary-check")["missions"] ==
+             manifest!("03-specialists")["missions"]
+
+    for file <- ~w(triage.clj escalation.clj) do
+      assert File.read!(Path.join([@examples, "mission-boundary-check", file])) ==
+               File.read!(Path.join([@examples, "03-specialists", file]))
+    end
+  end
+
+  @tag :tmp_dir
+  test "the boundary check fails when the escalation mission can answer", %{tmp_dir: tmp_dir} do
+    tree = copy_tree!(tmp_dir)
+    manifest = Path.join(tree, "mission-boundary-check/ptc.json")
+    opened = manifest |> File.read!() |> Jason.decode!()
+    tickets = opened["missions"]["triage"]["data"]
+
+    File.write!(
+      manifest,
+      Jason.encode!(put_in(opened, ["missions", "escalation", "data"], tickets))
+    )
+
+    assert_explicit_failure(tree)
+  end
+
+  @tag :tmp_dir
+  test "the boundary check fails on a refusal it did not expect", %{tmp_dir: tmp_dir} do
+    tree = copy_tree!(tmp_dir)
+    check = Path.join(tree, "mission-boundary-check/check.clj")
+    source = File.read!(check)
+
+    rewritten =
+      String.replace(
+        source,
+        ~S|(refused (read-mission-data "escalation")|,
+        ~S|(refused (read-mission-data "nowhere")|
+      )
+
+    assert rewritten != source
+    File.write!(check, rewritten)
+
+    assert_explicit_failure(tree)
+  end
+
+  defp manifest!(step) do
+    [@examples, step, "ptc.json"] |> Path.join() |> File.read!() |> Jason.decode!()
+  end
+
+  defp copy_tree!(tmp_dir) do
+    tree = Path.join(tmp_dir, "support-triage")
+    File.cp_r!(@examples, tree)
+    File.rm_rf!(Path.join(tree, "mission-boundary-check/.ptc"))
+    tree
+  end
+
+  # The check's `fail` value is retained only in the run's inspection record,
+  # so the command boundary shows the failure as its exit status and code.
+  defp assert_explicit_failure(tree) do
+    project_path = Path.join(tree, "mission-boundary-check.ptc-project.json")
+
+    assert {:error, %CommandOutcome{} = outcome} = CommandEngine.dispatch(["run", project_path])
+    assert outcome.exit_status == 5, inspect(outcome.envelope, pretty: true)
+    assert outcome.envelope["error"]["code"] == "explicit_failure"
+    assert outcome.envelope["error"]["provider_activity"] == false
+  end
 end

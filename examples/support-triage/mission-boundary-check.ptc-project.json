@@ -1,0 +1,21 @@
+{
+  "$schema": "https://ptc-runner.dev/schemas/ptc-project-config.schema.json",
+  "kind": "ptc-project",
+  "version": 1,
+  "application": {
+    "path": "mission-boundary-check/ptc.json"
+  },
+  "artifacts": {
+    "root": "mission-boundary-check/.ptc",
+    "trace": true,
+    "inspection": true,
+    "result": false,
+    "envelope": true
+  },
+  "viewer": {
+    "port": 4134,
+    "open": true,
+    "repl": true,
+    "private": true
+  }
+}
