@@ -595,21 +595,24 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
     documents =
       fixture_documents()
       |> Map.put("override.json", descriptor)
+      |> Map.put("Override.json", descriptor)
 
     manifest_path = write_documents(directory, documents)
 
-    assert {:ok, directory_package, _input} =
-             ApplicationPackage.acquire_directory(manifest_path,
-               component_override_descriptor: Path.join(directory, "override.json")
-             )
-
     assert {:ok, memory_package, _input} =
-             ApplicationPackage.acquire_memory("app.json", documents,
+             ApplicationPackage.acquire_memory("app.json", Map.delete(documents, "Override.json"),
                component_override: {"override.json", "workflow.clj"}
              )
 
-    assert directory_package.document_count == memory_package.document_count
-    assert directory_package.document_bytes == memory_package.document_bytes
+    for descriptor_name <- ["override.json", "Override.json"] do
+      assert {:ok, directory_package, _input} =
+               ApplicationPackage.acquire_directory(manifest_path,
+                 component_override_descriptor: Path.join(directory, descriptor_name)
+               )
+
+      assert directory_package.document_count == memory_package.document_count
+      assert directory_package.document_bytes == memory_package.document_bytes
+    end
   end
 
   @tag :tmp_dir

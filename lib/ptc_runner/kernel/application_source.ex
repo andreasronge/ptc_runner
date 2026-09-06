@@ -163,16 +163,26 @@ defmodule PtcRunner.Kernel.ApplicationSource do
   def read(_source, _name, _max_bytes), do: {:error, :invalid_application_source}
 
   @spec finish(t()) ::
-          {:ok, %{document_count: non_neg_integer(), document_bytes: non_neg_integer()}}
+          {:ok,
+           %{
+             captured_names: MapSet.t(binary()),
+             document_count: non_neg_integer(),
+             document_bytes: non_neg_integer()
+           }}
           | {:error, atom()}
-  @doc "Verifies memory closure use, returns accounting, and closes the source."
+  @doc "Verifies memory closure use, returns captured-name accounting, and closes the source."
   def finish(%__MODULE__{pid: pid}) do
     result =
       Agent.get_and_update(pid, fn state ->
         result =
           case all_memory_documents_used(state) do
             :ok ->
-              {:ok, %{document_count: map_size(state.captured), document_bytes: state.bytes}}
+              {:ok,
+               %{
+                 captured_names: MapSet.new(Map.keys(state.captured)),
+                 document_count: map_size(state.captured),
+                 document_bytes: state.bytes
+               }}
 
             {:error, _reason} = error ->
               error
