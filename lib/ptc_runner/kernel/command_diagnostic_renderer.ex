@@ -20,35 +20,53 @@ defmodule PtcRunner.Kernel.CommandDiagnosticRenderer do
   @doc false
   @spec render_with_run_ref(CommandDiagnostic.t() | CommandOutcome.t(), binary()) ::
           {:ok, binary()} | {:error, :invalid_command_diagnostic}
-  def render_with_run_ref(%CommandDiagnostic{} = diagnostic, run_ref) do
+  def render_with_run_ref(diagnostic, run_ref), do: render_with_run_ref(diagnostic, run_ref, [])
+
+  @doc false
+  @spec render_with_run_ref(CommandDiagnostic.t() | CommandOutcome.t(), binary(), keyword()) ::
+          {:ok, binary()} | {:error, :invalid_command_diagnostic}
+  def render_with_run_ref(%CommandDiagnostic{} = diagnostic, run_ref, opts) when is_list(opts) do
     if CommandDiagnostic.valid?(diagnostic) and CommandRunRef.valid?(run_ref),
-      do: {:ok, render_map(CommandDiagnostic.to_map(diagnostic), run_ref)},
+      do: {:ok, render_map(CommandDiagnostic.to_map(diagnostic), run_ref, opts)},
       else: {:error, :invalid_command_diagnostic}
   end
 
-  def render_with_run_ref(%CommandOutcome{} = outcome, run_ref) do
+  def render_with_run_ref(%CommandOutcome{} = outcome, run_ref, opts) when is_list(opts) do
     with true <- CommandOutcome.valid?(outcome),
          true <- CommandRunRef.valid?(run_ref),
          %{"error" => error} <- CommandOutcome.to_map(outcome) do
-      {:ok, render_map(error, run_ref)}
+      {:ok, render_map(error, run_ref, opts)}
     else
       _invalid -> {:error, :invalid_command_diagnostic}
     end
   end
 
-  def render_with_run_ref(_diagnostic, _run_ref),
+  def render_with_run_ref(_diagnostic, _run_ref, _opts),
     do: {:error, :invalid_command_diagnostic}
 
-  defp render_map(error, run_ref) do
+  defp render_map(error, run_ref, opts \\ []) do
     base =
       "#{error["phase"]}/#{error["code"]}: " <>
         subject_prefix(error["subject"]) <>
         error["message"] <>
-        location_suffix(error)
+        location_suffix(error) <>
+        local_context_suffix(error, opts)
 
     run_ref_suffix = if run_ref, do: " (run_ref: #{run_ref})", else: ""
     base <> run_ref_suffix <> diagnostic_suffix(error)
   end
+
+  defp local_context_suffix(
+         %{"phase" => "application", "code" => "application_not_found"},
+         opts
+       ) do
+    case Keyword.fetch(opts, :application_path) do
+      {:ok, path} when is_binary(path) and path != "" -> " at " <> path
+      _absent -> ""
+    end
+  end
+
+  defp local_context_suffix(_error, _opts), do: ""
 
   defp diagnostic_suffix(%{
          "phase" => "active_preflight",

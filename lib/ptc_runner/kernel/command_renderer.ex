@@ -13,8 +13,10 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   response, credential, or unvalidated path. Component compile failures with a
   proven byte span render the logical component name and canonical half-open
   byte range already present in the envelope; rendering does not retain or
-  reopen component source. A replay miss may include only its validated opaque
-  request hash.
+  reopen component source. The one local-only exception is an unreadable
+  application input: its caller-supplied positional path, or a loaded project's
+  validated relative application path, is appended without entering the sealed
+  diagnostic. A replay miss may include only its validated opaque request hash.
   """
 
   alias PtcRunner.Kernel.ArtifactRootDiagnostic
@@ -85,7 +87,7 @@ defmodule PtcRunner.Kernel.CommandRenderer do
       %{"status" => "error", "run_ref" => run_ref} = envelope ->
         {:stderr,
          warning_lines(envelope) <>
-           (failure_line(outcome, run_ref, rejection)
+           (failure_line(outcome, run_ref, rejection, opts)
             |> append_named_env_file_hint(envelope, opts)) <>
            evaluation_line(envelope)}
     end
@@ -148,11 +150,11 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   def rejection(run_ref, %CommandRejection{} = rejection) do
     row = DiagnosticCatalog.fetch!(:arguments, rejection.code)
     diagnostic = CommandDiagnostic.new!(:arguments, rejection.code, message: row.message)
-    failure_line(diagnostic, run_ref, rejection)
+    failure_line(diagnostic, run_ref, rejection, [])
   end
 
-  defp failure_line(diagnostic, run_ref, rejection) do
-    {:ok, rendered} = CommandDiagnosticRenderer.render_with_run_ref(diagnostic, run_ref)
+  defp failure_line(diagnostic, run_ref, rejection, opts) do
+    {:ok, rendered} = CommandDiagnosticRenderer.render_with_run_ref(diagnostic, run_ref, opts)
     "error: " <> rendered <> rejection_suffix(rejection) <> "\n"
   end
 

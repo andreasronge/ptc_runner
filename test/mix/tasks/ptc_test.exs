@@ -236,6 +236,81 @@ defmodule Mix.Tasks.PtcTest do
   end
 
   @tag :tmp_dir
+  test "missing application inputs add paths only to local terminal errors", %{tmp_dir: dir} do
+    for {command, missing_positional} <- [
+          {"run", "does-not-exist/ptc-project.json"},
+          {"validate", "does-not-exist/ptc-project.json"},
+          {"run", "does-not-exist/direct-manifest.json"},
+          {"validate", "does-not-exist/direct-manifest.json"}
+        ] do
+      envelope_path =
+        Path.join(dir, "#{command}-#{Path.basename(missing_positional)}-envelope.json")
+
+      presentation =
+        MixCommandAdapter.execute([
+          command,
+          missing_positional,
+          "--envelope",
+          envelope_path
+        ])
+
+      assert presentation.exit_status == 3
+      assert presentation.stdout == ""
+
+      assert presentation.stderr =~
+               "error: application/application_not_found: " <>
+                 "the application manifest does not exist at #{missing_positional}"
+
+      assert presentation.stderr =~ "(run_ref: cmd-"
+
+      envelope = envelope_path |> File.read!() |> Jason.decode!()
+      assert envelope["run_ref"] =~ "cmd-"
+      assert envelope["error"]["code"] == "application_not_found"
+      refute Jason.encode!(envelope) =~ missing_positional
+    end
+  end
+
+  @tag :tmp_dir
+  test "a missing project application renders its project-visible path only locally", %{
+    tmp_dir: dir
+  } do
+    project_path = Path.join(dir, "ptc-project.json")
+    envelope_path = Path.join(dir, "missing-project-application-envelope.json")
+
+    File.write!(
+      project_path,
+      Jason.encode!(%{
+        "kind" => "ptc-project",
+        "version" => 1,
+        "application" => %{"path" => "missing-application.json"}
+      })
+    )
+
+    presentation =
+      MixCommandAdapter.execute([
+        "run",
+        project_path,
+        "--envelope",
+        envelope_path
+      ])
+
+    assert presentation.exit_status == 3
+
+    assert presentation.stderr =~
+             "application/application_not_found: " <>
+               "the application manifest does not exist at missing-application.json"
+
+    refute presentation.stderr =~ "does-not-exist/ptc-project.json"
+    assert presentation.stderr =~ "(run_ref: cmd-"
+
+    envelope = envelope_path |> File.read!() |> Jason.decode!()
+    assert envelope["run_ref"] =~ "cmd-"
+    assert envelope["error"]["code"] == "application_not_found"
+    refute Jason.encode!(envelope) =~ "missing-application.json"
+    refute Jason.encode!(envelope) =~ project_path
+  end
+
+  @tag :tmp_dir
   test "root command names a missing manifest property", %{tmp_dir: dir} do
     manifest_path = write_manifest(dir, %{"value" => 1})
 
