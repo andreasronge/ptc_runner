@@ -347,6 +347,24 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
   end
 
   describe "value-position exports run isolated (codex re-review)" do
+    test "repeated exports start from the same immutable private namespace" do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns counter "Counter." {:visibility :prompt})
+        (def initial 0)
+        (defn advance [] (def initial (inc initial)) initial)
+        """)
+
+      source = "[(counter/advance) (apply counter/advance []) counter/initial]"
+
+      for _ <- 1..2 do
+        assert {:ok, %Step{return: [1, 1, 0], memory: memory}} =
+                 PtcRunner.Lisp.run(source, prelude: prelude)
+
+        assert memory == %{}
+      end
+    end
+
     test "a value-position export does not embed the private env in user-visible data" do
       {:ok, prelude} =
         Compiler.compile("""
@@ -366,6 +384,7 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
       # may reference the helper by name, but the helper's implementation
       # ("PRIVATE") must not be embedded in the value.
       assert meta[:prelude_ns] == "crm"
+      refute Map.has_key?(meta, :prelude_internal)
       refute Map.has_key?(meta, :prelude_ns_env)
       refute inspect(f) =~ "PRIVATE"
     end

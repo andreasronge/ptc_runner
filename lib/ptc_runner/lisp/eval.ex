@@ -803,6 +803,7 @@ defmodule PtcRunner.Lisp.Eval do
   defp bind_prelude_ref({:closure, params, body, captured_env, turn_history, meta}, export) do
     meta =
       meta
+      |> Map.delete(:prelude_internal)
       |> Map.put(:prelude_ns, Map.fetch!(export, :namespace))
       |> Map.put(:prelude_ref, Map.fetch!(export, :ref))
       |> Map.put(:prelude_tool_refs, Map.get(export, :tool_refs, []))
@@ -838,7 +839,7 @@ defmodule PtcRunner.Lisp.Eval do
 
     export_ctx =
       caller_ctx
-      |> Map.put(:user_ns, PreludeClosure.tag_internal_environment(ns_env, ns_name))
+      |> Map.put(:user_ns, ns_env)
       |> EvalContext.push_prelude_caller_user_ns(caller_ctx.user_ns)
       |> EvalContext.push_prelude_origin(export)
 

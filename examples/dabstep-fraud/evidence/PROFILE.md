@@ -1,5 +1,9 @@
 # Repeated CSV scanning profile
 
+The original investigation below is retained as its historical baseline.
+The measured runtime fix is recorded in
+[Optimization measurements for #1845](#optimization-measurements-for-1845).
+
 Measured on 2026-09-06 at commit
 `182037a4820501f68e30ae1700b04b31b052550b`, with `ptc-fs-mcp@0.3.0`.
 These are local diagnostic measurements, not a portable benchmark baseline.
@@ -138,3 +142,156 @@ Scratch reproduction programs and raw profiler output remain under ignored
   serialization and reported `result_limit_exceeded`. String keys worked.
   The misleading diagnostic is a separate follow-up candidate; no runtime
   fix for it is included here.
+
+## Optimization measurements for #1845
+
+Measured on 2026-09-06 against merged baseline `0ea718e40` (PR #1846), on
+Apple ARM64, Elixir 1.20.2, OTP 29.0.3 / ERTS 17.0.3, 10 online schedulers,
+and 8-byte words. The same pinned CSV, MCP 0.3.0, replay fixture, prompts,
+and 5,000,000-word mission heap were used throughout. These are local
+diagnostics, not portable timing gates. Individual samples and provenance
+are retained in [PERFORMANCE.json](PERFORMANCE.json).
+
+### Selected changes
+
+1. `Prelude.Compiler` tags the private namespace's top-level closures once
+   when capturing it. Direct and higher-order prelude calls reuse that
+   immutable environment. Public export binding removes the internal marker;
+   private environments still never travel in public closure metadata.
+2. `Eval.Apply` skips return-type updates when the call restores an earlier
+   namespace: those updates were immediately discarded. Calls whose namespace
+   survives still use the original tracking, including all matching aliases
+   and updates across turns. No closure identity index or new cache is needed.
+3. Direct closure calls change only the caller context's namespace, lexical
+   environment, and locals. Previously they allocated a default child context
+   and then restored every inherited field. The simpler path preserves the
+   same effects, heap limits, deadlines, and worker budgets.
+
+The second allocation profile identified context construction as the next
+large allocation source, motivating change 3. Higher-order callback context
+construction retains its separate semantics.
+
+### Measurements
+
+Wall-time runs use normal execution with capability telemetry and GC counters,
+without function tracing. Medians exclude the cold page/scan evaluation;
+replays each create fresh providers and include project loading and recording.
+
+| Workload | Before | Final | Reduction |
+| --- | ---: | ---: | ---: |
+| Warm 2,847-row page, five samples | 880.8 ms | 431.2 ms | 51.0% |
+| Count-only 138,236-row scan, two warm samples | 51.0 s | 18.7 s | 63.4% |
+| Complete replay, two samples | 138.0 s | 95.9 s | 30.5% |
+| Reclaimed heap words per warm page, median | 89.10 million | 37.08 million | 58.4% |
+| Allocated words in separate page/open/close profile | 105.10 million | 47.62 million | 54.7% |
+
+The staged warm-page medians were 635.0 ms with namespace preparation alone,
+513.1 ms after also skipping discarded return-type updates, and 431.2 ms
+with direct-context inheritance. These are sequential experiments; do not
+interpret the differences as portable additive component costs. A later
+process loading the original three runtime modules still took 946–1,068 ms
+per warm page, supporting the direction of the result despite timing noise.
+
+Every full scan returned exactly 138,236 rows in 49 reads. Both final replays
+returned the same complete result, including the reviewer caveat, and consumed
+all 11 recorded model responses. Baseline replays made 172 filesystem calls;
+final replays made 169. The retain-all attempt's heap-kill point can vary with
+GC, changing how many pages it reaches before failure. All three independent
+complete traversals and the recorded correction remain. The fixed-work scan
+comparison establishes cheaper processing separately from this variation.
+
+Direct MCP scans took 3.96 s including `npx`/server startup, then 1.91 and
+1.92 s in the same server. They transferred 23.58 MB of source as about
+48.49 MB of protocol JSON in 49 calls. Replay capability time was 14.2 s
+before and 15.1–15.4 s after; it did not decrease with the runtime speedup.
+Capability time is nested inside wall time, not an additional duration.
+
+The page allocation profile's `tag_internal/2` calls fell from 827,186 to
+218, all remaining calls belonging to preparation. `new_child/4` calls fell
+from 48,657 to 11,631. The sampled maximum sandbox `total_heap_size` for a
+scan was essentially unchanged: 364,845 versus 364,949 words. Sampling every
+2 ms misses short peaks, includes baseline/capacity, and excludes off-heap
+binaries; it does not establish a lower charged memory requirement. GC
+reclaimed words are VM-wide pressure diagnostics, not exact allocations.
+
+### Reproduction and remaining work
+
+From the repository root after preparing the example data:
+
+```console
+python3 bench/dabstep_mcp.py
+mix run bench/dabstep.exs --mode page --samples 5
+mix run bench/dabstep.exs --mode scan --samples 2
+mix run bench/dabstep.exs --mode replay --samples 2
+mix run bench/dabstep.exs --mode page --profile memory
+mix run bench/dabstep.exs --mode scan --profile heap
+```
+
+The profiling modes create and close their session inside the profiling
+callback to respect ownership. Their measurements include preparation;
+unprofiled runs report session opening separately. This separation follows
+OTP's [profiling guidance](https://www.erlang.org/doc/system/profiling.html)
+and [`tprof`'s allocation and tracing caveats](https://www.erlang.org/docs/29/apps/tools/tprof.html).
+
+### Prioritized follow-up investigations
+
+The subsequent [experiment report](FOLLOWUP.md) measures these candidates,
+including larger inputs and bounded trace navigation.
+
+These are experiments, not promised speedups. The remaining 18.7-second
+count-only traversal versus 1.9-second direct MCP traversal identifies a
+combined processing cost; it does not isolate any one layer. Continue tracking
+the broader investigation in #1845.
+
+1. **Prepare column types per page.** `payments.clj` already prepares column
+   positions once, but `typed-cell` calls type-set helpers for every cell.
+   Extend each selector with its conversion kind once per page. Compare the
+   same projections and rows, including empty cells and malformed values,
+   using warm-page allocation and timing measurements. The repeated work is
+   known from source; its remaining wall-time share is unmeasured.
+2. **Separate parsing, dispatch, validation, and recording.** Replay the same
+   captured page through a controlled benchmark ladder: split/project/type
+   alone, Lisp helper execution, then the full capability path. Measure
+   effect-context handling and inspection separately, keeping normal
+   validation and capture enabled in production. The host already uses
+   `digest_results`, so simply selecting digest capture is not a new fix.
+   Use unprofiled timings to validate anything suggested by profiler counts.
+3. **Measure ordinary user return-type scans.** The surviving-namespace path
+   still scans all bindings. Hold call count fixed while varying the number
+   of user bindings and aliases. If material, test an index or binding-aware
+   update while preserving all alias updates, rebinding, closures, and last
+   observed return types across turns. This cost remains in source but was
+   not isolated by the prelude-heavy page benchmark.
+4. **Evaluate a bounded streaming fold.** Keep one page and a compact
+   accumulator to avoid retain-all failures and pagination mistakes. Measure
+   fixed-work CPU separately from retries/read calls saved. Preserve all
+   three independent analyses; a fold is chiefly a reliability and memory
+   improvement until per-row savings are demonstrated.
+5. **Test scaling before introducing a parsed cache.** Use larger synthetic
+   inputs and wider projections with the mission heap unchanged and explicit
+   bounded server hashing ceilings. Page through growing trace cohorts with
+   compact summaries. Measure heap peaks, throughput, and recording growth;
+   do not load a whole dataset or trace archive into the analysis heap.
+
+This change addresses the measured runtime bottleneck; it does not complete
+every investigation checkbox in #1845.
+
+Raw/parsed-page caching was deferred: the example already uses digest-only
+inspection, and reducing filesystem time cannot explain the measured gain.
+A parsed cache would need content identity, projection/parser-version keys,
+authorization scoping, eviction, and preserved mutation checks. The
+[MCP caching operations](https://modelcontextprotocol.io/specification/2026-07-28/server/utilities/caching)
+do not include this `tools/call` path. No cache, larger heap, changed prompts,
+or removal of an independent measurement was necessary for the selected fix.
+
+### Validation
+
+The focused prelude and function suite passed, including public/private
+closure authority and visibility, return contracts, aliases across turns,
+and repeated use of immutable namespace state. The complete core CI gate
+(`scripts/ci/core-tests.sh`, with its 300-case property setting),
+`mix precommit`, and `mix docs --warnings-as-errors` passed. The benchmark
+also completed two fresh-provider replays with the unchanged recording.
+The complete `mix nightly` suite passed, including identical-file replacement,
+changed-byte rejection, all three seeded reviewer regressions, reviewer
+correction/exhaustion, and downstream-project startup.

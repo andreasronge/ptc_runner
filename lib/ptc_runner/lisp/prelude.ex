@@ -20,7 +20,10 @@ defmodule PtcRunner.Lisp.Prelude do
       definitions in different namespaces distinct (e.g. `crm/who` vs
       `hr/who`). Public exports call their own namespace's private helpers
       through this env; user code cannot resolve private helpers by qualified
-      symbol. The CALLABLE values are what evaluator threading depends on.
+      symbol. The compiler tags each top-level closure with its namespace and
+      internal-execution marker once, so helper calls reuse the immutable map.
+      Public export binding removes that marker; returning a helper likewise
+      removes it while retaining the namespace needed for sibling resolution.
     * `source_hash` — sha256 hex digest of the prelude source, for
       traceability.
     * `source_index` — precomputed `%{full-ref => rendered-source}` map for

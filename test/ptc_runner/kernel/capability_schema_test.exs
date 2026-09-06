@@ -95,6 +95,8 @@ defmodule PtcRunner.Kernel.CapabilitySchemaTest do
              )
   end
 
+  # These assertions exercise schema semantics, not deadline enforcement. Allow
+  # validation workers scheduling headroom when the full async suite is busy.
   test "schema and semantic validation both pass before callback execution" do
     parent = self()
 
@@ -121,7 +123,7 @@ defmodule PtcRunner.Kernel.CapabilitySchemaTest do
                environment,
                "checked",
                @valid_arguments,
-               TestHelpers.dispatch_context(state, :workflow, 100),
+               TestHelpers.dispatch_context(state, :workflow, 5_000),
                nil,
                nil
              )
@@ -137,7 +139,7 @@ defmodule PtcRunner.Kernel.CapabilitySchemaTest do
                environment,
                "checked",
                invalid_schema,
-               TestHelpers.dispatch_context(state, :workflow, 100),
+               TestHelpers.dispatch_context(state, :workflow, 5_000),
                nil,
                nil
              )
@@ -151,7 +153,7 @@ defmodule PtcRunner.Kernel.CapabilitySchemaTest do
                environment,
                "checked",
                semantic_rejection,
-               TestHelpers.dispatch_context(state, :workflow, 100),
+               TestHelpers.dispatch_context(state, :workflow, 5_000),
                nil,
                nil
              )
@@ -188,7 +190,7 @@ defmodule PtcRunner.Kernel.CapabilitySchemaTest do
                environment,
                "bad-output",
                %{},
-               TestHelpers.dispatch_context(state, :workflow, 100),
+               TestHelpers.dispatch_context(state, :workflow, 5_000),
                nil,
                nil
              )

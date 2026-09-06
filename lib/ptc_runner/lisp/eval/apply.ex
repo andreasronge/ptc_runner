@@ -1426,7 +1426,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   end
 
   # The `user_ns` a closure body runs against, and what to restore on return. A
-  # prelude-export closure (tagged `:prelude_ns_env`) runs against its private
+  # prelude-export closure (tagged `:prelude_ns`) runs against its private
   # env and restores the caller's namespace; any other closure runs against the
   # caller's `user_ns` and keeps whatever it produced.
   defp prelude_run_scope(%{prelude_ns: ns}, _user_ns, caller_ctx),
@@ -1442,15 +1442,13 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp restored_user_ns(:keep, final_ctx), do: final_ctx.user_ns
   defp restored_user_ns(ns, _final_ctx), do: ns
 
-  # Resolve a prelude namespace's private env from the attached prelude artifact.
+  # Resolve the already-tagged private env from the attached prelude artifact.
   # The closure carries only the (public) namespace NAME, never the env itself,
   # so private helpers stay out of user-visible values.
   defp prelude_ns_env(nil, _ns), do: %{}
 
   defp prelude_ns_env(prelude, ns) do
-    prelude.private_env
-    |> Map.get(ns, %{})
-    |> PreludeClosure.tag_internal_environment(ns)
+    Map.get(prelude.private_env, ns, %{})
   end
 
   # The prelude namespace name a closure was tagged with (value-position export),
@@ -1575,48 +1573,36 @@ defmodule PtcRunner.Lisp.Eval.Apply do
             _ -> new_env
           end
 
-        # A prelude-export closure (tagged with `:prelude_ns_env`) runs against
+        # A prelude-export closure (tagged with `:prelude_ns`) runs against
         # its private prelude env as `user_ns`, restoring the caller's namespace
         # on return so it cannot read or write user bindings (value-position
         # isolation, mirroring the direct `(crm/export ...)` call path).
         {closure_user_ns, restore_user_ns} = prelude_run_scope(meta, user_ns, caller_ctx)
 
-        closure_ctx = EvalContext.new_child(caller_ctx, closure_user_ns, new_env)
-
-        # Carry accumulated state from caller so tool_calls/cache aren't lost across closure calls.
-        # `locals` is rebuilt from the closure's lexical capture + this invocation's
-        # arg bindings + (for named fns) the fn's own name. Builtins no longer live
-        # in `env`, so the `:var` resolver falls through to Env.builtin? for them.
+        # Direct calls inherit all caller limits, deadlines, worker budgets,
+        # and accumulated effects. Only lexical/namespace scope changes here;
+        # constructing a default child and restoring every inherited field
+        # allocated two large context maps for the same final state.
         closure_ctx =
           %{
-            closure_ctx
-            | locals: closure_locals(meta, bindings),
-              loop_limit: caller_ctx.loop_limit,
-              effects: caller_ctx.effects,
-              max_print_length: caller_ctx.max_print_length,
-              pmap_timeout: caller_ctx.pmap_timeout,
-              parallel_deadline_cap: caller_ctx.parallel_deadline_cap,
-              pmap_max_concurrency: caller_ctx.pmap_max_concurrency,
-              # Security H1: propagate the heap caps + shared worker-slot
-              # budget into nested closure evaluation so a nested
-              # pmap/pcalls caps and counts its workers, and the shared
-              # deadline so nested calls share one wall clock.
-              max_heap: caller_ctx.max_heap,
-              worker_max_heap: caller_ctx.worker_max_heap,
-              parallel_budget: caller_ctx.parallel_budget,
-              pmap_deadline: caller_ctx.pmap_deadline,
-              tools_meta: caller_ctx.tools_meta,
-              # Propagate the ledger cap so tool calls inside a closure (e.g. the
-              # paginated-read fold's `(map (fn [_] (tool/...)) ...)`) honor the
-              # caller's cap instead of resetting to the struct default.
-              max_tool_call_result_bytes: caller_ctx.max_tool_call_result_bytes
+            caller_ctx
+            | user_ns: closure_user_ns,
+              env: new_env,
+              locals: closure_locals(meta, bindings)
           }
           |> maybe_push_prelude_origin(meta, caller_ctx)
 
         case do_eval_fn.(body, closure_ctx) do
           {:ok, result, final_ctx} ->
-            # Capture return type and update user_ns if this closure is a named function
-            final_ctx = update_closure_return_type(closure, result, final_ctx)
+            # Only track return types in a namespace that survives this call.
+            # Prelude scopes and user callbacks invoked inside them restore an
+            # earlier namespace below, discarding these updates wholesale.
+            final_ctx =
+              case restore_user_ns do
+                :keep -> update_closure_return_type(closure, result, final_ctx)
+                _namespace -> final_ctx
+              end
+
             # Restore caller's env AND locals — without restoring locals, a
             # param name that shadowed a top-level def would stay in the
             # caller's `locals` set after the call, making subsequent

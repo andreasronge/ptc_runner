@@ -111,6 +111,18 @@ all 138,236 rows and was stopped at the evaluation heap ceiling:
 
 Eight per-country pairs instead of 138,236 rows.
 
+`read-page` parses and types each page for you. Keep only that page, the next
+cursor, and a compact accumulator; collecting every row exceeds the intended
+streaming memory model. Analysis, recheck, and review deliberately traverse
+the file independently so each supplies its own measurement.
+
+Runtime benchmarks and reproduction commands are in
+[`evidence/PROFILE.md`](evidence/PROFILE.md#optimization-measurements-for-1845). Further page-processing, streaming-fold and scaling experiments are recorded
+in [`evidence/FOLLOWUP.md`](evidence/FOLLOWUP.md).
+On the measured Apple ARM64 machine, the full recording took about 96 seconds
+and a count-only scan about 19 seconds after runtime optimization. These use
+recorded model responses; live runs also include model latency.
+
 ## Verify and correct within the run
 
 The reviewer now proposes its measurements through `agent.core/run-outcome`'s
@@ -319,7 +331,7 @@ The binding stays outside the model's tool surface in either mode.
 
 ## Look inside a run
 
-Every number in this README came out of the run records, through `ptc`:
+Inspect the recorded runs through `ptc`:
 
 ```console
 ptc repl --profile private-run-analysis-v2 --private-unattended \

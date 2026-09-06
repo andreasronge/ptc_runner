@@ -1,0 +1,682 @@
+{
+  "baseline_commit": "0ea718e4091d448ada749c66ccad490dd811f96c",
+  "dataset": {
+    "bytes": 23581339,
+    "rows": 138236,
+    "sha256": "5fbb26210a45427d7a6560cfab3a362a08e4067f27cd03695f211a51c47ffc25"
+  },
+  "date": "2026-09-06",
+  "mission_heap_words": 5000000,
+  "page_profile_allocated_words_including_open_close": {
+    "before": 105095538,
+    "final": 47617066
+  },
+  "runs": {
+    "before-page": [
+      {
+        "mode": "page",
+        "open_ms": 10003.431
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 90,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": "cold",
+        "vm_gc_count": 2662,
+        "vm_gc_reclaimed_words": 89286291,
+        "wall_ms": 903.741
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 72,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 1,
+        "vm_gc_count": 2540,
+        "vm_gc_reclaimed_words": 89083214,
+        "wall_ms": 825.636
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 67,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 2,
+        "vm_gc_count": 2525,
+        "vm_gc_reclaimed_words": 89096435,
+        "wall_ms": 803.992
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 70,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 3,
+        "vm_gc_count": 3267,
+        "vm_gc_reclaimed_words": 89063961,
+        "wall_ms": 880.76
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 65,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 4,
+        "vm_gc_count": 3272,
+        "vm_gc_reclaimed_words": 89143616,
+        "wall_ms": 937.59
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 77,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 5,
+        "vm_gc_count": 3270,
+        "vm_gc_reclaimed_words": 89104691,
+        "wall_ms": 969.057
+      }
+    ],
+    "before-replay": [
+      {
+        "capabilities": [
+          {
+            "calls": 11,
+            "duration_ms": 16,
+            "name": "llm-request"
+          },
+          {
+            "calls": 172,
+            "duration_ms": 14192,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "replay",
+        "sample": 1,
+        "vm_gc_count": 425601,
+        "vm_gc_reclaimed_words": 16731521061,
+        "wall_ms": 138675.047
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 11,
+            "duration_ms": 12,
+            "name": "llm-request"
+          },
+          {
+            "calls": 172,
+            "duration_ms": 14197,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "replay",
+        "sample": 2,
+        "vm_gc_count": 425477,
+        "vm_gc_reclaimed_words": 16716244885,
+        "wall_ms": 137416.63
+      }
+    ],
+    "before-scan": [
+      {
+        "mode": "scan",
+        "open_ms": 2815.156
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 49,
+            "duration_ms": 3675,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "scan",
+        "sample": "cold",
+        "vm_gc_count": 138721,
+        "vm_gc_reclaimed_words": 4328957938,
+        "wall_ms": 44589.512
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 49,
+            "duration_ms": 3921,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "scan",
+        "sample": 1,
+        "vm_gc_count": 140778,
+        "vm_gc_reclaimed_words": 4328772676,
+        "wall_ms": 51051.859
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 49,
+            "duration_ms": 3937,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "scan",
+        "sample": 2,
+        "vm_gc_count": 139504,
+        "vm_gc_reclaimed_words": 4328775825,
+        "wall_ms": 50930.586
+      }
+    ],
+    "combined-page": [
+      {
+        "mode": "page",
+        "open_ms": 3404.966
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 85,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": "cold",
+        "vm_gc_count": 1570,
+        "vm_gc_reclaimed_words": 51093585,
+        "wall_ms": 637.881
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 74,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 1,
+        "vm_gc_count": 1452,
+        "vm_gc_reclaimed_words": 50895643,
+        "wall_ms": 522.938
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 72,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 2,
+        "vm_gc_count": 1436,
+        "vm_gc_reclaimed_words": 50882697,
+        "wall_ms": 513.441
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 71,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 3,
+        "vm_gc_count": 1432,
+        "vm_gc_reclaimed_words": 50942295,
+        "wall_ms": 510.246
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 63,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 4,
+        "vm_gc_count": 1438,
+        "vm_gc_reclaimed_words": 50925937,
+        "wall_ms": 501.234
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 76,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 5,
+        "vm_gc_count": 1434,
+        "vm_gc_reclaimed_words": 50915243,
+        "wall_ms": 513.063
+      }
+    ],
+    "direct-mcp": [
+      {
+        "calls": 49,
+        "sample": "cold",
+        "source_bytes": 23581339,
+        "wall_ms": 3957.237749826163,
+        "wire_bytes": 48488679
+      },
+      {
+        "calls": 49,
+        "sample": 1,
+        "source_bytes": 23581339,
+        "wall_ms": 1910.902792122215,
+        "wire_bytes": 48488688
+      },
+      {
+        "calls": 49,
+        "sample": 2,
+        "source_bytes": 23581339,
+        "wall_ms": 1921.3585839606822,
+        "wire_bytes": 48488736
+      }
+    ],
+    "final-page": [
+      {
+        "mode": "page",
+        "open_ms": 2553.77
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 87,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": "cold",
+        "vm_gc_count": 1279,
+        "vm_gc_reclaimed_words": 37248601,
+        "wall_ms": 557.89
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 72,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 1,
+        "vm_gc_count": 1370,
+        "vm_gc_reclaimed_words": 37083526,
+        "wall_ms": 434.498
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 68,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 2,
+        "vm_gc_count": 1216,
+        "vm_gc_reclaimed_words": 37045486,
+        "wall_ms": 431.225
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 68,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 3,
+        "vm_gc_count": 1213,
+        "vm_gc_reclaimed_words": 37106462,
+        "wall_ms": 428.557
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 68,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 4,
+        "vm_gc_count": 1216,
+        "vm_gc_reclaimed_words": 37087254,
+        "wall_ms": 426.62
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 75,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 5,
+        "vm_gc_count": 1213,
+        "vm_gc_reclaimed_words": 37078053,
+        "wall_ms": 447.549
+      }
+    ],
+    "final-replay": [
+      {
+        "capabilities": [
+          {
+            "calls": 11,
+            "duration_ms": 14,
+            "name": "llm-request"
+          },
+          {
+            "calls": 169,
+            "duration_ms": 15399,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "replay",
+        "sample": 1,
+        "vm_gc_count": 258199,
+        "vm_gc_reclaimed_words": 7574339832,
+        "wall_ms": 96460.932
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 11,
+            "duration_ms": 15,
+            "name": "llm-request"
+          },
+          {
+            "calls": 169,
+            "duration_ms": 15149,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "replay",
+        "sample": 2,
+        "vm_gc_count": 256882,
+        "vm_gc_reclaimed_words": 7559456780,
+        "wall_ms": 95309.65
+      }
+    ],
+    "final-scan": [
+      {
+        "mode": "scan",
+        "open_ms": 2913.552
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 49,
+            "duration_ms": 3217,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "scan",
+        "sample": "cold",
+        "vm_gc_count": 101555,
+        "vm_gc_reclaimed_words": 1782249629,
+        "wall_ms": 17551.233
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 49,
+            "duration_ms": 3172,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "scan",
+        "sample": 1,
+        "vm_gc_count": 89025,
+        "vm_gc_reclaimed_words": 1782049524,
+        "wall_ms": 18660.625
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 49,
+            "duration_ms": 3339,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "scan",
+        "sample": 2,
+        "vm_gc_count": 95856,
+        "vm_gc_reclaimed_words": 1782069002,
+        "wall_ms": 18682.466
+      }
+    ],
+    "recheck-before-page": [
+      {
+        "mode": "page",
+        "open_ms": 3136.576
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 121,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": "cold",
+        "vm_gc_count": 2713,
+        "vm_gc_reclaimed_words": 91483995,
+        "wall_ms": 1008.838
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 80,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 1,
+        "vm_gc_count": 2658,
+        "vm_gc_reclaimed_words": 91287149,
+        "wall_ms": 1063.321
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 86,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 2,
+        "vm_gc_count": 2644,
+        "vm_gc_reclaimed_words": 91301995,
+        "wall_ms": 1068.05
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 79,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 3,
+        "vm_gc_count": 2637,
+        "vm_gc_reclaimed_words": 91269377,
+        "wall_ms": 1012.696
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 77,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 4,
+        "vm_gc_count": 2642,
+        "vm_gc_reclaimed_words": 91350804,
+        "wall_ms": 993.196
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 75,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 5,
+        "vm_gc_count": 2639,
+        "vm_gc_reclaimed_words": 91309623,
+        "wall_ms": 946.429
+      }
+    ],
+    "tagged-page": [
+      {
+        "mode": "page",
+        "open_ms": 2766.116
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 89,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": "cold",
+        "vm_gc_count": 1786,
+        "vm_gc_reclaimed_words": 58844724,
+        "wall_ms": 701.478
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 75,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 1,
+        "vm_gc_count": 2167,
+        "vm_gc_reclaimed_words": 58631764,
+        "wall_ms": 671.263
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 72,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 2,
+        "vm_gc_count": 2166,
+        "vm_gc_reclaimed_words": 58625037,
+        "wall_ms": 629.446
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 75,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 3,
+        "vm_gc_count": 2160,
+        "vm_gc_reclaimed_words": 58683051,
+        "wall_ms": 764.943
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 64,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 4,
+        "vm_gc_count": 2163,
+        "vm_gc_reclaimed_words": 58663976,
+        "wall_ms": 627.092
+      },
+      {
+        "capabilities": [
+          {
+            "calls": 1,
+            "duration_ms": 73,
+            "name": "workspace.read"
+          }
+        ],
+        "mode": "page",
+        "sample": 5,
+        "vm_gc_count": 2160,
+        "vm_gc_reclaimed_words": 58653903,
+        "wall_ms": 634.964
+      }
+    ]
+  },
+  "runtime": {
+    "architecture": "aarch64-apple-darwin",
+    "elixir": "1.20.2",
+    "erts": "17.0.3",
+    "otp": "29.0.3",
+    "schedulers_online": 10,
+    "word_bytes": 8
+  },
+  "scan_sampled_peak_total_heap_words": {
+    "before": 364845,
+    "final": 364949
+  },
+  "variants": {
+    "combined": "Also skip discarded return-type updates",
+    "final": "Also inherit direct-call contexts without resetting/restoring fields",
+    "tagged": "Tag private namespaces at compilation"
+  }
+}
