@@ -19,6 +19,14 @@ belongs in guides or retained specifications.
   tracks the unfinished private-sink, overflow, real-pagination, and
   cache-usage journeys.
 
+## LLM transport evaluation
+
+- [`llm-transport-pilot.md`](llm-transport-pilot.md) defines the immediate
+  bounded evaluation: establish a configured ReqLLM baseline, prove one
+  opt-in installation's preparation/accounting contracts, and compare shared
+  hosting under contention. ReqLLM remains the default; continuing with it is
+  an explicit possible outcome.
+
 ## Future, trigger-gated
 
 - [`future/incident-evidence-compiler.md`](future/incident-evidence-compiler.md)
@@ -49,9 +57,10 @@ belongs in guides or retained specifications.
   and the trigger-gated plan for extracting the PTC-Lisp implementation into
   a nested Mix library. A separate Git repository is explicitly not planned
   while language and Kernel changes still benefit from atomic commits.
-- [`future/reqllm-removal.md`](future/reqllm-removal.md) records the trigger
-  and required adapter shape for replacing the optional `req_llm`/`llm_db`
-  closure with a direct `Req` adapter for OpenAI-compatible endpoints.
+- [`future/reqllm-removal.md`](future/reqllm-removal.md) retains the
+  ReqLLM/LLMDB feature inventory and conditional expansion/removal checkpoints.
+  Broad migration and retirement are deferred pending the transport pilot;
+  catalog retention and accounting parity remain requirements.
 
 Plans are disposable staging contracts, not API references. When a slice
 lands, move its durable behavior into module documentation and the relevant
