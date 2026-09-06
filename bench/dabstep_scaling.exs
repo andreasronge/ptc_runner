@@ -21,7 +21,7 @@ defmodule PtcRunner.Bench.DabstepScaling do
       OptionParser.parse(args, strict: [suite: :string, samples: :integer, rows: :integer])
 
     suite = opts[:suite] || "kernel"
-    samples = opts[:samples] || 3
+    samples = opts[:samples] || if(suite == "scale", do: 1, else: 2)
     source = File.read!("examples/dabstep-fraud/payments.clj")
     {:ok, file} = File.open("examples/dabstep-fraud/data/payments.csv")
     headers = file |> IO.read(:line) |> String.trim() |> String.split(",")

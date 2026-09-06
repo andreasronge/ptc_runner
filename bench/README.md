@@ -118,7 +118,9 @@ The scaling suite streams synthetic files of 20,000, 80,000 and 320,000 rows,
 selects three or all 21 columns, and checks full traversal counts. Each
 projection opens a fresh session. Sample 0 is the first evaluation and positive
 samples are warm; `--samples 1` means two traversals per projection. Large
-full-width scans take several minutes. Heap sampling runs separately and has
+full-width scans take several minutes. Defaults are two warm samples for kernel
+and replay, and one for scaling, keeping the standard scans within the unchanged
+512-call mission budget. Heap sampling runs separately and has
 the same limitations as the original DABStep heap profile above.
 
 The trace generator creates 1,025 real command runs and copies immutable cohorts

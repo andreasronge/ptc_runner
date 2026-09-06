@@ -31,7 +31,7 @@
     "bench/dabstep_dispatch.exs": "ce221f16e2a97dcf0be770860abeb89fc5868d6cbf6bbc39e7436639ffd38b9e",
     "bench/dabstep_experiments.exs": "abf3f5cf8b59e82db158455ab108ad03882084dad7f595ea4d06d0ea4cd19608",
     "bench/dabstep_mcp.py": "94a926c5f44127b48326760df3d80c0462fc6b2fe40cad6791e3e67281006e6f",
-    "bench/dabstep_scaling.exs": "20eb79e641d223fa3e91fdca8b90c55870f7514742fc2d1ef8f2ee6b7613f5ae",
+    "bench/dabstep_scaling.exs": "241bc55d177d17ebe83c6cfcac2a3f0e31319a2cb1432b41e90e345d62707bee",
     "bench/dabstep_trace_queries.py": "fd25aae87a6043ff51b95e6a98d0826393c300a8017e0b3984fcd0ea17842f30",
     "bench/dabstep_traces.exs": "4d2e7a25eb59b1c9ced9274ea0612fd2ce0e1250ce59be84d28195aa2cd45769",
     "bench/support/dabstep.exs": "ab12baa006b19f5714e04f2aaf6916e709f2525a4adad6a27ceed23ad277e789",
