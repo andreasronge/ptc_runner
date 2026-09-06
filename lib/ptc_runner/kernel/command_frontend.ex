@@ -12,6 +12,8 @@ defmodule PtcRunner.Kernel.CommandFrontend do
   alias PtcRunner.Kernel.CommandRenderer
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.ProjectArtifactRoot
+  alias PtcRunner.Kernel.ProjectConfig
+  alias PtcRunner.Kernel.ProjectContext
 
   @frontend_commands CommandDeclaration.frontend_commands()
 
@@ -123,7 +125,7 @@ defmodule PtcRunner.Kernel.CommandFrontend do
 
     case result do
       :ok ->
-        rendered_presentation(outcome, path, rejection, named_env_file?)
+        rendered_presentation(entry, outcome, path, rejection, named_env_file?)
 
       {:error, reason} ->
         presentation(
@@ -136,12 +138,15 @@ defmodule PtcRunner.Kernel.CommandFrontend do
     end
   end
 
-  defp present(%CommandEntry{}, %CommandOutcome{} = outcome, rejection, named_env_file?) do
-    rendered_presentation(outcome, nil, rejection, named_env_file?)
+  defp present(%CommandEntry{} = entry, %CommandOutcome{} = outcome, rejection, named_env_file?) do
+    rendered_presentation(entry, outcome, nil, rejection, named_env_file?)
   end
 
-  defp rendered_presentation(outcome, envelope_path, rejection, named_env_file?) do
-    render_options = [named_env_file: named_env_file?]
+  defp rendered_presentation(entry, outcome, envelope_path, rejection, named_env_file?) do
+    render_options = [
+      named_env_file: named_env_file?,
+      application_path: terminal_application_path(entry.arguments)
+    ]
 
     case CommandRenderer.render(outcome, rejection, render_options) do
       {:stdout, bytes} ->
@@ -154,6 +159,18 @@ defmodule PtcRunner.Kernel.CommandFrontend do
         presentation(outcome, envelope_path, stdout, stderr, outcome.exit_status)
     end
   end
+
+  defp terminal_application_path(%CommandArguments{
+         project: %ProjectContext{
+           config: %ProjectConfig{application: application, directory: directory}
+         }
+       }),
+       do: Path.relative_to(application, directory)
+
+  defp terminal_application_path(%CommandArguments{application: application}),
+    do: application
+
+  defp terminal_application_path(_arguments), do: nil
 
   defp presentation(outcome, envelope_path, stdout, stderr, exit_status) do
     %CommandPresentation{
