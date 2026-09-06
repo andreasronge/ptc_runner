@@ -311,3 +311,11 @@ conversion failures; traversal and replay assertions check results and limits.
 The synthetic scans, heap profiles and bounded CLI cohort queries all completed
 with their expected success or admission-refusal outcomes. The full `mix nightly` suite also passed, including identical-file replacement,
 changed-byte rejection, reviewer correction/exhaustion and downstream startup.
+
+PR review found and corrected two harness defects: the kernel page heap probe
+assumed a scan-summary map instead of its integer count, and the trace probe
+accepted arbitrary failures at 1,025 runs. The latter now requires the specific
+unselected admission refusal and success for selected runs. Boundary regression
+checks cover false-positive trace outcomes; the heap command reproduced the
+integer-access failure before correction. These fixes do not change the raw
+measurements above.

@@ -243,7 +243,7 @@ defmodule PtcRunner.Bench.DabstepScaling do
       heap =
         PtcRunner.Bench.Heap.measure(fn ->
           {:ok, result, _} = ReplSession.eval(session, source)
-          ^expected = result.return["rows"]
+          ^expected = row_count(result.return)
         end)
 
       IO.puts(Jason.encode!(Map.put(heap, :experiment, label)))
@@ -257,7 +257,7 @@ defmodule PtcRunner.Bench.DabstepScaling do
       :ets.delete_all_objects(table)
       {gc0, words0, _} = :erlang.statistics(:garbage_collection)
       {us, {:ok, result, _}} = :timer.tc(fn -> ReplSession.eval(session, source) end)
-      actual = if is_map(result.return), do: result.return["rows"], else: result.return
+      actual = row_count(result.return)
       ^expected = actual
       {gc1, words1, _} = :erlang.statistics(:garbage_collection)
 
@@ -277,6 +277,9 @@ defmodule PtcRunner.Bench.DabstepScaling do
       )
     end
   end
+
+  defp row_count(%{"rows" => rows}), do: rows
+  defp row_count(rows) when is_integer(rows), do: rows
 
   defp program("page", columns),
     do: "(count (get (dabstep.payments/read-page nil #{Jason.encode!(columns)}) \"rows\"))"

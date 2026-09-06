@@ -76,10 +76,22 @@ for size in [1000, 1025] if options.selected_run else [1, 10, 100, 1000, 1025]:
             elif value.get("type") != "session-closed":
                 diagnostics.append(value)
         code = process.wait()
-        if code == 0:
-            assert len(evaluations) == 3
+        expected_refusal = size == 1025 and not options.selected_run
+        if expected_refusal:
+            assert code != 0 and opened_ms is None and not evaluations, (
+                size,
+                code,
+                opened_ms,
+                evaluations,
+            )
+            assert any(
+                item.get("type") == "command-error"
+                and item.get("code") == "source_limit_exceeded"
+                for item in diagnostics
+            ), diagnostics
         else:
-            assert size == 1025, (size, code, diagnostics)
+            assert code == 0 and opened_ms is not None, (size, code, diagnostics)
+            assert len(evaluations) == 3
         print(
             json.dumps(
                 {

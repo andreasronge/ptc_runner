@@ -118,9 +118,9 @@ The scaling suite streams synthetic files of 20,000, 80,000 and 320,000 rows,
 selects three or all 21 columns, and checks full traversal counts. Each
 projection opens a fresh session. Sample 0 is the first evaluation and positive
 samples are warm; `--samples 1` means two traversals per projection. Large
-full-width scans take several minutes. Defaults are two warm samples for kernel
-and replay, and one for scaling, keeping the standard scans within the unchanged
-512-call mission budget. Heap sampling runs separately and has
+full-width scans take several minutes. Defaults are two warm samples for kernel,
+two repetitions for replay, and one warm sample for scaling, keeping the standard
+scans within the unchanged 512-call mission budget. Heap sampling runs separately and has
 the same limitations as the original DABStep heap profile above.
 
 The trace generator creates 1,025 real command runs and copies immutable cohorts
@@ -130,6 +130,13 @@ responses, never raw records; each query retains a compact count and pages at
 most 50 summaries. It runs three fresh CLI sessions and three queries per
 session. On macOS it also records whole-process peak RSS via `/usr/bin/time -l`.
 Use a run reference obtained through `analysis/runs` for the selected-run check.
+
+The trace-query harness requires a `source_limit_exceeded` setup refusal for
+the unselected 1,025-run cohort and successful queries for selected runs at
+both sizes. Check these assertions with
+`python3 -m unittest discover -s bench -p test_dabstep_trace_queries.py`.
+Heap profiling accepts both the integer page count and scan summary results:
+`DABSTEP_BENCH_HEAP=1 mix run bench/dabstep_scaling.exs --suite kernel`.
 
 See the [follow-up report](../examples/dabstep-fraud/evidence/FOLLOWUP.md) for
 results, rejected approaches, measurement caveats and the next concrete fixes.
