@@ -63,9 +63,9 @@ committed HTML that `mix ptc.gen_site_guides` renders from `docs/`
 (`mix ptc.gen_docs` runs it), and `mix precommit` fails on a stale, missing, or
 orphaned page. The Pages workflow stays Elixir-free because it only ever copies
 what the repository already proved current. Never edit the HTML by hand — edit
-the source Markdown or the generator. The landing page is hand-written except
-for the sidebar between its `BEGIN GENERATED`/`END GENERATED` markers, which
-the same task rewrites.
+the source Markdown or the generator. The landing page is the exception: it is
+hand-written, loads only `style.css` and `landing.css`, and does not share the
+guide shell or sidebar.
 
 The sidebar sections are read from the documentation groups in `mix.exs`
 (`:docs` → `:groups_for_extras`), the same configuration that groups the
@@ -104,7 +104,13 @@ carried a token, which is what a renamed or deleted placeholder looks like, and
 when any `@BUILD_*@` token survives into the artifact. Without those two checks
 a page could publish a footer that quietly lost half its stamp.
 
-## The diagram
+## Landing-page images
+
+The landing page uses product diagrams for concepts and a real Viewer capture
+for the supporting interface. Do not add stock art or a generic agent image:
+each image should explain something that the nearby text cannot show as well.
+
+### The loop diagram
 
 The diagram is image-model output, not a hand-drawn asset, so the prompt below
 is its source. Without the prompt, the diagram can only be replaced, never
@@ -153,6 +159,31 @@ One vocabulary trap: a prelude is not a file. It is the immutable compiled
 aggregate of the components selected for one environment, including their
 dependency closure, frozen for the run. A component is the file.
 
+### The Viewer screenshot
+
+`site/ptc-viewer-latest.webp` is a capture of the real Viewer, not a mockup. It
+shows the `01-orders` step of the kernel tutorial, a deterministic workflow
+that selects no provider, so the capture contains no user data, private
+prompts, or live credentials. The tutorial project keeps the result artifact
+off, so recreate the capture from a copy of its project file:
+
+```console
+sed 's/"open": true/"open": false/; s/"result": false/"result": true/' \
+  examples/kernel-tutorial/01-orders.ptc-project.json \
+  > examples/kernel-tutorial/01-orders.capture.ptc-project.json
+mix ptc run examples/kernel-tutorial/01-orders.capture.ptc-project.json
+mix ptc viewer examples/kernel-tutorial/01-orders.capture.ptc-project.json --port 8769
+```
+
+Open the run in a 1280-pixel-wide window and capture the column from the trace
+summary card down to the observed-run card, leaving out the run list above it
+and the browser scrollbar. Convert the capture with
+`cwebp -q 85 capture.png -o site/ptc-viewer-latest.webp` and update the
+`width` and `height` attributes on the landing page to the new pixel size.
+Delete the copied project file and the generated
+`examples/kernel-tutorial/01-orders/.ptc/` directory afterwards; both are local
+artifacts, not part of the site.
+
 ## Local preview
 
 ```console
@@ -162,6 +193,12 @@ python3 -m http.server -d _site 8000
 
 The pages use absolute links (`/schemas/...`), which resolve correctly under
 that server and under Pages, but not through `file://`.
+
+The stylesheets follow the operating system's colour scheme. To check the
+other theme without changing that setting, set `data-theme="light"` on the
+root element from the browser's developer tools; the dark rules are guarded
+on its absence. The brand mark is an image file and keeps following the system
+scheme, so its ring looks wrong under that override and only there.
 
 ## One-time setup
 

@@ -3,8 +3,8 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
   @moduledoc """
   Renders the published documentation groups into committed pages under
   `site/guides/`, `site/installation/`, and `site/reference/`, plus the
-  directory page at `site/guides/index.html`, and rewrites the shared
-  sidebar between the generated markers in `site/index.html`.
+  directory page at `site/guides/index.html`. The landing page at
+  `site/index.html` is hand-written and carries no generated content.
 
   The sidebar structure is read from the same `mix.exs` configuration ExDoc
   uses — `:groups_for_extras` names the sections and `:extras` orders the
@@ -45,10 +45,6 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
     "Reference" => "reference"
   }
 
-  @landing_page "site/index.html"
-  @sidebar_begin "<!-- BEGIN GENERATED: site sidebar (mix ptc.gen_site_guides) -->"
-  @sidebar_end "<!-- END GENERATED: site sidebar -->"
-
   @impl Mix.Task
   def run(args) do
     check? = "--check" in args
@@ -61,7 +57,6 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
     expected =
       expected
       |> Map.put(Path.join("site/guides", "index.html"), index_document(sections, pages))
-      |> Map.put(@landing_page, landing_document(sections, pages))
       |> Map.merge(vendored_highlighter())
 
     validate_anchors!(expected)
@@ -281,21 +276,6 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
       </article>
       """
     )
-  end
-
-  # The landing page is hand-written; only the sidebar between the generated
-  # markers belongs to this task.
-  defp landing_document(sections, pages) do
-    content = File.read!(@landing_page)
-
-    unless String.contains?(content, @sidebar_begin) and String.contains?(content, @sidebar_end) do
-      Mix.raise("#{@landing_page} is missing its generated sidebar markers")
-    end
-
-    [head, rest] = String.split(content, @sidebar_begin, parts: 2)
-    [_stale, tail] = String.split(rest, @sidebar_end, parts: 2)
-
-    head <> @sidebar_begin <> "\n" <> sidebar(sections, pages, nil) <> @sidebar_end <> tail
   end
 
   defp sidebar(sections, pages, current_slug) do
