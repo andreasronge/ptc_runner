@@ -48,6 +48,23 @@ defmodule PtcRunner.Kernel.TutorialExamplesContractTest do
            }
   end
 
+  test "the file-agent wrapper publishes the MCP result shape to the model" do
+    source = File.read!(Path.join([@examples, "03-file-agent", "files.clj"]))
+
+    assert source =~
+             "-> {items [{byte_offset :int, text :string}], next_cursor :string?, content_hash :string}"
+  end
+
+  test "shipped prompt-visible example components do not hide stable results behind any" do
+    examples_root = Path.expand("../../../examples", __DIR__)
+
+    for path <- Path.wildcard(Path.join(examples_root, "**/*.clj")),
+        source = File.read!(path),
+        source =~ ":visibility :prompt" do
+      refute source =~ "-> :any", path
+    end
+  end
+
   test "support-triage labels report the model installed by the host" do
     model =
       @support_triage

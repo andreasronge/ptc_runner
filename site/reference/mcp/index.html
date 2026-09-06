@@ -274,7 +274,7 @@ tool:</p><pre><code class="clojure language-clojure">(ns my.files &quot;Mission 
 
 (defn read-page
   &quot;Read one bounded UTF-8 page. Pass nil first, then next_cursor.&quot;
-  {:signature &quot;(path :string, cursor :string?) -&gt; :any&quot;}
+  {:signature &quot;(path :string, cursor :string?) -&gt; {items [{byte_offset :int, text :string}], next_cursor :string?, content_hash :string}&quot;}
   [path cursor]
   (let [args (if cursor {&quot;path&quot; path &quot;cursor&quot; cursor} {&quot;path&quot; path})
         response (tool/workspace.read args)]
@@ -282,7 +282,10 @@ tool:</p><pre><code class="clojure language-clojure">(ns my.files &quot;Mission 
       (get response :value)
       (fail response))))</code></pre><p>When prompt-visible wrappers exist, the model sees them instead of the raw
 <code class="inline">tool/...</code> entries. The underlying capability still enforces its schema, byte
-ceiling, timeout, quota, and manifest grant.</p><p>The value handed to <code class="inline">fail</code> is application data, so it never reaches the envelope
+ceiling, timeout, quota, and manifest grant.</p><p>To expose a granted tool directly, list its public name in the provider's
+<code class="inline">config.model_visible</code>. PtcRunner then publishes the input and output schemas
+discovered from the MCP server. Model visibility changes prompt inventory only;
+the manifest grant still decides call authority.</p><p>The value handed to <code class="inline">fail</code> is application data, so it never reaches the envelope
 or the trace. A workflow entry that ends this way reports
 <code class="inline">execution/explicit_failure</code> — unless the value re-raises a Kernel refusal, which
 keeps its own class — and that diagnostic says where the value went: it

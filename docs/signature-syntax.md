@@ -130,9 +130,9 @@ Model-visible functions should use named inputs and bounded outputs:
 
 ```text
 (path :string, cursor :string?) -> {
-  items [:string],
+  items [{byte_offset :int, text :string}],
   next_cursor :string?,
-  snapshot_hash :string
+  content_hash :string
 }
 ```
 
@@ -141,10 +141,13 @@ only the declared shape:
 
 ```clojure
 (defn read-page
-  {:signature "(path :string, cursor :string?) -> :any"}
+  {:signature "(path :string, cursor :string?) -> {items [{byte_offset :int, text :string}], next_cursor :string?, content_hash :string}"}
   [path cursor]
-  (tool/workspace.read
-    (if cursor {"path" path "cursor" cursor} {"path" path})))
+  (let [arguments (if cursor {"path" path "cursor" cursor} {"path" path})
+        response (tool/workspace.read arguments)]
+    (if (= :ok (get response :status))
+      (get response :value)
+      (fail response))))
 ```
 
 A signature documents and validates a capability; it does not grant one.
