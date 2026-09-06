@@ -13,6 +13,7 @@ many concurrent multi-turn sessions).
 | `mix bench.check` | Deterministic nightly/release gate for sandbox child eval reductions vs committed baseline; also prints the heap table informationally | custom Mix task |
 | `mix bench.heap` / `heap_baseline.exs` | Heap cost of every embedding unit vs `baselines/heap.json`: idle floor without Mix, `Lisp.run`, `compile_bundle`, `Kernel.run`, concurrency 1..128 | custom Mix task |
 | `prelude_bundle.exs` | Bundle preparation phases, composition vs aggregate recompilation, retained artifacts, 1..128-component scaling, identical/distinct preparations, and a shipped `agent.core` execution-overhead proxy | custom script |
+| `dabstep.exs` / `dabstep_mcp.py` | Real CSV page processing, count-only traversal, complete recorded replay, and direct MCP traversal | custom script / OTP `:tprof` |
 | `lisp_throughput.exs` | Per-program latency: parse / analyze / full run; per-archetype; latency under `parallel:` load | Benchee |
 | `lisp_profile.exs` | Function-level call_time + call_count, aggregated across the per-run sandbox processes | OTP `:tprof` |
 | `lisp_concurrency.exs` | Aggregate throughput vs concurrency; scheduler microstate; GC pressure | `:msacc` + `:erlang.statistics` |
@@ -32,6 +33,43 @@ mix run bench/lisp_concurrency.exs
 
 `mix run` prunes the OTP `tools` / `runtime_tools` apps from the code
 path; the scripts re-add them so `:tprof` / `:msacc` load.
+
+## DABStep page processing
+
+Prepare the pinned CSV with `examples/dabstep-fraud/fetch-data.sh` from the
+example directory, then run these commands from the repository root:
+
+```bash
+python3 bench/dabstep_mcp.py
+mix run bench/dabstep.exs --mode page --samples 5
+mix run bench/dabstep.exs --mode scan --samples 2
+mix run bench/dabstep.exs --mode replay --samples 2
+mix run bench/dabstep.exs --mode page --profile time
+mix run bench/dabstep.exs --mode page --profile memory
+mix run bench/dabstep.exs --mode scan --profile heap
+```
+
+No live model credentials are needed. The heap remains 5,000,000 words.
+Page/scan runs report session opening separately, then a cold evaluation and
+the requested number of warm evaluations in that session. A scan must return
+138,236 rows and 49 pages. Replay includes project loading, fresh providers,
+recording, and the recorded corrections; it must still agree on `B. BE`.
+Replay artifacts use the example's `.ptc-replay` directory.
+
+JSON lines report wall time and capability time (nested, not additive), plus
+VM-wide GC count and reclaimed words. Reclaimed words are allocation-pressure
+diagnostics, not exact allocated bytes or per-mission figures. Run without
+other workloads in the same VM. Compilation and VM startup precede these
+timers. Direct MCP's first scan includes server startup, including `npx`;
+subsequent scans share the same server. None of these are cold-disk tests.
+
+Run profiles separately from wall-time comparisons: tracing slows execution.
+Time/memory profiles include session open, evaluation and close and trace all
+VM processes to include supervisor-owned workers. The heap profile samples
+`total_heap_size` every 2 ms for armed 5,000,000-word sandboxes. Its maximum
+includes the environment baseline and heap capacity, excludes off-heap binary
+storage, and can miss short peaks; it is not the sandbox's charged memory.
+See the example's `evidence/PROFILE.md` for measured findings.
 
 ## Notes
 

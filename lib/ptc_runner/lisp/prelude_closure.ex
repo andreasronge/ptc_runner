@@ -1,8 +1,9 @@
 defmodule PtcRunner.Lisp.PreludeClosure do
   @moduledoc false
 
-  # Private namespace entries keep their namespace while they resolve sibling
-  # helpers, but the environment itself never travels in user-visible metadata.
+  # Prepare each compiled namespace once. Its entries keep their namespace
+  # while resolving sibling helpers; the environment itself never travels in
+  # user-visible metadata and is not rebuilt on helper entry.
   @spec tag_internal_environment(map(), term()) :: map()
   def tag_internal_environment(environment, namespace) when is_map(environment) do
     Map.new(environment, fn {name, value} ->

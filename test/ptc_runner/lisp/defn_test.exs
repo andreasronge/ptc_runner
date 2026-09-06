@@ -389,6 +389,23 @@ defmodule PtcRunner.Lisp.DefnTest do
   # ============================================================
 
   describe "return type capture" do
+    test "updates every alias of a closure across calls and turns" do
+      assert {:ok, %{memory: memory}} =
+               Lisp.run(
+                 ~S|(defn identity-value [x] x) (def alias-value identity-value) (alias-value 42)|
+               )
+
+      for name <- ["identity-value", "alias-value"] do
+        assert {:closure, _, _, _, _, %{return_type: "integer"}} = memory[name]
+      end
+
+      assert {:ok, %{memory: memory}} = Lisp.run(~S|(identity-value "next")|, memory: memory)
+
+      for name <- ["identity-value", "alias-value"] do
+        assert {:closure, _, _, _, _, %{return_type: "string"}} = memory[name]
+      end
+    end
+
     test "captures return type after function call" do
       # Define twice, call it, verify return type captured
       source = "(do (defn twice [x] (* x 2)) (twice 5))"

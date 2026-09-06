@@ -26,6 +26,8 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
        name through `user_ns` at CALL time. The whole `private_env` map IS
        that namespace, so `private_env` must be threaded as the user_ns layer
        when invoking an export for siblings to resolve (the capture seam).
+       Top-level closures are tagged with their namespace and internal marker
+       here, allowing calls to reuse this immutable environment directly.
     6. Computes a sha256 source hash.
 
   Attach-time `requires` validation against granted tools is a separate phase.
@@ -42,6 +44,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   alias PtcRunner.Lisp.Prelude.Export
   alias PtcRunner.Lisp.Prelude.Spec
   alias PtcRunner.Lisp.Prelude.ValidationError
+  alias PtcRunner.Lisp.PreludeClosure
   alias PtcRunner.Lisp.ProtectedNamespaces
   alias PtcRunner.Lisp.Signature
   alias PtcRunner.Sandbox
@@ -1697,7 +1700,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
       with {:ok, core} <- analyze(program, scope, ns_specs),
            :ok <- check_prelude_vars(core, ns_specs),
            {:ok, env} <- eval_runtime(core) do
-        {:cont, {:ok, Map.put(env_acc, ns, env)}}
+        {:cont, {:ok, Map.put(env_acc, ns, PreludeClosure.tag_internal_environment(env, ns))}}
       else
         {:error, _} = err -> {:halt, err}
       end
