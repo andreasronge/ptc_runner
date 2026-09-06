@@ -790,7 +790,9 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
     File.write!(Path.join(directory, "workflow.clj"), "(ns swapped)")
     assert {:ok, ^original} = ApplicationSource.read(source, "workflow.clj", 2_000_000)
 
-    ApplicationSource.close(source)
+    assert {:ok, %{captured_documents: captured_documents}} = ApplicationSource.finish(source)
+
+    assert captured_documents["workflow.clj"] == :crypto.hash(:sha256, original)
   end
 
   test "memory source preserves a per-document limit failure" do

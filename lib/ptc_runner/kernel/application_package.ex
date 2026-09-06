@@ -813,7 +813,7 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
         Enum.flat_map(override_pairs, fn
           {_identity, override, {:external, source_name}} ->
             [{:component_override, :override_descriptor, override.descriptor_bytes}] ++
-              external_source_document(override, source_name, accounting.captured_names)
+              external_source_document(override, source_name, accounting.captured_documents)
 
           {_identity, _override, :captured} ->
             []
@@ -828,14 +828,14 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
     end
   end
 
-  defp external_source_document(override, source_name, captured_names)
+  defp external_source_document(override, source_name, captured_documents)
        when is_binary(source_name) do
-    if MapSet.member?(captured_names, source_name),
+    if Map.get(captured_documents, source_name) == :crypto.hash(:sha256, override.source),
       do: [],
       else: [{:component_override, :override_source, byte_size(override.source)}]
   end
 
-  defp external_source_document(override, nil, _captured_names),
+  defp external_source_document(override, nil, _captured_documents),
     do: [{:component_override, :override_source, byte_size(override.source)}]
 
   defp account_documents(documents, accounting) do

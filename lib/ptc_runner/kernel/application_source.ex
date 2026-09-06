@@ -165,12 +165,12 @@ defmodule PtcRunner.Kernel.ApplicationSource do
   @spec finish(t()) ::
           {:ok,
            %{
-             captured_names: MapSet.t(binary()),
+             captured_documents: %{binary() => binary()},
              document_count: non_neg_integer(),
              document_bytes: non_neg_integer()
            }}
           | {:error, atom()}
-  @doc "Verifies memory closure use, returns captured-name accounting, and closes the source."
+  @doc "Verifies memory closure use, returns captured-document accounting, and closes the source."
   def finish(%__MODULE__{pid: pid}) do
     result =
       Agent.get_and_update(pid, fn state ->
@@ -179,7 +179,10 @@ defmodule PtcRunner.Kernel.ApplicationSource do
             :ok ->
               {:ok,
                %{
-                 captured_names: MapSet.new(Map.keys(state.captured)),
+                 captured_documents:
+                   Map.new(state.captured, fn {name, bytes} ->
+                     {name, :crypto.hash(:sha256, bytes)}
+                   end),
                  document_count: map_size(state.captured),
                  document_bytes: state.bytes
                }}
