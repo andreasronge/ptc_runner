@@ -12,185 +12,108 @@
 <meta property="og:type" content="website">
 <link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/style.css">
-<link rel="stylesheet" href="/guides.css">
-<script type="module" src="/docs.js"></script>
+<link rel="stylesheet" href="/landing.css">
 </head>
-<body>
-<div class="guide-shell">
-<!-- BEGIN GENERATED: site sidebar (mix ptc.gen_site_guides) -->
-<aside class="guide-nav">
-  <p class="brand"><a href="/">PtcRunner</a></p>
-  <nav aria-label="Documentation">
-    <p class="nav-home"><a href="/guides/">Overview</a></p>
-<h2>Start</h2>
-<ul>
-<li><a href="/guides/quickstart/">Quickstart</a></li>
-<li><a href="/guides/getting-started/">Understand a generated project</a></li>
-<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
-<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
-</ul>
-
-<h2>Language</h2>
-<ul>
-<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
-</ul>
-
-<h2>Configure</h2>
-<ul>
-<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
-<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
-<li><a href="/guides/host-configuration/">Install models and tools</a></li>
-</ul>
-
-<h2>Build</h2>
-<ul>
-<li><a href="/guides/using-models/">Use a model</a></li>
-<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
-<li><a href="/guides/building-agents/">Customize an agent</a></li>
-<li><a href="/guides/components-and-preludes/">Inspect and customize components</a></li>
-</ul>
-
-<h2>Design</h2>
-<ul>
-<li><a href="/guides/designing-agent-workflows/">Design an agent workflow</a></li>
-<li><a href="/guides/agent-workflow-patterns/">Choose a workflow shape</a></li>
-</ul>
-
-<h2>Run and debug</h2>
-<ul>
-<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
-<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
-<li><a href="/guides/inspecting-source-and-programs/">Inspect source and generated programs</a></li>
-<li><a href="/guides/self-improvement/">Let an agent improve its own workflow</a></li>
-<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
-</ul>
-
-<h2>Installation</h2>
-<ul>
-<li><a href="/installation/standalone/">Standalone installation</a></li>
-<li><a href="/installation/docker/">Docker installation</a></li>
-<li><a href="/installation/source/">Source installation</a></li>
-</ul>
-
-<h2>Reference</h2>
-<ul>
-<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
-<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
-<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
-<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
-<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
-<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
-<li><a href="/reference/signature-syntax/">Signature reference</a></li>
-<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
-<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
-<li><a href="/reference/project-files/">Project-configuration reference</a></li>
-<li><a href="/reference/examples/">Examples reference</a></li>
-<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
-<li><a href="/reference/mcp/">MCP reference</a></li>
-<li><a href="/reference/cli/">Command-line reference</a></li>
-<li><a href="/reference/viewer/">Viewer reference</a></li>
-<li><a href="/reference/repl/">REPL reference</a></li>
-<li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
-<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
-</ul>
-
+<body class="product-landing">
+<header class="product-nav">
+  <a class="product-brand" href="/" aria-label="PtcRunner home">
+    <img src="/ptc-runner-mark.svg" width="34" height="34" alt="">
+    <span>PtcRunner</span>
+  </a>
+  <nav aria-label="Main navigation">
+    <a href="#examples">Examples</a>
+    <a href="#why">Why PtcRunner</a>
+    <a href="/guides/">Documentation</a>
+    <a href="https://github.com/andreasronge/ptc_runner">GitHub</a>
+    <a class="nav-cta" href="/guides/quickstart/">Get started</a>
   </nav>
-</aside>
-<!-- END GENERATED: site sidebar -->
-<main class="guide-main landing">
-
-<header class="landing-header">
-  <img class="landing-mark" src="/ptc-runner-mark.svg" width="100" height="100"
-       alt="" aria-hidden="true">
-  <div>
-    <h1>PtcRunner</h1>
-    <p class="kicker">A runtime for building self-improving agents</p>
-  </div>
 </header>
+<main class="product-main">
 
-<p class="lead"><strong>Build loops that check their work and recover from evidence.</strong></p>
+<section class="product-hero">
+  <p class="eyebrow">A runtime for building self-improving agents</p>
+  <h1>Build loops that check their work and recover from evidence.</h1>
+  <p class="hero-lead">Bound execution, inspect failures, verify outcomes, and test changes
+  before adopting them.</p>
+  <div class="hero-actions">
+    <a class="button primary" href="/guides/quickstart/">Get started</a>
+    <a class="button secondary" href="https://github.com/andreasronge/ptc_runner">View on GitHub</a>
+  </div>
+</section>
 
-<p>Bound execution, inspect failures, verify outcomes, and test changes before adopting
-them.</p>
+<div class="product-pillars" aria-label="The two parts of PtcRunner">
+  <article>
+    <span class="pillar-index">01</span>
+    <div><strong>A language for agents</strong><p>Small, typed, and limited to the tools you
+    approved, discovered in a REPL rather than listed in the prompt.</p></div>
+  </article>
+  <article>
+    <span class="pillar-index">02</span>
+    <div><strong>A runtime for agent services</strong><p>Built for bounded, traceable jobs and
+    many concurrent requests, without a desktop, workspace, or container for every agent.</p></div>
+  </article>
+</div>
 
-<ul>
-<li><strong>A language for agents</strong> — small, typed, and limited to the tools you
-approved, discovered in a REPL rather than listed in the prompt.</li>
-<li><strong>A runtime for agent services</strong> — built for bounded, traceable jobs and
-many concurrent requests, without a desktop, workspace, or container for every agent.</li>
-</ul>
+<section id="examples" class="product-section examples-section">
+  <div class="section-heading">
+    <p class="eyebrow">Three runnable examples</p>
+    <h2>See the runtime solve real workflow problems.</h2>
+  </div>
+  <div class="example-grid">
+    <a class="example-card" href="https://github.com/andreasronge/ptc_runner/tree/main/examples/dabstep-fraud">
+      <span class="example-kicker">Check a result</span>
+      <span class="mini-flow" aria-hidden="true"><i>analyse</i><b>+</b><i>review</i><b>→</b><i>verify</i></span>
+      <strong>DABStep fraud analysis</strong>
+      <p>Process 138,236 payment records within a bounded mission heap. Correct a mismatch,
+      or withhold an answer that cannot be checked.</p>
+      <span class="card-link">Open example →</span>
+    </a>
+    <a class="example-card" href="https://github.com/andreasronge/ptc_runner/tree/main/examples/support-triage">
+      <span class="example-kicker">Mix model + rules</span>
+      <span class="mini-flow" aria-hidden="true"><i>classify</i><b>→</b><i>rules</i><b>→</b><i>route</i></span>
+      <strong>Support triage</strong>
+      <p>Combine model flexibility with fixed business rules and separately granted tools.</p>
+      <span class="card-link">Open example →</span>
+    </a>
+    <a class="example-card" href="https://github.com/andreasronge/ptc_runner/tree/main/examples/debug-a-failed-run">
+      <span class="example-kicker">Improve the loop</span>
+      <span class="mini-flow" aria-hidden="true"><i>failure</i><b>→</b><i>repair</i><b>→</b><i>test</i></span>
+      <strong>Self-improvement</strong>
+      <p>Use a failed run's evidence to propose and test a workflow repair.</p>
+      <span class="card-link">Open example →</span>
+    </a>
+  </div>
+</section>
 
-<h2>Three examples</h2>
+<section id="why" class="product-section why-section">
+  <div class="section-heading">
+    <p class="eyebrow">Why not a coding agent?</p>
+    <h2>Great tools, built for a different job.</h2>
+  </div>
+  <div class="why-copy">
+    <p>An agent's results come from the model and the harness around it. Coding agents have
+    the strongest harnesses today, so people use them for many non-coding jobs too.</p>
+    <p>But a service has different needs. It must handle many requests, stop one run from
+    using too much time or memory, and explain later why it made a choice.</p>
+    <p>PtcRunner makes those runtime features: fixed limits on time, memory, and tool calls;
+    a structured trace from every run; and thousands of isolated runs on one machine. Call it
+    from your code, or run a command and read JSON.</p>
+  </div>
+</section>
 
-<ul class="links">
-  <li><a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/dabstep-fraud">DABStep
-    fraud analysis</a>
-    — <span class="desc">Process 138,236 payment records within a bounded mission heap.
-    Check calculations, attempt a bounded correction, and withhold unverified answers.</span></li>
-  <li><a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/support-triage">Support
-    triage</a>
-    — <span class="desc">Combine model flexibility with deterministic business rules and
-    separately granted capabilities.</span></li>
-  <li><a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/debug-a-failed-run">Self-improvement</a>
-    — <span class="desc">Use a failed run's evidence to propose and validate a workflow
-    repair.</span></li>
-</ul>
-
-<h2>Why not a coding agent?</h2>
-
-<p>An agent's results come from the model <em>and</em> the harness around it, in roughly
-equal measure. The best harnesses anyone ships today are coding agents, so that is what
-non-coding work gets run on, whether or not it fits.</p>
-
-<p>Capability is not what decides it. How does it run behind your own interface, inside a
-service you already have? What happens when a thousand requests arrive at once, and what
-stops any one of them spending an hour, or a gigabyte? What do you show someone who asks,
-three weeks later, why it did that?</p>
-
-<p>Here those are properties of the runtime, not a project: ceilings on time, memory, and
-tool calls enforced by the VM, a structured trace from every run, and thousands of runs on
-one machine. You call it from your own code, or run it as a command and read back JSON.</p>
-
-<h2>The loop is a library, not the runtime</h2>
-
-<p>A system that improves itself has to be able to change itself. In most frameworks the
-agent loop is host code, so changing the agent means editing privileged code, and
-self-modification and privilege escalation become the same act.</p>
-
-<p>Here the loop is an ordinary library, written in the same bounded language the model
-writes its own programs in. Everything about the agent is replaceable, and nothing
-replaceable carries authority. You can change what the agent does without expanding what it
-may do.</p>
-
-<p>That language is also how tools get called: the model writes one small program instead of
-taking twenty turns, the part usually called code mode. Every run leaves a structured trace.
-Replay holds the model fixed, so a change can be measured against its baseline instead of
-guessed at. A candidate arrives with evidence, and a human decides whether it ships.</p>
-
-<p>One executable, with its own runtime inside. No language to install, no sandbox to stand
-up.</p>
-
-<h2>Bounded in what it can do</h2>
-
-<p>Bounded means there is no way out of the language. No <code>import</code>, no
-<code>open</code>, no <code>fetch</code>, no shell. A program can use what you passed in and
-the tools you approved, and nothing else. A sandbox works the other way round: it starts
-with a language that can do anything and takes the dangerous parts away one by one. Miss one
-and you have a breach. Here there is nothing to miss.</p>
-
-<p><code>ptc-host.json</code> installs providers, credentials, and outer ceilings.
-<code>ptc.json</code> selects from those installations and may narrow the limits. Workflow and
-mission code receive only the capabilities selected for that run.</p>
-
-<h2>Easy to change</h2>
-
-<p>The agent loop itself is ordinary PTC-Lisp, a small, bounded Clojure-like language (see
-the <a href="/guides/ptc-lisp-basics/">language tour</a> and the
-<a href="/reference/ptc-lisp-specification/">specification</a>). The loop is a library you
-select, not behaviour baked into the runtime, so you can replace it with a loop of your
-own, and doing so grants no new authority.</p>
-
-<figure class="diagram">
+<section class="product-section loop-section">
+  <div class="section-heading">
+    <p class="eyebrow">Change the agent, not its authority</p>
+    <h2>The loop is a library, not the runtime.</h2>
+  </div>
+  <div class="section-intro two-column-copy">
+    <p>A system that improves itself must be able to change itself. In many frameworks, the
+    agent loop is trusted host code. Changing the loop can also change what the agent may do.</p>
+    <p>Here the loop is an ordinary PTC-Lisp library. You can replace how the agent works
+    without giving it more tools. Replay holds the model fixed, so you can test a candidate
+    against the old version before a person decides whether it ships.</p>
+  </div>
+  <figure class="diagram product-diagram">
   <img src="/loop-is-a-library.webp" width="1672" height="941"
        alt="The loop is a library, not the runtime. A workflow prelude, compiled from selected
             components, contains a stack of agent.main, agent.core, agent.prompt, agent.retry and
@@ -199,49 +122,72 @@ own, and doing so grants no new authority.</p>
             separate mission prelude holding the generated program, your domain components, and
             prompt-visible exports. A bar across the bottom reads: every tool: requirement is
             checked against the assembled providers — never granted by them.">
-  <figcaption>A prelude is the immutable compiled aggregate of the components selected for one
-  environment, frozen for the run. A local component cannot shadow a shipped library ID, and
-  selecting a library installs its dependency closure without granting any tool authority.</figcaption>
-</figure>
+    <figcaption>The workflow and mission are separate. A library may ask for a tool, but only
+    the host can grant it.</figcaption>
+  </figure>
+</section>
 
-<h2>Will the model write it?</h2>
+<section class="product-section runtime-section">
+  <div class="section-heading">
+    <p class="eyebrow">Runtime guarantees</p>
+    <h2>Small programs. Clear limits. A record of every run.</h2>
+  </div>
+  <div class="feature-grid">
+    <article>
+      <span class="feature-mark"><svg viewBox="0 0 100 100" aria-hidden="true"><path class="paren" d="M34 16C23 25 18 37 18 50s5 25 16 34"/><path class="paren" d="M66 16c11 9 16 21 16 34s-5 25-16 34"/><circle class="dot" cx="50" cy="50" r="9"/></svg></span>
+      <h3>Bounded by design</h3>
+      <p>No <code>import</code>, <code>open</code>, <code>fetch</code>, or shell. A sandbox
+      takes a language that can do anything and removes the dangerous parts one by one. Here
+      there is nothing to remove: a program can use its input and the tools you approved, and
+      nothing else.</p>
+    </article>
+    <article>
+      <span class="feature-mark"><svg viewBox="0 0 100 100" aria-hidden="true"><path class="paren" d="M34 16C23 25 18 37 18 50s5 25 16 34"/><path class="paren" d="M66 16c11 9 16 21 16 34s-5 25-16 34"/><path class="ink" d="M38 51l9 9 16-19"/></svg></span>
+      <h3>Checked at the boundary</h3>
+      <p>Components and tools carry signatures. Inputs are validated before a call runs and
+      outputs after it returns, so a value of the wrong shape stops at the boundary instead of
+      flowing on.</p>
+    </article>
+    <article>
+      <span class="feature-mark"><svg viewBox="0 0 100 100" aria-hidden="true"><path class="paren" d="M34 16C23 25 18 37 18 50s5 25 16 34"/><path class="paren" d="M66 16c11 9 16 21 16 34s-5 25-16 34"/><circle class="ring" cx="50" cy="50" r="12"/><circle class="dot" cx="50" cy="50" r="4.5"/></svg></span>
+      <h3>Trace every run</h3>
+      <p>Inputs, tool calls, evaluations, outcomes, and limits become structured evidence you
+      can inspect and test.</p>
+    </article>
+  </div>
+  <p class="feature-note"><code>ptc-host.json</code> installs providers and sets outer limits.
+  <code>ptc.json</code> selects from them and may make the limits tighter for one project.</p>
+</section>
 
-<p>Yes, and it is not a new language to learn. PTC-Lisp is a bounded Clojure with type
-signatures, checked on the way in and on the way out.</p>
+<section class="product-section language-section">
+  <div class="language-card on-navy">
+    <div>
+      <p class="eyebrow">Will the model write it?</p>
+      <h2>Yes. Give it a small language and a narrow job.</h2>
+    </div>
+    <div class="language-copy">
+      <p>PTC-Lisp is a bounded, Clojure-like language with types checked on input and output.
+      The model writes one short program per turn instead of a long chain of tool calls, the
+      pattern often called code mode, against tool signatures it can explore in a REPL.</p>
+      <p>The tutorials use a small, low-cost model by default. Try it on your tasks and
+      measure the result.</p>
+      <a class="text-link" href="/guides/ptc-lisp-basics/">Take the language tour →</a>
+    </div>
+  </div>
+</section>
 
-<p>The job is also narrower than writing an application: short programs, one turn at a time
-in a REPL-style loop, against typed signatures. Narrow it that way and the ranking of
-languages changes.</p>
-
-<p>Models handle niche languages better than their share of the training data suggests.
-PtcRunner itself is a large codebase, written mostly by models over half a year, in Elixir.</p>
-
-<p>The tutorials here run on a small, cheap model by default. Point it at your own tasks and
-measure.</p>
-
-<h2>Improves from evidence</h2>
-
-<p>Evidence gets used during a run or after it, and the two are different jobs. The
-<a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/dabstep-fraud">DABStep
-example</a> works during the run: two blind analyses and a reviewer each compute payment totals, and
-workflow code allows one bounded correction when the reviewer differs from two agreeing analyses.
-It accepts the answer only when all three tables agree to the cent. The
-<a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/debug-a-failed-run">repair
-example</a> works after one: it reads a failed run's evidence, changes a candidate component
-for future execution, and validates that candidate on inputs the model never saw. One accepts
-or rejects an answer now. The other accepts or rejects a change to the workflow itself.</p>
-
-<p>Every run records a trace, and a custom workflow decides <em>where</em> code evaluates.
-In the shipped
-<a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/debug-a-failed-run">repair
-example</a>, workflow code first queries a failed run's traces inside mission environments
-that can only see the evidence, and puts the results into the prompt. The model then writes
-PTC-Lisp in a mission environment of its own, which works like a REPL: what one turn finds
-stays available in the next, so the model narrows the problem the way a person debugs. It
-finishes with a decision the runtime checks: propose a fix, or abstain. The mission names
-are the example's; the mechanics work in any workflow.</p>
-
-<figure class="diagram">
+<section class="product-section evidence-section">
+  <div class="section-heading">
+    <p class="eyebrow">Improve from evidence</p>
+    <h2>Check an answer now. Test a better workflow for later.</h2>
+  </div>
+  <p class="section-intro single-column-copy">Evidence is used at two different times. During a
+  run, the <a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/dabstep-fraud">DABStep
+  example</a> makes two analyses and a reviewer agree before the workflow returns an answer.
+  After a run, the <a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/debug-a-failed-run">repair
+  example</a> reads the failure's trace, proposes a change, and tests it on inputs the model
+  did not see.</p>
+  <figure class="diagram product-diagram">
   <img src="/code-travels.webp" width="1672" height="941"
        alt="Code travels; authority stays. A wide box labelled WORKFLOW ENVIRONMENT,
             host-authored code, the only sequencer, holding preloaded.clj (before turn 1)
@@ -255,95 +201,104 @@ are the example's; the mechanics work in any workflow.</p>
             and orange to model-generated code: same evaluator, same trace. A bar across
             the bottom reads: evidence flows down into the prompt — authority never flows
             with it.">
-  <figcaption>One custom workflow, drawn from a runnable example. The workflow's code gathers
-  the evidence with authority the model never holds; the model works step by step in its own
-  environment and returns a checked decision. Both kinds of code land in the same trace, told
-  apart only by who wrote them.</figcaption>
-</figure>
+    <figcaption>Evidence can move into the model's prompt. The tool authority stays with the
+    workflow that gathered it.</figcaption>
+  </figure>
+  <p class="closing-line">A repair run is an ordinary run too. It leaves a trace, so the
+  debugger can be tested and improved with the same tools it uses on everything else.</p>
+</section>
 
-<p>The loop closes on itself. A repair run is an ordinary run: it leaves the same
-kind of trace, so the debugger can be debugged, and improved, with exactly the
-machinery it applies to everything else.</p>
+<section class="viewer-section" aria-labelledby="viewer-heading">
+  <div class="viewer-copy">
+    <p class="eyebrow">Optional local viewer</p>
+    <h2 id="viewer-heading">Inspect a run when you need to.</h2>
+    <p>The runtime records structured traces without needing a UI. The included Viewer is a
+    convenient way to explore one: see the result, limits, tool calls, model sessions, and
+    errors in one place.</p>
+    <a class="text-link" href="/reference/viewer/">Open the Viewer reference →</a>
+  </div>
+  <figure class="viewer-shot">
+    <img src="/ptc-viewer-latest.webp" width="1372" height="876"
+         alt="PtcRunner Viewer showing a successful deterministic run of the orders tutorial:
+              the run summary with its duration and bundle, the JSON result, and counters for
+              evaluations, capability calls, model calls, errors, and events.">
+    <figcaption>A deterministic tutorial run, shown in the current Viewer.</figcaption>
+  </figure>
+</section>
 
-<h2>Built on the BEAM</h2>
+<section class="beam-section on-navy">
+  <div class="beam-inner">
+    <div>
+      <p class="eyebrow">Built on the BEAM</p>
+      <h2>Many isolated runs. One small runtime.</h2>
+    </div>
+    <div class="beam-copy">
+      <p>The BEAM is the virtual machine built three decades ago for telephone switches and
+      hardened in production ever since, where huge numbers of concurrent connections, low
+      latency, and failure isolation were the requirements.</p>
+      <p>Each environment runs in its own BEAM process and gets what an operating system
+      would give a program: preemptive scheduling, so a runaway job cannot starve its
+      neighbours; a per-process heap limit enforced by the VM, so a run over its memory
+      budget is stopped without taking the machine; and let-it-crash isolation, so one
+      failing run never corrupts another. Processes are cheap enough that one machine hosts
+      thousands of runs, with no container per run.</p>
+    </div>
+  </div>
+</section>
 
-<p>Every environment runs in its own process on the BEAM, the virtual machine
-built three decades ago for telephone switches and hardened in production ever
-since, where huge numbers of concurrent connections, low latency, and failure
-isolation were the requirements. That gives each sandbox
-properties an operating system would provide: preemptive scheduling, so a
-runaway program cannot starve its neighbours; a configurable per-process heap
-limit enforced by the VM, so a sandbox that exceeds its memory budget is
-stopped without taking the machine; and let-it-crash isolation, so one failing
-run never corrupts another. Processes are cheap enough that a normal machine
-hosts thousands of sandboxes at once, with no container per run.</p>
+<section class="product-section install-section">
+  <div class="install-copy">
+    <p class="eyebrow">Try it locally</p>
+    <h2>One executable. No separate runtime.</h2>
+    <p>Download the self-contained macOS arm64 archive from
+    <a href="https://github.com/andreasronge/ptc_runner/releases">GitHub Releases</a>, or pull
+    the <a href="/installation/docker/">Linux Docker image</a>.</p>
+    <p class="muted-note"><strong>0.x, under active development.</strong> Breaking changes are
+    expected.</p>
+  </div>
+  <div class="install-terminal" aria-label="PtcRunner quick start commands and output">
+    <div class="terminal-bar"><i></i><i></i><i></i><span>terminal</span></div>
+    <pre><span class="cmd">ptc init hello-ptc</span>
+<span class="cmd">ptc run hello-ptc/ptc-project.json</span>
 
-<h2>Install</h2>
+<samp>{"greeting":"hello world"}</samp></pre>
+    <p>Runs offline and writes a structured trace.</p>
+  </div>
+</section>
 
-<p>Download the self-contained macOS arm64 archive and checksum from
-<a href="https://github.com/andreasronge/ptc_runner/releases">GitHub Releases</a>, then follow
-the <a href="/installation/standalone/">standalone installation guide</a>. No separate runtime
-is required. The <a href="/installation/docker/">Docker guide</a> covers the verified local
-image; a published container is still planned. Once <code>ptc</code> is on your machine:</p>
+<section class="resources-section">
+  <div class="resources-inner">
+    <div class="section-heading">
+      <p class="eyebrow">Build with PtcRunner</p>
+      <h2>Start with a guide, then go as deep as you need.</h2>
+    </div>
+    <div class="resource-grid">
+      <a href="/guides/quickstart/"><strong>Quickstart</strong><span>Build and run a small project.</span></a>
+      <a href="/guides/"><strong>Documentation</strong><span>Guides for language, tools, workflows, and debugging.</span></a>
+      <a href="/schemas/"><strong>JSON Schemas</strong><span>Editor completion and validation for project files.</span></a>
+      <a href="https://github.com/andreasronge/ptc_runner"><strong>GitHub</strong><span>Source, runnable examples, changelog, and issues.</span></a>
+    </div>
+  </div>
+</section>
 
-<pre><code>ptc init hello-ptc
-ptc run hello-ptc/ptc-project.json</code></pre>
-
-<pre><code>{"greeting":"hello world"}</code></pre>
-
-<p class="muted-note">That runs without contacting a model, and writes a structured trace you can
-open in the viewer. The same <code>ptc run</code> drives agentic projects.</p>
-
-<div class="note">
-  <p><strong>0.x, under active development.</strong> Breaking changes are expected. The
-  <a href="/installation/standalone/">standalone installation page</a> lists the supported
-  release archives and their system requirements.</p>
-</div>
-
-<h2>Guides</h2>
-
-<a class="callout" href="/guides/">
-  <strong>Documentation &rarr;</strong>
-  <span>Task-focused guides in a sectioned reading path, the installation routes,
-  and the reference pages. The same pages, same order, as the HexDocs
-  sidebar.</span>
-</a>
-
-<h2>JSON Schemas</h2>
-
-<a class="callout" href="/schemas/">
-  <strong>Schema reference &rarr;</strong>
-  <span>The stable URLs for the project, application, host, and command-envelope
-  schemas. Point your editor at one to get completion and validation while authoring.</span>
-</a>
-
-<h2>Links</h2>
-
-<ul class="links">
-  <li><a href="https://github.com/andreasronge/ptc_runner">GitHub repository</a>
-    — <span class="desc">source, guides, and runnable examples</span></li>
-  <li><a href="/reference/ptc-lisp-specification/">PTC-Lisp
-    language specification</a>
-    — <span class="desc">the bounded Clojure-like language the model writes in</span></li>
-  <li><a href="https://hex.pm/packages/ptc_runner">Hex package</a>
-    — <span class="desc"><code>ptc_runner</code></span></li>
-  <li><a href="https://hexdocs.pm/ptc_runner/">HexDocs</a>
-    — <span class="desc">API documentation for the last published release</span></li>
-  <li><a href="https://github.com/andreasronge/ptc_runner/blob/main/CHANGELOG.md">Changelog</a>
-    — <span class="desc">what changed between versions</span></li>
-  <li><a href="https://github.com/andreasronge/ptc_runner/issues">Issues</a>
-    — <span class="desc">bugs and feature requests</span></li>
-</ul>
-
-<footer>
-  MIT licensed. Built from
-  <a href="https://github.com/andreasronge/ptc_runner">andreasronge/ptc_runner</a>.
+</main>
+<footer class="product-footer">
+  <div>
+    <a class="product-brand" href="/" aria-label="PtcRunner home">
+      <img src="/ptc-runner-mark.svg" width="30" height="30" alt="">
+      <span>PtcRunner</span>
+    </a>
+    <p>MIT licensed. Built from
+    <a href="https://github.com/andreasronge/ptc_runner">andreasronge/ptc_runner</a>.</p>
+  </div>
+  <div class="footer-links">
+    <a href="/reference/ptc-lisp-specification/">Language specification</a>
+    <a href="https://hex.pm/packages/ptc_runner">Hex package</a>
+    <a href="https://hexdocs.pm/ptc_runner/">HexDocs</a>
+  </div>
   <span class="build-stamp">v@BUILD_VERSION@ &middot;
     <a href="https://github.com/andreasronge/ptc_runner/commit/@BUILD_COMMIT@">@BUILD_COMMIT_SHORT@</a>
     &middot; built @BUILD_TIMESTAMP@</span>
 </footer>
-
-</main>
-</div>
 </body>
 </html>
