@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.CommandDiagnosticRenderer do
 
   @pointer_pattern ~r/\A\/[A-Za-z0-9._~\/-]+\z/
   @source_name_pattern ~r/\A[A-Za-z0-9._~-][A-Za-z0-9._~\/-]*\z/
+  @terminal_path_pattern ~r/\A[^\x00-\x1F\x7F]+\z/u
 
   @spec render(CommandDiagnostic.t()) :: {:ok, binary()} | {:error, :invalid_command_diagnostic}
   def render(%CommandDiagnostic{} = diagnostic) do
@@ -61,8 +62,11 @@ defmodule PtcRunner.Kernel.CommandDiagnosticRenderer do
          opts
        ) do
     case Keyword.fetch(opts, :application_path) do
-      {:ok, path} when is_binary(path) and path != "" -> " at " <> path
-      _absent -> ""
+      {:ok, path} when is_binary(path) and path != "" ->
+        " at " <> terminal_literal(path, @terminal_path_pattern)
+
+      _absent ->
+        ""
     end
   end
 

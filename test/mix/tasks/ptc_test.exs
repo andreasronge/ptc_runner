@@ -311,6 +311,28 @@ defmodule Mix.Tasks.PtcTest do
   end
 
   @tag :tmp_dir
+  test "a missing application path with terminal controls is safely quoted", %{tmp_dir: dir} do
+    missing_positional = "missing\nforged-error.json"
+    envelope_path = Path.join(dir, "controlled-path-envelope.json")
+
+    presentation =
+      MixCommandAdapter.execute([
+        "validate",
+        missing_positional,
+        "--envelope",
+        envelope_path
+      ])
+
+    assert presentation.exit_status == 3
+    assert presentation.stderr =~ ~S(at "missing\nforged-error.json" (run_ref: cmd-)
+    refute presentation.stderr =~ "at missing\nforged-error.json"
+
+    envelope = envelope_path |> File.read!() |> Jason.decode!()
+    assert envelope["run_ref"] =~ "cmd-"
+    refute Jason.encode!(envelope) =~ "forged-error.json"
+  end
+
+  @tag :tmp_dir
   test "root command names a missing manifest property", %{tmp_dir: dir} do
     manifest_path = write_manifest(dir, %{"value" => 1})
 
