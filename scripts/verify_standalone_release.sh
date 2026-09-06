@@ -87,6 +87,49 @@ cat > "$application_root/private-ptc.json" <<'EOF'
 }
 EOF
 
+interrupt_root="$fixture_root/interrupt"
+mkdir -p "$interrupt_root"
+
+cat > "$interrupt_root/main.clj" <<'EOF'
+(ns probe.main "Busy loop with no provider." {:visibility :prompt})
+
+(defn run [input]
+  (return (loop [i 0 acc 0]
+            (if (< i 6000000) (recur (inc i) (+ acc i)) acc))))
+EOF
+
+cat > "$interrupt_root/ptc.json" <<'EOF'
+{
+  "version": 1,
+  "workflow": {
+    "components": [{"id": "probe.main", "path": "main.clj"}],
+    "entry": "probe.main/run"
+  },
+  "input": {"value": {}},
+  "providers": {"workflow": [], "mission": []},
+  "limits": {
+    "run_duration_ms": 120000,
+    "workflow_timeout_ms": 120000,
+    "evaluation_timeout_ms": 120000
+  }
+}
+EOF
+
+cat > "$interrupt_root/ptc-project.json" <<'EOF'
+{
+  "kind": "ptc-project",
+  "version": 1,
+  "application": {"path": "ptc.json"},
+  "artifacts": {
+    "root": ".ptc",
+    "trace": true,
+    "inspection": false,
+    "result": false,
+    "envelope": false
+  }
+}
+EOF
+
 cat > "$fixture_root/provider-host.json" <<'EOF'
 {
   "credentials": {"key": {"literal": "invalid-smoke-credential"}},
@@ -190,6 +233,52 @@ grep -q '"provider_activity":false' "$release_tmp_dir/validate.stdout"
 "$command_bin" run "$application_root/ptc.json" > "$release_tmp_dir/run.stdout"
 printf '%s\n' '{"city":"Malmö","note":"café — 5 €"}' > "$release_tmp_dir/run.expected"
 cmp "$release_tmp_dir/run.expected" "$release_tmp_dir/run.stdout"
+
+# Run the command in its own foreground-style process group, as a terminal
+# does, and interrupt the group. The packaged command must leave signal
+# handling to the OS rather than opening the BEAM break menu or returning 0.
+interrupt_status="$(python3 - \
+  "$command_bin" \
+  "$interrupt_root/ptc-project.json" \
+  "$release_tmp_dir/interrupt.stdout" \
+  "$release_tmp_dir/interrupt.stderr" <<'PYTHON'
+import os
+import signal
+import subprocess
+import sys
+import time
+
+command, project, stdout_path, stderr_path = sys.argv[1:]
+with open(stdout_path, "wb") as stdout, open(stderr_path, "wb") as stderr:
+    process = subprocess.Popen(
+        [command, "run", project],
+        stdin=subprocess.DEVNULL,
+        stdout=stdout,
+        stderr=stderr,
+        start_new_session=True,
+    )
+    time.sleep(1)
+    os.killpg(process.pid, signal.SIGINT)
+    try:
+        returncode = process.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+        raise SystemExit("packaged ptc run did not stop on SIGINT within 30s")
+
+if returncode >= 0:
+    with open(stderr_path, encoding="utf-8") as stderr:
+        sys.stderr.write(stderr.read())
+print(128 - returncode if returncode < 0 else returncode)
+PYTHON
+)"
+test "$interrupt_status" -eq 130
+if grep -q 'BREAK:' "$release_tmp_dir/interrupt.stdout" \
+  "$release_tmp_dir/interrupt.stderr"; then
+  echo 'packaged ptc run opened the BEAM break menu on SIGINT' >&2
+  exit 1
+fi
+test -z "$(find "$interrupt_root/.ptc" -type f -name 'cmd-*.jsonl' -print -quit)"
 
 envelope_path="$release_tmp_dir/run-envelope.json"
 "$command_bin" run "$application_root/ptc.json" --envelope "$envelope_path" \
@@ -509,7 +598,8 @@ fi
 ' "$viewer_port" "$viewer_run_ref"
 
 # `rel/overlays/bin/ptc` execs `bin/ptc_runner eval`, which execs the runtime,
-# so this signals the VM itself and OTP stops it through `init:stop/0`.
+# so this signals the VM itself. The standalone entry point restores the OS
+# default disposition, and the shell reports 128 plus SIGTERM's number.
 if ! stop_viewer_process; then
   viewer_pid=""
   echo 'the packaged viewer did not stop on SIGTERM within 30s' >&2
@@ -521,7 +611,7 @@ wait "$viewer_pid"
 viewer_status=$?
 set -e
 viewer_pid=""
-test "$viewer_status" -eq 0
+test "$viewer_status" -eq 143
 
 "$release_root/bin/ptc_runner" eval '
   [port] = System.argv()

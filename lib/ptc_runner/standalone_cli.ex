@@ -38,6 +38,8 @@ defmodule PtcRunner.StandaloneCLI do
   @doc false
   @spec main([binary()]) :: no_return()
   def main(argv) do
+    :ok = :os.set_signal(:sigterm, :default)
+
     # OTP's default handler writes to stdout. A TLS handshake alert during
     # `ptc doctor --connect` would otherwise prefix the JSON report (#1583).
     CLILogger.install_stderr_handler()

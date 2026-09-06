@@ -76,7 +76,7 @@ FROM runtime AS verify
 USER root
 
 RUN apt-get update \
-  && apt-get install --yes --no-install-recommends diffutils expect \
+  && apt-get install --yes --no-install-recommends diffutils expect python3 \
   && rm -rf /var/lib/apt/lists/*
 
 # `verify_standalone_release.sh` derives its project root from its own parent
