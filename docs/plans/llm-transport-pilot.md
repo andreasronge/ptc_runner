@@ -1,11 +1,25 @@
 # Bounded LLM transport pilot
 
-**Status:** milestone 1 in progress, 2026-09-06. The
-[initial loopback baseline](evidence/llm-transport-baseline.md) measures
-prepared adapter calls, Dispatcher deadlines/accounting, socket cancellation,
-and pool recovery. Complete concurrent workflows and deployment criteria
-remain outstanding. Milestones 2 and 3 have not started. ReqLLM remains the
-default; dependency removal and broad migration remain deferred.
+**Status:** lab implementation and evidence recorded for all three milestones,
+2026-09-06; promotion gates remain open. The
+[comparison record](evidence/llm-transport-comparison.md) extends the
+[initial baseline](evidence/llm-transport-baseline.md) with concurrent complete
+workflows, a narrow opt-in adapter, live tool execution, accounting boundaries,
+and HTTP-disconnect ownership. ReqLLM remains the default. This is a maintainer
+experiment, not an accepted production adapter or completed gateway.
+
+| Milestone | Implemented and checked | Remaining acceptance gate |
+| --- | --- | --- |
+| 1 — baseline | Configured Finch control; Dispatcher/direct-call saturation; concurrent support-triage batches; cancellation and recovery | Deployment workload, latency/connection budget, and sustained-test duration must be agreed before a performance verdict |
+| 2 — opt-in parity | Lab adapter, exact-control refusal, metadata/reservations, cache observations, decimal cost, tools, structured output, truncation, and fresh-process live workflow | Publish the tested upstream fixes and pin that release before consumer promotion; preparation still delegates to ReqLLM |
+| 3 — shared hosting | Shared physical capacity; repeated cancellations; provider/runtime failure; real HTTP disconnect; separate bounded workflow admission | Sustained TLS/reuse comparison and deployment criteria; gateway release/conformance remains separate |
+
+Current decision: keep ReqLLM as default and retain this opt-in lab. Both
+transports pass the demonstrated workflow cancellation chain; only the new
+transport directly supplies fail-fast global/group physical-attempt admission.
+The baseline's direct adapter checkout ignores its short LLM deadline, while
+the existing Dispatcher enforces that deadline. These observations justify a
+bounded experiment, not a default switch or a broad rewrite.
 
 Related work: [aggregate concurrency #1290](https://github.com/andreasronge/ptc_runner/issues/1290)
 and [MCP gateway #1465](https://github.com/andreasronge/ptc_runner/issues/1465).
@@ -28,9 +42,11 @@ review its evidence before expanding scope.
 - Keep ReqLLM as the default and LLMDB as the metadata/pricing source.
 - Select one OpenRouter installation and one representative existing
   workload. The [support-triage example](../../examples/support-triage/README.md)
-  is a candidate: its checked-in host requires token and USD cost usage,
-  disables explicit caching, and specifies an output cap. Confirm the chosen
-  workflow's actual call shapes before committing the pilot matrix.
+  is the selected workload: its checked-in host requires token and USD cost
+  usage, disables explicit caching, and specifies a 4096-token output cap.
+  The deterministic comparison executes two Lisp tool round trips; the live
+  probe retains the manifest's three-turn limit. Budget-enforcing Dispatcher
+  cases supplement the manifest, whose operational token/cost ledgers are disabled.
 - Use the current prepared-model, requirements, invocation, and budget
   contracts. Adapter selection is explicit before a run; there is no
   automatic fallback or dual dispatch to paid providers.

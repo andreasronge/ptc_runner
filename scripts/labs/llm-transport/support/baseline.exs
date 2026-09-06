@@ -145,17 +145,17 @@ defmodule PtcRunner.Labs.LLMTransportBaseline do
     {id, pid, ref}
   end
 
-  defp dispatch(target, id, timeout) do
+  def dispatch(target, id, timeout, adapter \\ ReqLLMAdapter) do
     requester = fn request, context ->
       {:ok, invocation} =
         Invocation.new(
           ProviderRegistry.adapter_request(request),
           false,
-          "loopback-only",
+          if(adapter == ReqLLMAdapter, do: "loopback-only", else: nil),
           context.llm_request_deadline_ms
         )
 
-      ReqLLMAdapter.call(target, invocation)
+      adapter.call(target, invocation)
     end
 
     {:ok, capability} =
@@ -174,7 +174,7 @@ defmodule PtcRunner.Labs.LLMTransportBaseline do
           request_timeout_ms: timeout,
           reservation_tariff: @tariff,
           reservation_bound: fn request, tariff ->
-            {:ok, ReqLLMAdapter.reservation_bound(target, request, tariff)}
+            {:ok, adapter.reservation_bound(target, request, tariff)}
           end
         }
       ])

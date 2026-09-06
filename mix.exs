@@ -207,7 +207,7 @@ defmodule PtcRunner.MixProject do
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:earmark_parser, "~> 1.4.44", only: [:dev, :test], runtime: false},
       {:req_llm, "~> 1.20", optional: true, runtime: false},
-      {:ptc_llm_http, "== 0.1.0", only: [:dev, :test], runtime: false},
+      ptc_llm_http_dep(),
       launcher_dep(),
       {:usage_rules, "~> 1.2", only: :dev, runtime: false},
       {:recon, "~> 2.5", only: [:dev, :test], runtime: false},
@@ -228,6 +228,20 @@ defmodule PtcRunner.MixProject do
 
       {_env, _path} ->
         {:ex_dna, "~> 1.5", options}
+    end
+  end
+
+  # The transport pilot can test an isolated upstream checkout without changing
+  # the published pin or putting the experimental adapter in production builds.
+  defp ptc_llm_http_dep do
+    options = [only: [:dev, :test], runtime: false]
+
+    case {Mix.env(), System.get_env("PTC_LLM_HTTP_PATH")} do
+      {env, path} when env in [:dev, :test] and is_binary(path) and path != "" ->
+        {:ptc_llm_http, options ++ [path: Path.expand(path)]}
+
+      _ ->
+        {:ptc_llm_http, "== 0.1.0", options}
     end
   end
 

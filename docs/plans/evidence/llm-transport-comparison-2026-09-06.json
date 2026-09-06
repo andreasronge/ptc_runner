@@ -1,0 +1,109 @@
+{
+  "transport": "9272decf5580c2ea1f28bed48d88e1e58ac127a1",
+  "captured_at": "2026-09-06T21:02:47.599629Z",
+  "limitations": [
+    "Synthetic loopback HTTP/1 provider closes every response; no TLS or reuse comparison.",
+    "Short diagnostic batches, not deployment latency criteria or a sustained leak test."
+  ],
+  "observations": [
+    {
+      "attempts": 40,
+      "adapter": "PtcRunner.LLM.ReqLLMAdapter",
+      "resources": {
+        "after": {
+          "ports": 4,
+          "processes": 196
+        },
+        "before": {
+          "ports": 4,
+          "processes": 196
+        }
+      },
+      "duration_ms": 695,
+      "latency_ms": {
+        "samples": [
+          83,
+          77,
+          68,
+          65,
+          69,
+          68,
+          66,
+          69,
+          68,
+          68,
+          70,
+          70,
+          65,
+          64,
+          72,
+          71,
+          72,
+          70,
+          67,
+          67
+        ],
+        "p50": 68,
+        "p95": 77
+      },
+      "workflows": 20,
+      "concurrency": 2,
+      "workflows_per_second": 28.776978417266186
+    },
+    {
+      "attempts": 40,
+      "adapter": "PtcRunner.Labs.HttpAdapter",
+      "resources": {
+        "after": {
+          "ports": 4,
+          "processes": 196
+        },
+        "before": {
+          "ports": 4,
+          "processes": 196
+        }
+      },
+      "duration_ms": 688,
+      "latency_ms": {
+        "samples": [
+          63,
+          65,
+          65,
+          64,
+          65,
+          66,
+          73,
+          72,
+          68,
+          67,
+          66,
+          66,
+          72,
+          71,
+          69,
+          71,
+          73,
+          71,
+          73,
+          74
+        ],
+        "p50": 68,
+        "p95": 73
+      },
+      "workflows": 20,
+      "concurrency": 2,
+      "workflows_per_second": 29.069767441860463
+    }
+  ],
+  "root_base": "c6eba644451ec4dd225fb558b327486b2e7be873",
+  "probe_hashes": {
+    "scripts/labs/llm-transport/compare.exs": "da70fa5fccd5a683de6f7172690e1f2483e57b725a65b5462cdd41cd785b654b",
+    "scripts/labs/llm-transport/live.exs": "de650f3037a90bf6bd5a6d343ac3d8cfc8717f9df2b096a8343f3cdd9c2aa2a6",
+    "scripts/labs/llm-transport/run.exs": "a4f64e688190043a310f100db4017aa7790f411623047b4c0d167081db50a828",
+    "scripts/labs/llm-transport/support/baseline.exs": "a8f20fa6fee9795bea1e7f1924f43f1fe6984decd3963456dfb478f564102ceb",
+    "scripts/labs/llm-transport/support/comparison_test.exs": "1579de6eeb88219c16c8cf7c0e391bd9afa9570017e7ce84444fda9264127ced",
+    "scripts/labs/llm-transport/support/http_adapter.exs": "8219d3d4ed310469939f9d1161811d7f1a0077684bb982352a66711690db33ca",
+    "scripts/labs/llm-transport/support/serving_host.exs": "932886f41731832bbb5c4766a8ee610481be4073f246126759559cf922ac7ad8",
+    "scripts/labs/llm-transport/support/workflow_probe.exs": "06ff44e38c3fcc161a998b6ed4445b6cbc918baa7529a799d450d378948bb923"
+  }
+}

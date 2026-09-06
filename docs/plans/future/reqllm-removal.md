@@ -3,6 +3,10 @@
 **Status:** feature inventory and deferred migration options. The
 [bounded transport pilot](../llm-transport-pilot.md) owns the immediate work;
 default switching, broad migration, and dependency removal are deferred.
+The [pilot comparison](../evidence/llm-transport-comparison.md) now records a
+working lab adapter and upstream fixes, including a successful live tool
+workflow. These are unpublished source fixes, not a replacement for the
+consumer release checkpoint.
 Inventory refreshed on 2026-09-06 against
 PtcRunner `fe88b0fb3`, whose lockfile selects `req_llm 1.21.1`,
 `llm_db 2026.8.4`, and dev/test-only `ptc_llm_http 0.1.0`.
@@ -154,7 +158,8 @@ Before accounting cutover, settle these contracts:
 - **Cache and reasoning arithmetic:** establish whether each provider includes
   cached/created tokens in input and reasoning in output. Apply read/write
   rates and any supported TTL/tier conditions without double-counting.
-  Separate cache-write observations are a replacement-codec gap.
+  The pilot adds separate cache-write observations upstream; the published
+  `0.1.0` pin still lacks them.
 - **Reproducible prices:** bind the selected rate snapshot and override
   identity during preparation. Do not refresh rates halfway through a run.
   Define host refresh and stale/absent metadata policy before promising cost
@@ -173,7 +178,10 @@ The package has bounded HTTP/1 execution, OpenAI-compatible text, function
 tools, structured output, and synchronous text streaming. This is not evidence
 that the current PtcRunner contracts have all been integrated.
 
-Concrete gaps at that source checkpoint:
+Concrete gaps at that original source checkpoint (the pilot fixes finish
+reasons, cache-write observations, bounded decimal cost, and indexed
+non-stream OpenRouter tools on an isolated upstream branch; the evidence
+record pins that branch):
 
 - Request controls expose `max_tokens`, `temperature`, and `seed`;
   top-p, penalties, and reasoning effort need implementation or explicit

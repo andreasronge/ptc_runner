@@ -25,7 +25,8 @@ belongs in guides or retained specifications.
   bounded evaluation: establish a configured ReqLLM baseline, prove one
   opt-in installation's preparation/accounting contracts, and compare shared
   hosting under contention. ReqLLM remains the default; continuing with it is
-  an explicit possible outcome.
+  an explicit possible outcome. The [comparison evidence](evidence/llm-transport-comparison.md)
+  records the implemented lab slices and outstanding release/performance gates.
 
 ## Future, trigger-gated
 

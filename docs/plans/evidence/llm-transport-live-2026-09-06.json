@@ -1,0 +1,60 @@
+{
+  "captured_on": "2026-09-06",
+  "transport_code_revision": "afa5f115a0987903dc7578744dae491362733f8b",
+  "command_exit_code": 1,
+  "outcomes": [
+    {
+      "usage": {
+        "input": 10,
+        "output": 29,
+        "cache_read": 0,
+        "cache_creation": 0,
+        "total_cost": 5.40736e-06
+      },
+      "adapter": "PtcRunner.LLM.ReqLLMAdapter",
+      "model": "openrouter:deepseek/deepseek-v4-flash",
+      "outcome": "ok",
+      "content_present": true,
+      "finish_reason": null,
+      "duration_ms": 1878
+    },
+    {
+      "usage": {
+        "input": 10,
+        "output": 19,
+        "cache_read": 0,
+        "cache_creation": 0,
+        "total_cost": 3.82368e-06
+      },
+      "adapter": "PtcRunner.Labs.HttpAdapter",
+      "model": "openrouter:deepseek/deepseek-v4-flash",
+      "outcome": "ok",
+      "content_present": true,
+      "finish_reason": "stop",
+      "duration_ms": 2778
+    },
+    {
+      "adapter": "PtcRunner.LLM.ReqLLMAdapter",
+      "outcome": "error",
+      "duration_ms": 9116,
+      "workflow": "support-triage/01-one-question"
+    },
+    {
+      "usage": {
+        "llm_budget": {
+          "cost": null,
+          "total_tokens": null
+        }
+      },
+      "adapter": "PtcRunner.Labs.HttpAdapter",
+      "outcome": "ok",
+      "duration_ms": 10781,
+      "correct_result": true,
+      "workflow": "support-triage/01-one-question"
+    }
+  ],
+  "limitations": [
+    "Generation differs between live requests; these timings do not isolate transport cost.",
+    "ReqLLM control failure was not classified by the probe revision used for this capture."
+  ]
+}
