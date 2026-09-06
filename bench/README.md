@@ -71,6 +71,67 @@ includes the environment baseline and heap capacity, excludes off-heap binary
 storage, and can miss short peaks; it is not the sandbox's charged memory.
 See the example's `evidence/PROFILE.md` for measured findings.
 
+## DABStep follow-up experiments
+
+These maintainer experiments are sequential, local diagnostics. Prepare the
+pinned data using the example README and run from the repository root with the
+pinned toolchain (`mise exec --` may be prefixed to the commands below).
+
+```sh
+mkdir -p tmp/profiling/followup
+python3 bench/dabstep_mcp.py --capture-page tmp/profiling/followup/page.json
+mix run bench/dabstep_experiments.exs
+DABSTEP_BENCH_REVERSE=1 mix run bench/dabstep_experiments.exs
+DABSTEP_BENCH_WIDE=1 mix run bench/dabstep_experiments.exs
+DABSTEP_BENCH_PAIRED=1 mix run bench/dabstep_experiments.exs
+DABSTEP_BENCH_PAIRED=1 DABSTEP_BENCH_WIDE=1 mix run bench/dabstep_experiments.exs
+DABSTEP_BENCH_PROFILE=1 mix run bench/dabstep_experiments.exs
+mix run bench/dabstep_dispatch.exs
+mix run bench/dabstep_scaling.exs --suite kernel --samples 2
+mix run bench/dabstep_scaling.exs --suite replay --samples 2
+mix run bench/dabstep_scaling.exs --suite scale --samples 1
+DABSTEP_BENCH_HEAP=1 mix run bench/dabstep_scaling.exs --suite scale --rows 20000
+DABSTEP_BENCH_HEAP=1 mix run bench/dabstep_scaling.exs --suite scale --rows 320000
+mix run bench/dabstep_traces.exs
+python3 bench/dabstep_trace_queries.py
+python3 bench/dabstep_trace_queries.py --selected-run RUN_REF
+```
+
+The capture option saves one MCP page and its advertised schemas. Its catalog
+request starts the server before the first scan; catalog opening is reported
+separately and samples 1 and 2 remain warm scans. Captures and temporary example
+copies stay under ignored `tmp/profiling/followup/`. No live model calls occur.
+
+The isolated harness checks complete projected-row equality and malformed-cell
+behavior, then measures namespace size and effect-context controls. `WIDE`
+selects all 21 columns; `PAIRED` alternates current/prepared reader variants for
+six measured pairs after a warm-up pair. The normal run also emits an LRU
+hit-count model for three sequential scans; it is not a cache implementation. Allocation
+profiling is separate from timing. The Dispatcher ladder uses the captured
+response, schema controls, event capture and two inspection policies; it is not
+a transport benchmark. `--suite replay` checks the prepared-type variant,
+replaces the temporary CSV with identical bytes before its second replay, and
+verifies rejection after changing an EOF byte, restoring that byte afterward.
+It does not modify the shipped example or its recording.
+
+The scaling suite streams synthetic files of 20,000, 80,000 and 320,000 rows,
+selects three or all 21 columns, and checks full traversal counts. Each
+projection opens a fresh session. Sample 0 is the first evaluation and positive
+samples are warm; `--samples 1` means two traversals per projection. Large
+full-width scans take several minutes. Heap sampling runs separately and has
+the same limitations as the original DABStep heap profile above.
+
+The trace generator creates 1,025 real command runs and copies immutable cohorts
+at 1, 10, 100, 1,000 and 1,025 runs. It refuses an already generated trace fixture
+rather than silently mixing cohorts. The query script reads only CLI query
+responses, never raw records; each query retains a compact count and pages at
+most 50 summaries. It runs three fresh CLI sessions and three queries per
+session. On macOS it also records whole-process peak RSS via `/usr/bin/time -l`.
+Use a run reference obtained through `analysis/runs` for the selected-run check.
+
+See the [follow-up report](../examples/dabstep-fraud/evidence/FOLLOWUP.md) for
+results, rejected approaches, measurement caveats and the next concrete fixes.
+
 ## Notes
 
 - Benchee's `parallel: N` reports *per-call* latency under contention —

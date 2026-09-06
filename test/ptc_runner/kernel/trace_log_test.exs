@@ -1387,6 +1387,34 @@ defmodule PtcRunner.Kernel.TraceLogTest do
   end
 
   @tag :tmp_dir
+  test "run pages preserve instant order and run-id ties across timestamp spellings", %{
+    tmp_dir: directory
+  } do
+    for {run_id, timestamp} <- [
+          {"older", "2026-07-12T12:00:00Z"},
+          {"tie-a", "2026-07-12T12:00:00.1Z"},
+          {"tie-z", "2026-07-12T12:00:00.100000Z"},
+          {"newer", "2026-07-12T12:00:00.100001Z"}
+        ] do
+      event = %{decoded_event(run_id, 1, "run-started") | "timestamp" => timestamp}
+      File.write!(Path.join(directory, run_id <> ".jsonl"), Jason.encode!(event) <> "\n")
+    end
+
+    {:ok, trace_log} = TraceLog.new(source: {:directory, directory})
+
+    assert {:ok, %{"items" => first, "next_cursor" => cursor}} =
+             TraceLog.query(trace_log, :list_runs, %{"limit" => 2})
+
+    assert Enum.map(first, & &1["run_id"]) == ["newer", "tie-z"]
+    assert is_binary(cursor)
+
+    assert {:ok, %{"items" => second, "next_cursor" => nil}} =
+             TraceLog.query(trace_log, :list_runs, %{"limit" => 2, "cursor" => cursor})
+
+    assert Enum.map(second, & &1["run_id"]) == ["tie-a", "older"]
+  end
+
+  @tag :tmp_dir
   test "timestamp filters compare instants rather than timestamp spelling", %{tmp_dir: directory} do
     path = Path.join(directory, "timestamp.jsonl")
     event = %{decoded_event("time", 1, "run-started") | "timestamp" => "2026-07-12T12:00:00.1Z"}

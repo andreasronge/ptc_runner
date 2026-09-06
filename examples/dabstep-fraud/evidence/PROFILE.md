@@ -235,6 +235,9 @@ and [`tprof`'s allocation and tracing caveats](https://www.erlang.org/docs/29/ap
 
 ### Prioritized follow-up investigations
 
+The subsequent [experiment report](FOLLOWUP.md) measures these candidates,
+including larger inputs and bounded trace navigation.
+
 These are experiments, not promised speedups. The remaining 18.7-second
 count-only traversal versus 1.9-second direct MCP traversal identifies a
 combined processing cost; it does not isolate any one layer. Continue tracking

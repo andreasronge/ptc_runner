@@ -1,3 +1,6 @@
+Code.require_file("support/dabstep.exs", __DIR__)
+Code.require_file("support/heap.exs", __DIR__)
+
 defmodule PtcRunner.Bench.Dabstep do
   @moduledoc false
 
@@ -25,7 +28,7 @@ defmodule PtcRunner.Bench.Dabstep do
       :telemetry.attach(
         handler,
         [:ptc_runner, :capability, :stop],
-        &__MODULE__.capability/4,
+        &PtcRunner.Bench.DabstepSupport.capability/4,
         table
       )
 
@@ -39,10 +42,6 @@ defmodule PtcRunner.Bench.Dabstep do
       :telemetry.detach(handler)
       :ets.delete(table)
     end
-  end
-
-  def capability(_event, measures, %{name: name}, table) do
-    :ets.update_counter(table, name, [{2, 1}, {3, measures.duration_ms}], {name, 0, 0})
   end
 
   defp measure(root, "replay", samples, table) do
@@ -89,60 +88,10 @@ defmodule PtcRunner.Bench.Dabstep do
   end
 
   defp profile(root, mode, "heap") do
-    sampler = spawn_link(fn -> sample_heaps(%{}, 0, 0) end)
-    handler = {__MODULE__, :heap, self()}
-
-    :ok =
-      :telemetry.attach(handler, [:ptc_runner, :sandbox, :armed], &__MODULE__.armed/4, sampler)
-
-    try do
-      work(root, mode)
-      send(sampler, {:finish, self()})
-
-      receive do
-        {:heap_sample, peak, samples} ->
-          emit(%{sampled_peak_total_heap_words: peak, observations: samples})
-      end
-    after
-      :telemetry.detach(handler)
-      send(sampler, :stop)
-    end
+    PtcRunner.Bench.Heap.measure(fn -> work(root, mode) end) |> emit()
   end
 
   defp profile(root, mode, type), do: trace_profile(root, mode, type)
-
-  def armed(_event, _measurements, %{pid: pid, max_heap: 5_000_000}, sampler),
-    do: send(sampler, {:armed, pid})
-
-  def armed(_event, _measurements, _metadata, _sampler), do: :ok
-
-  defp sample_heaps(pids, peak, samples) do
-    receive do
-      {:armed, pid} ->
-        ref = Process.monitor(pid)
-        sample_heaps(Map.put(pids, ref, pid), peak, samples)
-
-      {:DOWN, ref, :process, _pid, _reason} ->
-        sample_heaps(Map.delete(pids, ref), peak, samples)
-
-      {:finish, parent} ->
-        send(parent, {:heap_sample, peak, samples})
-
-      :stop ->
-        :ok
-    after
-      2 ->
-        sizes =
-          Enum.flat_map(pids, fn {_ref, pid} ->
-            case Process.info(pid, :total_heap_size) do
-              {:total_heap_size, words} -> [words]
-              nil -> []
-            end
-          end)
-
-        sample_heaps(pids, Enum.max([peak | sizes]), samples + length(sizes))
-    end
-  end
 
   defp trace_profile(root, mode, type) do
     type =

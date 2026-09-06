@@ -117,7 +117,8 @@ streaming memory model. Analysis, recheck, and review deliberately traverse
 the file independently so each supplies its own measurement.
 
 Runtime benchmarks and reproduction commands are in
-[`evidence/PROFILE.md`](evidence/PROFILE.md#optimization-measurements-for-1845).
+[`evidence/PROFILE.md`](evidence/PROFILE.md#optimization-measurements-for-1845). Further page-processing, streaming-fold and scaling experiments are recorded
+in [`evidence/FOLLOWUP.md`](evidence/FOLLOWUP.md).
 On the measured Apple ARM64 machine, the full recording took about 96 seconds
 and a count-only scan about 19 seconds after runtime optimization. These use
 recorded model responses; live runs also include model latency.

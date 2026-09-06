@@ -14,7 +14,8 @@ defmodule PtcRunner.Kernel.TraceLog do
   Supported query operations are:
 
   - `:list_runs` — bounded filtered run summaries, including the run-started
-    sequence and component-override provenance;
+    sequence and component-override provenance, ordered by newest start instant
+    and then descending run ID;
   - `:get_run` — one run summary by run ID;
   - `:list_turns` — ordered evaluation/capability facts for one run;
   - `:counters` — aggregate counters for filtered runs, including LLM usage by
@@ -2852,10 +2853,9 @@ defmodule PtcRunner.Kernel.TraceLog do
     |> Enum.map(fn {run_id, run_events} ->
       run_metadata(run_id, run_events, run_source_kind(source_kind, run_id))
     end)
-    |> Enum.sort(fn left, right ->
-      {timestamp_sort_value(left["start_timestamp"]), left["run_id"]} >=
-        {timestamp_sort_value(right["start_timestamp"]), right["run_id"]}
-    end)
+    # Parse each timestamp once; comparisons otherwise repeat ISO-8601 parsing
+    # across every comparison on every page of a broad cohort query.
+    |> Enum.sort_by(&{timestamp_sort_value(&1["start_timestamp"]), &1["run_id"]}, :desc)
   end
 
   defp run_source_kind(source_kind, _run_id) when source_kind in [:sanitized, :private],
