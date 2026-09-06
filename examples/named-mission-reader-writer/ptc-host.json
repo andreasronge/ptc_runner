@@ -14,14 +14,14 @@
     },
     "reader_workspace": {
       "source": "mcp",
-      "installation_revision": "ptc-fs-mcp-reader-0.1.0",
+      "installation_revision": "ptc-fs-mcp-reader-0.3.0",
       "transport": {
         "type": "stdio",
         "command": "npx",
         "cwd": ".",
         "args": [
           "-y",
-          "ptc-fs-mcp@0.1.0",
+          "ptc-fs-mcp@0.3.0",
           "--root",
           "reader-state",
           "--include",
@@ -42,14 +42,14 @@
     },
     "writer_workspace": {
       "source": "mcp",
-      "installation_revision": "ptc-fs-mcp-writer-0.1.0",
+      "installation_revision": "ptc-fs-mcp-writer-0.3.0",
       "transport": {
         "type": "stdio",
         "command": "npx",
         "cwd": ".",
         "args": [
           "-y",
-          "ptc-fs-mcp@0.1.0",
+          "ptc-fs-mcp@0.3.0",
           "--root",
           "writer-state",
           "--include",

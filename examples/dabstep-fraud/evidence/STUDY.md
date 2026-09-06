@@ -92,8 +92,9 @@ runs. Method, tables, and every run are in
 
 `read-page` performs exactly one upstream read per call and hands the MCP
 cursor straight back to the server. That cursor is opaque and server-signed,
-so a forged position fails the read instead of returning invented rows. Each
-page reports `read_calls` and `content_hashes`, so a page is always
+so a forged position fails the read while its signing key stays secret. The
+checked-in replay key is public and offers only trusted playback, with no
+adversarial forgery protection. Each page reports `read_calls` and `content_hashes`, so a page is always
 attributable to the read that produced it.
 
 What the model can still author is `carry`, the partial final line of the
@@ -152,14 +153,23 @@ regression case, written by `record-replay.sh` through the analysis profile:
 `cmd-0cwcp0r52fj5tbfk7192bf3htx` (off-by-one), and
 `cmd-6r3vft625ney35rpn0p0bgc3jp` (shared-refused), each a single turn that
 scanned all 49 pages.
-`replay.jsonl` for the full workflow is assembled from the final program of
-each stage of live run `cmd-0twkysj3vwd4wwwjjgx42p09qs`, keyed to the hashes
-a placeholder fixture missed on. A recording of the whole session cannot
-replay elsewhere: the filesystem server signs each cursor with a per-process
-key, and a heap kill reports a baseline that differs from run to run, so any
-exploratory turn that printed a page or hit the ceiling puts a value in the
-conversation that never recurs. See
-[#1799](https://github.com/andreasronge/ptc_runner/issues/1799).
+`replay.jsonl` is the complete recording of Luna run
+`cmd-41epjevy1433hwrfp1qjd839s9` on 2026-09-06: 11 model calls, including a
+heap-killed first analysis and a first recheck turn that prints a page with a
+non-null signed cursor. It contains 10 distinct request hashes; the identical
+initial analyzer request has two ordered responses. No request hashes or
+programs were synthesized. All three tables agree on `B. BE`; the reviewer's
+one caution is retained in the result.
+
+The hosts pin `ptc-fs-mcp@0.3.0`, bind the signing key through `transport.env`,
+and allow at most 24,000,000 bytes of uncached cursor hashing for the
+23,581,339-byte CSV. Replay uses the public `replay-cursor-key.txt`; private
+live runs use `DABSTEP_CURSOR_KEY`. The 40 MB mission heap is unchanged.
+
+The recording, fresh-process replay, filesystem replacement and mutation
+checks, and friction notes are in [Replay acceptance](REPLAY.md). The existing
+`verification-replay.jsonl` remains a seeded reviewer-correction test, separate
+from this live recording.
 
 ## Benchmark fidelity and attribution
 

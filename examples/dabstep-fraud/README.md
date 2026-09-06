@@ -35,7 +35,8 @@ model too.
 ## Run it
 
 Requirements: a current `ptc` build, Node/npm for the pinned filesystem MCP
-server, `curl`, and an OpenRouter key for live runs.
+server, `curl`, and an OpenRouter key for live runs. The hosts pin
+`ptc-fs-mcp@0.3.0`.
 
 Download the dataset first. Both the live and the replay project read
 `data/payments.csv` through the filesystem MCP server, so replay removes the
@@ -46,14 +47,20 @@ model calls, not the download:
 ptc validate ptc-project.json
 ```
 
-Live, with a key:
+Live, with `OPENROUTER_API_KEY` and `DABSTEP_CURSOR_KEY` in your private
+environment file. Generate the cursor key once with
+`python3 -c 'import secrets; print(secrets.token_urlsafe(32))'` and keep it for
+subsequent recordings and replays. The host passes it only to the filesystem
+server through `transport.env`; the model can read only `data/payments.csv`.
+
+Live:
 
 ```console
 ptc run ptc-project.json --input inputs/deepseek.json \
   --env-file /absolute/path/to/private.env --envelope out.json
 ```
 
-Without a key:
+Without an OpenRouter key (trusted playback with the published fixture key):
 
 ```console
 ptc run ptc-project.replay.json --input inputs/luna.json --envelope out-replay.json
@@ -64,12 +71,13 @@ The result value:
 ```json
 {"ok": true, "value": "B. BE", "agreed": true,
  "top_country": {"analysis": "BE", "recheck": "BE", "review": "BE"},
- "problems": []}
+ "problems": ["The analyzer appears to rank countries by raw fraudulent volume, but the official fraud definition is fraudulent volume divided by total volume; this can produce a wrong top-country conclusion. For these measurements, BE has a slightly higher fraud ratio than NL despite NL having the larger raw fraudulent volume."]}
 ```
 
-The replay run returns exactly that. It executes three retained programs from a
-live Luna run against the pinned data, 147 reads, and makes no model network
-calls. What the fixture is and is not is in
+The replay run returns exactly that. It replays a complete multi-turn live
+Luna session, including exploratory cursor-bearing observations, against the
+pinned data and makes no model network calls. Recording provenance and the
+fresh-process checks are in
 [`evidence/STUDY.md`](evidence/STUDY.md#replay-fixtures).
 
 Live runs vary. `inputs/deepseek.json` uses DeepSeek for both analyzers and
@@ -273,9 +281,10 @@ TURN BUDGET: 13 turns remain, including the next program.
 ```
 
 The streaming aggregation shown above is what the same model wrote next. A
-run's recording is about 270 KB because the read mapping keeps an identity for
-each page instead of its bytes; capturing the same 49 reads in full would take
-74 MB. The arithmetic is in
+single-stage capture measured about 270 KB because the read mapping keeps an
+identity for each page instead of its bytes; capturing the same 49 reads in
+full would take 74 MB. The new 11-turn, three-stage recording retains 729 KB
+of private inspection and produces a 9.6 KB replay fixture. The arithmetic is in
 [`evidence/STUDY.md`](evidence/STUDY.md#keeping-the-evidence-small).
 
 **Why the verdict is code.** An earlier version let the reviewer approve or
@@ -285,6 +294,28 @@ the right answer by comparing its ratio winner against the largest absolute
 volume. A reviewer that can veto is a second single point of failure. A
 reviewer that must show its measurement is evidence. Those three run references
 are in [`evidence/STUDY.md`](evidence/STUDY.md#cohorts).
+
+## Record and replay
+
+After a live run, extract its fixture through the private analysis profile:
+
+```console
+./record-replay.sh .ptc RUN_REF > my-replay.jsonl
+```
+
+In a copy of `ptc-host.replay.json`, point both model installations at
+`my-replay.jsonl` and change `credentials.cursor_key` to
+`{"env": "DABSTEP_CURSOR_KEY"}`. Pass that host with `--host-config` and the
+same private environment file with `--env-file`. Every replay starts fresh
+provider processes. Identical CSV bytes survive replacement on another
+filesystem identity; changed bytes fail the exact request or cursor check.
+
+The checked-in fixture uses `replay-cursor-key.txt`, a deliberately public
+key for trusted playback. It does **not** provide adversarial cursor forgery
+protection. Private live runs retain that protection only while their key
+stays secret. To create a shareable fixture, explicitly use the public
+playback key for its live recording too; never publish a private signing key.
+The binding stays outside the model's tool surface in either mode.
 
 ## Look inside a run
 

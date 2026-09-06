@@ -20,8 +20,10 @@ ptc run kernel-tutorial/03-file-agent.ptc-project.json
 
 That example maps one server operation to `workspace.read` and exposes only a
 bounded wrapper to the mission. Its server has its own runtime prerequisite;
-the first PtcRunner project needs no API key or external tool. The server it launches is
-the published [`ptc-fs-mcp@0.1.0`](https://www.npmjs.com/package/ptc-fs-mcp)
+the first PtcRunner project needs no API key or external tool.
+
+The server it launches is
+the published [`ptc-fs-mcp@0.3.0`](https://www.npmjs.com/package/ptc-fs-mcp)
 package, via `npx`. The first run may download that package. Node.js and `npx`
 are required.
 

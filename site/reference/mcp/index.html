@@ -106,7 +106,7 @@ lifecycle contract.</p><p>MCP is the only way to add an external tool to a PtcRu
 application. <code class="inline">ptc-host.json</code> fixes the server, transport, credentials, public names, and read/write
 effects in the host document. The application manifest may select and narrow
 that installation but cannot invent or widen it.</p><p>Start with <a href="/guides/building-agents/">Building agents</a> if you have not yet run the
-shipped agent loop. This guide adds one file-reading tool to that working path.</p><p>The published <a href="https://www.npmjs.com/package/ptc-fs-mcp"><code class="inline">ptc-fs-mcp@0.1.0</code></a>
+shipped agent loop. This guide adds one file-reading tool to that working path.</p><p>The published <a href="https://www.npmjs.com/package/ptc-fs-mcp"><code class="inline">ptc-fs-mcp@0.3.0</code></a>
 package (MIT, <a href="https://github.com/andreasronge/ptc-fs-mcp">source</a>) is a
 confined read/write filesystem server over live bytes. Pin it from a host
 document with <code class="inline">npx</code>; a hermetic spawn that does not inherit <code class="inline">PATH</code> must run
@@ -129,7 +129,7 @@ handshake.</p><p>As of 2026-08-17, the official
 <code class="inline">2025-11-25</code> through <code class="inline">initialize</code> and answers <code class="inline">server/discover</code> with JSON-RPC
 <code class="inline">-32601 Method not found</code>. It is therefore not compatible with this PtcRunner
 profile, despite starting and serving legacy clients normally.
-<a href="https://www.npmjs.com/package/ptc-fs-mcp"><code class="inline">ptc-fs-mcp@0.1.0</code></a> implements the
+<a href="https://www.npmjs.com/package/ptc-fs-mcp"><code class="inline">ptc-fs-mcp@0.3.0</code></a> implements the
 required profile and is the deterministic baseline for this reference.</p><h3 id="implement-the-wire-profile">Implement the wire profile</h3><p>The executable serves the pinned protocol definitions offline as
 <code class="inline">ptc docs schema-mcp</code>. The same bytes are published as
 <a href="https://ptc-runner.dev/schemas/mcp-2026-07-28.schema.json"><code class="inline">mcp-2026-07-28.schema.json</code></a>.
@@ -186,7 +186,7 @@ that the clock ran out: the step that expired may have been the spawn or the
 discovery answer, so PtcRunner cannot say the server was reached, only that it
 never received the response needed to prove a protocol mismatch. Raise the
 budgets and run it again. A first launch on a cold npm cache, or any launch on a
-loaded machine, is the usual cause.</p><h2 id="run-the-checked-in-file-agent">Run the checked-in file agent</h2><p>The tutorial launches <a href="https://www.npmjs.com/package/ptc-fs-mcp"><code class="inline">ptc-fs-mcp@0.1.0</code></a>
+loaded machine, is the usual cause.</p><h2 id="run-the-checked-in-file-agent">Run the checked-in file agent</h2><p>The tutorial launches <a href="https://www.npmjs.com/package/ptc-fs-mcp"><code class="inline">ptc-fs-mcp@0.3.0</code></a>
 through <code class="inline">npx</code>. It requires Node.js 20.19 or newer and <code class="inline">npx</code>; the first run may
 download that package.</p><pre><code class="console language-console">ptc init kernel-tutorial --example kernel-tutorial
 ptc doctor kernel-tutorial/03-file-agent.ptc-project.json</code></pre><p>Passive doctor validates the application, resolves <code class="inline">npx</code>, and checks the
@@ -266,7 +266,7 @@ happened. A complete decoded refusal (<code class="inline">isError: true</code>)
 not indeterminate: the server answered, so the caller can treat that outcome
 as known.</p><p>The
 <a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/named-mission-reader-writer"><code class="inline">named-mission-reader-writer</code></a>
-example shows the complete installation: two occurrences of <code class="inline">ptc-fs-mcp@0.1.0</code>
+example shows the complete installation: two occurrences of <code class="inline">ptc-fs-mcp@0.3.0</code>
 with different roots, a mandatory <code class="inline">allow</code> list on the write mapping, basename
 confinement, and the rule that the caller must reconcile an indeterminate
 result rather than repeat the mutation blindly.</p><p>A prompt-visible PTC-Lisp wrapper can present a smaller domain API than the raw

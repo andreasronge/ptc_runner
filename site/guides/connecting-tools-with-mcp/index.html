@@ -107,8 +107,8 @@ ptc doctor kernel-tutorial/03-file-agent.ptc-project.json
 ptc doctor kernel-tutorial/03-file-agent.ptc-project.json --connect
 ptc run kernel-tutorial/03-file-agent.ptc-project.json</code></pre><p>That example maps one server operation to <code class="inline">workspace.read</code> and exposes only a
 bounded wrapper to the mission. Its server has its own runtime prerequisite;
-the first PtcRunner project needs no API key or external tool. The server it launches is
-the published <a href="https://www.npmjs.com/package/ptc-fs-mcp"><code class="inline">ptc-fs-mcp@0.1.0</code></a>
+the first PtcRunner project needs no API key or external tool.</p><p>The server it launches is
+the published <a href="https://www.npmjs.com/package/ptc-fs-mcp"><code class="inline">ptc-fs-mcp@0.3.0</code></a>
 package, via <code class="inline">npx</code>. The first run may download that package. Node.js and <code class="inline">npx</code>
 are required.</p><h2 id="which-mcp-servers-work">Which MCP servers work?</h2><p>PtcRunner requires the MCP <code class="inline">2026-07-28</code> profile and <code class="inline">server/discover</code>. An
 incompatible endpoint fails closed instead of falling back to a legacy

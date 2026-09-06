@@ -2,7 +2,7 @@
 
 This credential-free maintainer lab runs from a source checkout; it is not a
 shipped example. It drives the shipped `agent.core` loop against
-a scripted model, the published `ptc-fs-mcp@0.1.0` filesystem MCP server, one
+a scripted model, the published `ptc-fs-mcp@0.3.0` filesystem MCP server, one
 host-native read capability, and a protocol-faithful stateless MCP 2026-07-28
 server. The remote fixture exposes structured, text, and `isError: true`
 results. The scripted model first emits an invalid PTC-Lisp program, receives

@@ -56,7 +56,7 @@ filled in:
 The shared host installs the model with `structured_output_mode` set to
 `json_schema`; `ptc docs host-installation` explains the modes.
 
-Step 03 launches `ptc-fs-mcp@0.1.0` through `npx`, so Node.js is required and
+Step 03 launches `ptc-fs-mcp@0.3.0` through `npx`, so Node.js is required and
 the first run may download the package. `ptc docs connecting-tools-with-mcp`
 explains that connection.
 

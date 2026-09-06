@@ -116,7 +116,7 @@ defmodule PtcRunner.Kernel.PtcFsMCPStdioTest do
           "tools" => %{
             "write_text_file" => %{"as" => "workspace.write", "effect" => "write"}
           },
-          "installation_revision" => "ptc-fs-mcp-0.1.0",
+          "installation_revision" => "ptc-fs-mcp-0.3.0",
           "ceilings" => %{
             "timeout_ms" => 15_000,
             "max_catalog_tools" => 8,

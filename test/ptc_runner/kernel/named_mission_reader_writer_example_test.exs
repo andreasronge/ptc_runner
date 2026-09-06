@@ -26,8 +26,8 @@ defmodule PtcRunner.Kernel.NamedMissionReaderWriterExampleTest do
     assert writer.source == :mcp
     assert reader.transport.command == "npx"
     assert writer.transport.command == "npx"
-    assert "ptc-fs-mcp@0.1.0" in reader.transport.args
-    assert "ptc-fs-mcp@0.1.0" in writer.transport.args
+    assert "ptc-fs-mcp@0.3.0" in reader.transport.args
+    assert "ptc-fs-mcp@0.3.0" in writer.transport.args
     assert "reader-state" in reader.transport.args
     assert "writer-state" in writer.transport.args
 
