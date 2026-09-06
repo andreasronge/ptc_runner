@@ -1,8 +1,11 @@
 # Bounded LLM transport pilot
 
-**Status:** next-step plan, 2026-09-06; implementation and measurements have
-not started. ReqLLM remains the default. Dependency removal and broad provider
-migration are deferred until this pilot produces evidence for a decision.
+**Status:** milestone 1 in progress, 2026-09-06. The
+[initial loopback baseline](evidence/llm-transport-baseline.md) measures
+prepared adapter calls, Dispatcher deadlines/accounting, socket cancellation,
+and pool recovery. Complete concurrent workflows and deployment criteria
+remain outstanding. Milestones 2 and 3 have not started. ReqLLM remains the
+default; dependency removal and broad migration remain deferred.
 
 Related work: [aggregate concurrency #1290](https://github.com/andreasronge/ptc_runner/issues/1290)
 and [MCP gateway #1465](https://github.com/andreasronge/ptc_runner/issues/1465).

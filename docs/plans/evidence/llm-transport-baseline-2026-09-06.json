@@ -1,0 +1,219 @@
+{
+  "normal": {
+    "first": {
+      "usage": {
+        "cache_creation": 0,
+        "cache_read": 0,
+        "input": 10,
+        "output": 2,
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 5
+        }
+      },
+      "outcome": "ok",
+      "duration_ms": 2
+    },
+    "requests": 10,
+    "outcomes": {
+      "ok": 10
+    },
+    "latency_ms": {
+      "max": 2,
+      "min": 1,
+      "median": 2
+    }
+  },
+  "runtime": {
+    "otp": "29",
+    "schedulers": 10,
+    "elixir": "1.20.2"
+  },
+  "scope": "prepared adapter and Dispatcher over loopback HTTP/1; no aggregate host gate",
+  "source": {
+    "revision": "d5dcb0898dc50cca846a1eabf8fe8daedb2b90e6",
+    "probe_sha256": "90beeaea4917bf17a9c59f72650cf0179a65efddb88407909eef6bb33f617eb4",
+    "lock_sha256": "eb31c55cc3457d922e3d172232bc911ca0c2a97453d780178e3ed3b3dbeaf601",
+    "catalog_sha256": "fbb0e9b619a8762a980455bbc56580400d79285f87cf505f3da435e5230a7a82"
+  },
+  "requirements": {
+    "structured_output_mode": "unsupported",
+    "reservation": {
+      "total_tokens?": true,
+      "cost_tariff": {
+        "id": "pilot-llmdb-2026.8.4",
+        "currency": "USD"
+      }
+    },
+    "usage_guarantees": {
+      "tokens": true,
+      "cost_currency": "USD"
+    },
+    "exact_options": {
+      "max_tokens": 4096
+    },
+    "output_limit_bindings": [
+      "configured"
+    ]
+  },
+  "versions": {
+    "req": "0.7.4",
+    "req_llm": "1.21.1",
+    "llm_db": "2026.8.4",
+    "mint": "1.9.3",
+    "finch": "0.23.0"
+  },
+  "model": "openrouter:deepseek/deepseek-v4-flash",
+  "resources": {
+    "after": {
+      "ports": 4,
+      "processes": 179
+    },
+    "before": {
+      "ports": 4,
+      "processes": 179
+    }
+  },
+  "kernel_normal": {
+    "result": {
+      "status": "ok",
+      "value": {
+        "content": "ok",
+        "model": "pilot",
+        "tokens": {
+          "cache_creation": 0,
+          "cache_read": 0,
+          "input": 10,
+          "output": 2,
+          "total_cost": {
+            "currency": "USD",
+            "microunits": 5
+          }
+        }
+      }
+    },
+    "duration_ms": 19,
+    "ledger": {
+      "cost": {
+        "charged_microusd": 5,
+        "currency": "USD",
+        "limit_microusd": 10000,
+        "refused": 0,
+        "remaining_microusd": 9995,
+        "reserved_microusd": 0,
+        "state": "available"
+      },
+      "total_tokens": {
+        "charged": 12,
+        "limit": 10000,
+        "refused": 0,
+        "remaining": 9988,
+        "reserved": 0,
+        "state": "available"
+      }
+    }
+  },
+  "contention": {
+    "kernel_queued": {
+      "result": {
+        "reason": "llm_request_timeout",
+        "status": "error",
+        "kind": "timeout",
+        "model": "pilot",
+        "retryable?": true
+      },
+      "duration_ms": 254,
+      "ledger": {
+        "cost": {
+          "charged_microusd": 694,
+          "currency": "USD",
+          "limit_microusd": 10000,
+          "refused": 0,
+          "remaining_microusd": 9306,
+          "reserved_microusd": 0,
+          "state": "incomplete"
+        },
+        "total_tokens": {
+          "charged": 4430,
+          "limit": 10000,
+          "refused": 0,
+          "remaining": 5570,
+          "reserved": 0,
+          "state": "incomplete"
+        }
+      }
+    },
+    "queued": {
+      "exception": "RuntimeError",
+      "outcome": "raised",
+      "duration_ms": 5008
+    },
+    "held_requests": 2,
+    "kernel_queued_reached_wire": false,
+    "queued_reached_wire": false,
+    "cancellation": [
+      {
+        "closed": true,
+        "id": "hold-1"
+      },
+      {
+        "closed": true,
+        "id": "hold-2"
+      }
+    ],
+    "cleanup_duration_ms": 0
+  },
+  "recovery": {
+    "first": {
+      "usage": {
+        "cache_creation": 0,
+        "cache_read": 0,
+        "input": 10,
+        "output": 2,
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 5
+        }
+      },
+      "outcome": "ok",
+      "duration_ms": 2
+    },
+    "requests": 10,
+    "outcomes": {
+      "ok": 10
+    },
+    "latency_ms": {
+      "max": 2,
+      "min": 1,
+      "median": 2
+    }
+  },
+  "schema_version": 1,
+  "captured_at": "2026-09-06T20:01:04.465660Z",
+  "catalog_status": "cataloged",
+  "geometry": {
+    "count": 1,
+    "size": 2,
+    "protocols": [
+      "http1"
+    ]
+  },
+  "criteria": {
+    "cleanup_observation_ms": 1000,
+    "queued_request_deadline_ms": 250
+  },
+  "reservation": {
+    "total_tokens": 4411,
+    "cost": {
+      "currency": "USD",
+      "microunits": 692,
+      "tariff_id": "pilot-llmdb-2026.8.4"
+    }
+  },
+  "limitations": [
+    "Fixture closes successful connections; these timings do not measure pool reuse or TLS.",
+    "Direct adapter and one Dispatcher call: complete concurrent workflows remain a separate gate.",
+    "Resource snapshots are diagnostic, not sustained leak or deployment capacity evidence.",
+    "Local observation windows are provisional; deployment performance criteria remain open."
+  ]
+}
