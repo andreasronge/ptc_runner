@@ -27,15 +27,12 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
     end
   end
 
-  test "the materializable multi-turn tutorial carries its explicit run clocks" do
+  test "the materializable multi-turn tutorial relies on the default run clocks" do
     assert {:ok, files} = ExampleLibrary.fetch("kernel-tutorial")
 
     manifest = files["04-multi-turn-agent/ptc.json"] |> Jason.decode!()
 
-    assert manifest["limits"] == %{
-             "run_duration_ms" => 120_000,
-             "workflow_timeout_ms" => 120_000
-           }
+    refute Map.has_key?(manifest, "limits")
   end
 
   test "the materializable cost-budget tutorial includes both spend ceilings and a tariff" do

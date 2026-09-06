@@ -731,10 +731,9 @@ defmodule PtcRunner.Kernel.ManifestTest do
     assert {:ok, lowered_defaults} = Manifest.load(path, lower_ceiling)
 
     # With no manifest request the effective value is the smaller of the
-    # compiled default and the installed ceiling. Only `evaluation_timeout_ms`
-    # is clamped by a ceiling installed below its default; `run_duration_ms`
-    # stays at the lower compiled default.
-    assert lowered_defaults.limits.run_duration_ms == 30_000
+    # compiled default and the installed ceiling. Both values are clamped by
+    # ceilings installed below their compiled defaults.
+    assert lowered_defaults.limits.run_duration_ms == 45_000
     assert lowered_defaults.limits.evaluation_timeout_ms == 500
   end
 

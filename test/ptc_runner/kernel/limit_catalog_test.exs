@@ -32,7 +32,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     {"parallel_timeout_ms", :parallel_timeout_ms, 60_000, 600_000},
     {"protocol_errors", :protocol_errors, 64, 512},
     {"provider_heap_words", :provider_heap_words, 5_000_000, 5_000_000},
-    {"run_duration_ms", :run_duration_ms, 30_000, 1_800_000},
+    {"run_duration_ms", :run_duration_ms, 120_000, 1_800_000},
     {"subordinate_evaluations", :subordinate_evaluations, 128, 2_048},
     {"subordinate_source_bytes", :subordinate_source_bytes, 131_072, 2_000_000},
     {"subordinate_source_checks", :subordinate_source_checks, 128, 2_048},
@@ -40,7 +40,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     {"workflow_capability_calls", :workflow_capability_calls, 256, 4_096},
     {"workflow_capability_calls_per_name", :workflow_capability_calls_per_name, 128, 2_048},
     {"workflow_heap_words", :workflow_heap_words, 8_000_000, 8_000_000},
-    {"workflow_timeout_ms", :workflow_timeout_ms, 30_000, 1_800_000}
+    {"workflow_timeout_ms", :workflow_timeout_ms, 120_000, 1_800_000}
   ]
 
   @installed_only %{

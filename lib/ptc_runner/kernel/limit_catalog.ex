@@ -39,12 +39,11 @@ defmodule PtcRunner.Kernel.LimitCatalog do
   #
   # Counts and per-step times are cheap to leave generous: every one of them is
   # already bounded by the run clock, so a larger ceiling changes how the run is
-  # sliced rather than how much it can spend. `run_duration_ms` keeps a
-  # conservative 30 s default because a model call costs money and takes seconds,
-  # which makes the clock the practical cap on how many of them a runaway can
-  # buy. Its 1 800 s installed ceiling is the default authorization an operator
-  # grants by shipping no host document: an application may request up to 30
-  # minutes unless the operator narrows it. Raising it is one manifest edit.
+  # sliced rather than how much it can spend. The run and workflow defaults equal
+  # the whole-call LLM request default so an ordinary run can contain one request
+  # it is allowed to make. Their 1 800 s installed ceilings are the default
+  # authorization an operator grants by shipping no host document: an
+  # application may request up to 30 minutes unless the operator narrows them.
   #
   # Retained-buffer byte ceilings (evaluation memory, history, events, source,
   # payloads) are 16× their defaults. They bound what one run keeps, not live
@@ -52,8 +51,8 @@ defmodule PtcRunner.Kernel.LimitCatalog do
   # the same headroom the call-count rows use, and 64 MB of retained events is
   # still a buffer, not a sandbox.
   @manifest_defaults [
-    {:run_duration_ms, 30_000, 1_800_000},
-    {:workflow_timeout_ms, 30_000, 1_800_000},
+    {:run_duration_ms, 120_000, 1_800_000},
+    {:workflow_timeout_ms, 120_000, 1_800_000},
     {:evaluation_timeout_ms, 30_000, 600_000},
     {:evaluation_admission_timeout_ms, 10_000, 600_000},
     {:parallel_timeout_ms, 60_000, 600_000},

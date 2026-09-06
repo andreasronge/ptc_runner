@@ -60,9 +60,10 @@ Step 03 launches `ptc-fs-mcp@0.3.0` through `npx`, so Node.js is required and
 the first run may download the package. `ptc docs connecting-tools-with-mcp`
 explains that connection.
 
-Step 04 requests 120-second `run_duration_ms` and `workflow_timeout_ms` limits
-for its two-turn loop. `max_turns` bounds the agent protocol, not the time;
-every turn and provider wait must also finish within both clocks.
+Step 04 uses the default 120-second `run_duration_ms` and
+`workflow_timeout_ms` limits for its two-turn loop. `max_turns` bounds the
+agent protocol, not the time; every turn and provider wait must also finish
+within both clocks.
 
 Step 07 fans twelve requests out with `pmap`, then asks for a two-sentence
 summary. It runs long enough to watch in the Viewer's Live tab;

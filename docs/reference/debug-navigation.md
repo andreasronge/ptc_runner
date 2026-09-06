@@ -489,7 +489,7 @@ diagnosis slot:
 ```
 
 The agent loop runs inside one workflow evaluation, so `workflow_timeout_ms`
-must cover every model turn, not one call. Its installed default of 30 s ends a
+must cover every model turn, not one call. Its installed default of 120 s ends a
 multi-turn investigation mid-flight; the example raises the host ceiling and
 the manifest together.
 The example also requests `normal_event_count: 1024` so trace capture has

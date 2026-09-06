@@ -39,13 +39,10 @@ defmodule PtcRunner.Kernel.TutorialExamplesContractTest do
     end
   end
 
-  test "the multi-turn tutorial declares both Kernel run clocks" do
+  test "the multi-turn tutorial relies on the default Kernel run clocks" do
     manifest = decode!(Path.join([@examples, "04-multi-turn-agent", "ptc.json"]))
 
-    assert manifest["limits"] == %{
-             "run_duration_ms" => 120_000,
-             "workflow_timeout_ms" => 120_000
-           }
+    refute Map.has_key?(manifest, "limits")
   end
 
   test "the file-agent wrapper publishes the MCP result shape to the model" do

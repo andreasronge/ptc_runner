@@ -352,7 +352,7 @@ and failure detail, to be sent to a model vendor. Enable it only when intended.<
 explicit decision so an abstention is a first-class answer rather than an empty
 diagnosis slot:</p><pre><code class="json language-json">&quot;input&quot;: {&quot;value&quot;: {&quot;task&quot;: &quot;...&quot;, &quot;agent&quot;: {&quot;max_turns&quot;: 20, &quot;mission&quot;: &quot;evidence&quot;}}},
 &quot;contracts&quot;: {&quot;result_schema&quot;: {&quot;path&quot;: &quot;report.schema.json&quot;}}</code></pre><p>The agent loop runs inside one workflow evaluation, so <code class="inline">workflow_timeout_ms</code>
-must cover every model turn, not one call. Its installed default of 30 s ends a
+must cover every model turn, not one call. Its installed default of 120 s ends a
 multi-turn investigation mid-flight; the example raises the host ceiling and
 the manifest together.
 The example also requests <code class="inline">normal_event_count: 1024</code> so trace capture has
