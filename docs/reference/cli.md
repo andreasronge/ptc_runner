@@ -469,6 +469,10 @@ record. A turn-limited or failed run also names the class in
 The tables below are generated from the diagnostic catalog the command
 dispatches on, so they list every status a command can exit with and every
 diagnostic behind it.
+A run ended by a signal has no status of its own—the shell reports 128 plus the
+signal number (130 for Ctrl-C and 143 for SIGTERM)—and publishes nothing, not
+even a run id; `artifacts.inspection: true` is the only setting that leaves a
+partial private record, which no shipped command reads.
 
 <!-- BEGIN GENERATED: exit-status catalog (mix ptc.gen_docs) -->
 
