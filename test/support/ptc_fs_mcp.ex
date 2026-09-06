@@ -4,7 +4,7 @@ defmodule PtcRunner.TestSupport.PtcFsMCP do
   with `inherit_environment: false`.
   """
 
-  @package "ptc-fs-mcp@0.1.0"
+  @package "ptc-fs-mcp@0.3.0"
 
   @doc """
   Installs `#{@package}` under `dir` and returns the absolute `dist/cli.js`.

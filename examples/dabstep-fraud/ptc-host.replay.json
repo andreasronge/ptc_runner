@@ -1,31 +1,32 @@
 {
+  "credentials": {"cursor_key": {"file": "replay-cursor-key.txt"}},
   "limits": {
     "evaluation_heap_words": 5000000
   },
   "install": {
     "deepseek": {
       "source": "llm_replay",
-      "installation_revision": "dabstep-evidence-replay-v5",
+      "installation_revision": "dabstep-evidence-replay-v6",
       "fixtures": "replay.jsonl",
       "accepts_data": ["normal", "private_inspection"]
     },
     "luna": {
       "source": "llm_replay",
-      "installation_revision": "dabstep-evidence-replay-v5",
+      "installation_revision": "dabstep-evidence-replay-v6",
       "fixtures": "replay.jsonl",
       "accepts_data": ["normal", "private_inspection"]
     },
     "payments_data": {
       "source": "mcp",
-      "installation_revision": "ptc-fs-mcp-0.2.0-payments-csv",
+      "installation_revision": "ptc-fs-mcp-0.3.0-payments-csv",
       "accepts_data": ["normal", "private_inspection"],
       "transport": {
         "type": "stdio",
         "command": "npx",
         "cwd": ".",
-        "args": ["-y", "ptc-fs-mcp@0.2.0", "--root", "data", "--include", "payments.csv", "--max-read-bytes", "500000", "--max-result-bytes", "1000000"],
+        "args": ["-y", "ptc-fs-mcp@0.3.0", "--root", "data", "--include", "payments.csv", "--cursor-key-env", "PTC_FS_MCP_CURSOR_KEY", "--max-cursor-hash-bytes", "24000000", "--max-read-bytes", "500000", "--max-result-bytes", "1000000"],
         "inherit_environment": true,
-        "env": {},
+        "env": {"PTC_FS_MCP_CURSOR_KEY": {"binding": "cursor_key"}},
         "start_timeout_ms": 60000
       },
       "tools": {

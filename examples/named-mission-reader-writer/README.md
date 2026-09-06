@@ -15,7 +15,7 @@ ptc init named-mission-reader-writer --example named-mission-reader-writer
 ```
 
 Both missions install the published
-[`ptc-fs-mcp@0.1.0`](https://www.npmjs.com/package/ptc-fs-mcp) package through
+[`ptc-fs-mcp@0.3.0`](https://www.npmjs.com/package/ptc-fs-mcp) package through
 `npx`: one installation maps only `read_text_file`, the other only
 `write_text_file`, each with its own confined root. Node.js is required, and
 the first run may download the package. The project selects the trusted

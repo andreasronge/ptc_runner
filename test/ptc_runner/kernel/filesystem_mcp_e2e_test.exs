@@ -2,7 +2,7 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
   use ExUnit.Case, async: false
 
   @moduledoc """
-  Runs the published `ptc-fs-mcp@0.1.0` package through host installation,
+  Runs the published `ptc-fs-mcp@0.3.0` package through host installation,
   manifest selection, MCP stdio, and the PTC-Lisp mission boundary.
 
   The server is intentionally not represented by an Elixir provider builder:
@@ -179,7 +179,7 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
             "search_text" => %{"as" => "workspace.search", "effect" => "read"},
             "read_text_file" => %{"as" => "workspace.read", "effect" => "read"}
           },
-          "installation_revision" => "ptc-fs-mcp-0.1.0",
+          "installation_revision" => "ptc-fs-mcp-0.3.0",
           "ceilings" => %{
             "timeout_ms" => 15_000,
             "max_catalog_tools" => 8,

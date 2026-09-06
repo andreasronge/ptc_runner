@@ -104,11 +104,11 @@ was written this way from three live Luna runs, one per regression case:
 `cmd-0cwcp0r52fj5tbfk7192bf3htx` (off-by-one), and
 `cmd-6r3vft625ney35rpn0p0bgc3jp` (shared-refused).
 
-Exact matching means a recorded session replays only if nothing the model saw
-depends on the machine or the server process. Cursors and heap-kill messages
-do (#1799), so `replay.jsonl` for the full workflow is assembled from the
-final program of each stage of one live run, keyed to the hashes a
-placeholder fixture missed on; `evidence/STUDY.md` has the details. Read a
-miss's hash from the failed replay run with
-`(analysis/read RUN {"collection" "model_exchanges"})`; the item whose result
-is not `ok` carries it.
+Exact matching requires identical model-visible observations. The full workflow
+fixture now records a real multi-turn session with deterministic signed cursors
+from `ptc-fs-mcp@0.3.0`. Both replay hosts use the public
+`replay-cursor-key.txt` for trusted playback; private live runs bind
+`DABSTEP_CURSOR_KEY` from the exact environment file. Replaying a new private
+recording requires that same key, unchanged model input and unchanged CSV bytes.
+The public fixture key carries no adversarial unforgeability claim. See the
+README's recording steps and `evidence/STUDY.md` for acceptance evidence.

@@ -11,7 +11,7 @@ that installation but cannot invent or widen it.
 Start with [Building agents](../guides/building-agents.md) if you have not yet run the
 shipped agent loop. This guide adds one file-reading tool to that working path.
 
-The published [`ptc-fs-mcp@0.1.0`](https://www.npmjs.com/package/ptc-fs-mcp)
+The published [`ptc-fs-mcp@0.3.0`](https://www.npmjs.com/package/ptc-fs-mcp)
 package (MIT, [source](https://github.com/andreasronge/ptc-fs-mcp)) is a
 confined read/write filesystem server over live bytes. Pin it from a host
 document with `npx`; a hermetic spawn that does not inherit `PATH` must run
@@ -44,7 +44,7 @@ As of 2026-08-17, the official
 `2025-11-25` through `initialize` and answers `server/discover` with JSON-RPC
 `-32601 Method not found`. It is therefore not compatible with this PtcRunner
 profile, despite starting and serving legacy clients normally.
-[`ptc-fs-mcp@0.1.0`](https://www.npmjs.com/package/ptc-fs-mcp) implements the
+[`ptc-fs-mcp@0.3.0`](https://www.npmjs.com/package/ptc-fs-mcp) implements the
 required profile and is the deterministic baseline for this reference.
 
 ### Implement the wire profile
@@ -155,7 +155,7 @@ loaded machine, is the usual cause.
 
 ## Run the checked-in file agent
 
-The tutorial launches [`ptc-fs-mcp@0.1.0`](https://www.npmjs.com/package/ptc-fs-mcp)
+The tutorial launches [`ptc-fs-mcp@0.3.0`](https://www.npmjs.com/package/ptc-fs-mcp)
 through `npx`. It requires Node.js 20.19 or newer and `npx`; the first run may
 download that package.
 
@@ -286,7 +286,7 @@ as known.
 
 The
 [`named-mission-reader-writer`](https://github.com/andreasronge/ptc_runner/tree/main/examples/named-mission-reader-writer)
-example shows the complete installation: two occurrences of `ptc-fs-mcp@0.1.0`
+example shows the complete installation: two occurrences of `ptc-fs-mcp@0.3.0`
 with different roots, a mandatory `allow` list on the write mapping, basename
 confinement, and the rule that the caller must reconcile an indeterminate
 result rather than repeat the mutation blindly.

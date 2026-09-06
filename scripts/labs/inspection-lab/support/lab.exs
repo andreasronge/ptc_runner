@@ -12,7 +12,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
   alias PtcRunner.Kernel.RunBuilder
 
   @task "Use every available read-only fixture and return their results in one map."
-  @ptc_fs_mcp_package "ptc-fs-mcp@0.1.0"
+  @ptc_fs_mcp_package "ptc-fs-mcp@0.3.0"
 
   @direct_program ~S|(let [file (tool/filesystem.read {"path" "value.txt"}) native (tool/native-echo {"value" "fixture"}) structured (tool/remote.structured {"query" "fixture"}) text (tool/remote.text {"query" "fixture"}) failed (tool/remote.fail {"query" "fixture"})] (return {"file" file "native" native "structured" structured "text" text "failed" failed}))|
   @wrapper_program ~S|(return {"file" (lab.tools/read-file) "native" (lab.tools/echo) "structured" (lab.tools/remote-structured) "text" (lab.tools/remote-text) "failed" (lab.tools/remote-failure)})|
@@ -229,7 +229,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
         },
         timeout_ms: 15_000,
         max_result_bytes: 64_000,
-        installation_revision: "ptc-fs-mcp-0.1.0"
+        installation_revision: "ptc-fs-mcp-0.3.0"
       )
 
     {:ok, registry} =

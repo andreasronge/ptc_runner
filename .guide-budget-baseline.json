@@ -40,7 +40,7 @@
     "docs/guides/connecting-tools-with-mcp.md": {
       "words": 317,
       "density": 4.0,
-      "blockers": 1,
+      "blockers": 0,
       "tics": 0.7
     },
     "docs/guides/designing-agent-workflows.md": {

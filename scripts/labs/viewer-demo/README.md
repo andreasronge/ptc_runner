@@ -19,7 +19,7 @@ scripts/labs/viewer-demo/run.sh /path/out  # or an explicit directory
 ```
 
 The script regenerates the granted `files/` root, launches
-`ptc-fs-mcp@0.1.0` through `ptc-host.json`, runs each journey with
+`ptc-fs-mcp@0.3.0` through `ptc-host.json`, runs each journey with
 `--trace-dir` and `--inspect` into one owner-only project artifact root, writes
 each trace and inspection artifact under its generated run-reference filename,
 the project document beside it, and prints the `ptc viewer` command that
