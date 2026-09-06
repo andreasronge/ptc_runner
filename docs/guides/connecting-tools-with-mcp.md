@@ -32,16 +32,16 @@ incompatible endpoint fails closed instead of falling back to a legacy
 handshake; check the [protocol compatibility reference](../reference/mcp.md#protocol-compatibility)
 before choosing a server.
 
-## How do I add a real tool?
+## How do I add a tool?
 
-When adding a real tool:
+When adding a tool:
 
 1. install the MCP source in `ptc-host.json`;
 2. map only the upstream operations the mission needs;
 3. give every public mapping an explicit `read` or `write` effect;
-4. select the alias in the intended mission;
+4. select direct tools with `config.model_visible` in the intended mission;
 5. explicitly allow selected write-bearing tools; and
-6. run plain `doctor` before the active `--connect` probe.
+6. run passive doctor before the active `--connect` probe.
 
 ## Was my tool called, and with what?
 

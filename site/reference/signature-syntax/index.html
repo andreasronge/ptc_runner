@@ -125,15 +125,18 @@ offset does not satisfy <code class="inline">:datetime</code>, and neither does 
 value must already be the runtime's datetime value. Signature maps validate
 their declared fields and allow additional fields. A closed map created from a
 JSON Schema with <code class="inline">additionalProperties: false</code> rejects unknown fields instead.</p><h2 id="tool-contracts">Tool contracts</h2><p>Model-visible functions should use named inputs and bounded outputs:</p><pre><code class="text language-text">(path :string, cursor :string?) -&gt; {
-  items [:string],
+  items [{byte_offset :int, text :string}],
   next_cursor :string?,
-  snapshot_hash :string
+  content_hash :string
 }</code></pre><p>The corresponding PTC-Lisp wrapper can call a granted capability and return
 only the declared shape:</p><pre><code class="clojure language-clojure">(defn read-page
-  {:signature &quot;(path :string, cursor :string?) -&gt; :any&quot;}
+  {:signature &quot;(path :string, cursor :string?) -&gt; {items [{byte_offset :int, text :string}], next_cursor :string?, content_hash :string}&quot;}
   [path cursor]
-  (tool/workspace.read
-    (if cursor {&quot;path&quot; path &quot;cursor&quot; cursor} {&quot;path&quot; path})))</code></pre><p>A signature documents and validates a capability; it does not grant one.
+  (let [arguments (if cursor {&quot;path&quot; path &quot;cursor&quot; cursor} {&quot;path&quot; path})
+        response (tool/workspace.read arguments)]
+    (if (= :ok (get response :status))
+      (get response :value)
+      (fail response))))</code></pre><p>A signature documents and validates a capability; it does not grant one.
 <code class="inline">ptc-host.json</code> must still install the tool, and <code class="inline">ptc.json</code> must select it for
 the mission.</p><h2 id="prompt-schemas">Prompt schemas</h2><p>PtcRunner projects signatures into the model-visible tool schema. The schema
 contains the parameter names, nested collection and map shapes, required and

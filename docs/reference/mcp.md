@@ -299,7 +299,7 @@ tool:
 
 (defn read-page
   "Read one bounded UTF-8 page. Pass nil first, then next_cursor."
-  {:signature "(path :string, cursor :string?) -> :any"}
+  {:signature "(path :string, cursor :string?) -> {items [{byte_offset :int, text :string}], next_cursor :string?, content_hash :string}"}
   [path cursor]
   (let [args (if cursor {"path" path "cursor" cursor} {"path" path})
         response (tool/workspace.read args)]
@@ -311,6 +311,11 @@ tool:
 When prompt-visible wrappers exist, the model sees them instead of the raw
 `tool/...` entries. The underlying capability still enforces its schema, byte
 ceiling, timeout, quota, and manifest grant.
+
+To expose a granted tool directly, list its public name in the provider's
+`config.model_visible`. PtcRunner then publishes the input and output schemas
+discovered from the MCP server. Model visibility changes prompt inventory only;
+the manifest grant still decides call authority.
 
 The value handed to `fail` is application data, so it never reaches the envelope
 or the trace. A workflow entry that ends this way reports
