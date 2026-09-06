@@ -7,7 +7,7 @@ defmodule PtcRunner.Kernel.CommandDiagnosticRenderer do
 
   @pointer_pattern ~r/\A\/[A-Za-z0-9._~\/-]+\z/
   @source_name_pattern ~r/\A[A-Za-z0-9._~-][A-Za-z0-9._~\/-]*\z/
-  @terminal_path_pattern ~r/\A[^\x00-\x1F\x7F]+\z/u
+  @terminal_path_pattern ~r/\A[^\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+\z/u
 
   @spec render(CommandDiagnostic.t()) :: {:ok, binary()} | {:error, :invalid_command_diagnostic}
   def render(%CommandDiagnostic{} = diagnostic) do

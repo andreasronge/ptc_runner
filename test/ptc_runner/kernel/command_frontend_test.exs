@@ -1193,6 +1193,25 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
                 "at /sum in work.schema.json (run_ref: #{@run_ref})\n"}
   end
 
+  test "application paths escape Unicode terminal controls" do
+    outcome =
+      valid_outcome(CommandDiagnostic.new!(:application, :application_not_found))
+
+    for {control, escaped} <- [
+          {"\u009B", ~S(\x9B)},
+          {"\u2028", ~S(\u2028)},
+          {"\u202E", ~S(\u202E)}
+        ] do
+      path = "missing#{control}forged-error.json"
+
+      assert CommandRenderer.render(outcome, nil, application_path: path) ==
+               {:stderr,
+                "error: application/application_not_found: " <>
+                  "the application manifest does not exist at " <>
+                  ~s|"missing#{escaped}forged-error.json" (run_ref: #{@run_ref})\n|}
+    end
+  end
+
   test "structured argument rejections and envelope publication match exact fixtures" do
     for {name, argv} <- [
           {"unknown_switch", ["run", "ptc.json", "--caller-secret", "value"]},
