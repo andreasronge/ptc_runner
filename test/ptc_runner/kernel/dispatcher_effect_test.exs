@@ -481,11 +481,13 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
 
     callback = fn -> raise "canonical-separation-private-secret" end
 
+    # This checks exception projection, not scheduling latency under suite load.
     {captured_result, captured_events} =
-      dispatch_mission_with_events([], 100, callback, inspection_sink)
+      dispatch_mission_with_events([], 5_000, callback, inspection_sink)
 
-    {plain_result, plain_events} = dispatch_mission_with_events([], 100, callback)
+    {plain_result, plain_events} = dispatch_mission_with_events([], 5_000, callback)
 
+    assert %{kind: :provider_error, reason: :exception} = captured_result
     assert captured_result == plain_result
 
     captured_stop = Enum.find(captured_events, &(&1.type == "capability-stopped"))

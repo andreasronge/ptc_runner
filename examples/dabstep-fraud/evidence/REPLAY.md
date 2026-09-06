@@ -70,6 +70,11 @@ Exact matching was not weakened.
 
 ## Friction and bounded evidence
 
+- The first PR push exposed a 100 ms deadline in the exception-projection
+  comparison test. Under the full suite, the captured path timed out while the
+  plain path raised as expected; the exact test passed alone with seed 562444.
+  This non-timing assertion now uses a 5 s deadline and explicitly requires an
+  exception result, so two matching timeouts cannot satisfy it.
 - Deterministic hashing defaults to 16 MiB, below this CSV's size. The host
   now supplies a 24,000,000-byte hashing ceiling. This is a server work budget,
   separate from the PTC-Lisp heap; neither limit was made unbounded.
