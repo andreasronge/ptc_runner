@@ -26,6 +26,29 @@ and [MCP gateway #1465](https://github.com/andreasronge/ptc_runner/issues/1465).
 This plan stages transport evaluation within that work; it does not close
 either issue or replace the gateway's release requirements.
 
+## Next production slice: host-owned run admission
+
+The first production foundation adds `PtcRunner.Kernel.RunAdmission` around
+the canonical one-shot execution owner. It accepts an already prepared run,
+keeps publication ownership with its caller, refuses full capacity before
+consumption, and retains a lease through provider cleanup after caller death.
+Unexpected execution-owner death or cleanup failure fences the domain. A dead
+admission owner cancels active runs and is not automatically restarted.
+Workflow sandboxes now use their existing caller-death watchdog as well.
+
+This deliberately stops before an HTTP/MCP gateway: the host must connect
+request disconnect to the executing caller's lifetime and bound requests and
+preparation before this API. It does not implement aggregate physical LLM
+admission, change transport selection, or configure ReqLLM pools. The lab's
+HTTP-disconnect fixture remains experimental; it is not the production
+admission implementation.
+
+Continue with a gateway request-owner integration over this API, including a
+real disconnect test, then define deployment load and latency/connection
+budgets before sustained TLS/reuse comparisons. Upstream transport fixes still
+require a reviewed published release and explicit dependency pin before the
+opt-in adapter can be promoted. ReqLLM and LLMDB remain in place.
+
 ## Decision to make
 
 Does `ptc_llm_http` give concurrent hosted PtcRunner runs a meaningful,

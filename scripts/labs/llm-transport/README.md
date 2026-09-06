@@ -33,6 +33,12 @@ The observation windows are provisional diagnostic bounds. A direct adapter
 deadline is not evidence about the Dispatcher-owned whole-call cutoff.
 No runtime defaults are changed by adding this lab.
 
+Evidence capture requires a clean root checkout. The comparison additionally
+requires a clean upstream checkout when `PTC_PILOT_REPORT` is set; both are
+checked again before writing the report. Commit changes before recording
+acceptance evidence. Omit `PTC_PILOT_REPORT` for ordinary local comparison tests.
+Historical reports without this check are diagnostic observations only.
+
 ## Opt-in comparison
 
 The experimental adapter lives only in this lab. It delegates preparation,
@@ -50,7 +56,9 @@ PTC_PILOT_REPORT=/tmp/ptc-pilot-comparison.json \
   mix run scripts/labs/llm-transport/compare.exs
 ```
 
-Keep the path variable set for every Mix command in that build. Unset it,
+Both comparison and live probes reject a missing/empty path or unavailable
+required APIs before issuing requests. Keep the path variable set for every
+Mix command in that build. Unset it,
 then run `mix deps.get` and `mix compile` to return to the published pin.
 Production builds ignore the override; the dependency remains dev/test-only.
 The comparison uses no real credentials or public network. It fails on a

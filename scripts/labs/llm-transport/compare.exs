@@ -1,5 +1,5 @@
-unless System.get_env("PTC_LLM_HTTP_PATH"),
-  do: raise("set PTC_LLM_HTTP_PATH to the tested pilot checkout")
+Code.require_file("support/preflight.exs", __DIR__)
+PtcRunner.Labs.TransportPreflight.require_http_checkout!()
 
 Code.require_file("../../../test/support/mcp_http_fixture.ex", __DIR__)
 Code.require_file("../../../test/support/test_helpers.ex", __DIR__)
@@ -10,3 +10,4 @@ Code.require_file("support/workflow_probe.exs", __DIR__)
 Code.require_file("support/baseline.exs", __DIR__)
 Code.require_file("support/serving_host.exs", __DIR__)
 Code.require_file("support/comparison_test.exs", __DIR__)
+Code.require_file("support/preflight_test.exs", __DIR__)

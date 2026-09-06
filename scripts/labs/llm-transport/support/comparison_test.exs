@@ -8,6 +8,18 @@ defmodule PtcRunner.Labs.ComparisonTest do
   alias PtcRunner.TestSupport.MCPHTTPFixture
   import PtcRunner.TestSupport.Eventually
 
+  @source_identity (if System.get_env("PTC_PILOT_REPORT") do
+                      %{
+                        runner: PtcRunner.Labs.TransportPreflight.clean_source!("."),
+                        transport:
+                          PtcRunner.Labs.TransportPreflight.clean_source!(
+                            System.fetch_env!("PTC_LLM_HTTP_PATH")
+                          )
+                      }
+                    else
+                      %{runner: nil, transport: nil}
+                    end)
+
   setup do
     owner = self()
 
@@ -353,15 +365,16 @@ defmodule PtcRunner.Labs.ComparisonTest do
       end
 
     if path = System.get_env("PTC_PILOT_REPORT") do
-      {root, 0} = System.cmd("git", ["rev-parse", "HEAD"])
+      PtcRunner.Labs.TransportPreflight.verify_source!(".", @source_identity.runner)
 
-      {transport, 0} =
-        System.cmd("git", ["-C", System.fetch_env!("PTC_LLM_HTTP_PATH"), "rev-parse", "HEAD"])
+      PtcRunner.Labs.TransportPreflight.verify_source!(
+        System.fetch_env!("PTC_LLM_HTTP_PATH"),
+        @source_identity.transport
+      )
 
       report = %{
         captured_at: DateTime.to_iso8601(DateTime.utc_now()),
-        root_base: String.trim(root),
-        transport: String.trim(transport),
+        source: @source_identity,
         probe_hashes:
           Map.new(Path.wildcard("scripts/labs/llm-transport/**/*.{ex,exs}"), fn path ->
             {path, Base.encode16(:crypto.hash(:sha256, File.read!(path)), case: :lower)}

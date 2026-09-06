@@ -22,6 +22,8 @@ defmodule PtcRunner.Labs.LLMTransportBaseline do
   @tariff %{currency: "USD", id: "pilot-llmdb-2026.8.4"}
 
   def run do
+    identity = PtcRunner.Labs.TransportPreflight.clean_source!(".")
+
     if Application.started_applications() |> Enum.any?(&(elem(&1, 0) == :req_llm)) do
       raise "run in a fresh Mix VM; the probe owns provider application configuration"
     end
@@ -48,7 +50,7 @@ defmodule PtcRunner.Labs.LLMTransportBaseline do
       %{
         schema_version: 1,
         captured_at: DateTime.utc_now() |> DateTime.to_iso8601(),
-        source: source(),
+        source: source(identity),
         scope: "prepared adapter and Dispatcher over loopback HTTP/1; no aggregate host gate",
         model: @model,
         catalog_status: status,
@@ -298,11 +300,12 @@ defmodule PtcRunner.Labs.LLMTransportBaseline do
     end)
   end
 
-  defp source do
-    {revision, 0} = System.cmd("git", ["rev-parse", "HEAD"])
+  defp source(identity) do
+    PtcRunner.Labs.TransportPreflight.verify_source!(".", identity)
 
     %{
-      revision: String.trim(revision),
+      revision: identity.revision,
+      clean: true,
       probe_sha256: hash_file(__ENV__.file),
       lock_sha256: hash_file("mix.lock"),
       catalog_sha256: hash_file(Application.app_dir(:llm_db, "priv/llm_db/snapshot.json"))

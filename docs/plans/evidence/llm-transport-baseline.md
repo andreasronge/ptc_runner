@@ -1,5 +1,11 @@
 # Initial ReqLLM baseline observations
 
+**Provenance limitation:** this historical capture did not record or enforce
+clean root and upstream worktrees. Its commit IDs and selected hashes do not
+prove the identity of every executed source file. Retain it as diagnostic
+observations, not pinned acceptance evidence. New captures require clean
+checkouts before and after execution and refuse revision changes.
+
 Date: 2026-09-06. Milestone 1 is in progress; this is the first local
 characterization, not its exit evidence. The
 [pilot plan](../llm-transport-pilot.md) owns the remaining scope.

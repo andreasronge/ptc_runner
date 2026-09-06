@@ -1,3 +1,4 @@
+Code.require_file("support/preflight.exs", __DIR__)
 Code.require_file("../../../test/support/mcp_http_fixture.ex", __DIR__)
 Code.require_file("../../../test/support/test_helpers.ex", __DIR__)
 Code.require_file("support/baseline.exs", __DIR__)

@@ -1,6 +1,9 @@
 # Explicit live probe: one 512-token text request per adapter, optionally the
 # checked-in three-turn workflow at its original 4096-token cap. No retries or
 # response content are printed. The first argument is an exact env file.
+Code.require_file("support/preflight.exs", __DIR__)
+PtcRunner.Labs.TransportPreflight.require_http_checkout!()
+
 Code.require_file("support/http_adapter.exs", __DIR__)
 Code.require_file("../../../test/support/test_helpers.ex", __DIR__)
 Code.require_file("../../../test/support/run_lifecycle.ex", __DIR__)

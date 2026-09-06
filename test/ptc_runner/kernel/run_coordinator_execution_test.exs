@@ -484,19 +484,10 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     # completion, and could lose even outside full-suite load (reproduced
     # failing >50% of runs combined with just 3 other test files).
     #
-    # `repeats: 1` (~6s) is deliberately the smallest useful margin rather
-    # than something larger: `Runner.execute_workflow/4` calls
-    # `Lisp.run_native/2` without `link: true`, so `Process.exit(worker_pid,
-    # :kill)` below (via the ExecutionSessionOwner abort path) does not
-    # itself terminate the underlying sandbox process -- it only monitors
-    # it. On any test failure before that point, this loop's sandbox keeps
-    # running, unlinked, until its own deadline. That is a real gap
-    # (arguably the workflow path should link like `repl_session.ex` does),
-    # but fixing it is a production change beyond what a flaky-test fix
-    # warrants -- keeping this loop short bounds the cost of the gap
-    # instead. 6s still dwarfs any plausible harness-setup delay between
-    # here and the `Process.alive?` check below, so a real regression is a
-    # far likelier explanation for a failure than hardware variance.
+    # The workflow sandbox now watchdog-monitors its execution worker. Caller
+    # death aborts that worker and asynchronously kills the sandbox; the
+    # dedicated run-admission regression observes the sandbox DOWN directly.
+    # The short body still bounds this fixture if an earlier assertion fails.
     #
     # `evaluation_timeout_ms` does not apply here: that governs subordinate
     # mission evaluations, not this top-level workflow call, which uses

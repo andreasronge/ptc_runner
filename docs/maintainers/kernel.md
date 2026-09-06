@@ -117,6 +117,22 @@ One-shot runs use `ExecutionSessionOwner` whether or not they select a
 provider. The owner opens canonical and optional private sinks, monitors its
 caller and worker, and returns sealed execution evidence.
 
+An embedding host can supervise one `RunAdmission` owner with
+`max_concurrent_runs: n` and route prepared runs through its `execute/3`
+(provider-free) or `execute/5` (catalog and host-owned runtime services).
+Admission refuses excess runs before preparation consumption or publication
+claiming. Its lease belongs to `ExecutionSessionOwner` and lasts through
+provider cleanup, including after request-caller death. Cleanup failure or an
+execution owner dying without acknowledging cleanup fences that capacity
+domain. It does not restart automatically; drain old work before replacing it.
+Admission-owner death aborts the executions it admitted.
+
+This is a bound on executions using that explicit owner. The embedding host
+still bounds inbound requests, preparation and compilation, provisional
+admission processes, and control mailboxes. Physical LLM attempts and connection
+pools have separate limits; this API does not configure or start ReqLLM.
+Publication remains the caller's responsibility after receiving sealed evidence.
+
 Provider-bearing runs open one `ProviderActiveSession` inside that owner.
 `ProviderAcquisition` prepares and acquires selected providers in dependency
 order. Each scope registers resources through `ResourceRegistrar` before it can
@@ -144,6 +160,9 @@ a separate read followed by an update is a race.
 Normal completion, timeout, caller death, worker death, and termination all
 drain the same owned resource set. Provider work is drained before provider
 closers run. Cleanup remains bounded even when a callback or owner fails.
+The workflow Lisp sandbox also watches its execution worker and is killed when
+that worker dies, so request cancellation cannot leave it evaluating until its
+own deadline.
 
 `PublicationAuthority.authorize/4` anchors and reserves destinations before
 provider activity. `ArtifactPublisher` later consumes only the sealed
