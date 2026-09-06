@@ -446,8 +446,12 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
           {:error, reason} when reason in [:outside_application_source, :invalid_logical_name] ->
             ComponentOverride.load(path)
             |> case do
-              {:ok, override} -> {:ok, {override, :external}}
-              {:error, _reason} = error -> source_error(error, :component_override)
+              {:ok, override} ->
+                source_name = external_source_name(source, override)
+                {:ok, {override, {:external, source_name}}}
+
+              {:error, _reason} = error ->
+                source_error(error, :component_override)
             end
         end
     end
@@ -474,7 +478,8 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   defp apply_override(manifest, nil), do: {:ok, manifest, []}
 
   defp apply_override(manifest, {%ComponentOverride{} = override, accounting})
-       when accounting in [:captured, :external] do
+       when accounting == :captured or
+              (is_tuple(accounting) and elem(accounting, 0) == :external) do
     result =
       with {:ok, workflow, missions} <- apply_qualified_override(manifest, override) do
         effective = %{manifest | workflow_components: workflow, missions: missions}
@@ -483,6 +488,13 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
       end
 
     source_error(result, :component_override)
+  end
+
+  defp external_source_name(source, override) do
+    case ApplicationSource.logical_name(source, ComponentOverride.source_path(override)) do
+      {:ok, name} -> name
+      {:error, _reason} -> nil
+    end
   end
 
   defp source_error({:ok, _value} = success, _role), do: success
@@ -799,11 +811,9 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
 
       override_documents =
         Enum.flat_map(override_pairs, fn
-          {_identity, override, :external} ->
-            [
-              {:component_override, :override_descriptor, override.descriptor_bytes},
-              {:component_override, :override_source, byte_size(override.source)}
-            ]
+          {_identity, override, {:external, source_name}} ->
+            [{:component_override, :override_descriptor, override.descriptor_bytes}] ++
+              external_source_document(override, source_name, accounting.captured_documents)
 
           {_identity, _override, :captured} ->
             []
@@ -817,6 +827,16 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
       account_documents(added, accounting)
     end
   end
+
+  defp external_source_document(override, source_name, captured_documents)
+       when is_binary(source_name) do
+    if Map.get(captured_documents, source_name) == :crypto.hash(:sha256, override.source),
+      do: [],
+      else: [{:component_override, :override_source, byte_size(override.source)}]
+  end
+
+  defp external_source_document(override, nil, _captured_documents),
+    do: [{:component_override, :override_source, byte_size(override.source)}]
 
   defp account_documents(documents, accounting) do
     initial = {:ok, accounting.document_count, accounting.document_bytes}

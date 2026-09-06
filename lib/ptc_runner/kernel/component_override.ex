@@ -103,7 +103,8 @@ defmodule PtcRunner.Kernel.ComponentOverride do
     :provenance,
     :descriptor_bytes
   ]
-  defstruct @enforce_keys
+  defstruct @enforce_keys ++
+              [source_path: nil]
 
   @type provenance :: %{optional(binary()) => binary() | boolean()}
 
@@ -115,7 +116,8 @@ defmodule PtcRunner.Kernel.ComponentOverride do
           source: binary(),
           origin: binary(),
           provenance: provenance() | nil,
-          descriptor_bytes: non_neg_integer()
+          descriptor_bytes: non_neg_integer(),
+          source_path: binary() | nil
         }
 
   @type error ::
@@ -151,7 +153,7 @@ defmodule PtcRunner.Kernel.ComponentOverride do
          :ok <- valid_candidate_name(decoded["path"]),
          {:ok, source} <- read_source(directory, decoded["path"]),
          :ok <- verify_source_hash(source, decoded["source_hash"]) do
-      {:ok, override(decoded, raw, source)}
+      {:ok, override(decoded, raw, source, Path.join(directory, decoded["path"]))}
     else
       {:error, {:component_override_path, _path, :invalid_override_descriptor}} = error ->
         error
@@ -307,6 +309,10 @@ defmodule PtcRunner.Kernel.ComponentOverride do
   def attribution(%__MODULE__{provenance: nil}), do: %{}
   def attribution(%__MODULE__{provenance: provenance}), do: provenance
 
+  @doc false
+  @spec source_path(t()) :: binary() | nil
+  def source_path(%__MODULE__{source_path: source_path}), do: source_path
+
   @doc "Hashes component source with the descriptor's `sha256:` convention."
   @spec hash(binary()) :: binary()
   def hash(source) when is_binary(source),
@@ -319,7 +325,7 @@ defmodule PtcRunner.Kernel.ComponentOverride do
     end
   end
 
-  defp override(decoded, descriptor, source) do
+  defp override(decoded, descriptor, source, source_path \\ nil) do
     %__MODULE__{
       target: decoded["target"],
       component_id: decoded["component_id"],
@@ -328,7 +334,8 @@ defmodule PtcRunner.Kernel.ComponentOverride do
       source: source,
       origin: "component-override",
       provenance: decoded["provenance"],
-      descriptor_bytes: byte_size(descriptor)
+      descriptor_bytes: byte_size(descriptor),
+      source_path: source_path
     }
   end
 
