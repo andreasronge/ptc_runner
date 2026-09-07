@@ -6,3 +6,34 @@ set -euo pipefail
 # fetch dependencies, and validate the pinned toolchain before an agent starts.
 ./scripts/worktree.sh seed .
 ./scripts/worktree.sh init .
+
+# `mix nightly` reads the real DABStep dataset, which is gitignored and fetched
+# out of band, so a fresh worktree starts without it and five nightly cases
+# fail: two on the missing `examples/dabstep-fraud/data/payments.csv`, three on
+# `:mcp_transport_error`, because `ptc-fs-mcp --root data` cannot start without
+# the root. AGENTS.md requires `mix nightly` for the `mix ptc run` downstream
+# path, so an agent sent at that path is blocked on a prerequisite it cannot
+# restore itself -- it is told not to create worktrees, and the failure only
+# surfaces at the end of a long validation run. `nightly.yml` already fetches
+# the same dataset for CI; this is the same restore for a managed worktree.
+dabstep=examples/dabstep-fraud
+main_checkout="$(git worktree list --porcelain |
+  awk '/^worktree /{sub(/^worktree /, ""); print; exit}')"
+
+# The main checkout is the cache here too, exactly as it is for the build
+# artifacts above. Correctness never rests on the copy: fetch-data.sh verifies
+# whatever is on disk against its pinned checksums and re-downloads only what
+# fails, so a torn copy heals itself and a good one costs no network.
+for cached in data reference; do
+  if [ ! -e "$dabstep/$cached" ] && [ -d "$main_checkout/$dabstep/$cached" ]; then
+    cp -Rp "$main_checkout/$dabstep/$cached" "$dabstep/$cached" ||
+      rm -rf "${dabstep:?}/$cached"
+  fi
+done
+
+# Never fatal. A task that never reaches the nightly path must still start when
+# the dataset host is unreachable; it then fails at `mix nightly` exactly as it
+# does today, with the message that names the missing fixture.
+if ! (cd "$dabstep" && ./fetch-data.sh); then
+  printf '%s\n' "⚠️  DABStep dataset unavailable — mix nightly will fail until it is fetched" >&2
+fi
