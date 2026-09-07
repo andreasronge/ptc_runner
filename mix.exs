@@ -196,12 +196,7 @@ defmodule PtcRunner.MixProject do
       {:jason, "~> 1.4"},
       {:jsv, "~> 0.22.0"},
       {:nimble_parsec, "~> 1.4"},
-      # Held at 1.9.x: under Mint 1.10.0 a peer that stalls mid-response reaches
-      # `MCPHTTPAdapter` as a transport error rather than the receive-ceiling
-      # refusal, so the ceiling stops failing closed with `:response_exceeded`.
-      # `mcp_http_adapter_test` covers the four shapes. Raise this only with a
-      # classifier that restores that verdict.
-      {:mint, "~> 1.9.0"},
+      {:mint, "~> 1.10"},
       {:req, "~> 0.7.3"},
       {:telemetry, "~> 1.0"},
       {:stream_data, "~> 1.1", only: [:test, :dev]},
