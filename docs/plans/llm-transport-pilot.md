@@ -26,7 +26,7 @@ and [MCP gateway #1465](https://github.com/andreasronge/ptc_runner/issues/1465).
 This plan stages transport evaluation within that work; it does not close
 either issue or replace the gateway's release requirements.
 
-## Next production slice: host-owned run admission
+## Implemented foundation: host-owned run admission
 
 The first production foundation adds `PtcRunner.Kernel.RunAdmission` around
 the canonical one-shot execution owner. It accepts an already prepared run,
@@ -36,18 +36,40 @@ Unexpected execution-owner death or cleanup failure fences the domain. A dead
 admission owner cancels active runs and is not automatically restarted.
 Workflow sandboxes now use their existing caller-death watchdog as well.
 
-This deliberately stops before an HTTP/MCP gateway: the host must connect
-request disconnect to the executing caller's lifetime and bound requests and
+This remains a foundation for the gateway: the host must bound requests and
 preparation before this API. It does not implement aggregate physical LLM
-admission, change transport selection, or configure ReqLLM pools. The lab's
-HTTP-disconnect fixture remains experimental; it is not the production
-admission implementation.
+admission, change transport selection, or configure ReqLLM pools.
 
-Continue with a gateway request-owner integration over this API, including a
-real disconnect test, then define deployment load and latency/connection
-budgets before sustained TLS/reuse comparisons. Upstream transport fixes still
-require a reviewed published release and explicit dependency pin before the
-opt-in adapter can be promoted. ReqLLM and LLMDB remain in place.
+### Branch validation: HTTP request ownership (2026-09-07)
+
+The loopback `ServingHost` now connects socket lifetime to a bounded request
+worker using the existing `BoundedWorker` cancellation guards. That worker
+prepares the support-triage manifest, calls `RunAdmission.execute/5`, publishes
+its canonical execution report, and closes publication before returning JSON.
+The lab's separate workflow counter and unconditional SSE “complete” response
+are removed. Both adapters use the same inline capability and shared execution
+admission domain; provider applications are host-started.
+
+Socket tests exercise published results and readmission, overload before
+provider work, disconnect while a provider closer is held, connection-process
+death, request-worker death, request timeout, and cleanup failure fencing later
+requests. In particular, a closed client still occupies its execution slot
+until the held closer finishes. Error responses expose only fixed codes.
+
+Keep this work on `codex/reqllm-feature-inventory` and the upstream pilot on
+`codex/ptc-runner-pilot-parity` until acceptance evidence justifies promotion.
+The HTTP fixture is still lab code, uses an internal worker helper, compiles
+per request, and installs a custom inline provider rather than a shipped host
+installation. It does not prove MCP conformance, production ingress bounds,
+compile-once serving, authentication, or pooled TLS reuse.
+
+Next, carry this tested lifecycle into the narrow sibling gateway slice with
+bounded ingress and the real host installation, following #1465's public API
+boundary. Define deployment load and latency/connection budgets before
+sustained TLS/reuse comparisons. Upstream transport fixes still require a
+reviewed published release and explicit dependency pin before adapter
+promotion. ReqLLM and LLMDB remain in place; no merge, release, or default
+transport change is part of this branch validation.
 
 ## Decision to make
 

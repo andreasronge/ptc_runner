@@ -132,6 +132,11 @@ still bounds inbound requests, preparation and compilation, provisional
 admission processes, and control mailboxes. Physical LLM attempts and connection
 pools have separate limits; this API does not configure or start ReqLLM.
 Publication remains the caller's responsibility after receiving sealed evidence.
+A transport request worker must publish before it exits: returning the sealed
+outcome to a connection process for later publication outlives the claimant.
+Keep the connection responsive while that worker executes, and tie worker
+cancellation to disconnect and connection-process death. Cancellation ends the
+request's work, but only execution-owner cleanup releases its admission slot.
 
 Provider-bearing runs open one `ProviderActiveSession` inside that owner.
 `ProviderAcquisition` prepares and acquires selected providers in dependency

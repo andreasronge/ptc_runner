@@ -4,6 +4,7 @@ Logger.configure(level: :critical)
 defmodule PtcRunner.Labs.ComparisonTest do
   use ExUnit.Case, async: false
   alias PtcRunner.Labs.{HttpAdapter, WorkflowProbe}
+  alias PtcRunner.Kernel.RunAdmission
   alias PtcRunner.LLM.{Invocation, ReqLLMAdapter, Requirements}
   alias PtcRunner.TestSupport.MCPHTTPFixture
   import PtcRunner.TestSupport.Eventually
@@ -458,46 +459,216 @@ defmodule PtcRunner.Labs.ComparisonTest do
     end
   end
 
-  test "HTTP disconnect cancels the admitted workflow and rejects excess workflows locally", %{
+  @tag :http_cold_start
+  test "HTTP success returns the published workflow value and readmits" do
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+
+    for adapter <- [ReqLLMAdapter, HttpAdapter] do
+      server = workflow_server(host, adapter)
+
+      for _ <- 1..2 do
+        assert_success(connect(server.endpoint))
+        assert {:ok, %{in_use: 0, status: :ready}} = RunAdmission.snapshot(host)
+      end
+    end
+  end
+
+  @tag :http_rejected_preparation
+  test "rejected preparations do not accumulate in a surviving caller" do
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+    GenServer.stop(host)
+    {:links, initial_links} = Process.info(self(), :links)
+
+    for _ <- 1..3 do
+      assert {:error, :run_admission_unavailable} =
+               WorkflowProbe.run_admitted(host, ReqLLMAdapter, requirements())
+
+      {:links, links} = Process.info(self(), :links)
+
+      for pid <- links -- initial_links do
+        ref = Process.monitor(pid)
+        assert_receive {:DOWN, ^ref, :process, ^pid, _}, 1_000
+      end
+    end
+
+    refute_received {:wire, _}
+  end
+
+  test "HTTP disconnect retains admission until provider cleanup finishes", %{
     responder: responder,
     runtime: runtime
   } do
-    hold_responses(responder)
-    host = start_supervised!({PtcRunner.Labs.ServingHost, 1})
+    parent = self()
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
 
     for adapter <- [ReqLLMAdapter, HttpAdapter] do
+      hold_responses(responder)
+
       server =
-        MCPHTTPFixture.start(fn _ ->
-          {:script,
-           fn socket ->
-             PtcRunner.Labs.ServingHost.serve(host, socket, fn ->
-               WorkflowProbe.run(adapter, requirements())
-             end)
-           end}
-        end)
+        workflow_server(host, adapter,
+          close: fn ->
+            send(parent, {:closing, self()})
+            receive do: (:release -> :ok)
+          end
+        )
 
-      try do
-        socket = connect(server.endpoint)
-        assert {:ok, response} = :gen_tcp.recv(socket, 0, 5_000)
-        assert response =~ "200 OK"
-        assert_receive {:holding, _}, 5_000
-        assert PtcRunner.Labs.ServingHost.snapshot(host) == 1
-        assert_receive {:wire, _}
-        extra = connect(server.endpoint)
-        assert {:ok, response} = :gen_tcp.recv(extra, 0, 5_000)
-        assert response =~ "503 Busy"
-        :gen_tcp.close(extra)
-        refute_received {:wire, _}
-        :gen_tcp.close(socket)
-        assert_receive :socket_closed, 5_000
-        assert_eventually(fn -> PtcRunner.Labs.ServingHost.snapshot(host) == 0 end)
+      socket = connect(server.endpoint)
+      assert_receive {:holding, _}, 5_000
+      assert_receive {:wire, _}
+      assert_busy(connect(server.endpoint))
+      refute_received {:wire, _}
+      :gen_tcp.close(socket)
+      assert_receive :socket_closed, 5_000
+      assert_receive {:closing, closer}, 5_000
+      assert {:ok, %{in_use: 1, status: :ready}} = RunAdmission.snapshot(host)
+      assert_busy(connect(server.endpoint))
+      refute_received {:wire, _}
+      send(closer, :release)
+      assert_drained(host, runtime)
+      Agent.update(responder, fn _ -> fn request -> json(WorkflowProbe.response(request)) end end)
+      recovery = workflow_server(host, adapter)
+      assert_success(connect(recovery.endpoint))
+      # Drain recovery exchanges before asserting no wire work in the next iteration.
+      assert_receive {:wire, _}
+      assert_receive {:wire, _}
+    end
+  end
 
-        assert_eventually(fn ->
-          match?({:ok, %{in_use: 0}}, PtcLlmHttp.Runtime.snapshot(runtime))
-        end)
-      after
-        server.close.()
-      end
+  test "connection-process death cancels the workflow and its provider socket", %{
+    responder: responder,
+    runtime: runtime
+  } do
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+    hold_responses(responder)
+
+    for adapter <- [ReqLLMAdapter, HttpAdapter] do
+      server = workflow_server(host, adapter)
+      socket = connect(server.endpoint)
+      assert_receive {:connection, connection}, 5_000
+      assert_receive {:request_worker, worker}, 5_000
+      ref = Process.monitor(worker)
+      assert_receive {:holding, _}, 5_000
+      Process.exit(connection, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^worker, _}, 5_000
+      assert {:error, :closed} = :gen_tcp.recv(socket, 0, 5_000)
+      assert_receive :socket_closed, 5_000
+      assert_drained(host, runtime)
+    end
+  end
+
+  test "a failed provider closer returns a closed error and fences HTTP admission" do
+    for adapter <- [ReqLLMAdapter, HttpAdapter] do
+      host =
+        start_supervised!({RunAdmission, max_concurrent_runs: 1}, id: {:run_admission, adapter})
+
+      server = workflow_server(host, adapter, close: fn -> raise "private-closer-failure" end)
+      {head, body} = response(connect(server.endpoint))
+      assert head =~ "500 Internal Server Error"
+      assert body == %{"error" => "run_failed"}
+      assert_receive {:wire, _}
+      assert_receive {:wire, _}
+      assert {:ok, %{status: :unavailable}} = RunAdmission.snapshot(host)
+      {head, body} = response(connect(server.endpoint))
+      assert head =~ "503 Unavailable"
+      assert body == %{"error" => "run_admission_unavailable"}
+      refute_received {:wire, _}
+    end
+  end
+
+  @tag :http_cold_timeout
+  test "HTTP timeout cancels a blocked workflow and returns a bounded error", %{
+    responder: responder,
+    runtime: runtime
+  } do
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+    hold_responses(responder)
+
+    for adapter <- [ReqLLMAdapter, HttpAdapter] do
+      server = workflow_server(host, adapter, [], timeout_ms: 5_000)
+      socket = connect(server.endpoint)
+      assert_receive {:holding, _}, 5_000
+      {head, body} = response(socket)
+      assert head =~ "504 Gateway Timeout"
+      assert body == %{"error" => "request_timeout"}
+      assert_receive :socket_closed, 5_000
+      assert_drained(host, runtime)
+    end
+  end
+
+  test "request-worker death returns an error and drains admission", %{
+    responder: responder,
+    runtime: runtime
+  } do
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+    hold_responses(responder)
+
+    for adapter <- [ReqLLMAdapter, HttpAdapter] do
+      server = workflow_server(host, adapter)
+      socket = connect(server.endpoint)
+      assert_receive {:request_worker, worker}, 5_000
+      assert_receive {:holding, _}, 5_000
+      Process.exit(worker, :kill)
+      {head, body} = response(socket)
+      assert head =~ "500 Internal Server Error"
+      assert body == %{"error" => "run_failed"}
+      assert_receive :socket_closed, 5_000
+      assert_drained(host, runtime)
+    end
+  end
+
+  defp workflow_server(host, adapter, run_opts \\ [], http_opts \\ []) do
+    parent = self()
+
+    server =
+      MCPHTTPFixture.start(fn _ ->
+        {:script,
+         fn socket ->
+           send(parent, {:connection, self()})
+
+           PtcRunner.Labs.ServingHost.serve(
+             socket,
+             fn ->
+               send(parent, {:request_worker, self()})
+               WorkflowProbe.run_admitted(host, adapter, requirements(), run_opts)
+             end,
+             http_opts
+           )
+         end}
+      end)
+
+    on_exit(server.close)
+    server
+  end
+
+  defp assert_drained(host, runtime) do
+    assert_eventually(fn ->
+      match?({:ok, %{in_use: 0, status: :ready}}, RunAdmission.snapshot(host))
+    end)
+
+    assert_eventually(fn -> match?({:ok, %{in_use: 0}}, PtcLlmHttp.Runtime.snapshot(runtime)) end)
+  end
+
+  defp assert_success(socket) do
+    {head, body} = response(socket)
+    assert head =~ "200 OK"
+    assert body == %{"result" => %{"ok" => true, "value" => ["T-1001", "T-1004"]}}
+  end
+
+  defp assert_busy(socket) do
+    {head, body} = response(socket)
+    assert head =~ "503 Busy"
+    assert body == %{"error" => "run_capacity_exhausted"}
+  end
+
+  defp response(socket) do
+    [head, body] = socket |> receive_response() |> String.split("\r\n\r\n", parts: 2)
+    {head, Jason.decode!(body)}
+  end
+
+  defp receive_response(socket, acc \\ "") do
+    case :gen_tcp.recv(socket, 0, 7_000) do
+      {:ok, bytes} -> receive_response(socket, acc <> bytes)
+      {:error, :closed} -> acc
     end
   end
 
@@ -508,6 +679,7 @@ defmodule PtcRunner.Labs.ComparisonTest do
     :ok =
       :gen_tcp.send(socket, "POST /mcp HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n")
 
+    on_exit(fn -> :gen_tcp.close(socket) end)
     socket
   end
 
@@ -524,7 +696,7 @@ defmodule PtcRunner.Labs.ComparisonTest do
            receive do
              {:tcp_closed, ^socket} -> send(parent, :socket_closed)
            after
-             5_000 -> :ok
+             15_000 -> :ok
            end
          end}
       end

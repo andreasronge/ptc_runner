@@ -74,13 +74,42 @@ physical capacity, active deadlines, owner failure, provider errors, and
 repeated cancellation/readmission. One shared transport runtime has a global
 and OpenRouter-group capacity of two and no waiting queue.
 
-`ServingHost` recovers the minimal request-owner handoff from closed PR #1482
-at `d752a5fd9`. A separate one-workflow admission owner rejects excess incoming
-requests with 503, with no queue. Closing a real client socket kills the
-workflow owner and closes its provider socket. Workflow admission is released
-on owner death; the transport independently keeps physical capacity occupied
-until cleanup finishes. This framing fixture is not an MCP implementation,
-public server, authentication layer, or replacement for gateway conformance.
+`ServingHost` exercises the request-owner handoff considered in closed PR
+#1482 at `d752a5fd9`, using the current `RunAdmission.execute/5` lifecycle.
+The request worker prepares, executes, and publishes before it returns a JSON
+result. The connection stays responsive to disconnect, and the existing
+internal `BoundedWorker` guards cover connection death and request timeout.
+There is no independent workflow slot counter: execution admission remains
+occupied through provider cleanup. Excess executions return HTTP 503 before
+provider acquisition. Failures return fixed error codes without diagnostic
+payloads; successful responses contain the published workflow value.
+
+For each adapter, real socket tests cover success/readmission, overload,
+disconnect while a provider closer is held, connection-process death,
+request-worker death, timeout, and cleanup failure fencing future requests.
+The regression first demonstrated that the former SSE “complete” response
+omitted the workflow value. The loopback server uses one response per
+connection. It still compiles per request and installs the same custom inline
+capability as the baseline, not a shipped host installation. Ingress admission,
+compile-once serving, MCP framing/conformance, authentication, and sustained
+TLS/reuse measurements remain outside this fixture. Neither it nor its use of
+an internal worker helper is a deployable gateway API.
+
+Run the cold success case alone in a fresh VM so earlier tests cannot warm
+model metadata or bundle compilation and hide request heap failures:
+
+```bash
+mix run -e 'Code.require_file("scripts/labs/llm-transport/compare.exs"); ExUnit.configure(exclude: [:test], include: [:http_cold_start])'
+```
+
+Repeat in another fresh VM with `:http_cold_timeout` instead of
+`:http_cold_start`. Keep `PTC_LLM_HTTP_PATH` set as above. These checks caught
+an undersized request-worker heap budget that the warmed suite masked. The
+lab now allows 32 million heap words for preparation/execution/publication;
+the Kernel's workflow and provider heap limits remain separate. This is a
+provisional lab budget, not a deployment capacity recommendation. A separate
+regression checks that refused preparations are closed while their caller
+remains alive, rather than depending on disposable-worker exit for cleanup.
 
 ## Bounded live check
 

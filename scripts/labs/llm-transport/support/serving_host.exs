@@ -1,82 +1,77 @@
 defmodule PtcRunner.Labs.ServingHost do
   @moduledoc false
-  use GenServer
+  alias PtcRunner.Kernel.BoundedWorker
 
-  # Bounded lab recovery of PR #1482's request-owner handoff. The fixture
-  # supplies HTTP framing; this is not an MCP endpoint or deployable server.
-  def start_link(limit), do: GenServer.start_link(__MODULE__, limit)
-  def snapshot(host), do: GenServer.call(host, :snapshot)
+  # Includes cold model/bundle preparation, unlike the workflow evaluator's
+  # separate heap ceiling. This is a provisional lab request budget.
+  @request_heap_words 32_000_000
 
-  def serve(host, socket, run) do
-    case GenServer.call(host, {:admit, self(), run}) do
-      {:ok, owner} ->
-        try do
-          :ok = :inet.setopts(socket, active: :once)
+  # Loopback framing experiment, not an MCP endpoint. The socket stays owned by
+  # the connection process. The callback must execute AND publish in its worker;
+  # a sealed outcome cannot survive that worker's exit for later publication.
+  # Admission belongs to RunAdmission's execution owner, never this wrapper.
+  def serve(socket, run, opts \\ []) do
+    connection = self()
+    timeout_ms = Keyword.get(opts, :timeout_ms, 30_000)
+    :ok = :inet.setopts(socket, active: :once, send_timeout: 1_000, send_timeout_close: true)
 
-          :ok =
-            :gen_tcp.send(
-              socket,
-              "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n: ready\n\n"
-            )
+    {owner, ref} =
+      spawn_monitor(fn ->
+        result =
+          BoundedWorker.run(run,
+            timeout_ms: timeout_ms,
+            max_heap_words: @request_heap_words,
+            cancel_with: connection,
+            cancel_with_caller: true
+          )
 
-          send(owner, :go)
-          await(socket, owner)
-        after
-          Process.unlink(owner)
-          Process.exit(owner, :kill)
-        end
+        send(connection, {:finished, self(), result})
+      end)
 
-      :full ->
-        :gen_tcp.send(socket, "HTTP/1.1 503 Busy\r\nContent-Length: 0\r\n\r\n")
-    end
-  end
-
-  @impl true
-  def init(limit) do
-    Process.flag(:trap_exit, true)
-    {:ok, %{limit: limit, owners: %{}}}
-  end
-
-  @impl true
-  def handle_call(:snapshot, _, state), do: {:reply, map_size(state.owners), state}
-
-  def handle_call({:admit, connection, run}, _, state) do
-    if map_size(state.owners) < state.limit do
-      owner =
-        spawn_link(fn ->
-          Process.link(connection)
-
-          receive do
-            :go -> send(connection, {:finished, self(), run.()})
-          end
-        end)
-
-      ref = Process.monitor(owner)
-      {:reply, {:ok, owner}, %{state | owners: Map.put(state.owners, ref, owner)}}
-    else
-      {:reply, :full, state}
-    end
-  end
-
-  @impl true
-  def handle_info({:DOWN, ref, :process, _, _}, state),
-    do: {:noreply, %{state | owners: Map.delete(state.owners, ref)}}
-
-  def handle_info({:EXIT, _, _}, state), do: {:noreply, state}
-
-  @impl true
-  def terminate(_, state) do
-    Enum.each(state.owners, fn {_, owner} -> Process.exit(owner, :kill) end)
-  end
-
-  defp await(socket, owner) do
-    receive do
-      {:tcp_closed, ^socket} -> :ok
-      {:tcp_error, ^socket, _} -> :ok
-      {:tcp, ^socket, _} -> :ok
-      {:finished, ^owner, _result} -> :gen_tcp.send(socket, "data: complete\n\n")
+    try do
+      receive do
+        {:tcp_closed, ^socket} -> :ok
+        {:tcp_error, ^socket, _} -> :ok
+        {:tcp, ^socket, _} -> :ok
+        {:finished, ^owner, result} -> respond(socket, result)
+        {:DOWN, ^ref, :process, ^owner, _} -> respond(socket, {:error, :worker_failed})
+      after
+        timeout_ms + 1_000 -> respond(socket, {:error, :timeout})
+      end
     after
-      30_000 -> :ok
+      Process.exit(owner, :kill)
+      Process.demonitor(ref, [:flush])
     end
+  end
+
+  defp respond(socket, result) do
+    {status, body} =
+      case result do
+        {:ok, {:ok, value}} ->
+          {"200 OK", %{"result" => value}}
+
+        {:ok, {:error, :run_capacity_exhausted}} ->
+          {"503 Busy", %{"error" => "run_capacity_exhausted"}}
+
+        {:ok, {:error, :run_admission_unavailable}} ->
+          {"503 Unavailable", %{"error" => "run_admission_unavailable"}}
+
+        {:error, :timeout} ->
+          {"504 Gateway Timeout", %{"error" => "request_timeout"}}
+
+        _ ->
+          {"500 Internal Server Error", %{"error" => "run_failed"}}
+      end
+
+    body = Jason.encode!(body)
+
+    :gen_tcp.send(socket, [
+      "HTTP/1.1 ",
+      status,
+      "\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: ",
+      Integer.to_string(byte_size(body)),
+      "\r\n\r\n",
+      body
+    ])
   end
 end
