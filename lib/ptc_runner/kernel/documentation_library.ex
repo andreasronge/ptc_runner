@@ -236,7 +236,9 @@ defmodule PtcRunner.Kernel.DocumentationLibrary do
 
       matches = Enum.reverse(matches)
 
-      [%{index: index, heading_match?: heading_match?, matches: matches}]
+      if matches == [],
+        do: [],
+        else: [%{index: index, heading_match?: heading_match?, matches: matches}]
     else
       []
     end

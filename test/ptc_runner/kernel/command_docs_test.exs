@@ -107,6 +107,16 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     refute rendered =~ "internal_error"
   end
 
+  test "search ignores whole-page matches that cross line boundaries" do
+    assert {:ok, %CommandOutcome{envelope: envelope} = outcome} =
+             CommandEngine.dispatch(["docs", "--search", "\n"])
+
+    assert %{"matches" => [], "omitted_matches" => 0, "omitted_pages" => 0} =
+             envelope["result"]
+
+    assert {:stdout, "no page mentions \"\\n\"\n"} = CommandRenderer.render(outcome)
+  end
+
   test "search omission counts name every page with dropped matches" do
     result = DocumentationLibrary.search("Babashka")
 
