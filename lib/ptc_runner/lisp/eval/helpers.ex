@@ -400,9 +400,14 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   def sanitize_private_error(
         {:invalid_tool_args, _message,
          {:safe_diagnostic,
-          %{kind: :prelude_named_argument_map, ref: "analysis/counters", example_key: "run_id"}}} =
+          %{
+            kind: :prelude_named_argument_map,
+            ref: "analysis/counters",
+            example_key: "run_id"
+          } = diagnostic}} =
           reason
-      ),
+      )
+      when map_size(diagnostic) == 3,
       do: reason
 
   # The run-deadline variant of the timeout message is itself a stable
@@ -664,10 +669,15 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   def sanitize_private_error(
         {:invalid_tool_args, _message,
          {:safe_diagnostic,
-          %{kind: :prelude_named_argument_map, ref: "analysis/counters", example_key: "run_id"}}} =
+          %{
+            kind: :prelude_named_argument_map,
+            ref: "analysis/counters",
+            example_key: "run_id"
+          } = diagnostic}} =
           reason,
         _origin
-      ),
+      )
+      when map_size(diagnostic) == 3,
       do: reason
 
   def sanitize_private_error({:type_error, _message, _private_args}, origin),

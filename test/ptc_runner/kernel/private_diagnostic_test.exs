@@ -99,6 +99,13 @@ defmodule PtcRunner.Kernel.PrivateDiagnosticTest do
                %{message: "captured private value", capability_activity?: false},
                "(tool/analysis-counters *1)"
              )
+
+    assert {@redacted, true} =
+             PrivateDiagnostic.project(
+               :invalid_tool_args,
+               put_in(details, [:safe_diagnostic, :captured], "private value"),
+               "(analysis/counters id)"
+             )
   end
 
   test "still redacts a pre-execution kind once a capability has run" do

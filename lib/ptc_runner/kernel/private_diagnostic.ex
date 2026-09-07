@@ -88,14 +88,16 @@ defmodule PtcRunner.Kernel.PrivateDiagnostic do
         :invalid_tool_args,
         %{
           capability_activity?: false,
-          safe_diagnostic: %{
-            kind: :prelude_named_argument_map,
-            ref: "analysis/counters",
-            example_key: "run_id"
-          }
+          safe_diagnostic:
+            %{
+              kind: :prelude_named_argument_map,
+              ref: "analysis/counters",
+              example_key: "run_id"
+            } = diagnostic
         },
         _source
-      ) do
+      )
+      when map_size(diagnostic) == 3 do
     {~s(analysis/counters: expected one named argument map, for example {"run_id" value}; positional arguments are not accepted),
      false}
   end
