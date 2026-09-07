@@ -500,7 +500,6 @@ defmodule PtcRunner.Kernel.CommandParser do
     not Enum.any?([:manifest, :host_config, :trace], &Map.has_key?(options, &1)) and
       resources != [] and
       not (format == "jsonl" and evals == [] and positional == []) and
-      not (Map.get(options, :continue_on_error, false) and length(evals) < 2) and
       profile_output_arguments_valid?(options, positional, evals)
   end
 

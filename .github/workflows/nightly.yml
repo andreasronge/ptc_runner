@@ -63,6 +63,30 @@ jobs:
       - name: Compile
         run: mix compile --warnings-as-errors
 
+      # `PtcRunner.Kernel.DabstepReviewerRegressionTest` replays a recorded
+      # multi-turn run against the real DABStep `payments.csv`. The file is
+      # gitignored -- 24MB does not belong in the tree or in the Hex package --
+      # so the job has to fetch it, and without it the suite fails on a missing
+      # path rather than on anything about this commit.
+      #
+      # The cache key is the fetch script, which carries the pinned dataset
+      # revision and all four checksums: change a pin and the key changes with
+      # it. A daily run keeps the entry warm, so the download happens roughly
+      # once rather than nightly. `fetch-data.sh` verifies the checksums of
+      # whatever is already on disk, so a restored cache is still proven before
+      # the suite reads a byte of it.
+      - name: Cache the DABStep dataset
+        uses: actions/cache@v5
+        with:
+          path: |
+            examples/dabstep-fraud/data
+            examples/dabstep-fraud/reference
+          key: dabstep-${{ hashFiles('examples/dabstep-fraud/fetch-data.sh') }}
+
+      - name: Fetch and verify the DABStep dataset
+        run: ./fetch-data.sh
+        working-directory: examples/dabstep-fraud
+
       - name: Run the nightly test suite
         run: mix nightly
 

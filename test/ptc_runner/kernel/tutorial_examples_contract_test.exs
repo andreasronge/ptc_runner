@@ -1,26 +1,39 @@
 defmodule PtcRunner.Kernel.TutorialExamplesContractTest do
   use ExUnit.Case, async: true
 
+  @repo_root Path.expand("../../..", __DIR__)
   @examples Path.expand("../../../examples/kernel-tutorial", __DIR__)
   @host Path.join(@examples, "ptc-host.json")
   @cost_budget_host Path.join(@examples, "ptc-host-cost-budget.json")
   @viewer_examples Path.expand("../../../scripts/labs/viewer-demo", __DIR__)
-  @named_missions Path.expand("../../../examples/named-mission-reader-writer", __DIR__)
   @support_triage Path.expand("../../../examples/support-triage", __DIR__)
 
   test "models in shipped runnable examples belong to ReqLLM's catalog" do
-    installations = [
-      {@host, "deepseek"},
-      {@cost_budget_host, "deepseek"},
-      {Path.join(@viewer_examples, "ptc-host.json"), "deepseek"},
-      {Path.join(@named_missions, "ptc-host.json"), "agent_model"},
-      {Path.join(@support_triage, "ptc-host.json"), "deepseek"}
-    ]
+    installations = host_installations()
 
-    for {host, alias_name} <- installations do
-      model = host |> decode!() |> get_in(["install", alias_name, "model"])
-      assert {:ok, _catalog_model} = LLMDB.model(model), host
+    # A hand-written host list silently stops guarding the moment an example
+    # gains a host document, which is how three `debug-a-failed-run` hosts came
+    # to pin a model outside the catalog. Derive the list from the tree instead.
+    assert length(installations) >= 12
+
+    for {host, alias_name, model} <- installations do
+      assert {:ok, _catalog_model} = LLMDB.model(model), "#{host} installs #{alias_name}"
     end
+  end
+
+  defp host_installations do
+    ["examples", "scripts/labs"]
+    |> Enum.flat_map(&Path.wildcard(Path.join([@repo_root, &1, "**", "*.json"])))
+    |> Enum.flat_map(fn path ->
+      case Jason.decode(File.read!(path)) do
+        {:ok, %{"install" => install}} when is_map(install) ->
+          for {alias_name, %{"model" => model}} <- install, do: {path, alias_name, model}
+
+        _ ->
+          []
+      end
+    end)
+    |> Enum.sort()
   end
 
   test "the cost-budget tutorial label reports its dedicated host model" do

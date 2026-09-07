@@ -502,7 +502,7 @@ defmodule PtcRunner.Kernel.AnalysisSession do
   end
 
   # A private session never forwards arbitrary evaluator text; see
-  # `PrivateDiagnostic` for the two admission rules.
+  # `PrivateDiagnostic` for the admission rules.
   defp error_message(
          kind,
          details,

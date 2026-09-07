@@ -109,7 +109,7 @@ defmodule PtcRunner.Kernel.InspectOnlyRepl do
   defp compile_selected(package, nil) do
     deadline = System.monotonic_time(:millisecond) + @compile_timeout_ms
 
-    with {:ok, bundle} <- BundleCompiler.compile(package.workflow_components, deadline),
+    with {:ok, bundle} <- compile_bundle(package.workflow_components, deadline),
          :ok <- RunCoordinator.validate_entry(bundle, package.entry),
          {:ok, _intern, catalog} <-
            ComponentCatalog.build(package.workflow_components, bundle),
@@ -134,7 +134,7 @@ defmodule PtcRunner.Kernel.InspectOnlyRepl do
   defp compile_mission(name, spec) do
     deadline = System.monotonic_time(:millisecond) + @compile_timeout_ms
 
-    with {:ok, bundle} <- BundleCompiler.compile(spec.components, deadline),
+    with {:ok, bundle} <- compile_bundle(spec.components, deadline),
          {:ok, _intern, catalog} <- ComponentCatalog.build(spec.components, bundle),
          {:ok, environment} <-
            MissionEnvironment.new(
@@ -152,6 +152,22 @@ defmodule PtcRunner.Kernel.InspectOnlyRepl do
       }
 
       {:ok, workflow, %{name => environment}, mode}
+    end
+  end
+
+  defp compile_bundle(components, deadline) do
+    case BundleCompiler.compile(components, deadline) do
+      {:ok, bundle} ->
+        {:ok, bundle}
+
+      {:error, reason} ->
+        case RunCoordinator.classify_bundle_failure(reason, components) do
+          {:ok, diagnostic} ->
+            {:error, %{code: diagnostic.code, diagnostic: diagnostic}}
+
+          :error ->
+            {:error, reason}
+        end
     end
   end
 end

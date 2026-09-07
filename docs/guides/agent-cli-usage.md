@@ -1,7 +1,7 @@
 # Drive ptc as an agent
 
 Use the executable's own help and embedded documentation when a coding agent
-drives `ptc`.
+drives ptc.
 
 You do not need network access or a remembered API. The
 executable you are running carries its own command grammar and documentation,
@@ -16,13 +16,13 @@ so both always describe the version you actually invoke.
 | How does the language or a contract work? | `ptc docs PAGE` |
 | What does one function do? | `ptc repl --project PROJECT.json -e '(doc "name")'` |
 
-Help output is generated from the same declarations as the strict parser, and
-`ptc docs` prints pages embedded at build time. Neither can drift from the
-running executable. Prefer both over any remembered flag, built-in, or manifest
-field, and over any page you fetched from the web for a different version.
+Help and embedded pages come from the running executable, so they match its
+parser and version. Prefer them over remembered syntax or web pages for another
+version.
 
-Start with `ptc docs agent-guide` (this page), `ptc docs manifest` for the
-application document, and `ptc docs functions` for the built-in library.
+Use `ptc docs manifest` for the application document, `ptc docs functions` for
+built-in functions, and
+`ptc docs preludes` plus `ptc docs agent-library` for the shipped libraries.
 
 ## Follow the loop
 

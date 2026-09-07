@@ -26,8 +26,9 @@
     }
   },
   "limits": {
-    "workflow_timeout_ms": 110000,
-    "parallel_timeout_ms": 60000
+    "run_duration_ms": 195000,
+    "workflow_timeout_ms": 180000,
+    "parallel_timeout_ms": 120000
   },
   "providers": {
     "workflow": [

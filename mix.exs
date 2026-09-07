@@ -196,7 +196,7 @@ defmodule PtcRunner.MixProject do
       {:jason, "~> 1.4"},
       {:jsv, "~> 0.22.0"},
       {:nimble_parsec, "~> 1.4"},
-      {:mint, "~> 1.9"},
+      {:mint, "~> 1.10"},
       {:req, "~> 0.7.3"},
       {:telemetry, "~> 1.0"},
       {:stream_data, "~> 1.1", only: [:test, :dev]},

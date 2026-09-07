@@ -4391,16 +4391,6 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
             "--format",
             "jsonl"
           ],
-          [
-            "repl",
-            "--profile",
-            "run-analysis-v1",
-            "--resource",
-            "traces=traces",
-            "--continue-on-error",
-            "-e",
-            "1"
-          ],
           ["repl", "--manifest", "ptc.json", "--resource", "traces=traces"],
           ["repl", "--manifest", "ptc.json", "--session-trace-dir", "traces"],
           ["repl", "--manifest", "ptc.json", "--continue-on-error"],
@@ -4418,6 +4408,23 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       assert rejection.command == :repl
       assert rejection.code == :invalid_arguments
     end
+  end
+
+  test "repl leaves profile evaluation-count validation to the frontend" do
+    assert {:ok, arguments} =
+             CommandParser.parse([
+               "repl",
+               "--profile",
+               "run-analysis-v1",
+               "--resource",
+               "traces=traces",
+               "--continue-on-error",
+               "-e",
+               "1"
+             ])
+
+    assert arguments.options.continue_on_error
+    assert arguments.options.eval == "1"
   end
 
   test "repl inspect-only conflicts are rejected by the shared parser" do

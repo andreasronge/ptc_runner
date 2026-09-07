@@ -49,6 +49,18 @@ defmodule PtcRunner.Kernel.RunCoordinator do
 
   @mission_compile_timeout_ms 5_000
   @mission_bundles_bytes 4_000_000
+  @bundle_limit_reasons [
+    :bundle_limit_exceeded,
+    :bundle_artifact_exceeded,
+    :bundle_diagnostic_exceeded,
+    :bundle_compile_heap_exceeded,
+    :bundle_compile_timeout
+  ]
+  @bundle_compile_reasons [
+    :component_compile_error,
+    :bundle_compile_error,
+    :bundle_compile_failed
+  ]
 
   @spec prepare(RunRequest.t(), InstallationCatalog.t()) ::
           {:ok, PreparedRun.t()} | {:error, CommandDiagnostic.t()}
@@ -404,18 +416,21 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   defp external_size(nil), do: 0
   defp external_size(bundle), do: :erlang.external_size(bundle)
 
+  @doc false
+  @spec classify_bundle_failure(term(), [Component.t()]) ::
+          {:ok, CommandDiagnostic.t()} | :error
+  def classify_bundle_failure(%{reason: reason} = failure, components)
+      when reason in @bundle_limit_reasons or reason in @bundle_compile_reasons,
+      do: {:ok, bundle_diagnostic(failure, components)}
+
+  def classify_bundle_failure(_failure, _components), do: :error
+
   defp bundle_diagnostic(%{reason: reason} = failure, components)
-       when reason in [
-              :bundle_limit_exceeded,
-              :bundle_artifact_exceeded,
-              :bundle_diagnostic_exceeded,
-              :bundle_compile_heap_exceeded,
-              :bundle_compile_timeout
-            ],
+       when reason in @bundle_limit_reasons,
        do: diagnostic(:bundle, :bundle_limit_exceeded, source_opts(failure, components))
 
   defp bundle_diagnostic(%{reason: reason} = failure, components)
-       when reason in [:component_compile_error, :bundle_compile_error, :bundle_compile_failed] do
+       when reason in @bundle_compile_reasons do
     {code, opts} = compile_diagnostic(failure, components)
     diagnostic(:bundle, code, opts)
   end

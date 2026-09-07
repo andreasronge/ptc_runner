@@ -692,13 +692,11 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapterTest do
     end
 
     test "refuses a peer that never completes a status line" do
-      # Mint buffers an unterminated status line with no ceiling of its own, and
-      # emits no response, so neither the body nor the header ceiling can see it.
       assert_refused_before_parsing("HTTP/1.1 200 ")
     end
 
-    test "refuses a peer that never completes a chunk-size line" do
-      assert_refused_before_parsing("HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n")
+    test "rejects a chunk-size line beyond Mint's 16-digit cap as a transport error" do
+      assert_chunk_size_refused("10000000000000000")
     end
 
     test "refuses a peer that never completes a chunk extension" do
@@ -718,15 +716,9 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapterTest do
       end
     end
 
-    # The exact value of the pending ceiling is the whole slice, so it gets a
-    # two-sided test. A peer stalling at exactly the ceiling is still waited
-    # for and ends at the clock; one byte more is refused by the ceiling.
-    # Without both sides, every arithmetic change to `max_pending_bytes`
-    # survives. Neither side sends a completing response, because the peer
-    # cannot control which socket message it would land in.
-    test "admits a stall of exactly the pending ceiling and refuses one byte more" do
-      assert {:error, :timeout, :possibly_dispatched} = stall_of(0)
-      assert {:error, :response_exceeded, :possibly_dispatched} = stall_of(1)
+    test "derives the pending ceiling from the header cap and one delivered TLS message" do
+      assert MCPHTTPAdapter.max_pending_bytes(1_024, @receive_cap) ==
+               1_024 + @receive_cap + 16_384
     end
 
     # A legitimate chunked body costs about six bytes of framing per chunk. A
@@ -775,12 +767,7 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapterTest do
       :gen_tcp.close(listener)
     end
 
-    # A peer that sends exactly the pending ceiling plus `overshoot` bytes of an
-    # unterminated status line, and then holds the socket open sending nothing.
-    defp stall_of(overshoot) do
-      header_cap = 1_024
-      stall = header_cap + @receive_cap + 16_384 + overshoot
-
+    defp assert_chunk_size_refused(chunk_size) do
       {:ok, listener} =
         :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true, ip: {127, 0, 0, 1}])
 
@@ -791,7 +778,13 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapterTest do
         Task.async(fn ->
           {:ok, socket} = :gen_tcp.accept(listener, 2_000)
           {:ok, _request} = :gen_tcp.recv(socket, 0, 2_000)
-          :ok = :gen_tcp.send(socket, "HTTP/1.1 200 " <> :binary.copy(<<?O>>, stall - 13))
+
+          :ok =
+            :gen_tcp.send(
+              socket,
+              "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n" <> chunk_size
+            )
+
           send(parent, :sent)
 
           receive do
@@ -803,8 +796,8 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapterTest do
         MCPHTTPAdapter.request(
           method: :get,
           url: "http://127.0.0.1:#{port}/",
-          timeout_ms: 750,
-          max_header_bytes: header_cap,
+          timeout_ms: 5_000,
+          max_header_bytes: 1_024,
           max_receive_bytes: @receive_cap
         )
 
@@ -812,7 +805,7 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapterTest do
       send(server.pid, :release)
       _ = Task.shutdown(server, 2_000)
       :gen_tcp.close(listener)
-      result
+      assert result == {:error, :transport_error, :possibly_dispatched}
     end
 
     # The peer sends `preamble` and then more bytes than the pending ceiling
