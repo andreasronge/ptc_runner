@@ -65,12 +65,17 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
   legitimate peer nothing, because the window closes before the request is sent
   and anything accumulating inside it was unsolicited.
 
-  The second ceiling is derived rather than passed, and bounds what Mint may
-  buffer *unparsed* — the one thing none of the other limits can see. A peer
-  that never completes a status line, a chunk-size line, or a chunk extension
-  produces no Mint response at all, so no limit on a parsed value ever runs,
-  while Mint buffers the remainder with no ceiling of its own. Without this
-  count, 64 MiB from such a peer becomes 64 MiB resident in this process.
+  Mint bounds the HTTP/1 response line, header and trailer sections, chunk-size
+  line, and chunk-extension line. The adapter maps Mint's size refusals to
+  `:response_exceeded`; an overlong chunk size is Mint protocol failure because
+  Mint cannot distinguish it from non-hexadecimal protocol garbage.
+
+  The second adapter ceiling is derived rather than passed, and bounds bytes
+  for which Mint has emitted no response. With Mint's finite
+  `max_header_list_size`, its parser limits normally refuse every HTTP/1 shape
+  before this larger ceiling is reached. The ceiling remains defence-in-depth
+  for a future parser gap or a connection configured with an infinite parser
+  limit.
 
   It is counted over raw socket payloads before they reach Mint, and **reset
   whenever Mint returns any response**, because a response means Mint consumed
@@ -359,7 +364,7 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
          max_message_bytes: max_receive_bytes + @tls_record_bytes,
          # The ceiling has to admit one whole delivered message or a single
          # legitimate https message could exceed it on its own.
-         max_pending_bytes: max_header_bytes + max_receive_bytes + @tls_record_bytes,
+         max_pending_bytes: max_pending_bytes(max_header_bytes, max_receive_bytes),
          on_status: on_status,
          on_headers: on_headers,
          on_data: on_data,
@@ -369,6 +374,10 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
       _invalid -> {:error, :invalid_request}
     end
   end
+
+  @doc false
+  def max_pending_bytes(max_header_bytes, max_receive_bytes),
+    do: max_header_bytes + max_receive_bytes + @tls_record_bytes
 
   defp parse_uri(url) do
     case URI.parse(url) do
@@ -1256,6 +1265,11 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
 
   defp response_exceeded_reason?(%Mint.HTTPError{
          reason: {:max_header_list_size_exceeded, _size, _maximum}
+       }),
+       do: true
+
+  defp response_exceeded_reason?(%Mint.HTTPError{
+         reason: {:response_line_too_long, _size, _maximum}
        }),
        do: true
 
