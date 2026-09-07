@@ -419,7 +419,8 @@ defmodule PtcRunner.ReplFrontend do
              private_terminal: Keyword.get(opts, :private_terminal, false),
              private_unattended: Keyword.get(opts, :private_unattended, false),
              terminal_attached: terminal_attached?
-           }) do
+           }),
+         :ok <- validate_profile_evaluation_count(opts, evals) do
       {:ok, :profile}
     else
       {:error, :unsupported_analysis_profile} ->
@@ -435,6 +436,14 @@ defmodule PtcRunner.ReplFrontend do
 
       {:error, reason} when is_atom(reason) ->
         {:error, profile_frontend_error(reason)}
+    end
+  end
+
+  defp validate_profile_evaluation_count(opts, evals) do
+    if opts[:continue_on_error] && length(evals) < 2 do
+      {:error, :continue_requires_repeated_eval}
+    else
+      :ok
     end
   end
 
@@ -471,9 +480,6 @@ defmodule PtcRunner.ReplFrontend do
 
       format == "jsonl" and jsonl_reachable?(recipe, opts) and evals == [] and arguments == [] ->
         {:error, :jsonl_requires_input}
-
-      opts[:continue_on_error] && length(evals) < 2 ->
-        {:error, :continue_requires_repeated_eval}
 
       true ->
         :ok

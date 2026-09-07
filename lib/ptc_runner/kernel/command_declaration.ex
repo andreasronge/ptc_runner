@@ -365,7 +365,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           key: :continue_on_error,
           type: :boolean,
           syntax: ["--continue-on-error"],
-          description: "with --profile, continue later repeated evaluations after an error"
+          description: "profile-dependent; continue later repeated evaluations after an error"
         },
         %{
           key: :private_terminal,

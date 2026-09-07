@@ -64,6 +64,7 @@ defmodule PtcRunner.Kernel.PrivateDiagnosticTest do
           :symbol_limit_exceeded,
           :compile_timeout,
           :compile_memory_exceeded,
+          :invalid_tool_args,
           :unknown_tool,
           :private_tool_unauthorized,
           :unknown_namespace

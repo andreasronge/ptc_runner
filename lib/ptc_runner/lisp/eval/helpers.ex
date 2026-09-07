@@ -657,6 +657,18 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
     do:
       {:type_error, diagnostic_prefix(origin) <> "prelude function failed with a type error", nil}
 
+  def sanitize_private_error({:invalid_tool_args, _private_message}, %{ref: ref})
+      when is_binary(ref) do
+    message =
+      if CoreAST.valid_prelude_ref?(ref) do
+        "#{ref}: expected one named argument map; positional arguments are not accepted"
+      else
+        "private prelude tool call received invalid arguments"
+      end
+
+    {:invalid_tool_args, message}
+  end
+
   def sanitize_private_error(reason, _origin), do: sanitize_private_error(reason)
 
   defp diagnostic_prefix(%{ref: ref}) when is_binary(ref) do

@@ -1221,13 +1221,65 @@ defmodule PtcRunner.ReplFrontendTest do
       end)
 
     assert descriptions["--preview-chars COUNT"] =~ "--describe-profile prints its contract whole"
-    assert descriptions["--continue-on-error"] =~ "with --profile"
+    assert descriptions["--continue-on-error"] =~ "profile-dependent"
   end
 
   test "--continue-on-error is refused outside profile mode" do
     assert_raise Mix.Error, ~r/arguments\/invalid_arguments/, fn ->
       run_repl(["--continue-on-error", "-e", "(+ 1 1)", "-e", "(+ 2 2)"])
     end
+  end
+
+  @tag :tmp_dir
+  test "private profile refusal for continue-on-error precedes the repeated-eval check", %{
+    tmp_dir: directory
+  } do
+    fixture = PrivateInspectionFixture.create!(directory)
+
+    base_args = [
+      "--profile",
+      "private-run-analysis-v2",
+      "--resource",
+      "traces=#{fixture.traces}",
+      "--resource",
+      "inspection=#{fixture.inspection}",
+      "--session-trace-dir",
+      fixture.output,
+      "--private-unattended",
+      "--format",
+      "jsonl",
+      "--continue-on-error"
+    ]
+
+    for evals <- [["-e", "(analysis/runs {})"], ["-e", "1", "-e", "2"]] do
+      capture_io(fn ->
+        assert_raise Mix.Error,
+                     ~r|repl/command_failed: selected profile does not allow --continue-on-error|,
+                     fn -> run_repl(base_args ++ evals) end
+      end)
+    end
+  end
+
+  @tag :tmp_dir
+  test "continue-on-error requires repeated eval when the profile allows it", %{
+    tmp_dir: directory
+  } do
+    source = Path.join(directory, "source")
+    output_directory = Path.join(directory, "output")
+    File.mkdir!(source)
+    File.mkdir!(output_directory)
+    seed_trace(source, "seed")
+
+    capture_io(fn ->
+      assert_raise Mix.Error,
+                   ~r|repl/command_failed: --continue-on-error requires repeated --eval|,
+                   fn ->
+                     run_repl(
+                       profile_args(source, output_directory) ++
+                         ["--continue-on-error", "-e", "42"]
+                     )
+                   end
+    end)
   end
 
   test "unknown profiles report the accepted profile ids" do
@@ -1529,6 +1581,85 @@ defmodule PtcRunner.ReplFrontendTest do
 
     assert narrow =~ "#<preview truncated:"
     assert narrow =~ "--format jsonl publishes the unabbreviated result.value"
+  end
+
+  @tag :tmp_dir
+  test "private analysis shows pre-execution invalid tool arguments", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create!(root)
+
+    output =
+      capture_io(fn ->
+        assert_raise Mix.Error, ~r|repl/profile_evaluation_failed|, fn ->
+          run_repl([
+            "--profile",
+            "private-run-analysis-v2",
+            "--resource",
+            "traces=#{fixture.traces}",
+            "--resource",
+            "inspection=#{fixture.inspection}",
+            "--session-trace-dir",
+            fixture.output,
+            "--private-unattended",
+            "--format",
+            "jsonl",
+            "-e",
+            ~s|(analysis/counters "#{fixture.run_id}")|
+          ])
+        end
+      end)
+
+    evaluation = output |> decode_jsonl() |> Enum.find(&(&1["type"] == "evaluation"))
+
+    assert %{
+             "kind" => "invalid_tool_args",
+             "capability_activity" => false,
+             "message_redacted" => false,
+             "message" => message
+           } = evaluation["result"]["error"]
+
+    assert message =~ "named argument map"
+    assert message =~ "analysis/counters"
+  end
+
+  @tag :tmp_dir
+  test "private analysis redacts invalid tool arguments after capability activity", %{
+    tmp_dir: root
+  } do
+    fixture = PrivateInspectionFixture.create!(root)
+
+    source =
+      ~s|(do (analysis/open "#{fixture.run_id}") (analysis/counters "#{fixture.run_id}"))|
+
+    output =
+      capture_io(fn ->
+        assert_raise Mix.Error, ~r|repl/profile_evaluation_failed|, fn ->
+          run_repl([
+            "--profile",
+            "private-run-analysis-v2",
+            "--resource",
+            "traces=#{fixture.traces}",
+            "--resource",
+            "inspection=#{fixture.inspection}",
+            "--session-trace-dir",
+            fixture.output,
+            "--private-unattended",
+            "--format",
+            "jsonl",
+            "-e",
+            source
+          ])
+        end
+      end)
+
+    evaluation = output |> decode_jsonl() |> Enum.find(&(&1["type"] == "evaluation"))
+
+    assert %{
+             "kind" => "invalid_tool_args",
+             "capability_activity" => true,
+             "message_redacted" => true,
+             "message" =>
+               "private evaluation failed; diagnostic withheld by the private result policy"
+           } = evaluation["result"]["error"]
   end
 
   @tag :tmp_dir
