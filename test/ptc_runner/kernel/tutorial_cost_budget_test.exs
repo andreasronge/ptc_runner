@@ -18,6 +18,7 @@ defmodule PtcRunner.Kernel.TutorialCostBudgetTest do
   test "the cost-budget tutorial exits 6 before provider dispatch", %{tmp_dir: tmp_dir} do
     tutorial = Path.join(tmp_dir, "kernel-tutorial")
     File.cp_r!(@examples, tutorial)
+    File.rm_rf!(Path.join(tutorial, "06-cost-budget/.ptc"))
 
     env_file = Path.join(tutorial, ".env")
     File.write!(env_file, "OPENROUTER_API_KEY=sentinel-not-a-real-key\n")
