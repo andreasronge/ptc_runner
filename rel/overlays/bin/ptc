@@ -3,6 +3,8 @@ set -eu
 
 release_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
+# One-shot commands use the OS SIGINT disposition. The REPL keeps the BEAM
+# break menu documented by `ptc docs cli`.
 case "${1:-}" in
   repl) ;;
   *)

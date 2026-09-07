@@ -8,7 +8,7 @@
   },
   "guides": {
     "docs/guides/agent-cli-usage.md": {
-      "words": 701,
+      "words": 681,
       "density": 5.2,
       "blockers": 2,
       "tics": 1.0

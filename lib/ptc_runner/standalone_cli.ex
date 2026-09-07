@@ -38,6 +38,7 @@ defmodule PtcRunner.StandaloneCLI do
   @doc false
   @spec main([binary()]) :: no_return()
   def main(argv) do
+    # Standalone commands terminate by signal instead of OTP's graceful stop.
     :ok = :os.set_signal(:sigterm, :default)
 
     # OTP's default handler writes to stdout. A TLS handshake alert during
