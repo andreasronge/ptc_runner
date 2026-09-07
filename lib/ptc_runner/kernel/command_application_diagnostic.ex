@@ -142,6 +142,12 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
 
   defp projection(_role, :unknown_properties), do: {:schema_violation, []}
 
+  defp projection(_role, :unknown_mission_provider),
+    do: {:unknown_mission_provider, nil}
+
+  defp projection(_role, :duplicate_mission_provider),
+    do: {:duplicate_mission_provider, nil}
+
   defp projection(
          _role,
          {:manifest_schema_invalid, %SchemaViolation{rule: :required, path: path}}

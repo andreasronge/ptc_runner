@@ -509,6 +509,7 @@ Embedding runtimes can supply authorization targets directly.
 | 3 | `application` | `contract_invalid` | no | an application value contract is invalid |
 | 3 | `application` | `contract_projection_limit_exceeded` | no | application contract prompt projections exceed their bounded admission limit |
 | 3 | `application` | `document_limit_exceeded` | no | the application document closure exceeds its limit |
+| 3 | `application` | `duplicate_mission_provider` | no | a mission selects the same provider more than once; list each provider at most once |
 | 3 | `application` | `duplicate_property` | no | an application document contains a duplicate property |
 | 3 | `application` | `event_identity_conflict` | no | the command event identity conflicts with the application |
 | 3 | `application` | `input_contract_failed` | no | the selected input does not satisfy the input contract |
@@ -523,6 +524,7 @@ Embedding runtimes can supply authorization targets directly.
 | 3 | `application` | `required_property_missing` | no | the application manifest is missing a required property |
 | 3 | `application` | `schema_validation_unavailable` | yes | application schema validation timed out or exceeded its resource bound; retry the command |
 | 3 | `application` | `schema_violation` | no | the application manifest does not satisfy its schema |
+| 3 | `application` | `unknown_mission_provider` | no | a mission selects a provider that is not declared in providers.mission; declare it there before selecting it in the mission |
 | 3 | `bundle` | `bundle_invalid` | no | the component bundle is invalid |
 | 3 | `bundle` | `bundle_limit_exceeded` | no | the component bundle exceeds a compile limit |
 | 3 | `bundle` | `compile_failed` | no | the component bundle could not be compiled |

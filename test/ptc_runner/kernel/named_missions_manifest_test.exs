@@ -176,11 +176,8 @@ defmodule PtcRunner.Kernel.NamedMissionsManifestTest do
 
   test "provider grants are unique and bounded" do
     assert {:error,
-            {:manifest_schema_invalid,
-             %SchemaViolation{
-               rule: :unique_items,
-               path: [property: "missions", property: "*", property: "providers"]
-             }}} =
+            {:manifest_path, [property: "missions", property: "review", property: "providers"],
+             :duplicate_mission_provider}} =
              load(%{"review" => %{"providers" => ["reader_tool", "reader_tool"]}})
   end
 

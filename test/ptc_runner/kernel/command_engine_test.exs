@@ -6817,6 +6817,38 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "mission provider selection failures retain their actionable reason", %{
+    tmp_dir: directory
+  } do
+    provider = %{"name" => "workspace"}
+
+    cases = [
+      {"unknown", [], ["workspace"], "unknown_mission_provider",
+       "is not declared in providers.mission"},
+      {"duplicate", [provider], ["workspace", "workspace"], "duplicate_mission_provider",
+       "more than once"}
+    ]
+
+    for {name, declared, selected, code, message} <- cases do
+      manifest =
+        valid_manifest(%{
+          "providers" => %{"workflow" => [], "mission" => declared},
+          "missions" => %{"worker" => %{"providers" => selected}}
+        })
+
+      application = write_application(directory, "mission-provider-#{name}", manifest)
+
+      for command <- ["validate", "run", "doctor"] do
+        outcome = assert_error([command, application], "application", code)
+
+        assert outcome.envelope["error"]["path"] == "/missions/*/providers"
+        assert outcome.envelope["error"]["message"] =~ message
+        assert_schema_valid(outcome.envelope)
+      end
+    end
+  end
+
+  @tag :tmp_dir
   test "phase-2 host loading preserves every closed host diagnostic", %{tmp_dir: directory} do
     application = write_application(directory, "host-diagnostics", valid_manifest())
     base = valid_host_config()

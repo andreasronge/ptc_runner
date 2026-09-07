@@ -1479,7 +1479,6 @@ defmodule PtcRunner.Kernel.Manifest do
           "providers" => %{
             "type" => "array",
             "maxItems" => 32,
-            "uniqueItems" => true,
             "items" => component_id_schema()
           }
         })
