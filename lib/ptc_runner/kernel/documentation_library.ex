@@ -174,10 +174,12 @@ defmodule PtcRunner.Kernel.DocumentationLibrary do
     pattern = Regex.compile!(Regex.escape(term), "iu")
 
     pages =
-      @pages
+      @names
       |> Enum.with_index()
-      |> Enum.reject(fn {page, _index} -> String.starts_with?(page.name, "schema-") end)
-      |> Enum.flat_map(&page_matches(&1, pattern))
+      |> Enum.reject(fn {name, _index} -> String.starts_with?(name, "schema-") end)
+      |> Enum.flat_map(fn {name, index} ->
+        page_matches(name, Map.fetch!(@contents, name), index, pattern)
+      end)
       |> Enum.sort_by(fn page ->
         {if(page.heading_match?, do: 0, else: 1), -length(page.matches), page.index}
       end)
@@ -207,10 +209,10 @@ defmodule PtcRunner.Kernel.DocumentationLibrary do
       else: nil
   end
 
-  defp page_matches({page, index}, pattern) do
-    if Regex.match?(pattern, page.content) do
+  defp page_matches(name, content, index, pattern) do
+    if Regex.match?(pattern, content) do
       {matches, heading_match?, _fence} =
-        page.content
+        content
         |> String.split("\n")
         |> Enum.with_index(1)
         |> Enum.reduce({[], false, nil}, fn {line, line_number},
@@ -221,7 +223,7 @@ defmodule PtcRunner.Kernel.DocumentationLibrary do
 
           if line_matches? do
             match = %{
-              "page" => page.name,
+              "page" => name,
               "line" => line_number,
               "text" => search_snippet(line, pattern)
             }
@@ -249,7 +251,6 @@ defmodule PtcRunner.Kernel.DocumentationLibrary do
   end
 
   defp search_snippet(line, pattern) do
-    line = String.trim(line)
     [{match_byte, match_bytes}] = Regex.run(pattern, line, return: :index, capture: :first)
     match_start = line |> binary_part(0, match_byte) |> String.codepoints() |> length()
     match_length = line |> binary_part(match_byte, match_bytes) |> String.codepoints() |> length()
@@ -257,7 +258,7 @@ defmodule PtcRunner.Kernel.DocumentationLibrary do
     start = max(match_start - div(available_context, 2), 0)
     codepoints = String.codepoints(line)
     start = min(start, max(length(codepoints) - @max_search_line_length, 0))
-    codepoints |> Enum.slice(start, @max_search_line_length) |> Enum.join()
+    codepoints |> Enum.slice(start, @max_search_line_length) |> Enum.join() |> String.trim()
   end
 
   defp markdown_heading?(line), do: Regex.match?(~r/^ {0,3}\#{1,6}(?:\s|$)/, line)

@@ -98,6 +98,15 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     assert String.length(snippet) <= 160
   end
 
+  test "search accepts whitespace that a matching line trims away" do
+    assert {:ok, %CommandOutcome{envelope: envelope} = outcome} =
+             CommandEngine.dispatch(["docs", "--search", " "])
+
+    assert envelope["result"]["matches"] != []
+    assert {:stdout, rendered} = CommandRenderer.render(outcome)
+    refute rendered =~ "internal_error"
+  end
+
   test "search omission counts name every page with dropped matches" do
     result = DocumentationLibrary.search("Babashka")
 
