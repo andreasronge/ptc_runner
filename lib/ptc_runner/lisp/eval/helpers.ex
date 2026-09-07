@@ -397,6 +397,19 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   def sanitize_private_error({:type_error, _message, {:safe_diagnostic, _diagnostic}} = reason),
     do: sanitize_private_error(reason, nil)
 
+  def sanitize_private_error(
+        {:invalid_tool_args, _message,
+         {:safe_diagnostic,
+          %{
+            kind: :prelude_named_argument_map,
+            ref: "analysis/counters",
+            example_key: "run_id"
+          } = diagnostic}} =
+          reason
+      )
+      when map_size(diagnostic) == 3,
+      do: reason
+
   # The run-deadline variant of the timeout message is itself a stable
   # constant, so preserving it leaks nothing while keeping the binding limit
   # attributable at the Kernel boundary.
@@ -653,9 +666,48 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
     {:type_error, message, {:safe_diagnostic, diagnostic}}
   end
 
+  def sanitize_private_error(
+        {:invalid_tool_args, _message,
+         {:safe_diagnostic,
+          %{
+            kind: :prelude_named_argument_map,
+            ref: "analysis/counters",
+            example_key: "run_id"
+          } = diagnostic}} =
+          reason,
+        _origin
+      )
+      when map_size(diagnostic) == 3,
+      do: reason
+
   def sanitize_private_error({:type_error, _message, _private_args}, origin),
     do:
       {:type_error, diagnostic_prefix(origin) <> "prelude function failed with a type error", nil}
+
+  def sanitize_private_error({:invalid_tool_args, _private_message}, %{ref: ref})
+      when is_binary(ref) do
+    case ref do
+      "analysis/counters" ->
+        diagnostic = %{
+          kind: :prelude_named_argument_map,
+          ref: "analysis/counters",
+          example_key: "run_id"
+        }
+
+        {:invalid_tool_args, "private prelude tool call received invalid arguments",
+         {:safe_diagnostic, diagnostic}}
+
+      _other ->
+        message =
+          if CoreAST.valid_prelude_ref?(ref) do
+            "#{ref}: expected one named argument map; positional arguments are not accepted"
+          else
+            "private prelude tool call received invalid arguments"
+          end
+
+        {:invalid_tool_args, message}
+    end
+  end
 
   def sanitize_private_error(reason, _origin), do: sanitize_private_error(reason)
 

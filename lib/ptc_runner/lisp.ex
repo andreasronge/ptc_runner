@@ -1620,6 +1620,10 @@ defmodule PtcRunner.Lisp do
 
   defp error_details({:arity_error, details}) when is_map(details), do: details
 
+  defp error_details({:invalid_tool_args, _message, {:safe_diagnostic, diagnostic}})
+       when is_map(diagnostic),
+       do: %{safe_diagnostic: diagnostic}
+
   defp error_details({:not_callable, {:data_ref, symbol}}) when is_binary(symbol),
     do: %{name: symbol}
 
