@@ -881,6 +881,40 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
+  test "inspect-only classifies component compile failures for manifest and project forms", %{
+    tmp_dir: directory
+  } do
+    for {source, expected} <- [
+          {
+            "(ns den.main \"Invalid syntax fixture.\")\n\n" <>
+              "(defn run [input]\n  (return {\"a\" 1)\n",
+            "bundle/syntax_invalid: the component source is not valid PTC-Lisp at " <>
+              "main.clj bytes [75,75)"
+          },
+          {
+            "(ns den.main \"Invalid syntax fixture.\")\n\n" <>
+              "(defn run [input]\n  " <>
+              "(return (kernel/eval-mission \"worker\" \"(den.worker/ask)\")))\n",
+            "bundle/compile_failed: the component bundle could not be compiled"
+          }
+        ] do
+      {manifest_path, project_path} =
+        write_inspect_only_compile_failure(directory, source)
+
+      for args <- [
+            ["--manifest", manifest_path, "--inspect-only", "-e", "(+ 1 1)"],
+            ["--project", project_path, "--inspect-only", "-e", "(+ 1 1)"]
+          ] do
+        error = assert_raise Mix.Error, fn -> run_repl(args) end
+
+        assert error.message =~ "error: repl/command_failed: #{expected}"
+        refute error.message =~ "ptc repl setup failed"
+        refute error.message =~ "%{"
+      end
+    end
+  end
+
+  @tag :tmp_dir
   test "inspect-only project uses its host limit ceiling without resolving credentials", %{
     tmp_dir: directory
   } do
@@ -2881,6 +2915,40 @@ defmodule PtcRunner.ReplFrontendTest do
     )
 
     project_path
+  end
+
+  defp write_inspect_only_compile_failure(directory, source) do
+    File.write!(Path.join(directory, "main.clj"), source)
+
+    manifest_path = Path.join(directory, "ptc.json")
+
+    File.write!(
+      manifest_path,
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [
+            %{"id" => "den.main", "path" => "main.clj", "dependencies" => ["kernel"]},
+            %{"library" => "kernel"}
+          ],
+          "entry" => "den.main/run"
+        },
+        "input" => %{"value" => %{}}
+      })
+    )
+
+    project_path = Path.join(directory, "ptc-project.json")
+
+    File.write!(
+      project_path,
+      Jason.encode!(%{
+        "kind" => "ptc-project",
+        "version" => 1,
+        "application" => %{"path" => "ptc.json"}
+      })
+    )
+
+    {manifest_path, project_path}
   end
 
   defp repl_llm_installation(credential) do
