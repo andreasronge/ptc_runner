@@ -44,6 +44,15 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
     end
   end
 
+  defp message_option({
+         :manifest_schema_invalid,
+         %SchemaViolation{
+           rule: :unique_items,
+           path: [property: "missions", property: "*", property: "providers"]
+         }
+       }),
+       do: []
+
   defp message_option({:manifest_schema_invalid, %SchemaViolation{rule: rule}}) do
     case SchemaViolationDiagnostic.message(:application, rule) do
       {:ok, message} -> [message: message]
@@ -142,11 +151,27 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
 
   defp projection(_role, :unknown_properties), do: {:schema_violation, []}
 
+  defp projection(_role, :unknown_mission_provider),
+    do: {:unknown_mission_provider, nil}
+
+  defp projection(_role, :duplicate_mission_provider),
+    do: {:duplicate_mission_provider, nil}
+
   defp projection(
          _role,
          {:manifest_schema_invalid, %SchemaViolation{rule: :required, path: path}}
        ),
        do: {:required_property_missing, path}
+
+  defp projection(
+         _role,
+         {:manifest_schema_invalid,
+          %SchemaViolation{
+            rule: :unique_items,
+            path: [property: "missions", property: "*", property: "providers"] = path
+          }}
+       ),
+       do: {:duplicate_mission_provider, path}
 
   defp projection(_role, {:manifest_schema_invalid, %SchemaViolation{path: path}}),
     do: {:schema_violation, path}
