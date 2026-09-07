@@ -1497,7 +1497,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert {:error, %{fail: %{reason: :limit_exceeded, message: deadline_message}},
             deadline_session} = ReplSession.eval(deadline_session, "42")
 
-    assert deadline_message =~ "run_duration_ms limit 30000 ms was exceeded"
+    assert deadline_message =~ "run_duration_ms limit 120000 ms was exceeded"
     refute deadline_message =~ "manifest"
     refute ReplSession.open?(deadline_session)
     assert {:ok, deadline_events} = ReplSession.close(deadline_session)
