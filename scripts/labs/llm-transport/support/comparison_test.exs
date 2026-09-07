@@ -21,8 +21,10 @@ defmodule PtcRunner.Labs.ComparisonTest do
                       %{runner: nil, transport: nil}
                     end)
 
-  setup do
+  setup context do
     owner = self()
+    ambient_trust = system_trust()
+    start_supervised!({PtcRunner.Labs.RequestAdmission, 4})
 
     responder =
       start_supervised!(
@@ -35,6 +37,7 @@ defmodule PtcRunner.Labs.ComparisonTest do
     fixture =
       MCPHTTPFixture.start(fn request ->
         send(owner, {:wire, request.body})
+        send(owner, {:provider_auth, request.headers["authorization"]})
 
         Agent.get(responder, & &1).(request.body)
       end)
@@ -42,13 +45,37 @@ defmodule PtcRunner.Labs.ComparisonTest do
     on_exit(fixture.close)
     Application.put_env(:req_llm, :load_dotenv, false)
     Application.put_env(:llm_db, :load_dotenv, false)
-    Application.put_env(:req_llm, :openrouter, base_url: fixture.endpoint)
+
+    {endpoint, policy, connection_opts} =
+      if context[:installed_host] do
+        {:ok, _} = Application.ensure_all_started(:ssl)
+        config = PtcRunner.TestSupport.TLSFixture.configuration()
+        proxy = PtcRunner.Labs.TLSProxy.start(fixture.endpoint, config.server)
+        on_exit(proxy.close)
+        previous_ca = write_trust(context.tmp_dir, "previous-ca.pem", ambient_trust)
+
+        on_exit(fn ->
+          :ok = :public_key.cacerts_load(String.to_charlist(previous_ca))
+          assert MapSet.new(system_trust()) == MapSet.new(ambient_trust)
+        end)
+
+        ca_file = write_trust(context.tmp_dir, "ca.pem", ambient_trust ++ config.trust)
+        :ok = :public_key.cacerts_load(String.to_charlist(ca_file))
+        assert Enum.all?(ambient_trust, &(&1 in system_trust()))
+
+        {proxy.endpoint, {:allow_cidrs, ["127.0.0.0/8", "::1/128"]},
+         [transport_opts: [cacerts: config.trust]]}
+      else
+        {fixture.endpoint, :literal_loopback, []}
+      end
+
+    Application.put_env(:req_llm, :openrouter, base_url: endpoint)
 
     Application.put_env(:req_llm, :finch,
-      pools: %{default: [count: 1, size: 2, protocols: [:http1]]}
+      pools: %{default: [count: 1, size: 2, protocols: [:http1], conn_opts: connection_opts]}
     )
 
-    Application.put_env(:ptc_runner, :pilot_http_endpoint, {fixture.endpoint, :literal_loopback})
+    Application.put_env(:ptc_runner, :pilot_http_endpoint, {endpoint, policy})
     {:ok, _} = Application.ensure_all_started(:req_llm)
 
     runtime =
@@ -59,12 +86,15 @@ defmodule PtcRunner.Labs.ComparisonTest do
         start: {HttpAdapter, :start_runtime, [[max_concurrency: 2, groups: %{"openrouter" => 2}]]}
       })
 
+    previous_adapter = Application.fetch_env!(:ptc_runner, :llm_adapter)
+
     on_exit(fn ->
+      Application.put_env(:ptc_runner, :llm_adapter, previous_adapter)
       Application.stop(:req_llm)
       Application.stop(:llm_db)
     end)
 
-    %{runtime: runtime, responder: responder}
+    %{runtime: runtime, responder: responder, ambient_trust: ambient_trust}
   end
 
   test "both adapters execute concurrent support-triage workflows with tool round trips" do
@@ -616,8 +646,261 @@ defmodule PtcRunner.Labs.ComparisonTest do
     end
   end
 
+  for {label, adapter} <- [req_llm: ReqLLMAdapter, http: HttpAdapter] do
+    @tag :tmp_dir
+    @tag :installed_host
+    @tag installed_host_cold_start: label
+    @tag installed_adapter: adapter
+    test "#{label} real host resolves credentials and runs overlapping workflows over TLS", %{
+      tmp_dir: dir,
+      responder: responder,
+      installed_adapter: adapter
+    } do
+      parent = self()
+      host = start_supervised!({RunAdmission, max_concurrent_runs: 2})
+      installation = installed_fixture(dir, adapter)
+
+      assert {:ok, %{source: :llm}} =
+               PtcRunner.Kernel.InstallationCatalog.fetch(installation.catalog, "deepseek")
+
+      Agent.update(responder, fn _ ->
+        fn request ->
+          send(parent, {:provider_barrier, self()})
+
+          receive do
+            :release_provider -> json(WorkflowProbe.response(request))
+          after
+            10_000 -> raise "provider barrier was not released"
+          end
+        end
+      end)
+
+      server = workflow_server(host, adapter, installation: installation)
+      sockets = for _ <- 1..2, do: connect(server.endpoint)
+
+      workers =
+        for _ <- 1..2 do
+          assert_receive {:provider_barrier, worker}, 5_000
+          worker
+        end
+
+      assert length(Enum.uniq(workers)) == 2
+      assert {:ok, %{in_use: 2, status: :ready}} = RunAdmission.snapshot(host)
+      Agent.update(responder, fn _ -> fn request -> json(WorkflowProbe.response(request)) end end)
+      Enum.each(workers, &send(&1, :release_provider))
+      Enum.each(sockets, &assert_success/1)
+
+      for _ <- 1..4 do
+        assert_receive {:provider_auth, "Bearer loopback-only"}, 5_000
+
+        assert_receive {:wire, %{"model" => "deepseek/deepseek-v4-flash", "max_tokens" => 4096}},
+                       5_000
+      end
+
+      assert {:ok, %{in_use: 0, status: :ready}} = RunAdmission.snapshot(host)
+      server.close.()
+    end
+  end
+
+  @tag :tmp_dir
+  @tag :installed_host
+  test "real host cancellation drains provider TLS connections and permits recovery", %{
+    tmp_dir: dir,
+    responder: responder,
+    runtime: runtime
+  } do
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+
+    for adapter <- [ReqLLMAdapter, HttpAdapter] do
+      installation = installed_fixture(dir, adapter)
+      server = workflow_server(host, adapter, installation: installation)
+      hold_responses(responder)
+      socket = connect(server.endpoint)
+      assert_receive {:holding, _}, 5_000
+      assert_receive {:provider_auth, "Bearer loopback-only"}, 5_000
+      :gen_tcp.close(socket)
+      assert_receive :socket_closed, 5_000
+      assert_drained(host, runtime)
+      Agent.update(responder, fn _ -> fn request -> json(WorkflowProbe.response(request)) end end)
+      assert_success(connect(server.endpoint))
+      server.close.()
+    end
+  end
+
+  @tag :tmp_dir
+  @tag :installed_host
+  test "a missing host credential fails before provider traffic", %{tmp_dir: dir} do
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+
+    for adapter <- [ReqLLMAdapter, HttpAdapter] do
+      installation =
+        installed_fixture(dir, adapter, %{
+          "env" => "PTC_PILOT_ABSENT_#{System.unique_integer([:positive])}"
+        })
+
+      server = workflow_server(host, adapter, installation: installation)
+      {head, body} = response(connect(server.endpoint))
+      assert head =~ "500 Internal Server Error"
+      assert body == %{"error" => "run_failed"}
+      refute_received {:wire, _}
+      assert {:ok, %{in_use: 0, status: :ready}} = RunAdmission.snapshot(host)
+      server.close.()
+    end
+  end
+
+  @tag :tmp_dir
+  @tag :installed_host
+  test "host-owned provider applications are not restarted by a request", %{tmp_dir: dir} do
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+
+    for adapter <- [ReqLLMAdapter, HttpAdapter] do
+      installation = installed_fixture(dir, adapter)
+      server = workflow_server(host, adapter, installation: installation)
+      :ok = Application.stop(:req_llm)
+      {head, body} = response(connect(server.endpoint))
+      assert head =~ "500 Internal Server Error"
+      assert body == %{"error" => "run_failed"}
+      refute Enum.any?(Application.started_applications(), &(elem(&1, 0) == :req_llm))
+      refute_received {:wire, _}
+      {:ok, _} = Application.ensure_all_started(:req_llm)
+      assert_success(connect(server.endpoint))
+      assert_receive {:wire, _}
+      assert_receive {:wire, _}
+      server.close.()
+    end
+  end
+
+  @tag :tmp_dir
+  @tag :installed_host
+  test "an untrusted provider certificate is rejected before credentials reach HTTP", %{
+    tmp_dir: dir,
+    ambient_trust: ambient_trust
+  } do
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+    stranger = PtcRunner.TestSupport.TLSFixture.configuration()
+    wrong_ca = write_trust(dir, "wrong-ca.pem", ambient_trust ++ stranger.trust)
+    :ok = :public_key.cacerts_load(String.to_charlist(wrong_ca))
+    assert Enum.all?(ambient_trust, &(&1 in system_trust()))
+    :ok = Application.stop(:req_llm)
+
+    Application.put_env(:req_llm, :finch,
+      pools: %{
+        default: [
+          count: 1,
+          size: 2,
+          protocols: [:http1],
+          conn_opts: [transport_opts: [cacerts: stranger.trust]]
+        ]
+      }
+    )
+
+    {:ok, _} = Application.ensure_all_started(:req_llm)
+
+    for adapter <- [ReqLLMAdapter, HttpAdapter] do
+      installation = installed_fixture(dir, adapter)
+      server = workflow_server(host, adapter, installation: installation)
+      {head, body} = response(connect(server.endpoint))
+      assert head =~ "500 Internal Server Error"
+      assert body == %{"error" => "run_failed"}
+      refute_received {:wire, _}
+      refute_received {:provider_auth, _}
+      assert {:ok, %{in_use: 0, status: :ready}} = RunAdmission.snapshot(host)
+      server.close.()
+    end
+  end
+
+  test "request admission owner death refuses later work before preparation" do
+    gate = start_supervised!({PtcRunner.Labs.RequestAdmission, 1}, id: :dead_requests)
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+    server = workflow_server(host, ReqLLMAdapter, [], request_admission: gate)
+    Process.exit(gate, :kill)
+    assert_eventually(fn -> not Process.alive?(gate) end)
+    {head, body} = response(connect(server.endpoint))
+    assert head =~ "503 Unavailable"
+    assert body == %{"error" => "request_admission_unavailable"}
+    refute_received {:request_worker, _}
+    refute_received {:wire, _}
+  end
+
+  test "request admission refuses before preparation and survives disconnect" do
+    parent = self()
+    gate = start_supervised!({PtcRunner.Labs.RequestAdmission, 1}, id: :one_request)
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 2})
+
+    server =
+      workflow_server(
+        host,
+        ReqLLMAdapter,
+        [
+          before_prepare: fn ->
+            send(parent, {:preparing, self()})
+            receive do: (:continue -> :ok)
+          end
+        ],
+        request_admission: gate
+      )
+
+    socket = connect(server.endpoint)
+    assert_receive {:preparing, worker}, 5_000
+    assert_receive {:request_worker, ^worker}, 5_000
+    {head, body} = response(connect(server.endpoint))
+    assert head =~ "503 Busy"
+    assert body == %{"error" => "request_capacity_exhausted"}
+    refute_received {:request_worker, _}
+    refute_received {:wire, _}
+    assert {:ok, %{in_use: 0}} = RunAdmission.snapshot(host)
+    ref = Process.monitor(worker)
+    :gen_tcp.close(socket)
+    assert_receive {:DOWN, ^ref, :process, ^worker, _}, 5_000
+    assert_eventually(fn -> PtcRunner.Labs.RequestAdmission.snapshot(gate).in_use == 0 end)
+    recovered = connect(server.endpoint)
+    assert_receive {:preparing, next}, 5_000
+    send(next, :continue)
+    assert_success(recovered)
+  end
+
+  # cacerts_get/0 returns public_key combined_cert records on current OTP;
+  # older supported OTP releases can return DER binaries directly.
+  defp system_trust do
+    Enum.map(:public_key.cacerts_get(), fn
+      {:cert, der, _decoded} -> der
+      der when is_binary(der) -> der
+    end)
+  end
+
+  defp write_trust(dir, name, certificates) do
+    path = Path.join(dir, name)
+
+    File.write!(
+      path,
+      :public_key.pem_encode(Enum.map(certificates, &{:Certificate, &1, :not_encrypted}))
+    )
+
+    path
+  end
+
+  defp installed_fixture(dir, adapter, credential \\ %{"literal" => "loopback-only"}) do
+    Application.put_env(:ptc_runner, :llm_adapter, adapter)
+    config = "examples/support-triage/ptc-host.json" |> File.read!() |> Jason.decode!()
+    config = put_in(config, ["credentials", "openrouter_key"], credential)
+    path = Path.join(dir, "ptc-host.json")
+    File.write!(path, Jason.encode!(config))
+    {:ok, installation} = WorkflowProbe.load_installation(path)
+    on_exit(fn -> PtcRunner.Kernel.InstallationCatalog.close(installation.catalog) end)
+    installation
+  end
+
   defp workflow_server(host, adapter, run_opts \\ [], http_opts \\ []) do
     parent = self()
+
+    {:ok, supervisor} = ExUnit.fetch_test_supervisor()
+
+    [{_, gate, _, _}] =
+      Enum.filter(Supervisor.which_children(supervisor), fn {id, _, _, _} ->
+        id == PtcRunner.Labs.RequestAdmission
+      end)
+
+    http_opts = Keyword.put_new(http_opts, :request_admission, gate)
 
     server =
       MCPHTTPFixture.start(fn _ ->
@@ -629,7 +912,12 @@ defmodule PtcRunner.Labs.ComparisonTest do
              socket,
              fn ->
                send(parent, {:request_worker, self()})
-               WorkflowProbe.run_admitted(host, adapter, requirements(), run_opts)
+               if before_prepare = run_opts[:before_prepare], do: before_prepare.()
+
+               case run_opts[:installation] do
+                 nil -> WorkflowProbe.run_admitted(host, adapter, requirements(), run_opts)
+                 installation -> WorkflowProbe.run_installed(host, installation)
+               end
              end,
              http_opts
            )

@@ -89,10 +89,10 @@ disconnect while a provider closer is held, connection-process death,
 request-worker death, timeout, and cleanup failure fencing future requests.
 The regression first demonstrated that the former SSE “complete” response
 omitted the workflow value. The loopback server uses one response per
-connection. It still compiles per request and installs the same custom inline
-capability as the baseline, not a shipped host installation. Ingress admission,
-compile-once serving, MCP framing/conformance, authentication, and sustained
-TLS/reuse measurements remain outside this fixture. Neither it nor its use of
+connection. The original cases retain their custom inline
+capability as a baseline. The installed-provider cases below use the shipped
+host path. Compile-once serving, TCP/HTTP ingress limits, MCP framing/conformance,
+authentication, and sustained TLS/reuse measurements remain outside this fixture. Neither it nor its use of
 an internal worker helper is a deployable gateway API.
 
 Run the cold success case alone in a fresh VM so earlier tests cannot warm
@@ -110,6 +110,51 @@ the Kernel's workflow and provider heap limits remain separate. This is a
 provisional lab budget, not a deployment capacity recommendation. A separate
 regression checks that refused preparations are closed while their caller
 remains alive, rather than depending on disposable-worker exit for cleanup.
+
+## Installed providers and request work
+
+The `:installed_host` cases load the support-triage host document through
+`HostConfig.load/1` and `HostInstallation.catalog/1`/`runtime_services/2`. The
+only host-document substitution is an explicit dummy credential binding.
+They exercise the shipped LLM source, declared usage/options, credential
+resolution, and host-owned provider application checks. The adapter is chosen
+once per sequential host batch through the existing VM configuration; changing
+adapters while requests are active is unsupported.
+
+A supervised loopback TLS proxy fronts the existing HTTP fixture. Certificates
+are minted in memory, fixture trust is added to the existing VM authorities
+and supplied to Finch, and peer verification stays enabled. Teardown restores the previous VM
+authorities, including any custom roots. These tests run sequentially in a
+dedicated lab VM because the experimental public call uses the system trust
+store. Both adapters transmit the dummy bearer over TLS. Cases cover concurrent results, disconnect/recovery, missing
+credentials, stopped provider applications, and an untrusted certificate that
+must fail before credentials reach the HTTP handler. The fixture still closes
+each response connection, so this is not a connection-reuse benchmark.
+
+The separate experimental cold case reproduces a preflight heap failure that
+the combined adapter loop hid: audited-local LLM metadata preparation now
+gets its larger bounded heap by provider source, independently of adapter
+application identity. Run each adapter case in its own fresh VM:
+
+```bash
+mix run -e 'Code.require_file("scripts/labs/llm-transport/compare.exs"); ExUnit.configure(exclude: [:test], include: [installed_host_cold_start: :req_llm])'
+mix run -e 'Code.require_file("scripts/labs/llm-transport/compare.exs"); ExUnit.configure(exclude: [:test], include: [installed_host_cold_start: :http])'
+```
+
+`RequestAdmission` separately bounds disposable request workers entering
+preparation, execution, and publication. `ServingHost` requires its PID in
+`:request_admission`. Full capacity returns `request_capacity_exhausted` before
+the request callback starts; capacity returns only after that worker is dead.
+An unavailable gate refuses later work and never automatically restarts;
+already admitted work can finish under its existing request deadline. Drain
+old work before replacing a gate. `RunAdmission` still owns the independent
+execution limit and retains it through provider cleanup.
+
+This bounds request **work**, not accepted sockets, parsed HTTP bodies,
+provisional worker creation, copied request closures, or admission mailboxes.
+Those need a bounded production listener before a gateway can be deployed.
+The comparison checks refusal before preparation and recovery after killing a
+request while it is still preparing.
 
 ## Bounded live check
 

@@ -58,18 +58,46 @@ until the held closer finishes. Error responses expose only fixed codes.
 
 Keep this work on `codex/reqllm-feature-inventory` and the upstream pilot on
 `codex/ptc-runner-pilot-parity` until acceptance evidence justifies promotion.
-The HTTP fixture is still lab code, uses an internal worker helper, compiles
-per request, and installs a custom inline provider rather than a shipped host
-installation. It does not prove MCP conformance, production ingress bounds,
-compile-once serving, authentication, or pooled TLS reuse.
+The HTTP fixture is still lab code and compiles per request. It does not prove
+MCP conformance, production ingress bounds, compile-once serving,
+authentication, or pooled TLS reuse.
 
-Next, carry this tested lifecycle into the narrow sibling gateway slice with
-bounded ingress and the real host installation, following #1465's public API
-boundary. Define deployment load and latency/connection budgets before
-sustained TLS/reuse comparisons. Upstream transport fixes still require a
-reviewed published release and explicit dependency pin before adapter
-promotion. ReqLLM and LLMDB remain in place; no merge, release, or default
-transport change is part of this branch validation.
+### Branch validation: installed providers and preparation admission
+
+The additional installed-provider cases now load the support-triage host
+through `HostConfig` and `HostInstallation`, with its actual LLM source,
+credential resolver, usage/options, and host-owned application mode. Each
+adapter is selected before its host batch; no request changes VM adapter
+configuration. A verified local TLS peer permits the dummy bearer to take the
+real credential path without weakening the experimental transport's refusal
+to send credentials over plaintext loopback.
+
+Checks cover concurrent complete results, cancellation/recovery, missing
+credentials, stopped provider applications without automatic startup, and
+untrusted certificates rejected before HTTP credentials arrive. The tagged
+installed-host cold-start cases run once per adapter in separate fresh VMs.
+Provider barriers prove both runs are admitted simultaneously. The separate
+experimental cold case exposed a preflight heap failure hidden by ReqLLM
+warming metadata first: the larger audited-local metadata budget was selected
+by adapter application identity. It now follows the sealed LLM source; active
+provider budgets remain unchanged. TLS setup retains
+existing VM authorities and restores them after each sequential lab case. The existing
+inline-capability cases remain as the transport baseline.
+
+A separate lab `RequestAdmission` gate refuses excess request callbacks before
+preparation and holds each permit until its worker exits. The canonical
+`RunAdmission` still accounts for provider cleanup after request death. This
+bounds preparation/execution/publication work; it does not bound accepted
+sockets, HTTP parsing, provisional workers, copied closures, or control
+mailboxes. Gate replacement requires draining old work and is not automatic.
+
+Next, carry these tested lifecycles into the sibling gateway with a bounded
+listener and the public serving facade described by #1465. Define deployment
+load and latency/connection budgets before sustained TLS/reuse comparisons;
+the local TLS fixture closes every response connection. Upstream transport
+fixes still require a reviewed published release and explicit dependency pin
+before adapter promotion. ReqLLM and LLMDB remain in place; no merge, release,
+or default transport change is part of this branch validation.
 
 ## Decision to make
 

@@ -520,7 +520,7 @@ defmodule PtcRunner.Kernel.LocalPreflight do
                   invoke(
                     callback,
                     occurrence,
-                    catalog.implementations[occurrence.name],
+                    catalog.descriptors[occurrence.name],
                     context,
                     services,
                     timeout_ms,
@@ -631,11 +631,11 @@ defmodule PtcRunner.Kernel.LocalPreflight do
     end
   end
 
-  defp invoke(callback, occurrence, implementation, context, services, timeout_ms, step) do
+  defp invoke(callback, occurrence, descriptor, context, services, timeout_ms, step) do
     result =
       BoundedWorker.run(fn -> callback.(occurrence.config, context, services) end,
         timeout_ms: timeout_ms,
-        max_heap_words: max_heap_words(implementation, step),
+        max_heap_words: max_heap_words(descriptor, step),
         cancel_with_caller: true,
         # Linking to the caller alone is not enough for active work. The
         # executor can outlive the session, so a callback blocked in network or
@@ -648,10 +648,12 @@ defmodule PtcRunner.Kernel.LocalPreflight do
     BoundedWorker.classify_callback(result)
   end
 
-  defp max_heap_words(%{provider_application: :req_llm}, %{activity: false}),
+  # Cold bundled model metadata can need this budget regardless of the selected
+  # LLM adapter. Application ownership is independent of preparation cost.
+  defp max_heap_words(%{source: :llm}, %{activity: false}),
     do: @llm_max_heap_words
 
-  defp max_heap_words(_implementation, step), do: step.max_heap_words
+  defp max_heap_words(_descriptor, step), do: step.max_heap_words
 
   # A refused fixture file states the rule it broke, and a line-level rejection
   # states which line. Both are part of the published fixture contract, so

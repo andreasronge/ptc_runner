@@ -516,7 +516,9 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
         receive do: (:finish -> :ok)
       end)
 
-    assert_receive {:foreign_inspection_sink, foreign_inspection}, 2_000
+    # Construction reserves a real file and starts its sink. This ownership
+    # check imposes no two-second startup contract under parallel filesystem load.
+    assert_receive {:foreign_inspection_sink, foreign_inspection}, 5_000
     inspection_ref = Process.monitor(foreign_inspection.pid)
 
     {:ok, workflow} = WorkflowEnvironment.new([])

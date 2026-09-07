@@ -3,8 +3,9 @@ defmodule PtcRunner.TestSupport.TLSFixture do
   A loopback TLS listener for transport tests, minted in memory.
 
   `:public_key.pkix_test_data/1` builds the chain, so no certificate files are
-  checked in and none are written at test time. Keys are RSA-2048 with SHA-256
-  digests because the defaults are rejected by TLS 1.3 negotiation.
+  checked in and this helper writes none. Consumers can materialize the public
+  trust anchors for clients that require a CA file. Keys are RSA-2048 with
+  SHA-256 digests because the defaults are rejected by TLS 1.3 negotiation.
   """
 
   @doc """
@@ -21,7 +22,7 @@ defmodule PtcRunner.TestSupport.TLSFixture do
           active: false,
           reuseaddr: true,
           ip: {127, 0, 0, 1}
-        ] ++ server_config()
+        ] ++ configuration().server
       )
 
     {:ok, {_address, port}} = :ssl.sockname(listener)
@@ -38,17 +39,24 @@ defmodule PtcRunner.TestSupport.TLSFixture do
     end
   end
 
-  defp server_config do
+  @doc "Returns a localhost server chain and its client trust anchors."
+  def configuration do
     key = fn -> :public_key.generate_key({:rsa, 2048, 65_537}) end
 
     chain = %{
       root: [key: key.(), digest: :sha256],
       intermediates: [],
-      peer: [key: key.(), digest: :sha256]
+      peer: [
+        key: key.(),
+        digest: :sha256,
+        extensions: [
+          {:Extension, {2, 5, 29, 17}, false,
+           [dNSName: ~c"localhost", iPAddress: <<127, 0, 0, 1>>]}
+        ]
+      ]
     }
 
-    %{server_chain: chain, client_chain: chain}
-    |> :public_key.pkix_test_data()
-    |> Map.fetch!(:server_config)
+    data = :public_key.pkix_test_data(%{server_chain: chain, client_chain: chain})
+    %{server: data.server_config, trust: Keyword.fetch!(data.client_config, :cacerts)}
   end
 end

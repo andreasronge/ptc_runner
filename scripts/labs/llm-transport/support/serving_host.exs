@@ -13,12 +13,13 @@ defmodule PtcRunner.Labs.ServingHost do
   def serve(socket, run, opts \\ []) do
     connection = self()
     timeout_ms = Keyword.get(opts, :timeout_ms, 30_000)
+    request_admission = Keyword.fetch!(opts, :request_admission)
     :ok = :inet.setopts(socket, active: :once, send_timeout: 1_000, send_timeout_close: true)
 
     {owner, ref} =
       spawn_monitor(fn ->
         result =
-          BoundedWorker.run(run,
+          BoundedWorker.run(fn -> PtcRunner.Labs.RequestAdmission.run(request_admission, run) end,
             timeout_ms: timeout_ms,
             max_heap_words: @request_heap_words,
             cancel_with: connection,
@@ -49,6 +50,12 @@ defmodule PtcRunner.Labs.ServingHost do
       case result do
         {:ok, {:ok, value}} ->
           {"200 OK", %{"result" => value}}
+
+        {:ok, {:error, :request_capacity_exhausted}} ->
+          {"503 Busy", %{"error" => "request_capacity_exhausted"}}
+
+        {:ok, {:error, :request_admission_unavailable}} ->
+          {"503 Unavailable", %{"error" => "request_admission_unavailable"}}
 
         {:ok, {:error, :run_capacity_exhausted}} ->
           {"503 Busy", %{"error" => "run_capacity_exhausted"}}

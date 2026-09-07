@@ -4,6 +4,8 @@ defmodule PtcRunner.Labs.WorkflowProbe do
   alias PtcRunner.TestSupport.RunLifecycle
 
   alias PtcRunner.Kernel.{
+    HostConfig,
+    HostInstallation,
     InstallationCatalog,
     PreparedRun,
     ProviderDescriptor,
@@ -63,28 +65,42 @@ defmodule PtcRunner.Labs.WorkflowProbe do
       })
 
     try do
-      {:ok, request} =
-        ApplicationPackage.request_directory(
-          "examples/support-triage/01-one-question/ptc.json",
-          result_projection: :json,
-          installed_limits: catalog.installed_limits
-        )
-
-      {:ok, prepared} = RunCoordinator.prepare(request, catalog)
-
-      try do
-        execute_prepared(host, prepared, catalog)
-      after
-        PreparedRun.close(prepared)
-      end
+      {:ok, services} = ProviderRuntimeServices.new(provider_application_mode: :host_owned)
+      run_installed(host, %{catalog: catalog, services: services})
     after
       InstallationCatalog.close(catalog)
     end
   end
 
-  defp execute_prepared(host, prepared, catalog) do
-    {:ok, services} = ProviderRuntimeServices.new(provider_application_mode: :host_owned)
+  # The adapter is an explicit VM-level installation choice, made by the
+  # embedding host before any requests. Never change it per concurrent run.
+  def load_installation(path) do
+    with {:ok, host} <- HostConfig.load(path),
+         {:ok, catalog} <- HostInstallation.catalog(host),
+         {:ok, services} <-
+           HostInstallation.runtime_services(host, provider_application_mode: :host_owned) do
+      {:ok, %{catalog: catalog, services: services}}
+    end
+  end
 
+  def run_installed(admission, %{catalog: catalog, services: services}) do
+    {:ok, request} =
+      ApplicationPackage.request_directory(
+        "examples/support-triage/01-one-question/ptc.json",
+        result_projection: :json,
+        installed_limits: catalog.installed_limits
+      )
+
+    {:ok, prepared} = RunCoordinator.prepare(request, catalog)
+
+    try do
+      execute_prepared(admission, prepared, catalog, services)
+    after
+      PreparedRun.close(prepared)
+    end
+  end
+
+  defp execute_prepared(host, prepared, catalog, services) do
     {:ok, authority} =
       PublicationAuthority.authorize(
         "lab-#{System.unique_integer([:positive])}",
