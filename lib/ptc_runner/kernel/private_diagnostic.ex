@@ -9,7 +9,7 @@ defmodule PtcRunner.Kernel.PrivateDiagnostic do
   submitted source — or, for a narrower class, nothing private that this
   evaluation itself captured.
 
-  Two admission rules apply, both **rebuild-or-bound, never raw forward** of
+  Three admission rules apply, all **rebuild-or-bound, never raw forward** of
   untrusted evaluator prose outside their footing:
 
   1. **Source-derived structured detail** (today `:unbound_var`). A message is
@@ -25,9 +25,17 @@ defmodule PtcRunner.Kernel.PrivateDiagnostic do
      gate. Messages are a function of the submitted source, prelude surface, and
      installed tool names, not of values read from private records.
 
-  `details` is evaluator output and is treated as untrusted: it selects among
-  fixed shapes, it never carries provenance. Anything outside those rules
-  collapses to `redacted_message/0`.
+  3. **Code-owned structured selectors with no capability activity.** The
+     private prelude boundary may replace an evaluator message with a closed
+     `:safe_diagnostic` shape. This module admits only exact selector shapes it
+     knows and emits only fixed literals. The current selector explains that
+     `analysis/counters` expects a map containing the `run_id` key; arbitrary
+     `:invalid_tool_args` messages never enter the kind allowlist above.
+
+  `details` is evaluator output and remains untrusted even when it contains a
+  code-owned selector: it can only select among exact fixed shapes and never
+  contributes rendered bytes. Anything outside those rules collapses to
+  `redacted_message/0`.
   """
 
   @redacted "private evaluation failed; diagnostic withheld by the private result policy"
