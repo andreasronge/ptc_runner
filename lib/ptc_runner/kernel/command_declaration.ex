@@ -51,7 +51,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
         "ptc doctor [MANIFEST.json|PROJECT.json] [--host-config HOST.json] [--connect]",
         "ptc models PROJECT.json | --host-config HOST.json",
         "ptc init DIRECTORY [--example NAME]",
-        "ptc docs [PAGE]",
+        "ptc docs [PAGE] | --search TERM",
         "ptc help [COMMAND]",
         "ptc transcript RUN_ID --traces DIRECTORY --inspection DIRECTORY --private-unattended --private-output FILE",
         "ptc repl [OPTIONS] [SCRIPT|-]",
@@ -90,8 +90,17 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
       options: [@envelope_option]
     },
     docs: %{
-      usage: ["ptc docs [PAGE]"],
-      options: [@help_option]
+      usage: ["ptc docs [PAGE] | --search TERM"],
+      options: [
+        %{
+          key: :search,
+          type: :string,
+          syntax: ["--search TERM"],
+          description:
+            "find a case-insensitive substring in prose pages; use --search=TERM when TERM starts with --"
+        },
+        @help_option
+      ]
     },
     validate: %{
       usage: [

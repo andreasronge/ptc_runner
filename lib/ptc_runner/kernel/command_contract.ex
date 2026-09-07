@@ -988,8 +988,10 @@ defmodule PtcRunner.Kernel.CommandContract do
   @doc """
   Builds the `docs` result: the served listing, or one embedded page.
   """
-  @spec docs_result(binary() | nil) :: map()
+  @spec docs_result(binary() | nil | {:search, binary()}) :: map()
   def docs_result(nil), do: %{"pages" => DocumentationLibrary.listing()}
+
+  def docs_result({:search, term}) when is_binary(term), do: DocumentationLibrary.search(term)
 
   def docs_result(page) when is_binary(page) do
     case DocumentationLibrary.fetch(page) do
@@ -1081,6 +1083,7 @@ defmodule PtcRunner.Kernel.CommandContract do
        do: true
 
   defp diagnostic_pair_allowed?(:docs, :arguments, :docs_page_unknown), do: true
+  defp diagnostic_pair_allowed?(:docs, :arguments, :conflicting_arguments), do: true
   defp diagnostic_pair_allowed?(:init, :arguments, :example_unknown), do: true
 
   defp diagnostic_pair_allowed?(:run_unclassified, :arguments, code)
@@ -2067,6 +2070,23 @@ defmodule PtcRunner.Kernel.CommandContract do
         closed(~w(page content), %{
           "page" => %{"enum" => names},
           "content" => %{"type" => "string", "minLength" => 1}
+        }),
+        closed(~w(term matches omitted_matches omitted_pages), %{
+          "term" => %{"type" => "string", "minLength" => 1, "maxLength" => 128},
+          "matches" => %{
+            "type" => "array",
+            "maxItems" => 30,
+            "items" =>
+              closed(~w(page line text), %{
+                "page" => %{
+                  "enum" => names -- Enum.filter(names, &String.starts_with?(&1, "schema-"))
+                },
+                "line" => %{"type" => "integer", "minimum" => 1},
+                "text" => %{"type" => "string", "maxLength" => 160}
+              })
+          },
+          "omitted_matches" => %{"type" => "integer", "minimum" => 0},
+          "omitted_pages" => %{"type" => "integer", "minimum" => 0}
         })
       ]
     }

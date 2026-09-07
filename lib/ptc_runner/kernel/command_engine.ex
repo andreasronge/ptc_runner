@@ -391,11 +391,17 @@ defmodule PtcRunner.Kernel.CommandEngine do
         {:ok, CommandOutcome.success(:version, run_ref, CommandContract.version_result())}
 
       :docs ->
+        docs_request =
+          case Map.fetch(arguments.options, :search) do
+            {:ok, term} -> {:search, term}
+            :error -> arguments.options.page
+          end
+
         {:ok,
          CommandOutcome.success(
            :docs,
            run_ref,
-           CommandContract.docs_result(arguments.options.page)
+           CommandContract.docs_result(docs_request)
          )}
 
       :doctor ->

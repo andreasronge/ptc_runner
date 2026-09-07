@@ -1,18 +1,16 @@
 # Drive ptc as an agent
 
-Use the executable's own help and embedded documentation when a coding agent
-drives ptc.
+Use the executable's help and embedded documentation when a coding agent drives
+ptc. They work offline and describe the version you invoke.
 
-You do not need network access or a remembered API. The
-executable you are running carries its own command grammar and documentation,
-so both always describe the version you actually invoke.
+You do not need network access or a remembered API.
 
 ## Ask the binary instead of guessing
 
 | Question | Command |
 | --- | --- |
 | Which commands and switches exist? | `ptc help`, then `ptc help COMMAND` |
-| Which documentation ships here? | `ptc docs` |
+| Which documentation ships here or mentions a term? | `ptc docs; ptc docs --search TERM` |
 | How does the language or a contract work? | `ptc docs PAGE` |
 | What does one function do? | `ptc repl --project PROJECT.json -e '(doc "name")'` |
 
@@ -76,7 +74,9 @@ contract.
 A failed run reports a closed phase and code pair. Deliberate `fail` values are
 deliberately not copied into the command diagnostic, and private detail never
 reaches public evidence, so do not expect a stack trace or a model transcript
-in normal output. To debug, read the trace the run recorded, then
+in normal output.
+
+To debug, read the trace the run recorded, then
 `ptc docs debug` for the query surface and `ptc docs traces` for the record
 contract. `ptc viewer PROJECT.json` browses the same evidence when a human is
 present.
@@ -89,7 +89,9 @@ capability payloads — they require explicit private authorization; see
 
 An application document selects only what `ptc-host.json` already installed. It
 cannot add credentials, endpoints, commands, or wider limits, and no prompt or
-generated program can escalate that. If a provider or tool is missing, the fix
+generated program can escalate that.
+
+If a provider or tool is missing, the fix
 belongs in the host configuration a person controls (`ptc docs host`), not in
 the manifest or in a retry. Report the gap instead of working around it.
 

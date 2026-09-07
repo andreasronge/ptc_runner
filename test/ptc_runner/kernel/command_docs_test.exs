@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandOutcome
+  alias PtcRunner.Kernel.CommandParser
   alias PtcRunner.Kernel.CommandRejection
   alias PtcRunner.Kernel.CommandRenderer
   alias PtcRunner.Kernel.DocumentationLibrary
@@ -31,6 +32,106 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
       assert {:ok, %CommandOutcome{envelope: envelope}} = CommandEngine.dispatch(["docs", name])
       assert envelope["result"] == %{"page" => name, "content" => page_content(name)}
     end
+  end
+
+  test "search groups matches by ranked page and renders routable lines" do
+    assert {:ok, %CommandOutcome{envelope: envelope} = outcome} =
+             CommandEngine.dispatch(["docs", "--search", "result_schema"])
+
+    assert %{
+             "term" => "result_schema",
+             "matches" => [%{"page" => "manifest"} | _rest],
+             "omitted_matches" => 0,
+             "omitted_pages" => 0
+           } = envelope["result"]
+
+    assert {:stdout, rendered} = CommandRenderer.render(outcome)
+    [first | _rest] = String.split(rendered, "\n", trim: true)
+    assert first =~ ~r/^manifest:\d+: /
+    assert rendered =~ ~r/agent-workflow-patterns:\d+: /
+  end
+
+  test "search ranks a page with a heading hit before pages with only body hits" do
+    assert {:ok, %CommandOutcome{envelope: envelope}} =
+             CommandEngine.dispatch(["docs", "--search", "command-line reference"])
+
+    assert [%{"page" => "cli"} | _rest] = envelope["result"]["matches"]
+  end
+
+  test "search reports no hit and suggests a matching final dotted or slash segment" do
+    assert {:ok, %CommandOutcome{} = absent} =
+             CommandEngine.dispatch(["docs", "--search", "term-that-is-absent"])
+
+    assert {:stdout, "no page mentions term-that-is-absent\n"} = CommandRenderer.render(absent)
+
+    assert {:ok, %CommandOutcome{} = dotted} =
+             CommandEngine.dispatch(["docs", "--search", "contracts.result_schema"])
+
+    assert {:stdout, "no page mentions contracts.result_schema; try result_schema\n"} =
+             CommandRenderer.render(dotted)
+
+    assert {:ok, %CommandOutcome{} = slash} =
+             CommandEngine.dispatch(["docs", "--search", "missing/result_schema"])
+
+    assert {:stdout, "no page mentions missing/result_schema; try result_schema\n"} =
+             CommandRenderer.render(slash)
+  end
+
+  test "search excludes terms found only in schema pages" do
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["docs", "--search", "prefixItems"])
+
+    assert {:stdout, "no page mentions prefixItems\n"} = CommandRenderer.render(outcome)
+  end
+
+  test "search caps lines and pages and reports everything omitted" do
+    assert {:ok, %CommandOutcome{envelope: envelope} = outcome} =
+             CommandEngine.dispatch(["docs", "--search", "schema"])
+
+    result = envelope["result"]
+    assert result["omitted_matches"] > 0
+    assert result["omitted_pages"] > 0
+    assert length(result["matches"]) <= 30
+
+    assert result["matches"]
+           |> Enum.frequencies_by(& &1["page"])
+           |> Map.values()
+           |> Enum.all?(&(&1 <= 3))
+
+    assert result["matches"] |> Enum.map(& &1["page"]) |> Enum.uniq() |> length() == 10
+
+    assert {:stdout, rendered} = CommandRenderer.render(outcome)
+
+    assert rendered =~
+             "#{result["omitted_matches"]} more matches in #{result["omitted_pages"]} pages; narrow the term\n"
+  end
+
+  test "search rejects a page argument, missing or oversized terms, and accepts an equals value" do
+    assert {:error, %CommandRejection{} = rejection} =
+             CommandParser.parse(["docs", "agent-guide", "--search", "schema"])
+
+    assert rejection.conflicts == ["PAGE", "--search"]
+
+    assert {:error, %CommandOutcome{envelope: conflict}} =
+             CommandEngine.dispatch(["docs", "agent-guide", "--search", "schema"])
+
+    assert conflict["error"]["code"] == "conflicting_arguments"
+
+    for argv <- [["docs", "--search", ""], ["docs", "--search", String.duplicate("a", 129)]] do
+      assert {:error, %CommandOutcome{envelope: envelope}} = CommandEngine.dispatch(argv)
+      assert envelope["error"]["code"] == "invalid_arguments"
+    end
+
+    assert {:ok, %CommandOutcome{envelope: envelope}} =
+             CommandEngine.dispatch(["docs", "--search=--host-config"])
+
+    assert envelope["result"]["term"] == "--host-config"
+    assert envelope["result"]["matches"] != []
+
+    assert {:ok, %CommandOutcome{}} =
+             CommandEngine.dispatch(["docs", "--search", String.duplicate("é", 128)])
+
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["docs", "--search", "["])
   end
 
   test "the packaged MCP schema is the exact site wire schema" do
@@ -191,6 +292,8 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     for name <- DocumentationLibrary.names() do
       assert rendered =~ name
     end
+
+    assert rendered =~ "try --search TERM"
   end
 
   test "docs outcomes satisfy the published envelope schema" do
@@ -199,6 +302,8 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     for argv <- [
           ["docs"],
           ["docs", "agent-guide"],
+          ["docs", "--search", "result_schema"],
+          ["docs", "--search", "term-that-is-absent"],
           ["docs", "schema-project"],
           ["docs", "schema-mcp"]
         ] do

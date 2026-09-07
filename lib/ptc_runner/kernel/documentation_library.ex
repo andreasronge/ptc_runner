@@ -124,6 +124,9 @@ defmodule PtcRunner.Kernel.DocumentationLibrary do
            end)
   @contents Map.new(@pages, &{&1.name, &1.content})
   @source_paths Map.new(@catalog, fn {name, path} -> {name, path} end)
+  @max_search_pages 10
+  @max_search_lines_per_page 3
+  @max_search_line_length 160
 
   @doc """
   Returns every served page name, in catalog order.
@@ -159,4 +162,78 @@ defmodule PtcRunner.Kernel.DocumentationLibrary do
   @spec fetch(binary()) :: {:ok, binary()} | :error
   def fetch(name) when is_binary(name), do: Map.fetch(@contents, name)
   def fetch(_name), do: :error
+
+  @doc """
+  Searches the embedded prose pages for a case-insensitive substring.
+
+  Pages with a heading match rank first, followed by total match count and
+  catalog order. Results retain at most three lines from each of ten pages.
+  """
+  @spec search(binary()) :: map()
+  def search(term) when is_binary(term) and byte_size(term) > 0 do
+    pattern = Regex.compile!(Regex.escape(term), "iu")
+
+    pages =
+      @pages
+      |> Enum.with_index()
+      |> Enum.reject(fn {page, _index} -> String.starts_with?(page.name, "schema-") end)
+      |> Enum.flat_map(&page_matches(&1, pattern))
+      |> Enum.sort_by(fn page ->
+        {if(page.heading_match?, do: 0, else: 1), -length(page.matches), page.index}
+      end)
+
+    included_pages = Enum.take(pages, @max_search_pages)
+
+    matches =
+      Enum.flat_map(included_pages, fn page ->
+        Enum.take(page.matches, @max_search_lines_per_page)
+      end)
+
+    %{
+      "term" => term,
+      "matches" => matches,
+      "omitted_matches" => Enum.sum(Enum.map(pages, &length(&1.matches))) - length(matches),
+      "omitted_pages" => max(length(pages) - length(included_pages), 0)
+    }
+  end
+
+  @doc false
+  @spec suggested_search(binary()) :: binary() | nil
+  def suggested_search(term) when is_binary(term) do
+    segment = term |> String.split([".", "/"]) |> List.last()
+
+    if segment not in [nil, "", term] and search(segment)["matches"] != [],
+      do: segment,
+      else: nil
+  end
+
+  defp page_matches({page, index}, pattern) do
+    if Regex.match?(pattern, page.content) do
+      {matches, heading_match?} =
+        page.content
+        |> String.split("\n")
+        |> Enum.with_index(1)
+        |> Enum.reduce({[], false}, fn {line, line_number}, {matches, heading_match?} ->
+          if Regex.match?(pattern, line),
+            do: {
+              [
+                %{
+                  "page" => page.name,
+                  "line" => line_number,
+                  "text" => line |> String.trim() |> String.slice(0, @max_search_line_length)
+                }
+                | matches
+              ],
+              heading_match? or Regex.match?(~r/^ {0,3}\#{1,6}(?:\s|$)/, line)
+            },
+            else: {matches, heading_match?}
+        end)
+
+      matches = Enum.reverse(matches)
+
+      [%{index: index, heading_match?: heading_match?, matches: matches}]
+    else
+      []
+    end
+  end
 end

@@ -29,6 +29,7 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.DiagnosticCatalog
+  alias PtcRunner.Kernel.DocumentationLibrary
   alias PtcRunner.Kernel.ModelContractDiagnostic
 
   @spec render(CommandOutcome.t(), CommandRejection.t() | nil, keyword()) ::
@@ -67,6 +68,13 @@ defmodule PtcRunner.Kernel.CommandRenderer do
 
       %{"status" => "ok", "command" => "docs", "result" => %{"pages" => pages}} ->
         {:stdout, docs_listing_text(pages)}
+
+      %{
+        "status" => "ok",
+        "command" => "docs",
+        "result" => %{"term" => term, "matches" => matches} = result
+      } ->
+        {:stdout, docs_search_text(term, matches, result)}
 
       %{"status" => "ok", "command" => "init", "result" => %{"created" => created}} ->
         {:stdout, "created " <> Enum.join(created, ", ") <> "\n"}
@@ -184,7 +192,7 @@ defmodule PtcRunner.Kernel.CommandRenderer do
     do: "; unknown switch; accepted: " <> Enum.join(accepted, ", ")
 
   defp rejection_suffix(%CommandRejection{kind: :unknown_page, accepted: accepted}),
-    do: "; pages: " <> Enum.join(accepted, ", ")
+    do: "; try --search TERM; pages: " <> Enum.join(accepted, ", ")
 
   defp rejection_suffix(%CommandRejection{kind: :unknown_example, accepted: accepted}),
     do: "; examples: " <> Enum.join(accepted, ", ")
@@ -255,7 +263,34 @@ defmodule PtcRunner.Kernel.CommandRenderer do
         "  " <> String.pad_trailing(page["name"], width) <> " — " <> page["title"]
       end)
 
-    Enum.join(["Usage:", "  ptc docs PAGE", "", "Pages:" | rows], "\n") <> "\n"
+    Enum.join(
+      ["Usage:", "  ptc docs PAGE", "", "Pages:" | rows] ++
+        ["", "Find a page: ptc docs --search TERM"],
+      "\n"
+    ) <> "\n"
+  end
+
+  defp docs_search_text(term, [], _result) do
+    case DocumentationLibrary.suggested_search(term) do
+      nil -> "no page mentions #{term}\n"
+      suggestion -> "no page mentions #{term}; try #{suggestion}\n"
+    end
+  end
+
+  defp docs_search_text(_term, matches, result) do
+    lines = Enum.map(matches, &"#{&1["page"]}:#{&1["line"]}: #{&1["text"]}")
+
+    if result["omitted_matches"] > 0 or result["omitted_pages"] > 0 do
+      Enum.join(
+        lines ++
+          [
+            "#{result["omitted_matches"]} more matches in #{result["omitted_pages"]} pages; narrow the term"
+          ],
+        "\n"
+      ) <> "\n"
+    else
+      Enum.join(lines, "\n") <> "\n"
+    end
   end
 
   defp append_options(lines, [], _labels, _width), do: lines
