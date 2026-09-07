@@ -193,7 +193,7 @@ defmodule PtcRunner.Kernel.DocumentationLibrary do
       "term" => term,
       "matches" => matches,
       "omitted_matches" => Enum.sum(Enum.map(pages, &length(&1.matches))) - length(matches),
-      "omitted_pages" => max(length(pages) - length(included_pages), 0)
+      "omitted_pages" => omitted_page_count(pages)
     }
   end
 
@@ -209,24 +209,27 @@ defmodule PtcRunner.Kernel.DocumentationLibrary do
 
   defp page_matches({page, index}, pattern) do
     if Regex.match?(pattern, page.content) do
-      {matches, heading_match?} =
+      {matches, heading_match?, _fence} =
         page.content
         |> String.split("\n")
         |> Enum.with_index(1)
-        |> Enum.reduce({[], false}, fn {line, line_number}, {matches, heading_match?} ->
-          if Regex.match?(pattern, line),
-            do: {
-              [
-                %{
-                  "page" => page.name,
-                  "line" => line_number,
-                  "text" => line |> String.trim() |> String.slice(0, @max_search_line_length)
-                }
-                | matches
-              ],
-              heading_match? or Regex.match?(~r/^ {0,3}\#{1,6}(?:\s|$)/, line)
-            },
-            else: {matches, heading_match?}
+        |> Enum.reduce({[], false, nil}, fn {line, line_number},
+                                            {matches, heading_match?, fence} ->
+          line_matches? = Regex.match?(pattern, line)
+          heading? = is_nil(fence) and markdown_heading?(line)
+          fence = next_fence(line, fence)
+
+          if line_matches? do
+            match = %{
+              "page" => page.name,
+              "line" => line_number,
+              "text" => search_snippet(line, pattern)
+            }
+
+            {[match | matches], heading_match? or heading?, fence}
+          else
+            {matches, heading_match?, fence}
+          end
         end)
 
       matches = Enum.reverse(matches)
@@ -235,5 +238,41 @@ defmodule PtcRunner.Kernel.DocumentationLibrary do
     else
       []
     end
+  end
+
+  defp omitted_page_count(pages) do
+    pages
+    |> Enum.with_index()
+    |> Enum.count(fn {page, index} ->
+      index >= @max_search_pages or length(page.matches) > @max_search_lines_per_page
+    end)
+  end
+
+  defp search_snippet(line, pattern) do
+    line = String.trim(line)
+    [{match_byte, match_bytes}] = Regex.run(pattern, line, return: :index, capture: :first)
+    match_start = line |> binary_part(0, match_byte) |> String.codepoints() |> length()
+    match_length = line |> binary_part(match_byte, match_bytes) |> String.codepoints() |> length()
+    available_context = @max_search_line_length - match_length
+    start = max(match_start - div(available_context, 2), 0)
+    codepoints = String.codepoints(line)
+    start = min(start, max(length(codepoints) - @max_search_line_length, 0))
+    codepoints |> Enum.slice(start, @max_search_line_length) |> Enum.join()
+  end
+
+  defp markdown_heading?(line), do: Regex.match?(~r/^ {0,3}\#{1,6}(?:\s|$)/, line)
+
+  defp next_fence(line, nil) do
+    case Regex.run(~r/^ {0,3}(`{3,}|~{3,})/, line, capture: :first) do
+      [marker] -> {String.first(marker), String.length(marker)}
+      nil -> nil
+    end
+  end
+
+  defp next_fence(line, {character, minimum_length} = fence) do
+    pattern =
+      ~r/^ {0,3}#{Regex.escape(String.duplicate(character, minimum_length))}#{character}*\s*$/
+
+    if Regex.match?(pattern, line), do: nil, else: fence
   end
 end

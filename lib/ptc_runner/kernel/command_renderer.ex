@@ -31,6 +31,9 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.DocumentationLibrary
   alias PtcRunner.Kernel.ModelContractDiagnostic
+  alias PtcRunner.Kernel.TerminalLiteral
+
+  @terminal_search_term_pattern ~r/\A[^\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+\z/u
 
   @spec render(CommandOutcome.t(), CommandRejection.t() | nil, keyword()) ::
           {:stdout | :stderr, binary()} | {:stdio, binary(), binary()}
@@ -271,9 +274,16 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   end
 
   defp docs_search_text(term, [], _result) do
-    case DocumentationLibrary.suggested_search(term) do
-      nil -> "no page mentions #{term}\n"
-      suggestion -> "no page mentions #{term}; try #{suggestion}\n"
+    suggestion = DocumentationLibrary.suggested_search(term)
+    term = TerminalLiteral.render(term, @terminal_search_term_pattern)
+
+    case suggestion do
+      nil ->
+        "no page mentions #{term}\n"
+
+      suggestion ->
+        suggestion = TerminalLiteral.render(suggestion, @terminal_search_term_pattern)
+        "no page mentions #{term}; try #{suggestion}\n"
     end
   end
 

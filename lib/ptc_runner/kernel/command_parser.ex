@@ -214,7 +214,7 @@ defmodule PtcRunner.Kernel.CommandParser do
          frontend
        )
        when is_binary(term) and byte_size(term) > 0 do
-    if String.length(term) <= 128 do
+    if String.valid?(term) and byte_size(term) <= 512 and length(String.codepoints(term)) <= 128 do
       arguments(:docs,
         options: %{page: nil, search: term},
         ordered_options: ordered,

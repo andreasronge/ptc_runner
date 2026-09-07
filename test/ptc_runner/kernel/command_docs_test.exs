@@ -77,6 +77,41 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
              CommandRenderer.render(slash)
   end
 
+  test "search renders terminal-active no-hit terms as escaped literals" do
+    term = "absent\n\e]8;;https://example.invalid\a#{<<0x202E::utf8>>}forged"
+
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["docs", "--search", term])
+
+    assert {:stdout, rendered} = CommandRenderer.render(outcome)
+    assert rendered == "no page mentions #{inspect(term)}\n"
+    refute rendered =~ <<0x202E::utf8>>
+    refute rendered =~ "\e"
+  end
+
+  test "search snippets retain a long-line match inside the 160-code-point window" do
+    term = "reader-writer) (tools)"
+    result = DocumentationLibrary.search(term)
+
+    assert [%{"text" => snippet}] = result["matches"]
+    assert snippet =~ term
+    assert String.length(snippet) <= 160
+  end
+
+  test "search omission counts name every page with dropped matches" do
+    result = DocumentationLibrary.search("Babashka")
+
+    assert result["omitted_matches"] == 1
+    assert result["omitted_pages"] == 1
+  end
+
+  test "search does not rank fenced code comments as markdown headings" do
+    result = DocumentationLibrary.search("Validate")
+
+    assert [%{"page" => first_page} | _rest] = result["matches"]
+    refute first_page == "ptc-lisp"
+  end
+
   test "search excludes terms found only in schema pages" do
     assert {:ok, %CommandOutcome{} = outcome} =
              CommandEngine.dispatch(["docs", "--search", "prefixItems"])
@@ -117,7 +152,12 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
 
     assert conflict["error"]["code"] == "conflicting_arguments"
 
-    for argv <- [["docs", "--search", ""], ["docs", "--search", String.duplicate("a", 129)]] do
+    for argv <- [
+          ["docs", "--search", ""],
+          ["docs", "--search", String.duplicate("a", 129)],
+          ["docs", "--search", "a" <> String.duplicate("́", 128)],
+          ["docs", "--search", <<255>>]
+        ] do
       assert {:error, %CommandOutcome{envelope: envelope}} = CommandEngine.dispatch(argv)
       assert envelope["error"]["code"] == "invalid_arguments"
     end
@@ -128,8 +168,9 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     assert envelope["result"]["term"] == "--host-config"
     assert envelope["result"]["matches"] != []
 
-    assert {:ok, %CommandOutcome{}} =
-             CommandEngine.dispatch(["docs", "--search", String.duplicate("é", 128)])
+    for term <- [String.duplicate("é", 128), String.duplicate("😀", 128)] do
+      assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["docs", "--search", term])
+    end
 
     assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["docs", "--search", "["])
   end

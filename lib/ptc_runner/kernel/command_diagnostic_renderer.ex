@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.CommandDiagnosticRenderer do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandRunRef
+  alias PtcRunner.Kernel.TerminalLiteral
 
   @pointer_pattern ~r/\A\/[A-Za-z0-9._~\/-]+\z/
   @source_name_pattern ~r/\A[A-Za-z0-9._~-][A-Za-z0-9._~\/-]*\z/
@@ -63,7 +64,7 @@ defmodule PtcRunner.Kernel.CommandDiagnosticRenderer do
        ) do
     case Keyword.fetch(opts, :application_path) do
       {:ok, path} when is_binary(path) and path != "" ->
-        " at " <> terminal_literal(path, @terminal_path_pattern)
+        " at " <> TerminalLiteral.render(path, @terminal_path_pattern)
 
       _absent ->
         ""
@@ -204,16 +205,9 @@ defmodule PtcRunner.Kernel.CommandDiagnosticRenderer do
 
   defp location_suffix(_error), do: ""
 
-  defp terminal_contract_path(path), do: terminal_literal(path, @pointer_pattern)
+  defp terminal_contract_path(path), do: TerminalLiteral.render(path, @pointer_pattern)
 
-  defp terminal_source_name(name), do: terminal_literal(name, @source_name_pattern)
-
-  defp terminal_literal(text, pattern) do
-    case text =~ pattern do
-      true -> text
-      false -> inspect(text, binaries: :as_strings, limit: :infinity, printable_limit: :infinity)
-    end
-  end
+  defp terminal_source_name(name), do: TerminalLiteral.render(name, @source_name_pattern)
 
   defp subject_prefix(%{
          "kind" => "provider",
