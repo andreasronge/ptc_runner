@@ -71,6 +71,27 @@ defmodule PtcRunner.Kernel.CommandDiagnosticRenderer do
     end
   end
 
+  defp local_context_suffix(
+         %{"phase" => "destination", "code" => "destination_exists"},
+         opts
+       ) do
+    case Keyword.get(opts, :artifact_destinations) do
+      {destinations, _failures} when map_size(destinations) > 0 ->
+        paths =
+          Enum.map_join(Enum.sort(destinations), ", ", fn {key, path} ->
+            switch = "--" <> String.replace(Atom.to_string(key), "_", "-")
+            switch <> " " <> TerminalLiteral.render(path, @terminal_path_pattern)
+          end)
+
+        "; requested destinations: " <>
+          paths <>
+          "; remove an existing artifact or wait for its active run to finish, or choose another path"
+
+      _absent ->
+        ""
+    end
+  end
+
   defp local_context_suffix(_error, _opts), do: ""
 
   defp diagnostic_suffix(%{

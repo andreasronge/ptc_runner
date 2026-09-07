@@ -300,6 +300,29 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
 
   def create(_path), do: {:error, :private_directory_creation_failed}
 
+  @doc false
+  @spec owner_dead?(binary()) :: boolean()
+  def owner_dead?(pid) do
+    with true <- Regex.match?(~r/\A[1-9][0-9]{0,9}\z/, pid),
+         {number, ""} when number <= 2_147_483_647 <- Integer.parse(pid),
+         executable when is_binary(executable) <- System.find_executable("kill"),
+         env when is_binary(env) <- System.find_executable("env"),
+         {:ok, {output, status}} when status != 0 <-
+           SystemCommand.run(
+             env,
+             ["LC_ALL=C", executable, "-0", pid],
+             @external_command_timeout_ms
+           ) do
+      # EPERM and every unrecognized failure count as alive. Only ESRCH
+      # proves the same-host owner is gone; normalize the command's locale.
+      String.contains?(output, "No such process")
+    else
+      _alive_or_unknown -> false
+    end
+  rescue
+    _exception -> false
+  end
+
   defp authority_executable do
     case :os.type() do
       {:unix, _name} ->

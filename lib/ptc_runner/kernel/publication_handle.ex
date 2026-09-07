@@ -1122,21 +1122,21 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   end
 
   defp with_reservation(path, parent_identity, fun) do
-    with_reservation_path(reservation_path(path, parent_identity), Path.dirname(path), fun)
+    with_reservation_path(reservation_path(path, parent_identity), path, Path.dirname(path), fun)
   end
 
   defp with_append_reservation(path, fun) do
     case TraceLog.append_reservation_path(path) do
       {:ok, reservation_path} ->
-        with_reservation_path(reservation_path, Path.dirname(reservation_path), fun)
+        with_reservation_path(reservation_path, path, Path.dirname(reservation_path), fun)
 
       {:error, _reason} = error ->
         error
     end
   end
 
-  defp with_reservation_path(reservation_path, sync_parent, fun) do
-    case create_reservation(reservation_path) do
+  defp with_reservation_path(reservation_path, destination, sync_parent, fun) do
+    case create_reservation(reservation_path, destination, true) do
       {:ok, reservation_path, reservation_identity} ->
         case fun.(reservation_path, reservation_identity) do
           {:ok, _handle} = success ->
@@ -1153,24 +1153,126 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     end
   end
 
-  defp create_reservation(reservation_path) do
+  defp create_reservation(reservation_path, destination, retry?) do
     case PrivateDirectory.create(reservation_path) do
       :ok ->
-        with {:ok, stat} <- File.lstat(reservation_path, time: :posix),
-             true <- stat.type == :directory,
-             {:ok, identity} <- stat_identity(stat) do
-          {:ok, reservation_path, identity}
-        else
-          _other ->
-            _ = File.rmdir(reservation_path)
-            {:error, :destination_unavailable}
-        end
+        claim_created_reservation(reservation_path)
 
       {:error, _reason} ->
-        case File.lstat(reservation_path) do
-          {:ok, _stat} -> {:error, :destination_exists}
-          _other -> {:error, :destination_unavailable}
+        retry_reservation(reservation_path, destination, retry?)
+    end
+  end
+
+  # Identify the directory this process just made before writing the owner
+  # marker. Until that write lands the reservation is markerless, so a creator
+  # stalled here for longer than the markerless grace can lose it to a
+  # reclaimer; the identity guard then keeps its own cleanup from removing the
+  # live replacement. An unidentifiable directory is left for that same
+  # reclaim rather than removed by pathname.
+  defp claim_created_reservation(path) do
+    with {:ok, %{type: :directory} = stat} <- File.lstat(path, time: :posix),
+         {:ok, identity} <- stat_identity(stat) do
+      case write_reservation_owner(path) do
+        :ok ->
+          confirm_reservation_owner(path, identity)
+
+        _unowned ->
+          _ = cleanup_open_reservation(path, identity, Path.dirname(path))
+          {:error, :destination_unavailable}
+      end
+    else
+      _unidentified -> {:error, :destination_unavailable}
+    end
+  end
+
+  # The owner write is by pathname, so a creator stalled past the markerless
+  # grace can mark a reclaimer's replacement instead of its own directory and
+  # report a stale identity. Re-read the identity once the marker exists and
+  # keep the reservation only while it is still the directory this process
+  # made; the replacement stays its own creator's to remove. Past this point
+  # the live marker keeps a reclaimer away.
+  defp confirm_reservation_owner(path, identity) do
+    case File.lstat(path, time: :posix) do
+      {:ok, %{type: :directory} = stat} ->
+        case same_identity(stat, identity) do
+          :ok -> {:ok, path, identity}
+          _replaced -> {:error, :destination_unavailable}
         end
+
+      _other ->
+        {:error, :destination_unavailable}
+    end
+  end
+
+  defp retry_reservation(_path, _destination, false), do: {:error, :destination_exists}
+
+  defp retry_reservation(path, destination, true) do
+    if match?({:ok, _}, File.lstat(path)) do
+      # Serialize reclaimers across VMs with the existing same-host OS
+      # lock. Re-read under the lock so a delayed reaper cannot remove a
+      # replacement owner's marker. Fresh mkdir contenders still arbitrate
+      # atomically, and the retry is deliberately inside this lock.
+      TraceLog.with_append_authority_lock(path <> ".reclaim", fn ->
+        case reclaim_reservation(path, destination) do
+          :ok -> create_reservation(path, destination, false)
+          _other -> {:error, :destination_exists}
+        end
+      end)
+      |> normalize_reservation_refusal()
+    else
+      {:error, :destination_unavailable}
+    end
+  end
+
+  defp normalize_reservation_refusal({:ok, _path, _identity} = success), do: success
+  defp normalize_reservation_refusal(_failure), do: {:error, :destination_exists}
+
+  defp write_reservation_owner(path) do
+    owner = Path.join(path, "owner")
+
+    with :ok <- File.write(owner, System.pid(), [:exclusive]),
+         do: File.chmod(owner, 0o600)
+  end
+
+  defp reclaim_reservation(path, destination) do
+    with {:error, :enoent} <- File.lstat(destination),
+         {:ok, %{type: :directory} = stat} <- File.lstat(path, time: :posix),
+         {:ok, uid} <- PrivateDirectory.preflight_owner(path),
+         true <- stat.uid == uid and Bitwise.band(stat.mode, 0o777) == 0o700,
+         {:ok, identity} <- stat_identity(stat),
+         true <- stale_reservation?(path, stat),
+         {:ok, current} <- File.lstat(path, time: :posix),
+         :ok <- same_identity(current, identity),
+         {:error, :enoent} <- File.lstat(destination) do
+      remove_reservation_directory(path)
+    else
+      _live_or_changed -> {:error, :destination_exists}
+    end
+  end
+
+  defp stale_reservation?(path, stat) do
+    owner = Path.join(path, "owner")
+
+    case File.lstat(owner) do
+      {:ok, %{type: :regular, size: size}} when size <= 10 ->
+        case File.read(owner) do
+          {:ok, pid} -> PrivateDirectory.owner_dead?(pid)
+          _unreadable -> false
+        end
+
+      {:error, :enoent} ->
+        System.os_time(:second) - stat.mtime > 60
+
+      _invalid ->
+        false
+    end
+  end
+
+  defp remove_reservation_directory(path) do
+    case File.rm(Path.join(path, "owner")) do
+      :ok -> File.rmdir(path)
+      {:error, :enoent} -> File.rmdir(path)
+      error -> error
     end
   end
 
@@ -1227,7 +1329,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     case File.lstat(path, time: :posix) do
       {:ok, %{type: :directory} = stat} ->
         case same_identity(stat, identity) do
-          :ok -> _ = File.rmdir(path)
+          :ok -> _ = remove_reservation_directory(path)
           _other -> :ok
         end
 
@@ -1410,7 +1512,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
 
       {:ok, %{type: :directory} = stat} ->
         with :ok <- same_identity(stat, handle.reservation_identity),
-             :ok <- File.rmdir(handle.reservation_path),
+             :ok <- remove_reservation_directory(handle.reservation_path),
              :ok <- sync_directory(Path.dirname(handle.reservation_path)) do
           :ok
         else
