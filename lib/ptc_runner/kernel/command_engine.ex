@@ -72,6 +72,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
           {:ok, CommandOutcome.t()}
           | {:error, CommandOutcome.t()}
           | {:envelope_publication_failed, CommandOutcome.t()}
+          | {:envelope_publication_partial, CommandOutcome.t(), [{binary(), term()}]}
   def dispatch(argv), do: dispatch(argv, CommandRuntime.standalone())
 
   @doc false
@@ -79,6 +80,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
           {:ok, CommandOutcome.t()}
           | {:error, CommandOutcome.t()}
           | {:envelope_publication_failed, CommandOutcome.t()}
+          | {:envelope_publication_partial, CommandOutcome.t(), [{binary(), term()}]}
   def dispatch(argv, %CommandRuntime{} = runtime) do
     if CommandRuntime.valid?(runtime) do
       case CommandEntry.open(argv, :standalone) do
@@ -87,6 +89,8 @@ defmodule PtcRunner.Kernel.CommandEngine do
           if project_envelope?(entry.arguments) do
             dispatch_with_project_envelope(entry, runtime)
           else
+            CommandEntry.release(entry)
+
             {:error,
              arguments_outcome(entry.arguments, entry.run_ref, :arguments, :invalid_arguments)}
           end
@@ -341,20 +345,29 @@ defmodule PtcRunner.Kernel.CommandEngine do
   end
 
   defp dispatch_with_project_envelope(
-         %CommandEntry{envelope_path: path} = entry,
+         %CommandEntry{envelope_path: path, envelope_handle: handle} = entry,
          runtime
        ) do
     result = dispatch_entry(%{entry | envelope_path: nil}, runtime)
     {_status, outcome} = result
-    paths = CommandEnvelope.destinations(entry.arguments, path, entry.run_ref)
+    paths = CommandEnvelope.destinations(entry.arguments, handle || path, entry.run_ref)
 
     publication =
-      with :ok <- ProjectArtifactRoot.ensure_for(entry.arguments),
-           do: CommandEnvelope.publish_all(outcome, paths)
+      case ProjectArtifactRoot.ensure_for(entry.arguments) do
+        :ok ->
+          CommandEnvelope.publish_all(outcome, paths)
+
+        {:error, _reason} = error ->
+          if handle, do: _ = CommandEnvelope.discard(handle)
+          error
+      end
 
     case publication do
       :ok ->
         result
+
+      {:partial, _published, failures} ->
+        {:envelope_publication_partial, outcome, failures}
 
       # A publication failure has no envelope representation — the envelope is
       # the artifact that failed — and naming `{:publication,
