@@ -1619,6 +1619,50 @@ defmodule PtcRunner.ReplFrontendTest do
 
     assert message =~ "named argument map"
     assert message =~ "analysis/counters"
+    assert message =~ "run_id"
+  end
+
+  @tag :tmp_dir
+  test "private analysis redacts invalid tool arguments containing prior evaluation data", %{
+    tmp_dir: root
+  } do
+    fixture = PrivateInspectionFixture.create!(root)
+
+    output =
+      capture_io(fn ->
+        assert_raise Mix.Error, ~r|repl/profile_evaluation_failed|, fn ->
+          run_repl([
+            "--profile",
+            "private-run-analysis-v2",
+            "--resource",
+            "traces=#{fixture.traces}",
+            "--resource",
+            "inspection=#{fixture.inspection}",
+            "--session-trace-dir",
+            fixture.output,
+            "--private-unattended",
+            "--format",
+            "jsonl",
+            "-e",
+            ~s|(str (analysis/open "#{fixture.run_id}"))|,
+            "-e",
+            "(tool/analysis-counters *1)"
+          ])
+        end
+      end)
+
+    evaluation =
+      output
+      |> decode_jsonl()
+      |> Enum.find(&(get_in(&1, ["result", "error", "kind"]) == "invalid_tool_args"))
+
+    assert %{
+             "kind" => "invalid_tool_args",
+             "capability_activity" => false,
+             "message_redacted" => true,
+             "message" =>
+               "private evaluation failed; diagnostic withheld by the private result policy"
+           } = evaluation["result"]["error"]
   end
 
   @tag :tmp_dir

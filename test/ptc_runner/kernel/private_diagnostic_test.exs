@@ -64,7 +64,6 @@ defmodule PtcRunner.Kernel.PrivateDiagnosticTest do
           :symbol_limit_exceeded,
           :compile_timeout,
           :compile_memory_exceeded,
-          :invalid_tool_args,
           :unknown_tool,
           :private_tool_unauthorized,
           :unknown_namespace
@@ -76,6 +75,30 @@ defmodule PtcRunner.Kernel.PrivateDiagnosticTest do
                  "(g 1)"
                )
     end
+  end
+
+  test "rebuilds only provenance-tagged invalid tool arguments" do
+    details = %{
+      capability_activity?: false,
+      safe_diagnostic: %{
+        kind: :prelude_named_argument_map,
+        ref: "analysis/counters",
+        example_key: "run_id"
+      }
+    }
+
+    assert {message, false} =
+             PrivateDiagnostic.project(:invalid_tool_args, details, "(analysis/counters id)")
+
+    assert message ==
+             ~s(analysis/counters: expected one named argument map, for example {"run_id" value}; positional arguments are not accepted)
+
+    assert {@redacted, true} =
+             PrivateDiagnostic.project(
+               :invalid_tool_args,
+               %{message: "captured private value", capability_activity?: false},
+               "(tool/analysis-counters *1)"
+             )
   end
 
   test "still redacts a pre-execution kind once a capability has run" do

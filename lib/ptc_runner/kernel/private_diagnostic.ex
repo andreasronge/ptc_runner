@@ -17,8 +17,8 @@ defmodule PtcRunner.Kernel.PrivateDiagnostic do
      Every other byte is a literal in this module.
 
   2. **Allowlisted compile/analyze kinds with no capability activity.** Several
-     of these kinds (`:invalid_arity`, `:invalid_form`, `:invalid_tool_args`,
-     `:unknown_tool`, `:private_tool_unauthorized`) also have runtime constructors. Admission
+     of these kinds (`:invalid_arity`, `:invalid_form`, `:unknown_tool`,
+     `:private_tool_unauthorized`) also have runtime constructors. Admission
      therefore requires `details.capability_activity? == false` — measured for
      this evaluation — and a byte/UTF-8 bound at this boundary. The allowlist
      names which kinds may be considered; the activity flag is the load-bearing
@@ -47,7 +47,6 @@ defmodule PtcRunner.Kernel.PrivateDiagnostic do
     :symbol_limit_exceeded,
     :compile_timeout,
     :compile_memory_exceeded,
-    :invalid_tool_args,
     :unknown_tool,
     :private_tool_unauthorized,
     :unknown_namespace
@@ -75,6 +74,22 @@ defmodule PtcRunner.Kernel.PrivateDiagnostic do
       {[], _dropped?} -> {@redacted, true}
       {admitted, dropped?} -> {unbound_var_message(admitted, dropped?), dropped?}
     end
+  end
+
+  def project(
+        :invalid_tool_args,
+        %{
+          capability_activity?: false,
+          safe_diagnostic: %{
+            kind: :prelude_named_argument_map,
+            ref: "analysis/counters",
+            example_key: "run_id"
+          }
+        },
+        _source
+      ) do
+    {~s(analysis/counters: expected one named argument map, for example {"run_id" value}; positional arguments are not accepted),
+     false}
   end
 
   def project(kind, details, _source)
