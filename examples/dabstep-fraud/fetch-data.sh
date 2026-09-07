@@ -39,6 +39,22 @@ require_hash() {
   fi
 }
 
+# Downloading is the slow path, not the contract. The pinned checksums are the
+# contract, so verify whatever is already on disk first and re-download only
+# what fails. That makes the script idempotent for a second local run and lets
+# CI restore `data/` from a cache and still prove the bytes on every job.
+matches_pin() {
+  [ -f "$2" ] && [ "$(sha256 "$2")" = "$1" ]
+}
+
+if matches_pin "$payments_sha256" data/payments.csv &&
+  matches_pin "$dev_sha256" reference/dev.jsonl &&
+  matches_pin "$manual_sha256" reference/context/manual.md &&
+  matches_pin "$payments_readme_sha256" reference/context/payments-readme.md; then
+  printf '%s\n' 'DABStep dataset already present and matches the pinned checksums'
+  exit 0
+fi
+
 curl --fail --location --show-error "$payments_url" -o "$payments_tmp"
 curl --fail --location --show-error "$dev_url" -o "$dev_tmp"
 curl --fail --location --show-error "$manual_url" -o "$manual_tmp"
