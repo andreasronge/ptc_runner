@@ -29,8 +29,9 @@ defmodule PtcRunner.Kernel.PrivateDiagnostic do
      private prelude boundary may replace an evaluator message with a closed
      `:safe_diagnostic` shape. This module admits only exact selector shapes it
      knows and emits only fixed literals. The current selector explains that
-     `analysis/counters` expects a map containing the `run_id` key; arbitrary
-     `:invalid_tool_args` messages never enter the kind allowlist above.
+     `analysis/counters` expects a named-argument map and uses `run_id` in its
+     remediation example; arbitrary `:invalid_tool_args` messages never enter
+     the kind allowlist above.
 
   `details` is evaluator output and remains untrusted even when it contains a
   code-owned selector: it can only select among exact fixed shapes and never
