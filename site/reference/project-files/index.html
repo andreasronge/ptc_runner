@@ -207,8 +207,10 @@ ptc repl --project ptc-project.json --env-file deployment/staging.env
 ptc repl --project ptc-project.json --mission review
 ptc viewer ptc-project.json --env-file deployment/staging.env</code></pre><p><code class="inline">--envelope FILE</code> is different: it adds a convenience copy for the invocation
 and does <strong>not</strong> suppress the project ledger under <code class="inline">.ptc/envelopes/</code> when
-<code class="inline">artifacts.envelope</code> is enabled. Trace, inspection, and result overrides still
-replace their project defaults.</p><p>Mission selection, input, and component-override switches remain
+<code class="inline">artifacts.envelope</code> is enabled. The ledger and convenience copy publish
+independently, so a completed run retains its ledger record even when the copy
+cannot be written. Trace, inspection, and result overrides still replace their
+project defaults.</p><p>Mission selection, input, and component-override switches remain
 invocation-only. Mission names stay in the application manifest rather than
 being duplicated as project defaults. An environment file explicitly selected
 by the project or <code class="inline">--env-file</code> is loaded only when inert preparation proves that

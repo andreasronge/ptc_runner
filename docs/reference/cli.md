@@ -158,7 +158,12 @@ Useful run switches are:
   `.ptcins` file.
 - `--envelope FILE` atomically publishes a convenience copy of the stable V4
   command envelope. When a project enables `artifacts.envelope`, the project's
-  `.ptc/envelopes/<run_ref>.json` ledger entry is still written for that run.
+  `.ptc/envelopes/<run_ref>.json` ledger entry is written independently for that
+  run. The explicit path is reserved before artifact admission, so concurrent
+  commands naming the same file are rejected before provider activity. A missing
+  caller-owned parent is rejected at admission; project-managed artifact
+  directories are created before the reservation. Every failed envelope copy
+  is reported on stderr with its destination, even when another copy succeeds.
   `run`, `validate`, `doctor`, `models`, `init`, and `materialize` all accept the flag; the
   document it publishes carries status, run reference, result or classified
   error, artifact state, and a closed `warnings` array. For `run`, an uncataloged
@@ -370,8 +375,9 @@ Publication is no-replace, so a destination that already exists is refused
 during argument admission with `arguments/envelope_destination_exists` and exit
 `2`, before any provider work: a repeated CI step is told to remove the file
 rather than paying for a run whose result it cannot receive. If envelope
-publication itself fails, the standalone command exits `74` and cannot report
-that failure through the missing envelope. Success exits `0`; classified
+publication fails at every destination, the standalone command exits `74`.
+If any copy succeeds, the command retains its original exit status and reports
+the failed destinations on stderr. Success exits `0`; classified
 failures use their diagnostic catalog status; caught internal failures use
 `70`.
 

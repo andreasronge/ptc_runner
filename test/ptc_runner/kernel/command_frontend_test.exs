@@ -328,6 +328,121 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
   end
 
   @tag :tmp_dir
+  test "concurrent runs reserve a shared envelope before provider activity", %{tmp_dir: dir} do
+    parent = self()
+    target = Path.join(dir, "project")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    application = Path.join(target, "ptc-project.json")
+    output = Path.join(dir, "shared-result.json")
+    envelope = Path.join([target, ".ptc", "envelopes", "shared.json"])
+
+    presentations =
+      1..3
+      |> Task.async_stream(
+        fn attempt ->
+          CommandFrontend.execute(
+            ["run", application, "--output", output, "--envelope", envelope],
+            :standalone,
+            fn _arguments ->
+              send(parent, {:provider_activity, attempt})
+              {:ok, CommandRuntime.standalone()}
+            end
+          )
+        end,
+        max_concurrency: 3,
+        ordered: false,
+        timeout: 30_000
+      )
+      |> Enum.map(fn {:ok, presentation} -> presentation end)
+
+    assert Enum.frequencies_by(presentations, & &1.exit_status) == %{0 => 1, 2 => 2}
+
+    for rejected <- Enum.filter(presentations, &(&1.exit_status == 2)) do
+      assert rejected.outcome.envelope["error"]["code"] == "envelope_destination_exists"
+      assert rejected.outcome.envelope["error"]["provider_activity"] == false
+    end
+
+    assert_received {:provider_activity, winner}
+    refute_received {:provider_activity, _loser}
+
+    winner_presentation = Enum.find(presentations, &(&1.exit_status == 0))
+    published_envelope = envelope |> File.read!() |> Jason.decode!()
+    published_result = output |> File.read!() |> Jason.decode!()
+
+    winner_run_ref = winner_presentation.outcome.envelope["run_ref"]
+    assert published_envelope["run_ref"] == winner_run_ref
+    assert published_result == %{"greeting" => "hello world"}
+    assert winner in 1..3
+
+    ledger_envelopes = Path.wildcard(Path.join([target, ".ptc", "envelopes", "*.json"]))
+    ledger_envelopes = List.delete(ledger_envelopes, envelope)
+    assert length(ledger_envelopes) == 1
+
+    assert ledger_envelopes
+           |> hd()
+           |> File.read!()
+           |> Jason.decode!()
+           |> Map.fetch!("run_ref") == winner_run_ref
+  end
+
+  @tag :tmp_dir
+  test "direct engine rejection releases the explicit envelope claim", %{tmp_dir: dir} do
+    path = Path.join(dir, "rejected.json")
+    assert {:error, _} = CommandEngine.dispatch(["doctor", "--envelope", path])
+    assert {:ok, entry} = CommandEntry.open(["doctor", "--envelope", path], :standalone)
+    CommandEntry.release(entry)
+  end
+
+  @tag :tmp_dir
+  test "transcript terminal paths release the envelope claim", %{tmp_dir: dir} do
+    for failure <- [:runner, :coded_runner, :bootstrap, :exception, :throw, :ok] do
+      path = Path.join(dir, "#{failure}.json")
+
+      argv = [
+        "transcript",
+        @run_ref,
+        "--traces",
+        dir,
+        "--inspection",
+        dir,
+        "--private-unattended",
+        "--private-output",
+        Path.join(dir, "private.json"),
+        "--envelope",
+        path
+      ]
+
+      bootstrap = fn _ ->
+        if failure == :bootstrap, do: {:error, :failed}, else: {:ok, CommandRuntime.standalone()}
+      end
+
+      runner = fn _, _ ->
+        case failure do
+          :exception -> raise "failure"
+          :throw -> throw(:failure)
+          :coded_runner -> {:error, :command_failed, "failed"}
+          :ok -> :ok
+          _ -> {:error, "failed"}
+        end
+      end
+
+      presentation = CommandRouter.execute(argv, :standalone, bootstrap, runner)
+
+      expected =
+        case failure do
+          :ok -> 0
+          failure when failure in [:bootstrap, :exception, :throw] -> 70
+          _ -> 1
+        end
+
+      assert presentation.exit_status == expected
+      assert File.ls!(dir) == []
+      assert {:ok, entry} = CommandEntry.open(argv, :standalone)
+      CommandEntry.release(entry)
+    end
+  end
+
+  @tag :tmp_dir
   test "an envelope request preserves an artifact destination diagnosis", %{tmp_dir: dir} do
     application = write_application(dir)
     envelope_path = Path.join(dir, "command-envelope.json")

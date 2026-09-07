@@ -171,7 +171,12 @@ and keeps it off stdout.</li><li><code class="inline">--trace-dir DIR</code> wri
 <code class="inline">&lt;run_ref&gt;.private.jsonl</code> according to the run's artifact class.</li><li><code class="inline">--inspect FILE</code> writes sensitive execution evidence to an owner-only
 <code class="inline">.ptcins</code> file.</li><li><code class="inline">--envelope FILE</code> atomically publishes a convenience copy of the stable V4
 command envelope. When a project enables <code class="inline">artifacts.envelope</code>, the project's
-<code class="inline">.ptc/envelopes/&lt;run_ref&gt;.json</code> ledger entry is still written for that run.
+<code class="inline">.ptc/envelopes/&lt;run_ref&gt;.json</code> ledger entry is written independently for that
+run. The explicit path is reserved before artifact admission, so concurrent
+commands naming the same file are rejected before provider activity. A missing
+caller-owned parent is rejected at admission; project-managed artifact
+directories are created before the reservation. Every failed envelope copy
+is reported on stderr with its destination, even when another copy succeeds.
 <code class="inline">run</code>, <code class="inline">validate</code>, <code class="inline">doctor</code>, <code class="inline">models</code>, <code class="inline">init</code>, and <code class="inline">materialize</code> all accept the flag; the
 document it publishes carries status, run reference, result or classified
 error, artifact state, and a closed <code class="inline">warnings</code> array. For <code class="inline">run</code>, an uncataloged
@@ -326,8 +331,9 @@ Publication is no-replace, so a destination that already exists is refused
 during argument admission with <code class="inline">arguments/envelope_destination_exists</code> and exit
 <code class="inline">2</code>, before any provider work: a repeated CI step is told to remove the file
 rather than paying for a run whose result it cannot receive. If envelope
-publication itself fails, the standalone command exits <code class="inline">74</code> and cannot report
-that failure through the missing envelope. Success exits <code class="inline">0</code>; classified
+publication fails at every destination, the standalone command exits <code class="inline">74</code>.
+If any copy succeeds, the command retains its original exit status and reports
+the failed destinations on stderr. Success exits <code class="inline">0</code>; classified
 failures use their diagnostic catalog status; caught internal failures use
 <code class="inline">70</code>.</p><p><code class="inline">run</code>, <code class="inline">validate</code>, <code class="inline">doctor</code>, <code class="inline">models</code>, <code class="inline">init</code>, <code class="inline">materialize</code>, <code class="inline">transcript</code>, and
 <code class="inline">version</code> accept <code class="inline">--envelope</code>. <code class="inline">repl</code>, <code class="inline">viewer</code>, <code class="inline">docs</code>, and help do not. A private run
