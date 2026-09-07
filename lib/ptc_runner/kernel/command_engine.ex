@@ -62,11 +62,16 @@ defmodule PtcRunner.Kernel.CommandEngine do
   @doc """
   Executes one stable command and returns its sealed terminal outcome.
 
-  A project run whose envelope could not be published answers
+  A project run whose envelope reached no destination answers
   `{:envelope_publication_failed, outcome}` instead: the outcome is the run's
   own, so a run that already executed is not described as never started, and
   the distinct tag is what tells a caller its audit envelope is missing even
-  when the run itself failed for an unrelated reason.
+  when the run itself failed for an unrelated reason. When the run's envelope
+  reached at least one destination and failed at another, the answer is
+  `{:envelope_publication_partial, outcome, failures}`, carrying one
+  `{path, reason}` per destination that could not be written: the audit record
+  survives, so the run's own status is not replaced, and the caller still
+  learns which copy is missing.
   """
   @spec dispatch([binary()]) ::
           {:ok, CommandOutcome.t()}
