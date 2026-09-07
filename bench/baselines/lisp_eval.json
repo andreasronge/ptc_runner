@@ -11,12 +11,12 @@
     "schedulers_online": 10,
     "wordsize_bytes": 8
   },
-  "reason": "Accept Elixir 1.20/OTP 29 and evaluator correctness work since 7ed8da82; #1396 bisect attributes the July steps, while #1100 removes redundant default-path origin bookkeeping and closure atomics.",
+  "reason": "Accept the 2026-09 evaluator performance work and the residual raw-path rise it did not cover. 682d257f9 (closure parent-context reuse) and #1848 (prepared prelude environments and call contexts) put the prelude and closure scenarios 6-18% under the 2026-08-14 baseline, which left the 1.07 gate with roughly 24% of slack on public_prelude -- wide enough to sleep through a regression twice the size of the one the nightly caught on 2026-09-01. This commit's multi-arity fix recovers a further ~20 reductions wherever a multi-arity builtin is called. The remaining rise on the two call-light raw scenarios (arithmetic +3.9%, map_string +3.6%) is accepted rather than reclaimed: it arrived as four steps of about 1% each, none individually visible to a ratio gate, chiefly a483598ce (#1617, evaluator evidence through eval/apply) and cee07cf8a, whose two new EvalContext fields are paid on every context copy.",
   "samples": 7,
   "scenarios": [
     {
       "duration_ms": 0,
-      "eval_reductions": 1171,
+      "eval_reductions": 1217,
       "identity_sha256": "5555fffb741af2046245fdbfd4171749e422488537b9bd65c702de40d5a128c8",
       "memory_bytes": 16800,
       "name": "arithmetic",
@@ -25,61 +25,61 @@
     },
     {
       "duration_ms": 0,
-      "eval_reductions": 14825,
+      "eval_reductions": 13004,
       "identity_sha256": "7c6038fc1e4ba74991214320615f6789403272d8757e8b38ada7e7896d459310",
-      "memory_bytes": 30048,
+      "memory_bytes": 29952,
       "name": "collection_hofs",
       "policy": "raw",
       "program": "(reduce + 0 (map (fn [x] (* x x)) (filter odd? (range 0 40))))"
     },
     {
       "duration_ms": 0,
-      "eval_reductions": 1372,
+      "eval_reductions": 1420,
       "identity_sha256": "ba9d615a5afeb695414c392c3f2141c31b577e10ced169a9fdc839ac4b6bca45",
-      "memory_bytes": 26528,
+      "memory_bytes": 26560,
       "name": "map_string",
       "policy": "raw",
       "program": "(let [m {:a \"alpha\" :b \"beta\" :c \"gamma\"}] (clojure.string/join \",\" (map clojure.string/upper-case [(:a m) (:b m) (:c m)])))"
     },
     {
       "duration_ms": 0,
-      "eval_reductions": 4264,
+      "eval_reductions": 3684,
       "identity_sha256": "438a6ea13e91f58a1bac37bb21f4c88f5b26da3852590df093ae3a15a262dd14",
-      "memory_bytes": 21736,
+      "memory_bytes": 34432,
       "name": "closure_apply",
       "policy": "raw",
       "program": "(let [mk (fn [x] (fn [y] (+ x y)))] (reduce + 0 (map (mk 10) [1 2 3 4 5])))"
     },
     {
       "duration_ms": 0,
-      "eval_reductions": 3393,
+      "eval_reductions": 3188,
       "identity_sha256": "6745c6ef4c93e3d8b0072da4e9aa1fea7be08c1edd6c6727f6cf3335df493b0e",
-      "memory_bytes": 34504,
+      "memory_bytes": 26576,
       "name": "context_filter",
       "policy": "raw",
       "program": "(->> data/orders (filter #(> (:total %) 20)) (map :total) (reduce + 0))"
     },
     {
       "duration_ms": 0,
-      "eval_reductions": 25049,
+      "eval_reductions": 20502,
       "identity_sha256": "b1b3d54bf09a7ef6fbea3070af6be35835bd613e43762c0c3ee43c6c976af633",
-      "memory_bytes": 68280,
+      "memory_bytes": 109984,
       "name": "public_prelude",
       "policy": "public_prelude",
       "program": "(reduce + 0 (map bench/square (range 0 40)))"
     },
     {
       "duration_ms": 0,
-      "eval_reductions": 25143,
+      "eval_reductions": 20526,
       "identity_sha256": "625f62c516deadd3ddb92ff030f95e26e41d03baa46d929a4a31f65bbbf6bbd9",
-      "memory_bytes": 55824,
+      "memory_bytes": 109984,
       "name": "strict_transitive_prelude",
       "policy": "strict_transitive_prelude",
       "program": "(reduce + 0 (map bench/square (range 0 40)))"
     },
     {
       "duration_ms": 0,
-      "eval_reductions": 5136,
+      "eval_reductions": 4573,
       "identity_sha256": "d0d984f00158e56490cdc81634c2671c8de756cef52c2fc1927d512b3172de9d",
       "memory_bytes": 34528,
       "name": "private_tool_prelude",

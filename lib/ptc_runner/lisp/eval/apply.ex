@@ -644,11 +644,11 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     actual = length(args)
     min_arity = function_arity(elem(funs, 0))
     idx = actual - min_arity
-    expected = Enum.map(0..(tuple_size(funs) - 1), fn i -> i + min_arity end)
 
     if idx >= 0 and idx < tuple_size(funs) do
       validate_builtin_args(builtin, args)
     else
+      expected = Enum.map(0..(tuple_size(funs) - 1), fn i -> i + min_arity end)
       {:error, {:arity_error, %{name: lisp_name(name), expected: expected, actual: actual}}}
     end
   end
