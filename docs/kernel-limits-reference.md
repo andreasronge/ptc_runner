@@ -6,10 +6,10 @@
 
 Ordinary limits are positive enforced ceilings. Optional limits are disabled when omitted by the host. Two documents decide an enabled number: the host document installs the outer ceiling and the application manifest may narrow it.
 
-**To raise a limit, edit `limits` in the manifest.** Raising the installed ceiling alone moves the enforced value only while that ceiling is the binding one, and with the installed defaults listed below it is not: a host-only edit leaves the run at the effective default. A run that needs longer than the 30,000 ms `run_duration_ms` default therefore asks for it in the manifest — `ptc.json` — and nowhere else:
+**To raise a limit, edit `limits` in the manifest.** Raising the installed ceiling alone moves the enforced value only while that ceiling is the binding one, and with the installed defaults listed below it is not: a host-only edit leaves the run at the effective default. A run that needs longer than the 120,000 ms `run_duration_ms` default therefore asks for it in the manifest — `ptc.json` — and nowhere else:
 
 ```json
-{ "limits": { "run_duration_ms": 120000, "workflow_timeout_ms": 120000 } }
+{ "limits": { "run_duration_ms": 480000, "workflow_timeout_ms": 480000 } }
 ```
 
 Only when the application needs a value above the installed ceiling — here, above the 1,800,000 ms `run_duration_ms` ceiling — does the host document, `ptc-host.json`, need a matching edit, alongside the same request in the manifest:
@@ -61,7 +61,7 @@ Time values are milliseconds. Heap values are BEAM process heap words, not bytes
 | `parallel_timeout_ms` | One pmap or pcalls operation, clamped by the run deadline. | milliseconds | 60,000 | 600,000 | 1–2,592,000,000 |
 | `protocol_errors` | Recoverable agent protocol errors in one run. | count | 64 | 512 | 1–2,592,000,000 |
 | `provider_heap_words` | Heap of each provider callback process. | BEAM heap words | 5,000,000 | 5,000,000 | 1–2,592,000,000 |
-| `run_duration_ms` | Complete ordinary run after optional provider application admission, including active preflight and Kernel execution. | milliseconds | 30,000 | 1,800,000 | 1–2,592,000,000 |
+| `run_duration_ms` | Complete ordinary run after optional provider application admission, including active preflight and Kernel execution. | milliseconds | 120,000 | 1,800,000 | 1–2,592,000,000 |
 | `subordinate_evaluations` | Subordinate mission evaluations in one run. | count | 128 | 2,048 | 1–2,592,000,000 |
 | `subordinate_source_bytes` | Source accepted by one subordinate check or evaluation. | bytes | 131,072 | 2,000,000 | 1–2,592,000,000 |
 | `subordinate_source_checks` | Advisory subordinate source checks in one run. | count | 128 | 2,048 | 1–2,592,000,000 |
@@ -69,7 +69,7 @@ Time values are milliseconds. Heap values are BEAM process heap words, not bytes
 | `workflow_capability_calls` | Total workflow capability calls in one run. | count | 256 | 4,096 | 1–2,592,000,000 |
 | `workflow_capability_calls_per_name` | Workflow capability calls to any one public name in one run. | count | 128 | 2,048 | 1–2,592,000,000 |
 | `workflow_heap_words` | Heap of the workflow evaluator process. | BEAM heap words | 8,000,000 | 8,000,000 | 1–2,592,000,000 |
-| `workflow_timeout_ms` | One workflow evaluation. | milliseconds | 30,000 | 1,800,000 | 1–2,592,000,000 |
+| `workflow_timeout_ms` | One workflow evaluation. | milliseconds | 120,000 | 1,800,000 | 1–2,592,000,000 |
 
 ## Optional application-narrowable limits
 

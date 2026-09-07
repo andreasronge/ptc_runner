@@ -31,9 +31,7 @@
     "workflow": [{"name": "deepseek"}]
   },
   "limits": {
-    "evaluation_timeout_ms": 15000,
-    "workflow_timeout_ms": 120000,
-    "run_duration_ms": 120000
+    "evaluation_timeout_ms": 15000
   },
   "labels": {
     "name": "support-triage-one-question",

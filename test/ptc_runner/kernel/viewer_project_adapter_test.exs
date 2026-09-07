@@ -55,10 +55,10 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapterTest do
 
       by_name = Map.new(project.limits, &{&1.name, &1})
 
-      assert %{effective: 195_000, default: 30_000, unit: :milliseconds} =
+      assert %{effective: 195_000, default: 120_000, unit: :milliseconds} =
                by_name["run_duration_ms"]
 
-      assert %{effective: 180_000, default: 30_000} = by_name["workflow_timeout_ms"]
+      assert %{effective: 180_000, default: 120_000} = by_name["workflow_timeout_ms"]
 
       untouched = by_name["subordinate_evaluations"]
       assert untouched.effective == untouched.default
