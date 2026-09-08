@@ -129,6 +129,21 @@ defmodule PtcViewer.ApiTest do
     assert actual_source == inspect(source)
   end
 
+  test "generated sources delegates the pinned inspection grant", %{trace_dir: trace_dir} do
+    source = {:pinned, "run.ptcins"}
+    {:ok, store} = PtcViewer.InspectionStore.start(source)
+    on_exit(fn -> if Process.alive?(store), do: PtcViewer.InspectionStore.stop(store) end)
+
+    config = [
+      trace_dir: trace_dir,
+      inspection_store: store,
+      inspection_adapter: PtcViewer.PinningInspectionTestAdapter
+    ]
+
+    assert {:ok, %{"run_id" => "run-1", "items" => []}} =
+             PtcViewer.Api.generated_sources(config, "run-1")
+  end
+
   test "result delegates the pinned inspection grant", %{trace_dir: trace_dir} do
     source = {:pinned, "run.ptcins"}
     {:ok, store} = PtcViewer.InspectionStore.start(source)

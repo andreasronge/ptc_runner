@@ -43,6 +43,19 @@ defmodule PtcRunner.Kernel.ProjectViewerAdapter do
 
   def conversation(_source, _run_id), do: {:error, :invalid_inspection_query}
 
+  @spec generated_sources(
+          {:inspection_snapshot, InspectionSnapshot.t()}
+          | {:viewer_snapshot_store, ViewerSnapshotStore.t()},
+          binary()
+        ) :: {:ok, map()} | {:error, atom()}
+  def generated_sources({:inspection_snapshot, snapshot}, run_id),
+    do: collect(snapshot, :generated_sources, run_id)
+
+  def generated_sources({:viewer_snapshot_store, store}, run_id),
+    do: ViewerSnapshotStore.generated_sources(store, run_id)
+
+  def generated_sources(_source, _run_id), do: {:error, :invalid_inspection_query}
+
   @spec result(
           {:inspection_snapshot, InspectionSnapshot.t()}
           | {:viewer_snapshot_store, ViewerSnapshotStore.t()},
@@ -101,7 +114,11 @@ defmodule PtcRunner.Kernel.ProjectViewerAdapter do
 
   @spec collect(
           InspectionSnapshot.t(),
-          :turns | :effective_preludes | :execution_errors | :explicit_failure_values,
+          :turns
+          | :generated_sources
+          | :effective_preludes
+          | :execution_errors
+          | :explicit_failure_values,
           binary()
         ) ::
           {:ok, map()} | {:error, atom()}

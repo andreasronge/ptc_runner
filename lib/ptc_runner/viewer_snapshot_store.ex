@@ -79,6 +79,12 @@ defmodule PtcRunner.ViewerSnapshotStore do
 
   def conversation(_store, _run_id), do: {:error, :invalid_inspection_query}
 
+  @spec generated_sources(t(), binary()) :: {:ok, map()} | {:error, atom()}
+  def generated_sources(%__MODULE__{} = store, run_id) when is_binary(run_id),
+    do: call(store, {:generated_sources, run_id})
+
+  def generated_sources(_store, _run_id), do: {:error, :invalid_inspection_query}
+
   @spec result(t(), binary()) :: {:ok, map()} | {:error, atom()}
   def result(%__MODULE__{} = store, run_id) when is_binary(run_id),
     do: call(store, {:result, run_id})
@@ -215,6 +221,9 @@ defmodule PtcRunner.ViewerSnapshotStore do
 
   defp respond({:conversation, run_id}, state, outcome),
     do: respond_inspection(state, outcome, :conversation, run_id)
+
+  defp respond({:generated_sources, run_id}, state, outcome),
+    do: respond_inspection(state, outcome, :generated_sources, run_id)
 
   defp respond({:result, run_id}, state, outcome),
     do: respond_inspection(state, outcome, :result, run_id)
@@ -469,6 +478,9 @@ defmodule PtcRunner.ViewerSnapshotStore do
 
   defp inspect_snapshot(snapshot, :conversation, run_id),
     do: ProjectViewerAdapter.conversation({:inspection_snapshot, snapshot}, run_id)
+
+  defp inspect_snapshot(snapshot, :generated_sources, run_id),
+    do: ProjectViewerAdapter.generated_sources({:inspection_snapshot, snapshot}, run_id)
 
   defp inspect_snapshot(snapshot, :result, run_id),
     do: ProjectViewerAdapter.result({:inspection_snapshot, snapshot}, run_id)

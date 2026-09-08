@@ -121,6 +121,10 @@ defmodule PtcViewer.Router do
     send_analysis(conn, PtcViewer.Api.conversation(viewer_config(conn), run_id))
   end
 
+  get "/api/analysis/runs/:run_id/generated-sources" do
+    send_analysis(conn, PtcViewer.Api.generated_sources(viewer_config(conn), run_id))
+  end
+
   get "/api/analysis/runs/:run_id/result" do
     send_analysis(conn, PtcViewer.Api.result(viewer_config(conn), run_id))
   end

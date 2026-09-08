@@ -302,12 +302,14 @@ async function fetchAllTurns(runId) {
 
 async function loadRun(runId, routeGeneration) {
   const [
-    runResponse, turnsResult, conversationResponse, resultResponse, preludesResponse,
+    runResponse, turnsResult, conversationResponse, generatedSourcesResponse,
+    resultResponse, preludesResponse,
     executionErrorsResponse, explicitFailureValuesResponse
   ] = await Promise.all([
     fetch(`/api/kernel/runs/${encodeURIComponent(runId)}`),
     fetchAllTurns(runId),
     fetch(`/api/analysis/runs/${encodeURIComponent(runId)}/conversation`),
+    fetch(`/api/analysis/runs/${encodeURIComponent(runId)}/generated-sources`),
     fetch(`/api/analysis/runs/${encodeURIComponent(runId)}/result`),
     fetch(`/api/analysis/runs/${encodeURIComponent(runId)}/preludes`),
     fetch(`/api/analysis/runs/${encodeURIComponent(runId)}/execution-errors`),
@@ -338,6 +340,13 @@ async function loadRun(runId, routeGeneration) {
             status: resultResponse.status,
             reason: await safeBodyText(resultResponse)
           };
+      const generated_sources = generatedSourcesResponse.ok
+        ? await generatedSourcesResponse.json()
+        : {
+            'available?': false,
+            status: generatedSourcesResponse.status,
+            reason: await safeBodyText(generatedSourcesResponse)
+          };
       // Both private routes report an absence the same way, because the
       // transcript states it the same way: the reason code, not the status.
       const preludes = preludesResponse.ok
@@ -367,6 +376,7 @@ async function loadRun(runId, routeGeneration) {
           metadata: await runResponse.json(),
           turns: turnsResult.turns,
           conversation,
+          generated_sources,
           result,
           preludes,
           execution_errors,
@@ -437,6 +447,7 @@ function renderRun(data, { fresh = false, routeGeneration = state.routeGeneratio
           renderRun({
             metadata,
             conversation,
+            generated_sources: data.generated_sources,
             result: data.result,
             preludes: data.preludes,
             execution_errors: data.execution_errors,

@@ -82,6 +82,7 @@ defmodule PtcViewer.KernelTranscriptTest do
     rendered = render(directory, data)
 
     assert rendered =~ "Program source"
+    assert rendered =~ "Model-generated"
     assert rendered =~ "Execution result"
     assert rendered =~ "diagnosis"
     assert rendered =~ "other/uncaptured"
@@ -89,6 +90,52 @@ defmodule PtcViewer.KernelTranscriptTest do
     assert rendered =~ ~s(>runs/diagnose</a>)
     assert rendered =~ ~s(href="#kt-prelude-20-0-function-64-69-61-67-6e-6f-73-65")
     refute rendered =~ ~s(>other/uncaptured</a>)
+  end
+
+  test "renders workflow-supplied programs independently of conversation streams", %{
+    tmp_dir: directory
+  } do
+    source = ~S|(return (demo.browser/probe (get data/params "url")))|
+
+    rendered =
+      render(directory, %{
+        "metadata" => %{"run_id" => "workflow-source-run"},
+        "turns" => %{
+          "items" => [
+            event(1, "evaluation-started", %{
+              "evaluation_id" => "mission-evaluation-1",
+              "parent_evaluation_id" => "workflow-evaluation-1",
+              "environment" => "mission",
+              "mission_name" => "browser",
+              "program_kind" => "ptc-lisp",
+              "source_hash" => "sha256:workflow-source",
+              "source_bytes" => byte_size(source)
+            }),
+            event(2, "evaluation-stopped", %{
+              "evaluation_id" => "mission-evaluation-1",
+              "environment" => "mission",
+              "mission_name" => "browser",
+              "status" => "returned"
+            })
+          ]
+        },
+        "conversation" => %{"streams" => []},
+        "generated_sources" => %{
+          "items" => [
+            %{
+              "evaluation_id" => "mission-evaluation-1",
+              "environment" => "mission",
+              "mission_name" => "browser",
+              "source" => source
+            }
+          ]
+        }
+      })
+
+    assert rendered =~ "Program source"
+    assert rendered =~ "Workflow-supplied"
+    assert rendered =~ "demo.browser/probe"
+    refute rendered =~ "Open prompt, response &amp; program"
   end
 
   test "keeps captured calls unlinked without authorized prelude source", %{tmp_dir: directory} do
