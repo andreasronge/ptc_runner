@@ -6,6 +6,7 @@ defmodule PtcViewer.TestInspectionAdapter do
   end
 
   def conversation(_source, _run_id), do: {:error, :not_called}
+  def generated_sources(_source, _run_id), do: {:error, :not_called}
   def result(_source, _run_id), do: {:error, :not_called}
   def preludes(_source, _run_id), do: {:error, :not_called}
   def execution_errors(_source, _run_id), do: {:error, :not_called}
@@ -19,6 +20,9 @@ defmodule PtcViewer.PinningInspectionTestAdapter do
 
   def conversation(source, run_id),
     do: {:ok, %{"source" => inspect(source), "run_id" => run_id, "streams" => []}}
+
+  def generated_sources(source, run_id),
+    do: {:ok, %{"source" => inspect(source), "run_id" => run_id, "items" => []}}
 
   def result(source, run_id),
     do: {:ok, %{"source" => inspect(source), "run_id" => run_id, "value" => "done"}}

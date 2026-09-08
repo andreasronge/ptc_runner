@@ -67,6 +67,11 @@ defmodule PtcRunner.Kernel.ViewerAdapter do
     end
   end
 
+  @spec generated_sources(inspection_grant(), binary()) :: {:ok, map()} | {:error, atom()}
+  @doc "Returns the pinned run's exact evaluated program sources."
+  def generated_sources(grant, run_id),
+    do: inspection_collection(grant, run_id, :generated_sources)
+
   @spec result(inspection_grant(), binary()) :: {:ok, map()} | {:error, atom()}
   @doc "Returns the pinned run's authorized terminal application result."
   def result({:inspection_v4, granted_run_id, snapshot, _trace_snapshot}, run_id)

@@ -32,6 +32,12 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
                "limit" => 1_000
              })
 
+    assert {:ok, expected_sources} =
+             InspectionSnapshot.query(inspection, :generated_sources, %{
+               "run_id" => fixture.run_id,
+               "limit" => 1_000
+             })
+
     inspection_path =
       fixture.inspection
       |> Path.join("*.ptcins")
@@ -43,6 +49,7 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
 
     assert {:ok, actual} = ViewerAdapter.conversation(grant, fixture.run_id)
     assert actual == expected
+    assert {:ok, ^expected_sources} = ViewerAdapter.generated_sources(grant, fixture.run_id)
     assert {:error, :result_not_found} = ViewerAdapter.result(grant, fixture.run_id)
     assert {:ok, ^expected_preludes} = ViewerAdapter.preludes(grant, fixture.run_id)
     assert {:error, :inspection_run_mismatch} = ViewerAdapter.preludes(grant, "another-run")
@@ -68,6 +75,9 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
 
     project_source = {:inspection_snapshot, inspection}
     assert {:ok, ^expected} = ProjectViewerAdapter.conversation(project_source, fixture.run_id)
+
+    assert {:ok, ^expected_sources} =
+             ProjectViewerAdapter.generated_sources(project_source, fixture.run_id)
 
     assert {:error, :result_not_found} =
              ProjectViewerAdapter.result(project_source, fixture.run_id)

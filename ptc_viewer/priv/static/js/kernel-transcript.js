@@ -49,7 +49,7 @@ export function renderKernelTranscriptMarkup(data) {
 }
 
 function KernelTranscript({
-  metadata = {}, turns = {}, conversation = null, preludes = null,
+  metadata = {}, turns = {}, conversation = null, generated_sources = null, preludes = null,
   execution_errors = null, explicit_failure_values = null,
   result = null, last_evaluation_error = null, options = {}
 }) {
@@ -61,6 +61,10 @@ function KernelTranscript({
   const privatePrograms = new Map();
   const privateResults = new Map();
   const modelSessions = new Map();
+
+  for (const program of generated_sources?.items || []) {
+    if (program?.evaluation_id) privatePrograms.set(program.evaluation_id, program);
+  }
 
   for (const stream of conversation?.streams || []) {
     const streamTurns = stream.turns || [];
@@ -662,12 +666,18 @@ function Evaluation({ evaluation, preludeIndex }) {
 function EvaluationSource({ evaluation, preludeIndex }) {
   const canonicalHash = evaluation.start?.data?.source_hash;
   const program = evaluation.privateProgram;
+  const provenance = evaluation.modelSession
+    ? 'Model-generated'
+    : evaluation.start?.data?.parent_evaluation_id
+      ? 'Workflow-supplied'
+      : 'Directly supplied';
 
   const sourceBlock = program?.source != null
     ? html`
       <details class="kt-private-source" open=${environmentOf(evaluation) === 'workflow'}>
         <summary>
           Program source
+          <span class="kt-private-badge">${provenance}</span>
           <span class="kt-private-badge">private evidence</span>
         </summary>
         ${rawHtml('pre', 'kt-code kt-code-lisp', highlightLisp(program.source))}
