@@ -164,7 +164,12 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              CommandEngine.prepare(["--version"])
 
     assert version.envelope["command"] == "version"
-    assert version.envelope["result"]["version"] == "0.15.0"
+
+    # `BuildIdentity` reads the compiled `ptc_runner.app` vsn, so comparing it
+    # against `mix.exs` proves the reported version tracks the declared one --
+    # a stale build or a wrong key still fails -- without making every release
+    # bump edit this file.
+    assert version.envelope["result"]["version"] == Mix.Project.config()[:version]
     assert_schema_valid(version.envelope)
   end
 
