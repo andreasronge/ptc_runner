@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "adaptive.workflow", "path": "workflow.clj", "dependencies": ["agent.core", "kernel"]},
+      {"library": "agent.core"}
+    ],
+    "entry": "adaptive.workflow/run"
+  },
+  "missions": {
+    "browser": {
+      "components": [
+        {"id": "demo.browser", "path": "browser.clj", "dependencies": ["site.recipe"]},
+        {"id": "site.recipe", "path": "site.clj"}
+      ],
+      "providers": ["web"]
+    },
+    "evidence": {
+      "components": [{"id": "repair.evidence", "path": "evidence.clj"}]
+    },
+    "artifact": {
+      "components": [{"id": "demo.artifact", "path": "artifact.clj"}],
+      "providers": ["candidate-store"]
+    }
+  },
+  "contracts": {
+    "phase_return_schemas": {
+      "recipe": {"path": "repair-recipe.schema.json"}
+    }
+  },
+  "providers": {
+    "workflow": [{"name": "repair-model"}],
+    "mission": [
+      {"name": "web"},
+      {
+        "name": "candidate-store",
+        "config": {"allow": ["candidate.read", "candidate.write"]}
+      }
+    ]
+  },
+  "input": {
+    "value": {
+      "url": "http://127.0.0.1:3000/quotes",
+      "held_out_url": "http://127.0.0.1:3000/held-out"
+    }
+  },
+  "limits": {
+    "run_duration_ms": 180000,
+    "workflow_timeout_ms": 180000,
+    "evaluation_timeout_ms": 30000,
+    "workflow_capability_calls": 24,
+    "mission_capability_calls": 20,
+    "subordinate_evaluations": 16,
+    "subordinate_source_checks": 4,
+    "llm_request_output_tokens": 1200
+  },
+  "labels": {"name": "adaptive-web-parser", "tags": {"mode": "agent"}}
+}

@@ -34,6 +34,24 @@
         "page_close": {"as": "web.close", "effect": "read", "error_feedback": "bounded"}
       },
       "ceilings": {"timeout_ms": 30000, "max_catalog_tools": 8, "max_result_bytes": 262144}
+    },
+    "candidate-store": {
+      "source": "mcp",
+      "installation_revision": "ptc-fs-mcp-0.4.0",
+      "transport": {
+        "type": "stdio",
+        "command": "npx",
+        "cwd": ".",
+        "args": ["-y", "ptc-fs-mcp@0.4.0", "--root", ".ptc-private-demo", "--include", "*.clj"],
+        "inherit_environment": false,
+        "env": {},
+        "start_timeout_ms": 60000
+      },
+      "tools": {
+        "read_text_file": {"as": "candidate.read", "effect": "read", "model_visible": false},
+        "write_text_file": {"as": "candidate.write", "effect": "write", "model_visible": false}
+      },
+      "ceilings": {"timeout_ms": 15000, "max_catalog_tools": 8, "max_result_bytes": 262144}
     }
   }
 }

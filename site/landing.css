@@ -189,6 +189,127 @@
 .example-card p { margin: .6rem 0 1.5rem; color: var(--muted); font-size: .9rem; line-height: 1.65; }
 .card-link { margin-top: auto; color: var(--accent); font-size: .85rem; font-weight: 650; }
 
+.adaptive-walkthrough {
+  margin-top: 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--panel);
+  overflow: hidden;
+}
+.adaptive-walkthrough > header {
+  padding: 1.8rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(16rem, .85fr);
+  gap: 3rem;
+  align-items: end;
+  border-bottom: 1px solid var(--border);
+}
+.adaptive-walkthrough h3 {
+  max-width: 26ch;
+  margin: 0;
+  font-size: clamp(1.45rem, 2.5vw, 2rem);
+  line-height: 1.2;
+  letter-spacing: -.025em;
+}
+.adaptive-walkthrough header > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: .94rem;
+  line-height: 1.65;
+}
+.adaptive-run { padding: 1.6rem 1.8rem 1.8rem; }
+.run-label {
+  margin: 0 0 1.1rem;
+  color: var(--muted);
+  font: .74rem/1.4 ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.run-label span,
+.reuse-note span {
+  margin-right: .65rem;
+  color: var(--accent);
+  font-weight: 720;
+}
+.adaptive-steps {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  list-style: none;
+}
+.adaptive-steps li {
+  min-width: 0;
+  padding: 0 1rem 0 1.25rem;
+  position: relative;
+  border-left: 1px solid var(--border);
+}
+.adaptive-steps li > i {
+  position: absolute;
+  top: -.05rem;
+  left: -.72rem;
+  width: 1.35rem;
+  height: 1.35rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--bg);
+  font: normal 700 .66rem/1 ui-monospace, SFMono-Regular, monospace;
+}
+.adaptive-steps li > span {
+  display: block;
+  min-height: 2.2em;
+  color: var(--accent);
+  font-size: .67rem;
+  line-height: 1.15;
+  font-weight: 710;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.adaptive-steps strong {
+  display: block;
+  margin: .55rem 0 .4rem;
+  font-size: .88rem;
+  line-height: 1.35;
+}
+.adaptive-steps small {
+  display: block;
+  color: var(--muted);
+  font-size: .76rem;
+  line-height: 1.5;
+}
+.adaptive-steps code,
+.reuse-note code { font-size: .82em; }
+.adaptive-foot {
+  padding: 1.35rem 1.8rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(17rem, .65fr);
+  gap: 2rem;
+  align-items: center;
+  border-top: 1px solid var(--border);
+  background: var(--code-bg);
+}
+.adaptive-foot p {
+  margin: 0;
+  color: var(--muted);
+  font-size: .85rem;
+  line-height: 1.6;
+}
+.adaptive-foot p > strong { color: var(--text); }
+.reuse-note {
+  padding-left: 1.25rem;
+  border-left: 1px solid var(--border);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+.reuse-note strong { display: block; margin-top: .35rem; }
+.adaptive-next .card-link {
+  display: inline-block;
+  margin: .7rem 0 0 1.25rem;
+  text-decoration: none;
+}
+.adaptive-next .card-link:hover { text-decoration: underline; }
+
 .why-section {
   width: min(var(--landing-wide), calc(100% - 2.5rem));
   display: grid;
@@ -405,6 +526,11 @@
   .example-grid { grid-template-columns: 1fr; }
   .example-card + .example-card { border-left: 0; border-top: 1px solid var(--border); }
   .mini-flow { justify-content: flex-start; gap: .6rem; }
+  .adaptive-walkthrough > header,
+  .adaptive-foot { grid-template-columns: 1fr; gap: 1.25rem; }
+  .adaptive-steps { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.5rem 0; }
+  .reuse-note { padding: 1rem 0 0; border-left: 0; border-top: 1px solid var(--border); }
+  .adaptive-next .card-link { margin-left: 0; }
   .why-section,
   .language-card,
   .beam-inner,
@@ -425,6 +551,8 @@
   .product-pillars { grid-template-columns: 1fr; }
   .product-pillars article + article { border-left: 0; border-top: 1px solid var(--border); }
   .product-section { padding: 6rem 0; }
+  .adaptive-steps { grid-template-columns: 1fr; gap: 1.3rem; }
+  .adaptive-steps li { padding-left: 1.4rem; }
   .two-column-copy { grid-template-columns: 1fr; gap: 1rem; }
   .viewer-section { margin-bottom: 6rem; padding: 1.25rem; }
   .beam-section { padding-top: 5rem; padding-bottom: 5rem; }
