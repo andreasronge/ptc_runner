@@ -104,8 +104,14 @@ EOF
 cp test/support/mcp_stdio_source_fixture.sh "$probe_dir/mcp_stdio_source_fixture.sh"
 chmod 0755 "$probe_dir/mcp_stdio_source_fixture.sh"
 
+# The build passes `PTC_SOURCE_REVISION` above, so the image reports its build
+# identity and not a bare version. This is the contract
+# `verify_standalone_release.sh` already checks inside the image; both have to
+# move together when the rendering changes.
 docker run --rm "${mounted_run[@]}" "$image_tag" --version > "$probe_dir/version.stdout"
-grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' "$probe_dir/version.stdout"
+grep -Eq \
+  '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)? \([0-9a-f]{8}, (clean|dirty)\)$' \
+  "$probe_dir/version.stdout"
 
 # Exercise the target-native C launcher through the release's real stdio
 # transport. Finding the optional application in the release is not enough:
