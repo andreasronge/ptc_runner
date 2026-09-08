@@ -50,6 +50,8 @@ examples/kernel-tutorial/*/.ptc/
 examples/debug-a-failed-run/*/.ptc/
 examples/support-triage/*/.ptc/
 examples/named-mission-reader-writer/.ptc/
+examples/adaptive-web-parser/.ptc/
+examples/adaptive-web-parser/.ptc-private-*
 examples/named-mission-reader-writer/writer-state/summary.txt
 
 # Temporary commit message files from tooling.

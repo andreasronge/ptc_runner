@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "repair.workflow", "path": "workflow.clj", "dependencies": ["agent.core"]},
+      {"library": "agent.core"}
+    ],
+    "entry": "repair.workflow/run"
+  },
+  "missions": {
+    "evidence": {
+      "components": [
+        {"id": "repair.evidence", "path": "evidence.clj"}
+      ]
+    }
+  },
+  "contracts": {
+    "phase_return_schemas": {
+      "recipe": {"path": "repair-recipe.schema.json"}
+    }
+  },
+  "input": {"value": {}},
+  "providers": {"workflow": [{"name": "repair-model"}]},
+  "limits": {
+    "run_duration_ms": 180000,
+    "workflow_timeout_ms": 180000,
+    "evaluation_timeout_ms": 30000,
+    "workflow_capability_calls": 12,
+    "subordinate_evaluations": 5,
+    "llm_request_output_tokens": 1200
+  },
+  "labels": {"name": "adaptive-web-parser-repair", "tags": {"mode": "agent"}}
+}

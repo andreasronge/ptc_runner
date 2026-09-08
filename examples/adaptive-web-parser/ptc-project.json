@@ -1,0 +1,9 @@
+{
+  "$schema": "https://ptc-runner.dev/schemas/ptc-project-config.schema.json",
+  "kind": "ptc-project",
+  "version": 1,
+  "application": {"path": "query.ptc.json"},
+  "host": {"path": "ptc-host.json"},
+  "artifacts": {"root": ".ptc", "trace": true, "inspection": true, "result": true, "envelope": true},
+  "viewer": {"private": true}
+}

@@ -1,0 +1,38 @@
+{
+  "credentials": {
+    "fixture_origin": {"env": "PTC_WEB_FIXTURE_ORIGIN"},
+    "openrouter_key": {"env": "OPENROUTER_API_KEY"}
+  },
+  "install": {
+    "repair-model": {
+      "source": "llm",
+      "installation_revision": "adaptive-web-parser-live-v1",
+      "model": "openrouter:deepseek/deepseek-v4-flash",
+      "credential": "openrouter_key",
+      "structured_output_mode": "unsupported",
+      "usage_guarantees": {"tokens": true, "cost_currency": "USD"},
+      "cache": false,
+      "params": {"max_tokens": 1200, "temperature": 0}
+    },
+    "web": {
+      "source": "mcp",
+      "installation_revision": "ptc-web-0.1.0",
+      "transport": {
+        "type": "stdio",
+        "command": "npx",
+        "cwd": ".",
+        "args": ["-y", "ptc-web@0.1.0"],
+        "inherit_environment": false,
+        "env": {"PTC_WEB_ALLOW_LOCAL_ORIGINS": {"binding": "fixture_origin"}},
+        "start_timeout_ms": 60000
+      },
+      "tools": {
+        "page_open": {"as": "web.open", "effect": "read", "error_feedback": "bounded"},
+        "page_capture": {"as": "web.capture", "effect": "read", "error_feedback": "bounded"},
+        "page_extract": {"as": "web.extract", "effect": "read", "error_feedback": "bounded"},
+        "page_close": {"as": "web.close", "effect": "read", "error_feedback": "bounded"}
+      },
+      "ceilings": {"timeout_ms": 30000, "max_catalog_tools": 8, "max_result_bytes": 262144}
+    }
+  }
+}

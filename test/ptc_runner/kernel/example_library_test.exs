@@ -167,6 +167,24 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
     assert script =~ "self-debugger/validation/*.json"
   end
 
+  test "the adaptive parser defaults to exact replay and keeps models out of queries" do
+    assert {:ok, files} = ExampleLibrary.fetch("adaptive-web-parser")
+
+    replay_host = Jason.decode!(files["ptc-host.json"])
+    live_host = Jason.decode!(files["ptc-host.live.json"])
+    query = Jason.decode!(files["query.ptc.json"])
+
+    assert replay_host["install"]["repair-model"]["source"] == "llm_replay"
+    assert live_host["install"]["repair-model"]["source"] == "llm"
+
+    assert replay_host["install"]["web"]["transport"]["args"] ==
+             ["-y", "ptc-web@0.1.0"]
+
+    refute Map.has_key?(query["providers"], "workflow")
+    assert files["README.md"] =~ "needs no LLM key"
+    assert files["run.mjs"] =~ "query runs must not call a model"
+  end
+
   @tag :tmp_dir
   test "init materializes a nested tree the documented commands then run", %{tmp_dir: directory} do
     target = Path.join(directory, "kernel-tutorial")
