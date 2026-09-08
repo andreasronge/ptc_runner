@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "container": {"type": "string", "minLength": 1, "maxLength": 200},
+    "text_selector": {"type": "string", "minLength": 1, "maxLength": 200},
+    "author_selector": {"type": "string", "minLength": 1, "maxLength": 200},
+    "reason": {"type": "string", "minLength": 1, "maxLength": 500}
+  },
+  "required": ["container", "text_selector", "author_selector", "reason"]
+}
