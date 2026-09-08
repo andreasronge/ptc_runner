@@ -137,6 +137,13 @@ defmodule PtcRunner.Kernel.CommandRenderer do
     do: envelope_failure(run_ref, :envelope_publication_failed)
 
   @spec envelope_failure(binary(), term()) :: binary()
+  def envelope_failure(run_ref, {:envelope_destinations_failed, failures}) do
+    Enum.map_join(failures, fn {path, reason} ->
+      String.trim_trailing(envelope_failure(run_ref, reason)) <>
+        " (destination: #{inspect(path)})\n"
+    end)
+  end
+
   def envelope_failure(run_ref, {:envelope_destination_parent_unavailable, path})
       when is_binary(run_ref) and is_binary(path) do
     parent = Path.dirname(path)

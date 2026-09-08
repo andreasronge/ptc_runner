@@ -79,6 +79,8 @@ defmodule PtcRunner.Kernel.CommandRouter do
   catch
     _kind, _reason ->
       internal_error(entry)
+  after
+    CommandEntry.release(entry)
   end
 
   defp run_one_shot_scoped(entry, bootstrap, runner) do

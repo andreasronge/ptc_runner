@@ -451,7 +451,34 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
   end
 
   @tag :tmp_dir
-  test "--envelope into a missing parent names destination_parent_unavailable", %{
+  test "a failed convenience copy reports its path and retains the ledger", %{tmp_dir: directory} do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    copy = Path.join(directory, "copy.json")
+
+    presentation =
+      CommandFrontend.execute(
+        ["run", Path.join(target, "ptc-project.json"), "--envelope", copy],
+        :standalone,
+        fn _ ->
+          File.write!(copy, "concurrent writer")
+          {:ok, CommandRuntime.standalone()}
+        end
+      )
+
+    assert presentation.exit_status == 0
+    assert presentation.stderr =~ "envelope/publication_failed"
+    assert presentation.stderr =~ copy
+    assert presentation.envelope_path != copy
+
+    assert Jason.decode!(File.read!(presentation.envelope_path))["run_ref"] ==
+             presentation.outcome.envelope["run_ref"]
+
+    assert File.read!(copy) == "concurrent writer"
+  end
+
+  @tag :tmp_dir
+  test "a missing explicit envelope parent is rejected before bootstrap", %{
     tmp_dir: directory
   } do
     target = Path.join(directory, "demo")
@@ -464,12 +491,14 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
       CommandFrontend.execute(
         ["run", project, "--envelope", copy],
         :standalone,
-        fn _arguments -> {:ok, CommandRuntime.standalone()} end
+        fn _arguments -> flunk("must not bootstrap") end
       )
 
-    assert presentation.exit_status == CommandFrontend.envelope_failure_exit_status()
-    assert presentation.stderr =~ "envelope/destination_parent_unavailable"
-    assert presentation.stderr =~ missing_parent
+    assert presentation.exit_status == 2
+    assert presentation.stderr =~ "arguments/invalid_arguments"
+    assert presentation.stderr =~ "invalid destination: --envelope"
+    refute File.exists?(copy)
+    refute File.exists?(Path.join(target, ".ptc"))
   end
 
   @tag :tmp_dir

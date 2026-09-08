@@ -191,8 +191,10 @@ ptc viewer ptc-project.json --env-file deployment/staging.env
 
 `--envelope FILE` is different: it adds a convenience copy for the invocation
 and does **not** suppress the project ledger under `.ptc/envelopes/` when
-`artifacts.envelope` is enabled. Trace, inspection, and result overrides still
-replace their project defaults.
+`artifacts.envelope` is enabled. The ledger and convenience copy publish
+independently, so a completed run retains its ledger record even when the copy
+cannot be written. Trace, inspection, and result overrides still replace their
+project defaults.
 
 Mission selection, input, and component-override switches remain
 invocation-only. Mission names stay in the application manifest rather than

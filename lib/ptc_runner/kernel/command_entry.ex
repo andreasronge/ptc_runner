@@ -20,8 +20,10 @@ defmodule PtcRunner.Kernel.CommandEntry do
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.DestinationIdentity
   alias PtcRunner.Kernel.PrivateDirectory
+  alias PtcRunner.Kernel.ProjectArtifactRoot
   alias PtcRunner.Kernel.ProjectResolver
   alias PtcRunner.Kernel.PublicationAuthority
+  alias PtcRunner.Kernel.PublicationHandle
 
   @fallback_run_ref "cmd-00000000000000000000000000"
   @frontend_commands CommandDeclaration.frontend_commands()
@@ -32,6 +34,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
     :diagnostic,
     :rejection,
     :envelope_path,
+    :envelope_handle,
     :destinations
   ]
   defstruct @enforce_keys
@@ -43,6 +46,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
           diagnostic: CommandDiagnostic.t() | nil,
           rejection: CommandRejection.t() | nil,
           envelope_path: binary() | nil,
+          envelope_handle: %PublicationHandle{} | nil,
           destinations: {map(), [atom()]} | nil
         }
 
@@ -172,18 +176,27 @@ defmodule PtcRunner.Kernel.CommandEntry do
   defp finish_envelope(arguments, destinations, run_ref, frontend, diagnostic) do
     case Keyword.fetch(arguments.frontend_options, :envelope) do
       :error ->
-        {:ok, accepted(run_ref, frontend, arguments, diagnostic, nil, destinations)}
+        {:ok, accepted(run_ref, frontend, arguments, diagnostic, nil, nil, destinations)}
 
       {:ok, envelope} ->
         with {:ok, envelope} <- anchor_file(envelope),
              :ok <- distinct?(arguments, destinations, run_ref, envelope),
-             :ok <- absent?(envelope) do
+             {:ok, envelope_handle} <- reserve_envelope(arguments, envelope) do
           arguments = %{
             arguments
             | frontend_options: Keyword.delete(arguments.frontend_options, :envelope)
           }
 
-          {:ok, accepted(run_ref, frontend, arguments, diagnostic, envelope, destinations)}
+          {:ok,
+           accepted(
+             run_ref,
+             frontend,
+             arguments,
+             diagnostic,
+             envelope,
+             envelope_handle,
+             destinations
+           )}
         else
           {:error, :invalid_destination} ->
             {:error,
@@ -219,17 +232,52 @@ defmodule PtcRunner.Kernel.CommandEntry do
     end
   end
 
-  # The publication reserve behind the envelope never clobbers, so an existing
-  # destination is refused whenever it is noticed. Noticing it here, where the
-  # path is already anchored and nothing has run, costs one lstat and keeps a
-  # second invocation of the same CI step from paying for a run whose result it
-  # cannot receive.
-  defp absent?(path) do
-    case File.lstat(path) do
-      {:error, :enoent} -> :ok
-      {:ok, _stat} -> {:error, :destination_exists}
-      {:error, _reason} -> :ok
+  # Keep the reservation itself, rather than merely observing absence. This is
+  # the admission claim that prevents concurrent commands from all paying for
+  # work before competing to publish the same envelope.
+  defp reserve_envelope(arguments, path) do
+    case PublicationHandle.reserve(path, :result, 0o600) do
+      {:ok, handle} -> {:ok, handle}
+      {:error, :destination_exists} -> {:error, :destination_exists}
+      {:error, _reason} -> reserve_unavailable_envelope(arguments, path)
     end
+  end
+
+  # A derived ledger path is owned by project artifact admission. Explicit
+  # destinations must hold a claim before bootstrap, including on a fresh project.
+  defp reserve_unavailable_envelope(arguments, path) do
+    case arguments.project do
+      %{derived_options: derived, config: %{artifact_root: root}} ->
+        cond do
+          MapSet.member?(derived, :envelope) ->
+            {:ok, nil}
+
+          DestinationIdentity.within?(path, root) == true ->
+            with :ok <- ProjectArtifactRoot.ensure_for(arguments),
+                 {:ok, handle} <- PublicationHandle.reserve(path, :result, 0o600) do
+              {:ok, handle}
+            else
+              {:error, :destination_exists} -> {:error, :destination_exists}
+              _failure -> {:error, :invalid_destination}
+            end
+
+          true ->
+            {:error, :invalid_destination}
+        end
+
+      _other ->
+        {:error, :invalid_destination}
+    end
+  end
+
+  @doc false
+  @spec release(t()) :: :ok
+  def release(%__MODULE__{envelope_handle: nil}), do: :ok
+
+  def release(%__MODULE__{envelope_handle: handle}) do
+    _ = PublicationHandle.discard(handle)
+    _ = PublicationHandle.close(handle)
+    :ok
   end
 
   defp distinct?(%CommandArguments{command: :run}, {destinations, _failures}, run_ref, envelope) do
@@ -388,7 +436,15 @@ defmodule PtcRunner.Kernel.CommandEntry do
 
   defp anchor_path(_path), do: {:error, :invalid_destination}
 
-  defp accepted(run_ref, frontend, arguments, diagnostic, envelope_path, destinations) do
+  defp accepted(
+         run_ref,
+         frontend,
+         arguments,
+         diagnostic,
+         envelope_path,
+         envelope_handle,
+         destinations
+       ) do
     %__MODULE__{
       run_ref: run_ref,
       frontend: frontend,
@@ -396,6 +452,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
       diagnostic: diagnostic,
       rejection: nil,
       envelope_path: envelope_path,
+      envelope_handle: envelope_handle,
       destinations: destinations
     }
   end
@@ -408,6 +465,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
       diagnostic: nil,
       rejection: rejection,
       envelope_path: nil,
+      envelope_handle: nil,
       destinations: nil
     }
   end
