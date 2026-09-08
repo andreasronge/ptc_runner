@@ -164,7 +164,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              CommandEngine.prepare(["--version"])
 
     assert version.envelope["command"] == "version"
-    assert version.envelope["result"]["version"] == "0.14.0"
+    assert version.envelope["result"]["version"] == "0.15.0"
     assert_schema_valid(version.envelope)
   end
 

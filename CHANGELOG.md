@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-09-08
+
+A large incremental release on the 0.14.0 Kernel: no breaking API removals,
+but substantially stricter budgets, richer private evidence, and a reworked
+example set. 410 commits.
+
+### Added
+
+- **Model-call budgets and controls.** Aggregate cost budget contract,
+  runtime token and cost budgets, fixed-point usage guarantees, exact
+  inference controls, whole-call request deadlines, requirement-aware prepare
+  with per-call output tokens, and published warnings for uncataloged models.
+- **Structured output.** Structured output envelopes, bounded request-schema
+  compilation and output validation, and bounded nullable contract types.
+- **Private analysis and evidence.** Cutover to a sealed inspection evidence
+  log with bounded ETS indexes, a bounded private run catalog with selected
+  cohorts, digest result capture, canonical model-attributed counters exposed
+  to PTC-Lisp, and transcript selection of one named private run without
+  listing artifact roots.
+- **Agent loop.** Named phase return contracts, standalone named-return
+  validation, results verified with bounded correction, retained admitted
+  programs on run outcome, and preserved inspected-outcome diagnostics.
+- **CLI.** Standalone `ptc materialize` and `--source-out`, opt-in run
+  progress, embedded source build identity in `ptc --version`, and search over
+  the embedded documentation.
+- **Viewer.** Workflow model sessions explained, external labels and agent
+  progress, and isolated trace evidence reporting.
+- **Trace.** Directory admission classifier, immutable directory-admission
+  capture, and unified direct directory queries.
+- **PTC-Lisp.** Component and component introspection forms, and an opt-in,
+  activation-local `loop_limit`.
+- **Kernel.** Optional aggregate limit infrastructure and attested interned
+  per-environment component catalogs.
+- **Prompts.** A `prompt.audit` prelude with a rendered-size gate.
+- **Examples.** The DABStep fraud study with the review decided in workflow
+  code, a replayable adaptive web parser with its repair moved into PTC, a
+  checked debugging self-improvement loop, a denied capability at the
+  support-triage mission boundary, and an `AGENTS.md` routing card written
+  into materialized example trees.
+- **Site.** The landing page redesigned as a product page.
+
+### Changed
+
+- Agent state machine, agent failure taxonomy, cost warning handling, and
+  several PTC-Lisp resolution paths were extracted or centralized.
+- PTC-Lisp evaluation reuses prepared prelude environments, call contexts, and
+  parent contexts for closures; trace timestamp sort keys are computed once
+  per run.
+- The example tree was reorganized: alternative failure shapes grouped under
+  `variants/`, the self-improvement example trimmed to one story, and an
+  unreferenced repair entry removed.
+
+### Fixed
+
+- 136 fixes across the Kernel, CLI, LLM integration, MCP, REPL, examples,
+  inspection, limits, and build paths. The bulk came from repeated
+  contributor- and new-user smoke passes and target diagnostics that named a
+  rule but not the offending value, a limit but not the remedy.
+- The container build script's version probe rejected the build identity the
+  same script now passes, aborting silently before every finished-image probe.
+
 ## [0.14.0] - 2026-08-24
 
 ### Breaking rewrite
@@ -839,6 +900,7 @@ APIs and commands have no compatibility facades.
 - Improve LLM schema descriptions and use Haiku 4.5 (#73) ([#73](https://github.com/andreasronge/ptc_runner/pull/73))
 - Store last_result in Agent state to avoid regenerating random data (#79) ([#79](https://github.com/andreasronge/ptc_runner/pull/79))
 - Add test_coverage configuration to exclude test support modules (#89) ([#89](https://github.com/andreasronge/ptc_runner/pull/89))
+[0.15.0]: https://github.com/andreasronge/ptc_runner/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/andreasronge/ptc_runner/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/andreasronge/ptc_runner/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/andreasronge/ptc_runner/compare/v0.11.0...v0.12.0
