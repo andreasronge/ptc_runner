@@ -205,12 +205,12 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
     assert script =~ "self-debugger/validation/*.json"
   end
 
-  test "the adaptive parser defaults to exact replay and keeps models out of queries" do
+  test "the adaptive parser repairs inside PTC and reuses an accepted program without a model" do
     assert {:ok, files} = ExampleLibrary.fetch("adaptive-web-parser")
 
     replay_host = Jason.decode!(files["ptc-host.json"])
     live_host = Jason.decode!(files["ptc-host.live.json"])
-    query = Jason.decode!(files["query.ptc.json"])
+    application = Jason.decode!(files["ptc.json"])
 
     assert replay_host["install"]["repair-model"]["source"] == "llm_replay"
     assert live_host["install"]["repair-model"]["source"] == "llm"
@@ -218,9 +218,20 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
     assert replay_host["install"]["web"]["transport"]["args"] ==
              ["-y", "ptc-web@0.1.0"]
 
-    refute Map.has_key?(query["providers"], "workflow")
+    assert replay_host["install"]["candidate-store"]["transport"]["args"] ==
+             ["-y", "ptc-fs-mcp@0.4.0", "--root", ".ptc-private-demo", "--include", "*.clj"]
+
+    assert application["missions"]["browser"]["providers"] == ["web"]
+    assert application["missions"]["artifact"]["providers"] == ["candidate-store"]
+
+    assert application["providers"]["mission"] |> List.last() |> get_in(["config", "allow"]) ==
+             ["candidate.read", "candidate.write"]
+
+    assert application["providers"]["workflow"] == [%{"name" => "repair-model"}]
     assert files["README.md"] =~ "needs no LLM key"
-    assert files["run.mjs"] =~ "query runs must not call a model"
+    assert files["workflow.clj"] =~ "kernel/check-terminal-source"
+    assert files["workflow.clj"] =~ ~s(write-source "accepted.clj")
+    assert files["run.mjs"] =~ "reuse must not call a model"
   end
 
   @tag :tmp_dir

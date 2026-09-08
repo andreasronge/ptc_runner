@@ -3,6 +3,10 @@
 Install the self-contained Linux AMD64 or ARM64 image and run the PtcRunner CLI,
 Viewer, and stdio launcher without a build toolchain.
 
+> **Project status:** PtcRunner is a 0.x project under active development. It has
+> not yet been validated in a real production deployment, and breaking changes
+> are expected.
+
 Images are published as `ghcr.io/andreasronge/ptc_runner` starting with the
 first root release after the container publication workflow lands. Older
 releases are not backfilled. The image does not contain runtimes used by
@@ -23,8 +27,7 @@ Replace `VERSION` with a three-part release version such as `0.14.0`. The releas
 workflow creates each exact version tag once and refuses to replace one. GHCR
 does not enforce that policy as registry-level tag immutability, so pin the
 pulled repository digest and verify its attestation in automated deployments.
-There are no moving `latest` or `MAJOR.MINOR` tags; PtcRunner is 0.x and breaking
-changes are expected.
+There are no moving `latest` or `MAJOR.MINOR` tags, so pin the exact version.
 
 Each image has signed GitHub build provenance. Verification requires GitHub CLI
 authentication and a registry login, including for a public image:

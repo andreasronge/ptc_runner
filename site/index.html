@@ -66,23 +66,56 @@
       <strong>DABStep fraud analysis</strong>
       <p>Process 138,236 payment records within a bounded mission heap. Correct a mismatch,
       or withhold an answer that cannot be checked.</p>
-      <span class="card-link">Open example →</span>
+      <span class="card-link">View source on GitHub →</span>
     </a>
     <a class="example-card" href="https://github.com/andreasronge/ptc_runner/tree/main/examples/support-triage">
       <span class="example-kicker">Mix model + rules</span>
       <span class="mini-flow" aria-hidden="true"><i>classify</i><b>→</b><i>rules</i><b>→</b><i>route</i></span>
       <strong>Support triage</strong>
       <p>Combine model flexibility with fixed business rules and separately granted tools.</p>
-      <span class="card-link">Open example →</span>
+      <span class="card-link">View source on GitHub →</span>
     </a>
     <a class="example-card" href="https://github.com/andreasronge/ptc_runner/tree/main/examples/adaptive-web-parser">
       <span class="example-kicker">Repair from evidence</span>
       <span class="mini-flow" aria-hidden="true"><i>failure</i><b>→</b><i>repair</i><b>→</b><i>verify</i></span>
       <strong>Adaptive web parser</strong>
       <p>Repair a stale parser, verify it on a page the model did not see, then reuse it without another model call.</p>
-      <span class="card-link">Open example →</span>
+      <span class="card-link">View source on GitHub →</span>
     </a>
   </div>
+  <article class="adaptive-walkthrough" aria-labelledby="adaptive-walkthrough-heading">
+    <header>
+      <div>
+        <p class="example-kicker">One demo pattern</p>
+        <h3 id="adaptive-walkthrough-heading">Generated code is tested before it becomes the parser.</h3>
+      </div>
+      <p>This example uses one workflow and three mission environments to show code evaluation
+      and permissions. Each environment gets different code, data, and tools. It is one of many
+      patterns you can build with the same runtime.</p>
+    </header>
+    <div class="adaptive-run">
+      <p class="run-label"><span>First run</span> repair and verify</p>
+      <ol class="adaptive-steps">
+        <li><i aria-hidden="true">1</i><span>Artifact mission</span><strong>Look for <code>accepted.clj</code></strong><small>It is missing.</small></li>
+        <li><i aria-hidden="true">2</i><span>Browser mission</span><strong>Run the installed parser</strong><small>Old selectors return no records.</small></li>
+        <li><i aria-hidden="true">3</i><span>Evidence mission</span><strong>Ask for a selector recipe</strong><small>Toy evidence functions expose the failure and one changed page.</small></li>
+        <li><i aria-hidden="true">4</i><span>Artifact mission</span><strong>Write <code>candidate.clj</code></strong><small>The candidate is real PTC-Lisp, not trusted host code.</small></li>
+        <li><i aria-hidden="true">5</i><span>Browser mission</span><strong>Evaluate it twice</strong><small>Run on the changed page and a page the model did not see.</small></li>
+        <li><i aria-hidden="true">6</i><span>Workflow</span><strong>Adopt only if both pass</strong><small>The verified source becomes <code>accepted.clj</code>.</small></li>
+      </ol>
+    </div>
+    <div class="adaptive-foot">
+      <p><strong>Outcomes drive the workflow.</strong> Each evaluation returns a value or a
+      bounded failure. The workflow can inspect that outcome, evaluate another program, retry,
+      compare results, or adopt a candidate. The full trace is recorded separately; reading it
+      inside a workflow requires an explicit capability.</p>
+      <div class="adaptive-next">
+        <p class="reuse-note"><span>Next run</span><code>accepted.clj</code> → browser mission → result
+        <strong>No model call.</strong></p>
+        <a class="card-link" href="/adaptive-parser-runtime.html">Step through the full runtime flow →</a>
+      </div>
+    </div>
+  </article>
 </section>
 
 <section id="why" class="product-section why-section">
@@ -96,8 +129,9 @@
     <p>But a service has different needs. It must handle many requests, stop one run from
     using too much time or memory, and explain later why it made a choice.</p>
     <p>PtcRunner makes those runtime features: fixed limits on time, memory, and tool calls;
-    a structured trace from every run; and thousands of isolated runs on one machine. Call it
-    from your code, or run a command and read JSON.</p>
+    a structured trace from every run; and thousands of isolated runs on one machine. Run
+    workflows with <code>ptc run</code>, then inspect their traces from another authorized
+    PTC-Lisp program, the REPL, or the Viewer.</p>
   </div>
 </section>
 

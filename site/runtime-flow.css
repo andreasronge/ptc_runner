@@ -1,0 +1,246 @@
+.runtime-flow-body {
+  --foreground: var(--text);
+  --background: var(--bg);
+  --card: var(--panel);
+  --muted-foreground: var(--muted);
+  --viz-series-1: #4b84bd;
+  --viz-series-2: var(--accent);
+  --green: #347b55;
+  --blue: #3979b4;
+  --purple: #8056a8;
+  --orange: #a85d2d;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .runtime-flow-body {
+    --viz-series-1: #72ace5;
+    --green: #78c895;
+    --blue: #76afe8;
+    --purple: #c099e3;
+    --orange: #e7a06c;
+  }
+}
+
+.runtime-flow-page {
+  width: min(var(--landing-wide), calc(100% - 2.5rem));
+  margin: 0 auto;
+  padding: 3rem 0 7rem;
+}
+
+.runtime-flow-intro {
+  margin-bottom: 2.75rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(20rem, .9fr);
+  column-gap: 4rem;
+  align-items: end;
+}
+
+.runtime-flow-intro .crumb {
+  grid-column: 1 / -1;
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: .9rem;
+}
+
+.runtime-flow-intro .crumb a {
+  color: var(--text);
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.runtime-flow-intro .crumb a:hover { color: var(--accent); }
+
+.runtime-flow-intro .eyebrow { grid-column: 1; }
+
+.runtime-flow-intro h1 {
+  grid-column: 1;
+  max-width: 16ch;
+  margin: 0;
+  font-size: clamp(2.4rem, 4vw, 3.5rem);
+  line-height: 1.03;
+  letter-spacing: -.045em;
+}
+
+.runtime-flow-intro .lead {
+  grid-column: 2;
+  grid-row: 2 / 4;
+  max-width: 43rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 1.05rem;
+  line-height: 1.7;
+}
+
+.runtime-flow-page .card {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--panel);
+}
+
+.runtime-flow-page .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.35rem;
+  padding: .45rem .75rem;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: .84rem;
+  cursor: pointer;
+}
+
+.runtime-flow-page .btn:hover { border-color: var(--accent); }
+.runtime-flow-page .btn:disabled { cursor: default; opacity: .45; }
+.runtime-flow-page .btn-primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--bg);
+}
+.runtime-flow-page .btn-ghost { border-color: transparent; background: transparent; }
+.runtime-flow-page .text-small { font-size: .78rem; line-height: 1.4; }
+
+.runtime-flow-page #ptc-mission-flow h2 {
+  padding: 0;
+  border: 0;
+  color: var(--text);
+  font-size: clamp(1.65rem, 3vw, 2.35rem);
+  line-height: 1.15;
+  letter-spacing: -.025em;
+  text-transform: none;
+}
+
+.runtime-flow-page #ptc-mission-flow h3 {
+  color: var(--text);
+  font-size: 1.15rem;
+  line-height: 1.3;
+}
+
+/* The embedded walkthrough was designed for a compact host surface. Keep its
+   fixed-position mission boxes compact enough that their copy never clips. */
+.runtime-flow-page #ptc-mission-flow .zone {
+  padding: 12px 14px;
+  line-height: 1.4;
+}
+.runtime-flow-page #ptc-mission-flow .zone-top { margin-bottom: 8px; }
+.runtime-flow-page #ptc-mission-flow .zone > span {
+  margin-top: 4px;
+  font-size: .9rem;
+}
+.runtime-flow-page #ptc-mission-flow .ptc-source-trigger {
+  min-height: auto;
+  padding: .2rem .35rem;
+}
+.runtime-flow-page #ptc-mission-flow .workflow { height: 128px; }
+
+.runtime-flow-note {
+  margin-top: 2rem;
+  padding: 1.2rem 1.35rem;
+  border-left: 3px solid var(--accent);
+  background: var(--code-bg);
+  color: var(--muted);
+  font-size: .94rem;
+  line-height: 1.65;
+}
+.runtime-flow-note strong { color: var(--text); }
+
+.runtime-flow-actions {
+  margin-top: 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  flex-wrap: wrap;
+}
+
+.runtime-flow-actions a { text-decoration: none; }
+
+@media (max-width: 58rem) {
+  .runtime-flow-intro { display: block; }
+  .runtime-flow-intro .lead { margin-top: 1.25rem; }
+  .runtime-flow-body .product-nav nav a[href="/#examples"],
+  .runtime-flow-body .product-nav nav a[href="/#why"] { display: none; }
+}
+
+@media (max-width: 52rem) {
+  .runtime-flow-page #ptc-mission-flow .stage { min-height: 670px; }
+  .runtime-flow-page #ptc-mission-flow .workflow {
+    left: 0;
+    width: 100%;
+    height: 128px;
+  }
+  .runtime-flow-page #ptc-mission-flow .query,
+  .runtime-flow-page #ptc-mission-flow .evidence,
+  .runtime-flow-page #ptc-mission-flow .candidate {
+    left: 0;
+    right: auto;
+    width: 100%;
+    height: 120px;
+  }
+  .runtime-flow-page #ptc-mission-flow .query { top: 145px; }
+  .runtime-flow-page #ptc-mission-flow .evidence { top: 280px; }
+  .runtime-flow-page #ptc-mission-flow .candidate { top: 415px; }
+  .runtime-flow-page #ptc-mission-flow .browser,
+  .runtime-flow-page #ptc-mission-flow .model,
+  .runtime-flow-page #ptc-mission-flow .trace {
+    top: 560px;
+    width: 31%;
+    height: 88px;
+  }
+  .runtime-flow-page #ptc-mission-flow .browser { left: 0; }
+  .runtime-flow-page #ptc-mission-flow .model { left: 34.5%; }
+  .runtime-flow-page #ptc-mission-flow .trace { right: 0; }
+  .runtime-flow-page #ptc-mission-flow svg { display: none; }
+  .runtime-flow-page #ptc-mission-flow .evaluation { grid-template-columns: 1fr; }
+  .runtime-flow-page #ptc-mission-flow .code-head {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .runtime-flow-page #ptc-mission-flow .code-head span { white-space: normal; }
+}
+
+@media (max-width: 40rem) {
+  .runtime-flow-page { padding: 3rem 0 5rem; }
+  .runtime-flow-intro h1 { font-size: clamp(2.4rem, 12vw, 3.6rem); }
+  .runtime-flow-actions { align-items: stretch; flex-direction: column; }
+  .runtime-flow-body .product-nav nav a[href="https://github.com/andreasronge/ptc_runner"] {
+    display: none;
+  }
+}
+
+@media (max-width: 30rem) {
+  .runtime-flow-page #ptc-mission-flow .stage { min-height: 875px; }
+  .runtime-flow-page #ptc-mission-flow .workflow { height: 170px; }
+  .runtime-flow-page #ptc-mission-flow .query,
+  .runtime-flow-page #ptc-mission-flow .evidence,
+  .runtime-flow-page #ptc-mission-flow .candidate { height: 135px; }
+  .runtime-flow-page #ptc-mission-flow .query { top: 185px; }
+  .runtime-flow-page #ptc-mission-flow .browser { top: 330px; }
+  .runtime-flow-page #ptc-mission-flow .evidence { top: 415px; }
+  .runtime-flow-page #ptc-mission-flow .model { top: 560px; }
+  .runtime-flow-page #ptc-mission-flow .candidate { top: 645px; }
+  .runtime-flow-page #ptc-mission-flow .trace { top: 790px; }
+  .runtime-flow-page #ptc-mission-flow .browser,
+  .runtime-flow-page #ptc-mission-flow .model,
+  .runtime-flow-page #ptc-mission-flow .trace {
+    left: 0;
+    right: auto;
+    width: 100%;
+    height: 64px;
+  }
+  .runtime-flow-page #ptc-mission-flow .support .zone-top {
+    flex-direction: row;
+    align-items: center;
+  }
+  .runtime-flow-page #ptc-mission-flow .controls {
+    align-items: flex-end;
+    flex-wrap: wrap;
+  }
+  .runtime-flow-page #ptc-mission-flow .steps { flex-wrap: wrap; }
+}

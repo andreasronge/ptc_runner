@@ -2,6 +2,10 @@
 
 Install the self-contained `ptc` executable from GitHub Releases.
 
+> **Project status:** PtcRunner is a 0.x project under active development. It has
+> not yet been validated in a real production deployment, and breaking changes
+> are expected.
+
 A target machine does not need Elixir, Erlang, Python, Node.js, or a separately
 installed sandbox to run an application that needs no API key or an agent
 whose external tools are remote.
