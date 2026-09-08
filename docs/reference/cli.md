@@ -187,6 +187,15 @@ The command envelope reports the run reference and artifact class, not artifact
 paths. Output, trace, inspection, and envelope destinations must be distinct.
 All publications are no-replace and recheck their destination at commit time.
 
+Reservations named `.*.ptc-reservation` record the owning process. When you
+reuse a destination after an interrupted run on the same host, a reservation
+whose owner is gone is reclaimed automatically if the destination is absent.
+Older reservations without an owner marker are reclaimed only after 60 seconds.
+Live owners, uncertain owner status, and existing destinations are always
+preserved. Cross-host recovery on network filesystems is not supported.
+A `destination/destination_exists` terminal error lists the requested paths
+and a remedy; the command envelope remains path-free.
+
 Atomic publication may reserve owner-only sibling paths named
 `.ptc-private-*` or `.ptc-private-result-*`. They normally disappear at commit
 or cleanup, but an abruptly terminated process can leave one behind. Because a

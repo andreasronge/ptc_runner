@@ -298,6 +298,11 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
                :normal
              )
 
+    reservation = PublicationAuthority.handles(first).trace.reservation_path
+    owner = Path.join(reservation, "owner")
+    assert File.read!(owner) == System.pid()
+    assert Bitwise.band(File.stat!(owner).mode, 0o777) == 0o600
+
     assert {:error, :destination_exists} =
              PublicationAuthority.authorize(
                "second-authority",

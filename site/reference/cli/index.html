@@ -194,7 +194,14 @@ successful non-run commands keep the array empty. Parse the
 envelope rather than scraping stdout, which is a human
 presentation channel that may also carry application output.</li></ul><p>The command envelope reports the run reference and artifact class, not artifact
 paths. Output, trace, inspection, and envelope destinations must be distinct.
-All publications are no-replace and recheck their destination at commit time.</p><p>Atomic publication may reserve owner-only sibling paths named
+All publications are no-replace and recheck their destination at commit time.</p><p>Reservations named <code class="inline">.*.ptc-reservation</code> record the owning process. When you
+reuse a destination after an interrupted run on the same host, a reservation
+whose owner is gone is reclaimed automatically if the destination is absent.
+Older reservations without an owner marker are reclaimed only after 60 seconds.
+Live owners, uncertain owner status, and existing destinations are always
+preserved. Cross-host recovery on network filesystems is not supported.
+A <code class="inline">destination/destination_exists</code> terminal error lists the requested paths
+and a remedy; the command envelope remains path-free.</p><p>Atomic publication may reserve owner-only sibling paths named
 <code class="inline">.ptc-private-*</code> or <code class="inline">.ptc-private-result-*</code>. They normally disappear at commit
 or cleanup, but an abruptly terminated process can leave one behind. Because a
 completed reservation can contain private prompts, responses, source, or a

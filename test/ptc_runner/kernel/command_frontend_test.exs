@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.ExampleLibrary
+  alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.ValueContractDiagnostic
   import PtcRunner.TestSupport.CommandEngineFixtures, only: [validate_success_result: 0]
@@ -761,6 +762,128 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
       ],
       "--private-output"
     )
+  end
+
+  @tag :tmp_dir
+  test "run reclaims a dead owner's output reservation", %{tmp_dir: dir} do
+    application = write_application(dir)
+    output = Path.join(dir, "answer.json")
+    reservation = make_output_reservation(output, "2147483647")
+
+    presentation = run_with_output(application, output)
+
+    assert presentation.exit_status == 0
+    assert Jason.decode!(File.read!(output)) == %{"answer" => 42}
+    refute File.exists?(reservation)
+  end
+
+  @tag :tmp_dir
+  test "run reclaims the shared envelope reservation after its owner dies", %{tmp_dir: dir} do
+    application = write_application(dir)
+    envelope = Path.join(dir, "envelope.json")
+    reservation = make_output_reservation(envelope, "2147483647")
+
+    presentation =
+      CommandFrontend.execute(["run", application, "--envelope", envelope], :standalone, fn _ ->
+        {:ok, CommandRuntime.standalone()}
+      end)
+
+    assert presentation.exit_status == 0
+    assert Jason.decode!(File.read!(envelope))["status"] == "ok"
+    refute File.exists?(reservation)
+  end
+
+  @tag :tmp_dir
+  test "run preserves live, fresh, and occupied output reservations", %{tmp_dir: dir} do
+    application = write_application(dir)
+
+    for {name, owner, occupied?} <- [
+          {"live", System.pid(), false},
+          {"fresh", nil, false},
+          {"malformed", "not-a-pid", false},
+          {"occupied", "2147483647", true}
+        ] do
+      output = Path.join(dir, name <> ".json")
+      reservation = make_output_reservation(output, owner)
+      if occupied?, do: File.write!(output, "original")
+      before = File.stat!(reservation)
+
+      presentation = run_with_output(application, output)
+      assert presentation.exit_status == 7
+      assert presentation.stderr =~ "destination/destination_exists"
+      assert presentation.stderr =~ output
+      assert presentation.stderr =~ "another path"
+      refute Jason.encode!(presentation.outcome.envelope) =~ output
+      assert File.stat!(reservation) == before
+      if owner, do: assert(File.read!(Path.join(reservation, "owner")) == owner)
+      if occupied?, do: assert(File.read!(output) == "original")
+    end
+  end
+
+  @tag :tmp_dir
+  test "run reclaims an old markerless output reservation", %{tmp_dir: dir} do
+    application = write_application(dir)
+    output = Path.join(dir, "answer.json")
+    reservation = make_output_reservation(output, nil)
+    File.touch!(reservation, System.os_time(:second) - 120)
+
+    assert run_with_output(application, output).exit_status == 0
+    assert File.regular?(output)
+    refute File.exists?(reservation)
+  end
+
+  for stale? <- [false, true] do
+    @tag :tmp_dir
+    @tag stale_reservation: stale?
+    test "concurrent runs publish exactly one output (stale=#{stale?})", %{
+      tmp_dir: dir,
+      stale_reservation: stale?
+    } do
+      application = write_application(dir)
+      output = Path.join(dir, "answer.json")
+      if stale?, do: make_output_reservation(output, "2147483647")
+      parent = self()
+
+      tasks =
+        for _ <- 1..2 do
+          Task.async(fn ->
+            CommandFrontend.execute(["run", application, "--output", output], :standalone, fn _ ->
+              send(parent, {:ready, self()})
+
+              receive do
+                :go -> {:ok, CommandRuntime.standalone()}
+              end
+            end)
+          end)
+        end
+
+      for _ <- tasks, do: assert_receive({:ready, _pid}, 5_000)
+      for task <- tasks, do: send(task.pid, :go)
+      assert Enum.sort(Enum.map(tasks, &Task.await(&1, 10_000).exit_status)) == [0, 7]
+      assert Jason.decode!(File.read!(output)) == %{"answer" => 42}
+      assert Path.wildcard(Path.join(dir, ".*.ptc-reservation")) == []
+    end
+  end
+
+  defp run_with_output(application, output) do
+    CommandFrontend.execute(["run", application, "--output", output], :standalone, fn _ ->
+      {:ok, CommandRuntime.standalone()}
+    end)
+  end
+
+  defp make_output_reservation(output, owner) do
+    stat = File.stat!(Path.dirname(output))
+    identity = {stat.major_device, stat.minor_device, stat.inode}
+    key = {identity, PrivateDirectory.casefold_name(Path.basename(output))}
+    digest = :crypto.hash(:sha256, :erlang.term_to_binary(key, [:deterministic]))
+
+    path =
+      Path.join(Path.dirname(output), ".#{Base.encode16(digest, case: :lower)}.ptc-reservation")
+
+    File.mkdir!(path)
+    File.chmod!(path, 0o700)
+    if owner, do: File.write!(Path.join(path, "owner"), owner)
+    path
   end
 
   @tag :tmp_dir

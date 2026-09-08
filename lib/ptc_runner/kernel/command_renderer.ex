@@ -13,7 +13,8 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   response, credential, or unvalidated path. Component compile failures with a
   proven byte span render the logical component name and canonical half-open
   byte range already present in the envelope; rendering does not retain or
-  reopen component source. The one local-only exception is an unreadable
+  reopen component source. Local-only context includes artifact destination paths and remedies for
+  destination collisions, and an unreadable
   application input: its caller-supplied positional path, or a loaded project's
   validated relative application path, is appended without entering the sealed
   diagnostic. A replay miss may include only its validated opaque request hash.
