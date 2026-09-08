@@ -1,4 +1,5 @@
 {
+  "$schema": "https://ptc-runner.dev/schemas/ptc-application-manifest.schema.json",
   "version": 1,
   "workflow": {
     "components": [{"id": "tutorial.cost-budget", "path": "request.clj"}],

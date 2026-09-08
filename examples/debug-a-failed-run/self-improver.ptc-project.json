@@ -1,4 +1,5 @@
 {
+  "$schema": "https://ptc-runner.dev/schemas/ptc-project-config.schema.json",
   "kind": "ptc-project",
   "version": 1,
   "application": {

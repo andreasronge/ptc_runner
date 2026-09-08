@@ -19,6 +19,14 @@ value or an unknown caller-authored key. Paths through named maps use `*` for
 the caller-selected name, and an unknown property stops at its schema-owned
 parent.
 
+New manifests from `ptc init` identify the hosted schema with
+`"$schema": "https://ptc-runner.dev/schemas/ptc-application-manifest.schema.json"`.
+Some VS Code installations require a one-time URI trust approval for
+`https://ptc-runner.dev` before loading it; that approval concerns the hosted
+URI, not whether the manifest satisfies the schema. Adding `$schema` manually
+to an existing manifest changes its `application_content_digest`, just like
+any other application-content change.
+
 ## Start with one workflow
 
 ```json

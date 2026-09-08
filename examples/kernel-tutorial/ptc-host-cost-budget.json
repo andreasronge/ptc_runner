@@ -1,4 +1,5 @@
 {
+  "$schema": "https://ptc-runner.dev/schemas/ptc-host-config.schema.json",
   "credentials": {"openrouter_key": {"env": "OPENROUTER_API_KEY"}},
   "limits": {"llm_cost_microusd": 1},
   "install": {

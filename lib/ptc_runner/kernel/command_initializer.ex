@@ -31,6 +31,7 @@ defmodule PtcRunner.Kernel.CommandInitializer do
 
   @manifest """
   {
+    "$schema": "https://ptc-runner.dev/schemas/ptc-application-manifest.schema.json",
     "version": 1,
     "workflow": {
       "components": [
