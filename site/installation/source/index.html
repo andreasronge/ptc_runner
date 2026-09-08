@@ -102,7 +102,9 @@ validating an unreleased revision, or producing a standalone artifact.">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
 <h1 id="source-installation">Source installation</h1><p>Build PtcRunner from a repository checkout when changing the runtime,
-validating an unreleased revision, or producing a standalone artifact.</p><p>The
+validating an unreleased revision, or producing a standalone artifact.</p><blockquote><p><strong>Project status:</strong> PtcRunner is a 0.x project under active development. It has
+not yet been validated in a real production deployment, and breaking changes
+are expected.</p></blockquote><p>The
 ordinary product interface is the installed <code class="inline">ptc</code> executable.</p><p>Tool versions are pinned in <code class="inline">mise.toml</code>:</p><pre><code class="console language-console">mise install
 mix deps.get
 mix compile</code></pre><p>Run the command frontend from the checkout:</p><pre><code class="console language-console">mix ptc init hello-ptc

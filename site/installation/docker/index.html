@@ -102,7 +102,9 @@ Viewer, and stdio launcher without a build toolchain.">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
 <h1 id="docker-installation">Docker installation</h1><p>Install the self-contained Linux AMD64 or ARM64 image and run the PtcRunner CLI,
-Viewer, and stdio launcher without a build toolchain.</p><p>Images are published as <code class="inline">ghcr.io/andreasronge/ptc_runner</code> starting with the
+Viewer, and stdio launcher without a build toolchain.</p><blockquote><p><strong>Project status:</strong> PtcRunner is a 0.x project under active development. It has
+not yet been validated in a real production deployment, and breaking changes
+are expected.</p></blockquote><p>Images are published as <code class="inline">ghcr.io/andreasronge/ptc_runner</code> starting with the
 first root release after the container publication workflow lands. Older
 releases are not backfilled. The image does not contain runtimes used by
 external MCP servers.</p><h2 id="pull-and-verify-the-image">Pull and verify the image</h2><p>Use an exact version tag for deployments:</p><pre><code class="console language-console">version=VERSION
@@ -112,8 +114,7 @@ docker run --rm &quot;$image&quot; --version</code></pre><p>Replace <code class=
 workflow creates each exact version tag once and refuses to replace one. GHCR
 does not enforce that policy as registry-level tag immutability, so pin the
 pulled repository digest and verify its attestation in automated deployments.
-There are no moving <code class="inline">latest</code> or <code class="inline">MAJOR.MINOR</code> tags; PtcRunner is 0.x and breaking
-changes are expected.</p><p>Each image has signed GitHub build provenance. Verification requires GitHub CLI
+There are no moving <code class="inline">latest</code> or <code class="inline">MAJOR.MINOR</code> tags, so pin the exact version.</p><p>Each image has signed GitHub build provenance. Verification requires GitHub CLI
 authentication and a registry login, including for a public image:</p><pre><code class="console language-console">gh auth refresh --scopes read:packages
 gh auth token | docker login ghcr.io \
   --username &quot;$(gh api user --jq .login)&quot; --password-stdin

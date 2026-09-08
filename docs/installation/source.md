@@ -3,6 +3,10 @@
 Build PtcRunner from a repository checkout when changing the runtime,
 validating an unreleased revision, or producing a standalone artifact.
 
+> **Project status:** PtcRunner is a 0.x project under active development. It has
+> not yet been validated in a real production deployment, and breaking changes
+> are expected.
+
 The
 ordinary product interface is the installed `ptc` executable.
 
