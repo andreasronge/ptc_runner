@@ -8,9 +8,9 @@
   },
   "guides": {
     "docs/guides/agent-cli-usage.md": {
-      "words": 681,
+      "words": 676,
       "density": 5.2,
-      "blockers": 2,
+      "blockers": 0,
       "tics": 1.0
     },
     "docs/guides/agent-workflow-patterns.md": {

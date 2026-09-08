@@ -104,6 +104,22 @@ defmodule PtcRunner.Kernel.CommandRejection do
   end
 
   @doc """
+  Builds the rejection for combining a documentation page with `--search`.
+  """
+  @spec docs_search_page_collision(CommandDeclaration.frontend()) :: t()
+  def docs_search_page_collision(frontend) do
+    %__MODULE__{
+      command: :docs,
+      code: :conflicting_arguments,
+      kind: :generic,
+      accepted: [],
+      option: nil,
+      destination: nil,
+      conflicts: ["PAGE", CommandDeclaration.option_switch!(:docs, frontend, :search)]
+    }
+  end
+
+  @doc """
   Builds the rejection for a `ptc init --example` name nothing embeds.
 
   Same shape as `docs_page_unknown/0`: the embedded set is declaration-owned and

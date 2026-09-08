@@ -205,6 +205,30 @@ defmodule PtcRunner.Kernel.CommandParser do
            frontend: frontend
          )
 
+  defp validate_command(
+         :docs,
+         [],
+         %{search: term},
+         ordered,
+         frontend_options,
+         frontend
+       )
+       when is_binary(term) and byte_size(term) > 0 do
+    if String.valid?(term) and byte_size(term) <= 512 and length(String.codepoints(term)) <= 128 do
+      arguments(:docs,
+        options: %{page: nil, search: term},
+        ordered_options: ordered,
+        frontend_options: frontend_options,
+        frontend: frontend
+      )
+    else
+      reject(:docs, :invalid_arguments)
+    end
+  end
+
+  defp validate_command(:docs, [_page], %{search: _term}, _ordered, _frontend_options, frontend),
+    do: {:error, CommandRejection.docs_search_page_collision(frontend)}
+
   defp validate_command(:docs, [page], options, ordered, frontend_options, frontend)
        when map_size(options) == 0 do
     if page in DocumentationLibrary.names(),

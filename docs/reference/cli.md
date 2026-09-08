@@ -13,7 +13,7 @@ grammar for each frontend.
 | --- | --- |
 | `ptc init DIRECTORY` | Publish a validated minimal application without replacing an existing target |
 | `ptc init DIRECTORY --example NAME` | Publish one embedded example tree instead of the scaffold |
-| `ptc docs [PAGE]` | List the documentation embedded in this executable, or print one page |
+| `ptc docs [PAGE]` or `--search TERM` | List embedded documentation, print one page, or find a term in prose pages |
 | `ptc help [COMMAND]` | Print the root command list, or the exact switches one command accepts |
 | `ptc validate MANIFEST or PROJECT` | Load and compile without executing the workflow, and read the input files the declarations name |
 | `ptc run MANIFEST or PROJECT` | Execute the application entry |
@@ -81,19 +81,27 @@ successful completions.
 ## Read the embedded documentation
 
 Every installation carries the language specification, references, and JSON
-Schemas that describe its own version. `ptc docs` lists them; `ptc docs PAGE`
-prints one page verbatim to stdout:
+Schemas that describe its own version. `ptc docs` lists them, `ptc docs PAGE`
+prints one page verbatim, and `ptc docs --search TERM` finds a case-insensitive
+substring in the prose pages:
 
 ```console
 ptc docs
 ptc docs agent-guide
+ptc docs --search result_schema
 ptc docs schema-manifest
 ```
 
 Pages are embedded when the executable is built, so they need no network
-access and cannot describe a different version. An unrecognized page name is
-rejected as invalid arguments. `docs` publishes no envelope and reads no
-application, host configuration, or project document.
+access and cannot describe a different version. Search results identify the
+page, source line, and matching text, with the most relevant pages first. Each
+page contributes up to three lines, and the result covers up to ten pages.
+Schema pages are excluded from search. When a term starts with `--`, pass it in
+the joined form, such as `ptc docs --search=--host-config`.
+
+An unrecognized page name is rejected as invalid arguments and points to
+`--search`. `docs` publishes no envelope and reads no application, host
+configuration, or project document.
 
 Coding agents and LLMs driving the executable should start at
 [Drive ptc as an agent](../guides/agent-cli-usage.md), served as
