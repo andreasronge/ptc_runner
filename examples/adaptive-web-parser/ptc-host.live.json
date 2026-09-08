@@ -1,4 +1,5 @@
 {
+  "$schema": "https://ptc-runner.dev/schemas/ptc-host-config.schema.json",
   "credentials": {
     "fixture_origin": {"env": "PTC_WEB_FIXTURE_ORIGIN"},
     "openrouter_key": {"env": "OPENROUTER_API_KEY"}

@@ -4,10 +4,13 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
   import ExUnit.CaptureIO
 
   alias PtcRunner.Dotenv
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.ExampleLibrary
+  alias PtcRunner.Kernel.HostConfig
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.ProjectConfig
   alias PtcRunner.MixCommandAdapter
 
@@ -22,6 +25,41 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
 
         if File.regular?(source) do
           assert File.read!(source) == content, "#{name}/#{relative} drifted from its source"
+        end
+      end
+    end
+  end
+
+  @tag :tmp_dir
+  test "every materialized PTC document identifies and passes its runtime schema boundary", %{
+    tmp_dir: directory
+  } do
+    schema_by_role = %{
+      application: "https://ptc-runner.dev/schemas/ptc-application-manifest.schema.json",
+      host: "https://ptc-runner.dev/schemas/ptc-host-config.schema.json",
+      project: "https://ptc-runner.dev/schemas/ptc-project-config.schema.json"
+    }
+
+    for name <- ExampleLibrary.names() do
+      target = Path.join(directory, name)
+
+      assert {:ok, %CommandOutcome{}} =
+               CommandEngine.dispatch(["init", target, "--example", name])
+
+      installed_limits = installed_limits_for(target)
+
+      for path <- Path.wildcard(Path.join(target, "**/*.json")) do
+        source = File.read!(path)
+        document = Jason.decode!(source)
+
+        case ptc_document_role(document) do
+          nil ->
+            :ok
+
+          role ->
+            assert document["$schema"] == schema_by_role[role], path
+            assert String.starts_with?(source, ~s({\n  "$schema":)), path
+            assert_runtime_loads(role, path, installed_limits)
         end
       end
     end
@@ -285,4 +323,49 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
     assert envelope["error"]["phase"] == "publication"
     assert File.ls!(target) == ["keep.txt"]
   end
+
+  defp ptc_document_role(%{"kind" => "ptc-project"}), do: :project
+
+  defp ptc_document_role(%{"version" => 1, "workflow" => workflow}) when is_map(workflow),
+    do: :application
+
+  defp ptc_document_role(%{"install" => install}) when is_map(install), do: :host
+  defp ptc_document_role(_document), do: nil
+
+  defp installed_limits_for(target) do
+    overrides =
+      target
+      |> Path.join("**/*.json")
+      |> Path.wildcard()
+      |> Enum.reduce(%{}, fn path, acc ->
+        case path |> File.read!() |> Jason.decode!() do
+          %{"install" => install} = host when is_map(install) ->
+            host
+            |> Map.get("limits", %{})
+            |> Enum.reduce(acc, fn {name, value}, limits ->
+              {:ok, field} = Limits.name(name)
+              Map.update(limits, field, value, &max(&1, value))
+            end)
+
+          _document ->
+            acc
+        end
+      end)
+
+    {:ok, limits} = Limits.installed(overrides)
+    limits
+  end
+
+  defp assert_runtime_loads(:project, path, _installed_limits),
+    do: assert({:ok, _project} = ProjectConfig.load(path))
+
+  defp assert_runtime_loads(:application, path, installed_limits),
+    do:
+      assert(
+        {:ok, _request} =
+          ApplicationPackage.request_directory(path, installed_limits: installed_limits)
+      )
+
+  defp assert_runtime_loads(:host, path, _installed_limits),
+    do: assert({:ok, _host} = HostConfig.load(path))
 end

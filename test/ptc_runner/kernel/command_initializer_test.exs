@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.CommandInitializerTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandInitializer
@@ -19,6 +20,7 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
 
   @manifest """
   {
+    "$schema": "https://ptc-runner.dev/schemas/ptc-application-manifest.schema.json",
     "version": 1,
     "workflow": {
       "components": [
@@ -50,11 +52,41 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
     assert File.read!(Path.join(target, "main.clj")) == @main_clj
     assert File.read!(Path.join(target, "ptc.json")) == @manifest
 
+    assert {:ok, manifest} = Jason.decode(File.read!(Path.join(target, "ptc.json")))
+
+    assert manifest["$schema"] ==
+             "https://ptc-runner.dev/schemas/ptc-application-manifest.schema.json"
+
+    assert {:ok, request} =
+             ApplicationPackage.request_directory(Path.join(target, "ptc.json"))
+
+    manifest_without_schema =
+      String.replace(
+        @manifest,
+        ~s(  "$schema": "https://ptc-runner.dev/schemas/ptc-application-manifest.schema.json",\n),
+        ""
+      )
+
+    assert {:ok, request_without_schema} =
+             ApplicationPackage.request_memory("ptc.json", %{
+               "main.clj" => @main_clj,
+               "ptc.json" => manifest_without_schema
+             })
+
+    refute request.package.application_content_digest ==
+             request_without_schema.package.application_content_digest
+
     assert File.read!(Path.join(target, ".gitignore")) ==
              ".ptc/\n.ptc-private-*\n.ptc-private-result-*\n"
 
     assert {:ok, project} =
              ProjectConfig.load(Path.join(target, "ptc-project.json"))
+
+    assert {:ok, project_document} =
+             Jason.decode(File.read!(Path.join(target, "ptc-project.json")))
+
+    assert project_document["$schema"] ==
+             "https://ptc-runner.dev/schemas/ptc-project-config.schema.json"
 
     assert project.application == Path.join(target, "ptc.json")
     assert project.viewer.port == 0

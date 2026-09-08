@@ -112,7 +112,13 @@ The message also names the bounded JSON Schema rule (<code class="inline">type</
 <code class="inline">maximum</code>, <code class="inline">required</code>, or another supported rule) without copying the rejected
 value or an unknown caller-authored key. Paths through named maps use <code class="inline">*</code> for
 the caller-selected name, and an unknown property stops at its schema-owned
-parent.</p><h2 id="start-with-one-workflow">Start with one workflow</h2><pre><code class="json language-json">{
+parent.</p><p>New manifests from <code class="inline">ptc init</code> identify the hosted schema with
+<code class="inline">&quot;$schema&quot;: &quot;https://ptc-runner.dev/schemas/ptc-application-manifest.schema.json&quot;</code>.
+Some VS Code installations require a one-time URI trust approval for
+<code class="inline">https://ptc-runner.dev</code> before loading it; that approval concerns the hosted
+URI, not whether the manifest satisfies the schema. Adding <code class="inline">$schema</code> manually
+to an existing manifest changes its <code class="inline">application_content_digest</code>, just like
+any other application-content change.</p><h2 id="start-with-one-workflow">Start with one workflow</h2><pre><code class="json language-json">{
   &quot;version&quot;: 1,
   &quot;workflow&quot;: {
     &quot;components&quot;: [
