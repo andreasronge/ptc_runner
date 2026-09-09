@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tools built for LLMs, not for humans · PtcRunner</title>
+<meta name="description" content="A language, a runtime and preludes - and what the combination makes possible">
+<link rel="canonical" href="https://ptc-runner.dev/blog/tools-built-for-llms/">
+<meta property="og:title" content="Tools built for LLMs, not for humans">
+<meta property="og:description" content="A language, a runtime and preludes - and what the combination makes possible">
+<meta property="og:url" content="https://ptc-runner.dev/blog/tools-built-for-llms/">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-09-09">
+<link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="PtcRunner blog" href="/feed.xml">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/landing.css">
+<link rel="stylesheet" href="/blog.css">
+</head>
+<body class="product-landing">
+<header class="product-nav">
+  <a class="product-brand" href="/" aria-label="PtcRunner home">
+    <img src="/ptc-runner-mark.svg" width="34" height="34" alt="">
+    <span>PtcRunner</span>
+  </a>
+  <nav aria-label="Main navigation">
+    <a href="/blog/">Blog</a>
+    <a href="/guides/">Documentation</a>
+    <a href="https://github.com/andreasronge/ptc_runner">GitHub</a>
+    <a class="nav-cta" href="/guides/quickstart/">Get started</a>
+  </nav>
+</header>
+
+<main class="blog-main">
+<article>
+<header class="post-header">
+  <p class="crumb"><a href="/blog/">&larr; Blog</a></p>
+  <h1>Tools built for LLMs, not for humans</h1>
+  <p class="post-lead">A language, a runtime and preludes - and what the combination makes possible</p>
+  <p class="post-meta"><time datetime="2026-09-09">9 September 2026</time> &middot; Andreas Ronge</p>
+</header>
+
+<div class="post-body">
+<p>Back in the late 1990s I did a bit of machine learning at university. I remember my professor warning me when I evolved programs using genetic programming: do not connect it to the internet. That still rings in my ears every time I read about an agent getting loose.</p>
+
+<p>Today we hand models the full power of a programming language and a machine. Python, bash, the filesystem, the network. Tools built for humans, by humans, over fifty years.</p>
+
+<p>What if we built the tools for the models instead ?</p>
+
+<p>That sounds stupid, I know - they were trained on our tools. But first, what is actually wrong with letting models use ours ?</p>
+
+<h2>Security</h2>
+
+<p>The obvious thing is security. It's crazy how we today let LLMs have access to the full power of a programming language and machines.</p>
+
+<p>But security is not just about making something safe, it also enables us to scale up and do more interesting things. Part of the security is monitoring and logging - without that it's impossible to design solutions that (self) improves.</p>
+
+<h2>Feedback</h2>
+
+<p>The next problem with human tools is feedback. What happens if your LLM eats up all your memory or consumes all the CPU on the machine ? It gets killed. That is the whole message.</p>
+
+<p>What a model wants is not just to be killed - it should get a signal about what happened and try again without losing previous work. Maybe it can learn to use the resources on the machine in a more effective way.</p>
+
+<p>So feedback is important, but not enough. Say the LLM got good feedback when it made a mistake. The next thing it wants to do is investigate: read docs, read logs, read source code. Tools should come with great docs that are easy to search from an LLM, and they should not be dumped into the context upfront.</p>
+
+<p>I do not believe skills are the future here either. You can never be sure that the LLM will follow a skill, but you can always trust that a program will be executed in a certain way. A function can carry its own docs, and the model can look them up and decide whether to call it or not. So the question is not how to write better instructions - it is how to make functions easy to discover. The answer is a REPL and tools the model already knows. In a Clojure REPL that is <code>apropos</code> and <code>doc</code>.</p>
+
+<h2>Introspection</h2>
+
+<p>An LLM should be able to spin up an environment where it tests the tool, pokes at it, reads the docs, investigates the logs and navigates the source. For example, grepping code is probably not the best way of navigating code. Presenting it as a graph is probably better. From there it can build up knowledge of how to best use the tool in some scenario.</p>
+
+<p>But there are very few tools built like that. Here comes the kicker - let the LLM build those tools, around human tools or from scratch.</p>
+
+<h2>Scaling</h2>
+
+<p>LLMs use human tools differently from humans, and at a different scale. They often talk to the world through just a few lines of a general purpose programming language.</p>
+
+<p>What happens with 1000+ agents on a single machine, each in a sandbox ? How do you let an agent fan out workers, each with a different environment ? How do you set limits on each of those environments and make sure the agents get feedback when a limit is reached ?</p>
+
+<p>I believe security, feedback, introspection and scaling are all necessary to build self improving software for LLMs. But how would that be done, and what would it look like ?</p>
+
+<h2>What the LLM needs - the language</h2>
+
+<p>We need tools the models recognize and that are part of their training set. What matters is not the amount of training data but the quality of it. Just think of all the Javascript out there and all the different ways of using it.</p>
+
+<p>We need a language that is secure by construction, so there are no dangerous things left to remove - no calling the operating system, no reaching the network behind your back. We need one where the model can poke around and test things and get good feedback, which means a REPL, with tooling for reading docs and searching APIs. The REPL is also a good place to build up knowledge: you write a helper and reuse it in the next turn. The language should be small, with no complex syntax to learn, typed so the model gets errors early, and compact enough to save tokens. And it should be practical - dates, JSON, composing functions the way Unix pipes compose tools.</p>
+
+<p>There is no language with all of that, as far as I know. But some come close.</p>
+
+<p>The one I landed on is Lisp, which is funny, since Lisp was originally designed for AI in the late 1950s. There are many dialects and I believe in the more practical Clojure, which I also suspect the models have more training data on. The APIs have been stable for years, the REPL and docs are good, and even the cheaper models can write Clojure today.</p>
+
+<p>Remember that we are not talking about big programs. We are talking about many small programs in a REPL doing tool calling. That is a different requirement from what most popular languages were designed for.</p>
+
+<p>But Clojure was not designed for a model doing tool calling either, and it still has most of the problems above. So what if we build a Clojure-like language, remove the dangerous parts, and improve the feedback the model gets ? That is what I've done - a small Clojure-like language, PTC-Lisp.</p>
+
+<p>One example of what that means in practice: a function can declare its signature, and both the arguments and the result are checked against it. A model that gets the shape wrong should be told where it made the mistake, not three steps later where the error no longer says anything useful.</p>
+
+<p>But that is still not enough.</p>
+
+<h2>What the LLM needs - the runtime</h2>
+
+<p>What if the model wants to fan out 1000 REPLs to test something ? I don't think my machine would have survived that.</p>
+
+<p>So we need a runtime and environments designed for this too. We want to limit which tools an environment may use, how many times, for how long, how much money it may spend on LLM calls, how much memory it may use. We want many environments with different constraints. And when one hits a limit it should not just crash - it should get good feedback, learn, and continue.</p>
+
+<p>There are many ways to get isolation - containers, V8 isolates, WASM - and each gives something up: how many you can run on one machine, whether one runaway can block the others, or what happens when you hit a limit. The Erlang BEAM handles all of that. It was built thirty years ago to run telephone switches - huge amounts of concurrency, low latency, and no tolerance for one call taking down the rest. So PTC-Lisp runs on the BEAM. I can cap the heap of each environment, and the preemptive scheduler guarantees that one program cannot make the other environments unresponsive. If an environment crashes I get notified and can start a new one in milliseconds.</p>
+
+<p>On my Mac M1 a BEAM process costs 2640 bytes, and I can spawn 100 000 of them in 122 ms.</p>
+
+<h2>What the LLM needs - preludes</h2>
+
+<p>If you watch an LLM work you notice it keeps writing the same or a similar Python program over and over. For a coding agent that may not matter much, since the tasks vary a lot. But for business use cases the same task comes back again and again.</p>
+
+<p>Today we handle that by guessing upfront. We design custom tools, or an MCP server optimized for some use case, and in doing so we decide in advance how the tools will be used. What if instead the model explored the API in a safe environment, found the good way to use it, and then wrote its own small library that hides the low level details ?</p>
+
+<p>That is not really a library. It is a prelude.</p>
+
+<p>The word comes from music, which matters to me since I'm also a trained classical pianist and practice the 48 preludes and fugues of Bach's Wohltemperierte Klavier more or less every day. Originally a prelude was improvised: the musician checks the tuning, finds the key, establishes the setting - and only then plays the real piece. Something found by poking at the instrument, and then written down. That is exactly the motion I am after.</p>
+
+<p>The other half of the word comes from Haskell, where a prelude is simply loaded in advance, so you can use it without importing anything.</p>
+
+<p>So: a prelude is a small library, discovered or written for a purpose, checked, and already loaded when the model starts working. Which is also where the skills question from earlier lands - a prelude is what a skill becomes once the model can write and test the function itself.</p>
+
+<p>What if the harness supported preludes that could be monitored, replaced and optimized ?</p>
+
+<h2>One example</h2>
+
+<p>Enough theory. Here is a small example how to use environments.</p>
+
+<p>A web page changes and the parser that used to read it stops working. You don't need a model to notice that - the author field just came back empty.</p>
+
+<p>That check runs in the workflow environment. It is trusted code, and its job is to decide what happens next, not to do the work. It can spawn mission environments, and each mission gets only what it needs.</p>
+
+<p>So it spawns one with browser tools and no model, and runs the old parser there. Empty. Now, and only now, it starts an agent in a second mission that can see the failure and the changed page and nothing else - no browser, no filesystem. The agent hands back a recipe for the new selectors. Trusted code turns that into a small PTC-Lisp program, and a third mission writes it to disk through a filesystem server that can only see two files.</p>
+
+<p>Then the interesting part. The workflow reads that program back and evaluates it in the browser mission - the one with no model and no filesystem. It runs against the failed page, and then against a second page the model never saw. Only if both pass does the new parser get saved. The next run makes no model call at all.</p>
+
+<p>The model never touched the browser. The generated code never touched the filesystem. And nothing was adopted because the model said it was good - it was adopted because it passed a check written up front. Which I did not write either, by the way. My coding agent wrote that workflow and I read it. That is rather the point.</p>
+
+<p>That is what the environments are for. Not only safety, although it is that too, but being able to give each step exactly the tools it needs, in a few lines of configuration.</p>
+
+<p>None of that is a prelude yet - it is just a file the workflow reads. But it is the same motion, and it generalises: let the model work something out in a bounded environment, check it, keep what passes. Do that often enough in one domain and what you keep becomes a prelude.</p>
+
+<p>All the details are at <a href="https://ptc-runner.dev/adaptive-parser-runtime.html">https://ptc-runner.dev/adaptive-parser-runtime.html</a></p>
+
+<h2>What the combination enables</h2>
+
+<p>Every piece of this exists somewhere. Code instead of tool calls is not new - people call it code mode. Sandboxes are not new. Preloaded libraries are not new. What I have not seen is the whole set in one place: a language that is safe by construction, a runtime that bounds every environment and tells the model what happened instead of killing it, and preludes the model can write itself and the host adopts after checking them.</p>
+
+<p>That combination is the interesting part, because it makes things possible that none of the pieces give you alone. A workflow that repairs itself from evidence and then stops paying for the model, like the one above. A thousand bounded environments that report back instead of dying. And PtcRunner ships preludes for navigating its own traces and its own prelude sources, presented as a graph - which means it can debug itself, and even debug the debugger.</p>
+
+<h2>How can I test it</h2>
+
+<p>Install from ptc-runner.dev. Single click, no other language or sandbox needed.</p>
+
+<pre>ptc init hello-ptc
+ptc run hello-ptc/ptc-project.json</pre>
+
+<p>Point your coding agent at the included AGENTS.md and it will explore the ptc command line tool, which comes with all the docs it needs. It leaves a trace you can look at using ptc itself.</p>
+
+<p>Fair warning: it's a 0.x library and in heavy development. Next up is an inbound MCP endpoint - today PtcRunner can call MCP tools, but nothing can call it, so you can't drop it into an agent you already run. The main use case as I see it is running it as a service handling many requests, and maybe talking to other PtcRunner instances.</p>
+
+<p>What's your take ? I feel there is so much to explore here.</p>
+</div>
+
+<footer class="post-footer">
+  <p>PtcRunner is MIT licensed and built in the open at
+  <a href="https://github.com/andreasronge/ptc_runner">andreasronge/ptc_runner</a>.</p>
+  <p><a href="/guides/quickstart/">Quickstart</a> &middot;
+  <a href="/blog/">More posts</a> &middot;
+  <a href="/feed.xml">RSS</a></p>
+</footer>
+</article>
+</main>
+
+<footer class="product-footer">
+  <div>
+    <a class="product-brand" href="/" aria-label="PtcRunner home">
+      <img src="/ptc-runner-mark.svg" width="30" height="30" alt="">
+      <span>PtcRunner</span>
+    </a>
+    <p>MIT licensed. Built from
+    <a href="https://github.com/andreasronge/ptc_runner">andreasronge/ptc_runner</a>.</p>
+  </div>
+  <div class="footer-links">
+    <a href="/reference/ptc-lisp-specification/">Language specification</a>
+    <a href="https://hex.pm/packages/ptc_runner">Hex package</a>
+    <a href="https://hexdocs.pm/ptc_runner/">HexDocs</a>
+  </div>
+  <span class="build-stamp">v@BUILD_VERSION@ &middot;
+    <a href="https://github.com/andreasronge/ptc_runner/commit/@BUILD_COMMIT@">@BUILD_COMMIT_SHORT@</a>
+    &middot; built @BUILD_TIMESTAMP@</span>
+</footer>
+</body>
+</html>

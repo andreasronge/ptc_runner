@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blog · PtcRunner</title>
+<meta name="description" content="Notes on building tools for LLMs instead of for humans: languages, runtimes, preludes, and what PtcRunner is for.">
+<link rel="canonical" href="https://ptc-runner.dev/blog/">
+<meta property="og:title" content="PtcRunner blog">
+<meta property="og:description" content="Notes on building tools for LLMs instead of for humans: languages, runtimes, preludes, and what PtcRunner is for.">
+<meta property="og:url" content="https://ptc-runner.dev/blog/">
+<meta property="og:type" content="website">
+<link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
+<link rel="alternate" type="application/rss+xml" title="PtcRunner blog" href="/feed.xml">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/landing.css">
+<link rel="stylesheet" href="/blog.css">
+</head>
+<body class="product-landing">
+<header class="product-nav">
+  <a class="product-brand" href="/" aria-label="PtcRunner home">
+    <img src="/ptc-runner-mark.svg" width="34" height="34" alt="">
+    <span>PtcRunner</span>
+  </a>
+  <nav aria-label="Main navigation">
+    <a href="/blog/">Blog</a>
+    <a href="/guides/">Documentation</a>
+    <a href="https://github.com/andreasronge/ptc_runner">GitHub</a>
+    <a class="nav-cta" href="/guides/quickstart/">Get started</a>
+  </nav>
+</header>
+
+<main class="blog-main">
+<header class="blog-index-header">
+  <h1>Blog</h1>
+  <p>Notes on building tools for LLMs instead of for humans.</p>
+</header>
+
+<ul class="post-list">
+  <li>
+    <time datetime="2026-09-09">9 September 2026</time>
+    <h2><a href="/blog/tools-built-for-llms/">Tools built for LLMs, not for humans</a></h2>
+    <p>We hand models tools that were designed for people: general purpose languages,
+    Unix, containers. What would we build instead if the model were the user? A language
+    that is safe by construction, a runtime that reports a limit rather than killing you,
+    and preludes the model writes itself.</p>
+  </li>
+</ul>
+
+<p class="blog-subscribe">Subscribe by <a href="/feed.xml">RSS</a>.</p>
+</main>
+
+<footer class="product-footer">
+  <div>
+    <a class="product-brand" href="/" aria-label="PtcRunner home">
+      <img src="/ptc-runner-mark.svg" width="30" height="30" alt="">
+      <span>PtcRunner</span>
+    </a>
+    <p>MIT licensed. Built from
+    <a href="https://github.com/andreasronge/ptc_runner">andreasronge/ptc_runner</a>.</p>
+  </div>
+  <div class="footer-links">
+    <a href="/reference/ptc-lisp-specification/">Language specification</a>
+    <a href="https://hex.pm/packages/ptc_runner">Hex package</a>
+    <a href="https://hexdocs.pm/ptc_runner/">HexDocs</a>
+  </div>
+  <span class="build-stamp">v@BUILD_VERSION@ &middot;
+    <a href="https://github.com/andreasronge/ptc_runner/commit/@BUILD_COMMIT@">@BUILD_COMMIT_SHORT@</a>
+    &middot; built @BUILD_TIMESTAMP@</span>
+</footer>
+</body>
+</html>
