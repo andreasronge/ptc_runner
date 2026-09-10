@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.ConnectivityResult
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.ExecutionSessionResources
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.LLMBudget
@@ -20,6 +21,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.PublicationAuthority
+  alias PtcRunner.Kernel.RunAdmission
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.LiveStatus
   alias PtcRunner.LiveStatus.Target
@@ -113,6 +115,52 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       ),
       do: {:error, :invalid_prepared_run}
 
+  @doc false
+  @spec start_admitted(
+          pid(),
+          PreparedRun.t(),
+          PublicationAuthority.t(),
+          pid(),
+          ProviderExecution.t() | nil
+        ) ::
+          {:ok, t()} | {:error, term()}
+  def start_admitted(host, prepared, authority, caller, execution) do
+    with :ok <- admissible(prepared, authority, execution, nil, :run, nil) do
+      token = make_ref()
+
+      case GenServer.start(
+             __MODULE__,
+             {:admitted, host, prepared, authority, caller, token, execution}
+           ) do
+        {:ok, pid} -> activate_admitted(pid, token, authority)
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  defp activate_admitted(pid, token, authority) do
+    case PublicationAuthority.claim(authority) do
+      {:ok, lease} ->
+        try do
+          :ok = GenServer.call(pid, {token, {:activate, lease}}, :infinity)
+          {:ok, %__MODULE__{pid: pid, token: token}}
+        catch
+          :exit, _ ->
+            PublicationAuthority.abort(authority)
+            {:error, :execution_session_unavailable}
+        end
+
+      {:error, reason} ->
+        try do
+          GenServer.stop(pid, :normal)
+        catch
+          :exit, _ -> :ok
+        end
+
+        {:error, reason}
+    end
+  end
+
   # Every refusal here is decided before `init/1` consumes the prepared run, so
   # a rejected start leaves that preparation reusable.
   defp admissible(prepared, authority, provider_execution, notifier, operation, live_status) do
@@ -191,14 +239,35 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   def pid(%__MODULE__{pid: pid}), do: pid
 
   @impl GenServer
-  def init(
-        {prepared, authority, caller, token, lease, provider_execution, notifier, operation,
-         live_status}
-      ) do
+  def init({:admitted, host, prepared, authority, caller, token, execution}) do
+    case RunAdmission.admit(host) do
+      :ok ->
+        {:ok,
+         %{
+           pending: {prepared, authority, execution},
+           token: token,
+           caller: caller,
+           caller_ref: Process.monitor(caller),
+           admission: {host, Process.monitor(host)}
+         }}
+
+      {:error, reason} ->
+        {:stop, reason}
+    end
+  end
+
+  def init(args), do: initialize(args, nil)
+
+  defp initialize(
+         {prepared, authority, caller, token, lease, provider_execution, notifier, operation,
+          live_status},
+         admission
+       ) do
     caller_ref = Process.monitor(caller)
 
     initial = %{
       token: token,
+      admission: admission,
       caller: caller,
       caller_ref: caller_ref,
       authority: authority,
@@ -264,6 +333,22 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
   @impl GenServer
   def handle_call(
+        {token, {:activate, lease}},
+        {caller, _},
+        %{pending: {prepared, authority, execution}, token: token, caller: caller} = state
+      ) do
+    Process.demonitor(state.caller_ref, [:flush])
+
+    {:ok, active} =
+      initialize(
+        {prepared, authority, caller, token, lease, execution, nil, :run, nil},
+        state.admission
+      )
+
+    {:reply, :ok, active}
+  end
+
+  def handle_call(
         {token, :await},
         {caller, _tag} = from,
         %{token: token, caller: caller, result: nil, waiter: nil} = state
@@ -307,6 +392,12 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   def handle_cast(_message, state), do: {:noreply, state}
 
   @impl GenServer
+  def handle_info({:DOWN, ref, :process, pid, _}, %{pending: _} = state) do
+    if ref == state.caller_ref or state.admission == {pid, ref},
+      do: {:stop, :normal, state},
+      else: {:noreply, state}
+  end
+
   def handle_info(
         {token, :execution_result, worker_pid, result},
         %{token: token, worker_pid: worker_pid} = state
@@ -361,13 +452,41 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
      |> forget_resource(:authority)}
   end
 
+  def handle_info({:DOWN, ref, :process, host, _}, %{admission: {host, ref}} = state),
+    do: {:stop, :run_admission_unavailable, abort(state)}
+
   def handle_info(_message, state), do: {:noreply, state}
 
   @impl GenServer
-  def terminate(_reason, state) do
-    _state = abort(state)
+  def terminate(reason, %{pending: _, admission: {host, _}}) do
+    RunAdmission.complete(host, reason == :normal)
     :ok
   end
+
+  def terminate(reason, state) do
+    state = abort(state)
+
+    if state.admission do
+      {host, _} = state.admission
+      RunAdmission.complete(host, reason == :normal and clean_admitted_exit?(state))
+    end
+
+    :ok
+  end
+
+  defp clean_admitted_exit?(%{cleanup: {:error, _}}), do: false
+
+  defp clean_admitted_exit?(%{
+         result: {:ok, %ExecutionOutcome{result: {:error, %{kind: :provider_cleanup_error}}}}
+       }),
+       do: false
+
+  defp clean_admitted_exit?(%{
+         result: {:error, %CommandDiagnostic{code: :provider_cleanup_failed}}
+       }),
+       do: false
+
+  defp clean_admitted_exit?(_), do: true
 
   defp open_provider_free(initial, authority, opened_sinks, operation) do
     prepared = initial.prepared
