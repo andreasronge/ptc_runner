@@ -1,4 +1,4 @@
-ExUnit.start()
+ExUnit.start(exclude: [:sustained_tls])
 Logger.configure(level: :critical)
 
 defmodule PtcRunner.Labs.ComparisonTest do
@@ -9,7 +9,8 @@ defmodule PtcRunner.Labs.ComparisonTest do
   alias PtcRunner.TestSupport.MCPHTTPFixture
   import PtcRunner.TestSupport.Eventually
 
-  @source_identity (if System.get_env("PTC_PILOT_REPORT") do
+  @source_identity (if System.get_env("PTC_PILOT_REPORT") ||
+                         System.get_env("PTC_PILOT_SUSTAINED_REPORT") do
                       %{
                         runner: PtcRunner.Labs.TransportPreflight.clean_source!("."),
                         transport:
@@ -34,39 +35,44 @@ defmodule PtcRunner.Labs.ComparisonTest do
          end}
       )
 
-    fixture =
-      MCPHTTPFixture.start(fn request ->
-        send(owner, {:wire, request.body})
-        send(owner, {:provider_auth, request.headers["authorization"]})
+    handler = fn request ->
+      send(owner, {:wire, request.body})
+      send(owner, {:provider_auth, request.headers["authorization"]})
 
-        Agent.get(responder, & &1).(request.body)
-      end)
+      Agent.get(responder, & &1).(request.body)
+    end
 
-    on_exit(fixture.close)
     Application.put_env(:req_llm, :load_dotenv, false)
     Application.put_env(:llm_db, :load_dotenv, false)
 
-    {endpoint, policy, connection_opts} =
-      if context[:installed_host] do
-        {:ok, _} = Application.ensure_all_started(:ssl)
-        config = PtcRunner.TestSupport.TLSFixture.configuration()
-        proxy = PtcRunner.Labs.TLSProxy.start(fixture.endpoint, config.server)
-        on_exit(proxy.close)
-        previous_ca = write_trust(context.tmp_dir, "previous-ca.pem", ambient_trust)
+    {endpoint, policy, connection_opts, persistent_fixture} =
+      cond do
+        context[:persistent_tls] ->
+          {:ok, _} = Application.ensure_all_started(:ssl)
+          config = PtcRunner.TestSupport.TLSFixture.configuration()
+          fixture = PtcRunner.Labs.PersistentTLSFixture.start(handler, config.server)
+          on_exit(fixture.close)
+          install_trust(context.tmp_dir, ambient_trust, config.trust)
 
-        on_exit(fn ->
-          :ok = :public_key.cacerts_load(String.to_charlist(previous_ca))
-          assert MapSet.new(system_trust()) == MapSet.new(ambient_trust)
-        end)
+          {fixture.endpoint, {:allow_cidrs, ["127.0.0.0/8", "::1/128"]},
+           [transport_opts: [cacerts: config.trust]], fixture}
 
-        ca_file = write_trust(context.tmp_dir, "ca.pem", ambient_trust ++ config.trust)
-        :ok = :public_key.cacerts_load(String.to_charlist(ca_file))
-        assert Enum.all?(ambient_trust, &(&1 in system_trust()))
+        context[:installed_host] ->
+          fixture = MCPHTTPFixture.start(handler)
+          on_exit(fixture.close)
+          {:ok, _} = Application.ensure_all_started(:ssl)
+          config = PtcRunner.TestSupport.TLSFixture.configuration()
+          proxy = PtcRunner.Labs.TLSProxy.start(fixture.endpoint, config.server)
+          on_exit(proxy.close)
+          install_trust(context.tmp_dir, ambient_trust, config.trust)
 
-        {proxy.endpoint, {:allow_cidrs, ["127.0.0.0/8", "::1/128"]},
-         [transport_opts: [cacerts: config.trust]]}
-      else
-        {fixture.endpoint, :literal_loopback, []}
+          {proxy.endpoint, {:allow_cidrs, ["127.0.0.0/8", "::1/128"]},
+           [transport_opts: [cacerts: config.trust]], nil}
+
+        true ->
+          fixture = MCPHTTPFixture.start(handler)
+          on_exit(fixture.close)
+          {fixture.endpoint, :literal_loopback, [], nil}
       end
 
     Application.put_env(:req_llm, :openrouter, base_url: endpoint)
@@ -94,7 +100,110 @@ defmodule PtcRunner.Labs.ComparisonTest do
       Application.stop(:llm_db)
     end)
 
-    %{runtime: runtime, responder: responder, ambient_trust: ambient_trust}
+    %{
+      runtime: runtime,
+      responder: responder,
+      ambient_trust: ambient_trust,
+      persistent_fixture: persistent_fixture
+    }
+  end
+
+  @tag persistent_tls: true
+  @tag :sustained_tls
+  @tag :tmp_dir
+  @tag timeout: 700_000
+  test "sustained TLS comparison records physical connection reuse", %{
+    persistent_fixture: fixture
+  } do
+    criteria = %{
+      concurrency: 2,
+      minimum_workflows: 200,
+      duration_ms: sustained_duration_ms(),
+      maximum_error_rate: 0.0,
+      maximum_connections_per_concurrency: 1,
+      minimum_requests_per_connection: 20
+    }
+
+    observations =
+      for adapter <- [ReqLLMAdapter, HttpAdapter] do
+        assert {:ok, _} = WorkflowProbe.run(adapter, requirements())
+        drain_wire()
+        before_stats = fixture.snapshot.()
+        before_resources = resources()
+        started = System.monotonic_time(:millisecond)
+
+        {latencies, failures, workflows} =
+          sustained_workflows(adapter, criteria.minimum_workflows, criteria.duration_ms, started)
+
+        duration_ms = System.monotonic_time(:millisecond) - started
+        requests = drain_wire()
+        after_stats = fixture.snapshot.()
+        stats = subtract_stats(after_stats, before_stats)
+
+        assert failures == 0
+        assert workflows >= criteria.minimum_workflows
+        assert requests == workflows * 2
+        assert stats.requests == requests
+        assert stats.accepted_connections == stats.successful_handshakes
+
+        requests_per_connection = requests / max(stats.connections_used, 1)
+
+        accepted? =
+          stats.connections_observed <=
+            criteria.concurrency * criteria.maximum_connections_per_concurrency and
+            requests_per_connection >= criteria.minimum_requests_per_connection
+
+        %{
+          adapter: inspect(adapter),
+          accepted: accepted?,
+          workflows: workflows,
+          requests: requests,
+          failures: failures,
+          duration_ms: duration_ms,
+          workflows_per_second: workflows * 1_000 / max(duration_ms, 1),
+          latency_ms: percentiles(latencies),
+          connections_used: stats.connections_used,
+          connections_observed: stats.connections_observed,
+          new_connections: stats.new_connections,
+          accepted_connections: stats.accepted_connections,
+          successful_handshakes: stats.successful_handshakes,
+          requests_per_connection: requests_per_connection,
+          resources: %{before: before_resources, after: resources()}
+        }
+      end
+
+    req_llm = Enum.find(observations, &String.ends_with?(&1.adapter, "ReqLLMAdapter"))
+    http = Enum.find(observations, &String.ends_with?(&1.adapter, "HttpAdapter"))
+
+    assert req_llm.accepted
+
+    conclusion =
+      cond do
+        http.accepted ->
+          "Both transports meet the fixed TLS connection-reuse envelope; compare their operational evidence before choosing."
+
+        true ->
+          "Keep configured ReqLLM/Finch for the gateway: it meets the fixed TLS connection-reuse envelope and the experimental transport does not."
+      end
+
+    if path = System.get_env("PTC_PILOT_SUSTAINED_REPORT") do
+      PtcRunner.Labs.TransportPreflight.verify_source!(".", @source_identity.runner)
+
+      PtcRunner.Labs.TransportPreflight.verify_source!(
+        System.fetch_env!("PTC_LLM_HTTP_PATH"),
+        @source_identity.transport
+      )
+
+      report = %{
+        captured_at: DateTime.to_iso8601(DateTime.utc_now()),
+        source: @source_identity,
+        criteria: criteria,
+        observations: observations,
+        conclusion: conclusion
+      }
+
+      File.write!(path, Jason.encode!(report, pretty: true) <> "\n")
+    end
   end
 
   test "both adapters execute concurrent support-triage workflows with tool round trips" do
@@ -423,6 +532,124 @@ defmodule PtcRunner.Labs.ComparisonTest do
 
   defp resources,
     do: %{processes: :erlang.system_info(:process_count), ports: :erlang.system_info(:port_count)}
+
+  defp install_trust(dir, ambient_trust, fixture_trust) do
+    previous_ca = write_trust(dir, "previous-ca.pem", ambient_trust)
+
+    on_exit(fn ->
+      :ok = :public_key.cacerts_load(String.to_charlist(previous_ca))
+      assert MapSet.new(system_trust()) == MapSet.new(ambient_trust)
+    end)
+
+    ca_file = write_trust(dir, "ca.pem", ambient_trust ++ fixture_trust)
+    :ok = :public_key.cacerts_load(String.to_charlist(ca_file))
+    assert Enum.all?(ambient_trust, &(&1 in system_trust()))
+  end
+
+  defp sustained_duration_ms do
+    report? = is_binary(System.get_env("PTC_PILOT_SUSTAINED_REPORT"))
+
+    case Integer.parse(System.get_env("PTC_PILOT_SUSTAINED_MS", "30000")) do
+      {duration, ""} when duration >= 30_000 and duration <= 300_000 ->
+        duration
+
+      {duration, ""} when duration >= 0 and duration < 30_000 and not report? ->
+        duration
+
+      _ ->
+        raise "PTC_PILOT_SUSTAINED_MS must be 30000 through 300000 when recording evidence; diagnostics without a report may use 0 through 29999"
+    end
+  end
+
+  defp sustained_workflows(adapter, minimum, duration_ms, started) do
+    sustained_workflows(adapter, minimum, duration_ms, started, [], 0, 0)
+  end
+
+  defp sustained_workflows(adapter, minimum, duration_ms, started, latencies, failures, total) do
+    elapsed = System.monotonic_time(:millisecond) - started
+
+    if total >= minimum and elapsed >= duration_ms do
+      {latencies, failures, total}
+    else
+      outcomes =
+        Task.async_stream(
+          1..2,
+          fn _ ->
+            call_started = System.monotonic_time(:microsecond)
+            result = WorkflowProbe.run(adapter, requirements())
+            latency_us = System.monotonic_time(:microsecond) - call_started
+            {result, latency_us}
+          end,
+          max_concurrency: 2,
+          timeout: 30_000,
+          ordered: false
+        )
+        |> Enum.to_list()
+
+      {next_latencies, next_failures} =
+        Enum.reduce(outcomes, {latencies, failures}, fn
+          {:ok, {{:ok, %{value: %{"ok" => true, "value" => ["T-1001", "T-1004"]}}}, latency_us}},
+          {samples, failed} ->
+            {[latency_us | samples], failed}
+
+          _outcome, {samples, failed} ->
+            {samples, failed + 1}
+        end)
+
+      sustained_workflows(
+        adapter,
+        minimum,
+        duration_ms,
+        started,
+        next_latencies,
+        next_failures,
+        total + length(outcomes)
+      )
+    end
+  end
+
+  defp subtract_stats(after_stats, before_stats) do
+    request_deltas =
+      Map.new(after_stats.requests_by_connection, fn {connection, requests} ->
+        {connection, requests - Map.get(before_stats.requests_by_connection, connection, 0)}
+      end)
+
+    used_connections =
+      request_deltas
+      |> Enum.filter(fn {_connection, requests} -> requests > 0 end)
+      |> MapSet.new(&elem(&1, 0))
+
+    new_connections =
+      after_stats.requests_by_connection
+      |> Map.keys()
+      |> Enum.reject(&Map.has_key?(before_stats.requests_by_connection, &1))
+      |> MapSet.new()
+
+    %{
+      accepted_connections: after_stats.accepted_connections - before_stats.accepted_connections,
+      successful_handshakes: after_stats.connections - before_stats.connections,
+      new_connections: MapSet.size(new_connections),
+      connections_used: MapSet.size(used_connections),
+      connections_observed: used_connections |> MapSet.union(new_connections) |> MapSet.size(),
+      requests: Enum.sum(Map.values(request_deltas))
+    }
+  end
+
+  defp percentiles(samples_us) do
+    samples = Enum.sort(samples_us)
+    count = length(samples)
+
+    %{
+      p50: percentile(samples, count, 0.50),
+      p95: percentile(samples, count, 0.95),
+      p99: percentile(samples, count, 0.99)
+    }
+  end
+
+  defp percentile(samples, count, fraction) do
+    index = max(ceil(count * fraction) - 1, 0)
+    samples |> Enum.at(index) |> Kernel./(1_000)
+  end
 
   defp drain_wire(count \\ 0) do
     receive do

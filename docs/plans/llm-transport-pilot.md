@@ -10,9 +10,9 @@ experiment, not an accepted production adapter or completed gateway.
 
 | Milestone | Implemented and checked | Remaining acceptance gate |
 | --- | --- | --- |
-| 1 — baseline | Configured Finch control; Dispatcher/direct-call saturation; concurrent support-triage batches; cancellation and recovery | Deployment workload, latency/connection budget, and sustained-test duration must be agreed before a performance verdict |
+| 1 — baseline | Configured Finch control; Dispatcher/direct-call saturation; concurrent support-triage batches; cancellation and recovery; fixed local serving envelope | A deployment-specific latency threshold is needed only if both transports pass the fixed reuse envelope |
 | 2 — opt-in parity | Lab adapter, exact-control refusal, metadata/reservations, cache observations, decimal cost, tools, structured output, truncation, and fresh-process live workflow | Publish the tested upstream fixes and pin that release before consumer promotion; preparation still delegates to ReqLLM |
-| 3 — shared hosting | Shared physical capacity; repeated cancellations; provider/runtime failure; real HTTP disconnect; separate bounded workflow admission | Sustained TLS/reuse comparison and deployment criteria; gateway release/conformance remains separate |
+| 3 — shared hosting | Shared physical capacity; repeated cancellations; provider/runtime failure; real HTTP disconnect; separate bounded workflow admission | Run the fixed sustained TLS/reuse acceptance comparison below; gateway release/conformance remains separate |
 
 Current decision: keep ReqLLM as default and retain this opt-in lab. Both
 transports pass the demonstrated workflow cancellation chain; only the new
@@ -91,19 +91,49 @@ bounds preparation/execution/publication work; it does not bound accepted
 sockets, HTTP parsing, provisional workers, copied closures, or control
 mailboxes. Gate replacement requires draining old work and is not automatic.
 
-Next, carry these tested lifecycles into the sibling gateway with a bounded
-listener and the public serving facade described by #1465. Define deployment
-load and latency/connection budgets before sustained TLS/reuse comparisons;
-the local TLS fixture closes every response connection. Upstream transport
-fixes still require a reviewed published release and explicit dependency pin
-before adapter promotion. ReqLLM and LLMDB remain in place; no merge, release,
-or default transport change is part of this branch validation.
+Next, run the fixed sustained TLS/reuse envelope below, then carry the selected
+runtime and tested lifecycles into the sibling gateway with a bounded listener
+and the public serving facade described by #1465. The acceptance fixture keeps
+HTTP/1.1 connections alive and counts physical sessions separately from
+requests. Upstream transport fixes still require a reviewed published release
+and explicit dependency pin before adapter promotion. ReqLLM and LLMDB remain
+in place; no merge, release, or default transport change is part of this branch
+validation.
 
 ## Decision to make
 
 Does `ptc_llm_http` give concurrent hosted PtcRunner runs a meaningful,
 demonstrable improvement in request ownership or reliability over configured
 ReqLLM/Finch, at an acceptable connection and maintenance cost?
+
+## Fixed serving acceptance envelope
+
+The first single-authority gateway is sized for two concurrent workflows. The
+transport comparison therefore uses concurrency two, the existing
+support-triage workload with two LLM attempts per workflow, at least 200
+complete workflows per adapter, and at least 30 seconds of offered work per
+adapter. It requires zero failed workflows.
+
+A long-lived host must reuse its two configured TLS connections: after one
+unmeasured warmup workflow, the measured run may open at most two connections
+and must average at least 20 requests per connection. A transport that opens a
+new TLS connection for every request does not meet the deployment envelope,
+even if a loopback timing is competitive. Closed local connections do not
+model public DNS, network round trips, certificate exchange, or provider-side
+connection limits.
+
+The comparison records p50/p95/p99 whole-workflow latency, throughput, physical
+connections, requests per connection, failures, and before/after BEAM process
+and port counts. Existing cancellation and recovery cases remain the causal
+resource checks; the sustained observations must not replace them.
+
+Adopt a replacement only if it first meets the same connection-reuse and
+correctness envelope, then demonstrates a material operational benefit. If
+configured ReqLLM meets the envelope, keep it and put aggregate admission above
+it; transport replacement is not a gateway prerequisite. This pilot treats a
+reuse failure as decisive: loopback latency cannot compensate for it. If both
+transports pass reuse, their timings remain diagnostic until a real deployment
+latency budget is selected.
 
 The [feature inventory and eventual removal plan](future/reqllm-removal.md)
 owns the broader compatibility matrix and source checkpoints. This pilot owns

@@ -156,6 +156,32 @@ Those need a bounded production listener before a gateway can be deployed.
 The comparison checks refusal before preparation and recovery after killing a
 request while it is still preparing.
 
+## Sustained TLS and connection reuse
+
+The acceptance run uses a persistent HTTP/1.1 TLS peer and counts physical
+connections independently from requests. It runs the existing two-attempt
+support-triage workflow at concurrency two for at least 200 workflows and 30
+seconds per adapter. Both adapters must complete without errors. The configured
+ReqLLM control may open at most two measured connections and must average at
+least 20 requests per connection.
+
+The sustained case is excluded from the ordinary comparison so normal lab
+validation remains short. Run it explicitly from a clean checkout and record
+the pinned report:
+
+```bash
+PTC_LLM_HTTP_PATH=/absolute/path/to/ptc_llm_http-pilot \
+PTC_PILOT_SUSTAINED_MS=30000 \
+PTC_PILOT_SUSTAINED_REPORT=/absolute/path/to/report.json \
+mix run -e 'Code.require_file("scripts/labs/llm-transport/compare.exs"); ExUnit.configure(exclude: [:test], include: [:sustained_tls])'
+```
+
+Set `PTC_PILOT_SUSTAINED_MS=0` for a non-acceptance diagnostic that runs only
+the minimum workload. The value is bounded to five minutes per adapter. The
+test records whole-workflow timings, which include preparation and evaluation;
+the connection/request ratio is the direct pooling observation. A synthetic
+loopback timing is not evidence that repeated public TLS setup is free.
+
 ## Bounded live check
 
 Use an explicit environment file, or an already configured
