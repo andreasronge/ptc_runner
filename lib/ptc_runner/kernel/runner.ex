@@ -256,6 +256,7 @@ defmodule PtcRunner.Kernel.Runner do
       loop_limit: config.limits.workflow_loop_iterations,
       filter_context: false,
       caller: :kernel,
+      link: true,
       telemetry_run: state.pid,
       strict_data: true,
       data_grants: DataKeys.source_referenceable_forms(config.input),
