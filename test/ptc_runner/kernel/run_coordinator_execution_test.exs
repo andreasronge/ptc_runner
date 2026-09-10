@@ -484,19 +484,9 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     # completion, and could lose even outside full-suite load (reproduced
     # failing >50% of runs combined with just 3 other test files).
     #
-    # `repeats: 1` (~6s) is deliberately the smallest useful margin rather
-    # than something larger: `Runner.execute_workflow/4` calls
-    # `Lisp.run_native/2` without `link: true`, so `Process.exit(worker_pid,
-    # :kill)` below (via the ExecutionSessionOwner abort path) does not
-    # itself terminate the underlying sandbox process -- it only monitors
-    # it. On any test failure before that point, this loop's sandbox keeps
-    # running, unlinked, until its own deadline. That is a real gap
-    # (arguably the workflow path should link like `repl_session.ex` does),
-    # but fixing it is a production change beyond what a flaky-test fix
-    # warrants -- keeping this loop short bounds the cost of the gap
-    # instead. 6s still dwarfs any plausible harness-setup delay between
-    # here and the `Process.alive?` check below, so a real regression is a
-    # far likelier explanation for a failure than hardware variance.
+    # The workflow sandbox watchdog-monitors its execution worker. Caller death
+    # aborts that worker and asynchronously kills the sandbox. The short body
+    # still bounds this fixture if an earlier assertion fails.
     #
     # `evaluation_timeout_ms` does not apply here: that governs subordinate
     # mission evaluations, not this top-level workflow call, which uses
@@ -515,6 +505,20 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
 
     parent = self()
 
+    telemetry_handler = {__MODULE__, make_ref()}
+
+    :ok =
+      :telemetry.attach(
+        telemetry_handler,
+        [:ptc_runner, :sandbox, :armed],
+        fn _, _, %{live_run: live_run, pid: sandbox}, destination ->
+          send(destination, {:sandbox_armed, live_run, sandbox})
+        end,
+        parent
+      )
+
+    on_exit(fn -> :telemetry.detach(telemetry_handler) end)
+
     caller =
       spawn(fn ->
         assert {:ok, owner} = ExecutionSessionOwner.start(prepared, authority, self())
@@ -532,6 +536,8 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     caller_ref = Process.monitor(caller)
     assert_receive {:execution_owner, owner}, 5_000
     owner_pid = ExecutionSessionOwner.pid(owner)
+    assert_receive {:sandbox_armed, _live_run, sandbox}, 5_000
+    sandbox_ref = Process.monitor(sandbox)
     state = :sys.get_state(owner_pid)
     event_sink = state.built.config.event_sink
     inspection_sink = state.built.config.inspection_sink
@@ -594,6 +600,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
                LLMBudget.validate_terminal_projection(stopped.usage.llm_budget)
 
       assert_receive {:DOWN, ^worker_ref, :process, _worker, :killed}, 5_000
+      assert_receive {:DOWN, ^sandbox_ref, :process, ^sandbox, :killed}, 1_000
       assert_receive {:DOWN, ^inspection_sink_ref, :process, _pid, :normal}, 5_000
       assert_receive {:DOWN, ^event_sink_ref, :process, _pid, :normal}, 5_000
       assert_receive {:DOWN, ^activity_ref, :process, _pid, :normal}, 5_000
