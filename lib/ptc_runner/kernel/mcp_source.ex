@@ -516,6 +516,7 @@ defmodule PtcRunner.Kernel.MCPSource do
              capabilities: capabilities,
              snapshot: snapshot,
              cleanup_context: cleanup_context(installed.transport),
+             cleanup_snapshot: fn -> cleanup_snapshot(transport) end,
              close: fn -> close_transport(transport) end
            }}
 
@@ -686,6 +687,11 @@ defmodule PtcRunner.Kernel.MCPSource do
     do: %{transport: :stdio, grace_ms: Keyword.get(options, :grace_ms, 250)}
 
   defp cleanup_context(%{type: :streamable_http}), do: %{transport: :streamable_http}
+
+  defp cleanup_snapshot(%{type: :stdio, handle: handle}),
+    do: MCPStdioTransport.cleanup_snapshot(handle)
+
+  defp cleanup_snapshot(_transport), do: %{}
 
   defp stage_launcher(source, staging) do
     with {:ok, stat} <- File.stat(source),

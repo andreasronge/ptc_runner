@@ -200,6 +200,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
             :never -> :ok
           end
         end,
+        fn -> %{stderr: "last words", stderr_truncated?: true} end,
         "workspace",
         %{transport: :stdio, grace_ms: 2_000}
       )
@@ -214,7 +215,9 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
                grace_ms: 2_000,
                reason: :cleanup_deadline_expired,
                cleanup_budget_ms: cleanup_budget_ms,
-               duration_ms: duration_ms
+               duration_ms: duration_ms,
+               stderr: "last words",
+               stderr_truncated?: true
              }}} = ProviderSession.close_detailed(session)
 
     assert cleanup_budget_ms in 1..100

@@ -199,8 +199,9 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     assert byte_size(stderr) == 32
     assert stderr == String.duplicate("x", 32)
 
-    assert {:ok, %{reason: :close, stderr_truncated?: true}} =
-             MCPStdioLauncher.close(launcher, 2_000)
+    assert Port.command(launcher.port, "C")
+    assert {tail, %{reason: :close, stderr_truncated?: true}} = collect_finish(launcher, "")
+    assert String.ends_with?(tail, String.duplicate("y", 32))
   end
 
   test "keeps at most one stdout frame in flight for a stalled owner" do
@@ -933,6 +934,15 @@ defmodule PtcRunnerLauncher.ConformanceTest do
         other ->
           flunk("launcher ended before expected output: #{inspect(other)}")
       end
+    end
+  end
+
+  defp collect_finish(launcher, stderr) do
+    case MCPStdioLauncher.receive_event(launcher, 2_000) do
+      {:ok, {:stderr, bytes}} -> collect_finish(launcher, stderr <> bytes)
+      {:ok, :stderr_truncated} -> collect_finish(launcher, stderr)
+      {:ok, {:finished, finish}} -> {stderr, finish}
+      other -> flunk("launcher ended before its finish frame: #{inspect(other)}")
     end
   end
 

@@ -488,6 +488,12 @@ defmodule PtcRunner.Kernel.RunConfig do
   def close_provider_session(%__MODULE__{provider_session: nil}), do: :ok
 
   def close_provider_session(%__MODULE__{provider_session: session}),
+    do: ProviderSession.close(session)
+
+  @doc false
+  def close_provider_session_detailed(%__MODULE__{provider_session: nil}), do: :ok
+
+  def close_provider_session_detailed(%__MODULE__{provider_session: session}),
     do: ProviderSession.close_detailed(session)
 
   @doc false

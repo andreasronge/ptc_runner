@@ -16,8 +16,13 @@ case "$1" in
 
   stderr)
     index=0
-    while [ "$index" -lt 256 ]; do
+    while [ "$index" -lt 128 ]; do
       printf x >&2
+      index=$((index + 1))
+    done
+    index=0
+    while [ "$index" -lt 128 ]; do
+      printf y >&2
       index=$((index + 1))
     done
 

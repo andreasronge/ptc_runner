@@ -20,6 +20,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.LLMBudget
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.ProjectionError
+  alias PtcRunner.Kernel.ProviderCleanupDiagnostic
   alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.ResultIdentity
@@ -68,7 +69,7 @@ defmodule PtcRunner.Kernel.Runner do
         result =
           apply_provider_cleanup_failure(
             event_sink_error(%{}),
-            RunConfig.close_provider_session(config),
+            RunConfig.close_provider_session_detailed(config),
             %{}
           )
 
@@ -97,7 +98,7 @@ defmodule PtcRunner.Kernel.Runner do
               reason
               |> configuration_error(usage)
               |> apply_provider_cleanup_failure(
-                RunConfig.close_provider_session(config),
+                RunConfig.close_provider_session_detailed(config),
                 usage
               )
 
@@ -113,7 +114,10 @@ defmodule PtcRunner.Kernel.Runner do
         result =
           reason
           |> configuration_error(usage)
-          |> apply_provider_cleanup_failure(RunConfig.close_provider_session(config), usage)
+          |> apply_provider_cleanup_failure(
+            RunConfig.close_provider_session_detailed(config),
+            usage
+          )
 
         finalize_result(result, usage, config.event_sink)
     end
@@ -142,7 +146,7 @@ defmodule PtcRunner.Kernel.Runner do
         end
 
       usage = run_state_usage(state, config.limits)
-      cleanup = RunConfig.close_provider_session(config)
+      cleanup = RunConfig.close_provider_session_detailed(config)
 
       case execution do
         {:ok, result} ->
@@ -753,6 +757,10 @@ defmodule PtcRunner.Kernel.Runner do
   defp outcome({:ok, _result}), do: :ok
   defp outcome({:error, _error}), do: :error
   defp terminal_reason({:ok, _result}), do: nil
+
+  defp terminal_reason({:error, %Error{kind: :provider_cleanup_error, details: details}}),
+    do: ProviderCleanupDiagnostic.trace_reason(details)
+
   defp terminal_reason({:error, %Error{reason: reason}}), do: reason
 
   defp live_terminal_outcome({:ok, _result}), do: {nil, nil}
@@ -1015,6 +1023,8 @@ defmodule PtcRunner.Kernel.Runner do
          {:error, {:provider_cleanup_failed, details}},
          usage
        ) do
+    details = put_cleanup_message(details)
+
     {:error,
      %Error{
        kind: :provider_cleanup_error,
@@ -1022,6 +1032,13 @@ defmodule PtcRunner.Kernel.Runner do
        details: details,
        usage: usage
      }}
+  end
+
+  defp put_cleanup_message(details) do
+    case ProviderCleanupDiagnostic.fields(details) do
+      {:ok, message, _subject} -> Map.put(details, :message, message)
+      :error -> details
+    end
   end
 
   defp close_run_state(state) do

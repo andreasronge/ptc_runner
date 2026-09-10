@@ -4766,6 +4766,32 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              JSV.validate(CommandDiagnostic.to_map(diagnostic), root, cast: false)
   end
 
+  test "provider cleanup diagnostics sanitize Unicode controls and obey byte bounds" do
+    details = %{
+      provider: "workspace",
+      transport: :stdio,
+      grace_ms: 2_000,
+      reason: :transport_failed,
+      finish_reason: :close_timeout,
+      exit_status: nil,
+      stderr: "hidden\u200Bline\u2028" <> String.duplicate("€", 600),
+      stderr_truncated?: true,
+      duration_ms: 2_001,
+      cleanup_budget_ms: 5_000
+    }
+
+    assert {:ok, message, _subject} = ProviderCleanupDiagnostic.fields(details)
+    refute message =~ "\u200B"
+    refute message =~ "\u2028"
+    assert byte_size(message) <= 2_048
+
+    trace_reason = ProviderCleanupDiagnostic.trace_reason(details)
+    assert is_binary(trace_reason)
+    assert String.valid?(trace_reason)
+    assert byte_size(trace_reason) <= 1_020
+    assert trace_reason =~ "launcher reported close_timeout"
+  end
+
   test "success construction rejects results outside the command schema" do
     run_ref = CommandRunRef.encode(@zero_entropy)
 

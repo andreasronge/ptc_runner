@@ -59,6 +59,16 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   defp outcome_table_options(owner), do: [:set, :public, {:heir, owner, :cleanup_outcome}]
 
   @doc false
+  def cleanup_snapshot(%__MODULE__{outcome: outcome}) do
+    case :ets.lookup(outcome.details, :stderr) do
+      [{:stderr, details}] -> details
+      [] -> %{}
+    end
+  rescue
+    ArgumentError -> %{}
+  end
+
+  @doc false
   @spec validate_options(keyword()) :: {:ok, map()} | {:error, :invalid_mcp_stdio_launch}
   def validate_options(opts) when is_list(opts), do: validate_launch_options(opts)
   def validate_options(_opts), do: {:error, :invalid_mcp_stdio_launch}
@@ -315,11 +325,15 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     end
   end
 
-  def handle_info({port, {:data, <<"E", bytes::binary>>}}, %{port: port} = state),
-    do: {:noreply, append_stderr(state, bytes)}
+  def handle_info({port, {:data, <<"E", bytes::binary>>}}, %{port: port} = state) do
+    state = state |> append_stderr(bytes) |> record_stderr_snapshot()
+    {:noreply, state}
+  end
 
-  def handle_info({port, {:data, "T"}}, %{port: port} = state),
-    do: {:noreply, %{state | stderr_truncated?: true}}
+  def handle_info({port, {:data, "T"}}, %{port: port} = state) do
+    state = %{state | stderr_truncated?: true}
+    {:noreply, record_stderr_snapshot(state)}
+  end
 
   def handle_info({port, {:data, <<"X", finish::binary-size(6)>>}}, %{port: port} = state) do
     case decode_finish(finish) do
@@ -339,7 +353,8 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   def handle_info({:EXIT, port, _reason}, %{port: port} = state),
     do: defer_terminal_failure(state)
 
-  def handle_info(:terminal_without_finish, state), do: stop_transport(state)
+  def handle_info(:terminal_without_finish, state),
+    do: stop_transport(state, transport_failure(state, :finish_missing))
 
   def handle_info({:request_timeout, id}, state) do
     case Map.fetch(state.pending, id) do
@@ -369,7 +384,8 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   def handle_info(:flush_writes, state),
     do: state |> Map.put(:retry_scheduled?, false) |> continue_after_flush()
 
-  def handle_info(:close_timeout, state), do: stop_transport(state)
+  def handle_info(:close_timeout, state),
+    do: stop_transport(state, transport_failure(state, :close_timeout))
 
   def handle_info(
         {:DOWN, ref, :process, _pid, _reason},
@@ -1072,6 +1088,18 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   defp cleanup_details({:mcp_transport_error, details}), do: details
   defp cleanup_details(_reason), do: nil
 
+  defp transport_failure(state, finish_reason) do
+    {stderr, truncated?, _state} = drain_stderr(state)
+
+    {:mcp_transport_error,
+     %{
+       finish_reason: finish_reason,
+       exit_status: nil,
+       stderr: stderr,
+       stderr_truncated?: truncated?
+     }}
+  end
+
   defp safe_call(pid, request) do
     GenServer.call(pid, request, :infinity)
   catch
@@ -1094,6 +1122,19 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
           stderr_truncated?: true
       }
     end
+  end
+
+  defp record_stderr_snapshot(state) do
+    {stderr, truncated?, _state} = drain_stderr(state)
+
+    :ets.insert(
+      state.outcome.details,
+      {:stderr, %{stderr: stderr, stderr_truncated?: truncated?}}
+    )
+
+    state
+  rescue
+    ArgumentError -> state
   end
 
   defp drain_stderr(%{stderr_truncated?: true} = state) do

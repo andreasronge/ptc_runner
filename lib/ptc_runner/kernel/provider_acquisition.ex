@@ -604,7 +604,13 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   defp handle_acquisition({:ok, built}, provider, _session, current)
        when built.data_class == provider.data_class and
               built.accepts_data == provider.accepts_data do
-    close = cleanup_action(built.close, provider.provider, built.cleanup_context)
+    close =
+      cleanup_action(
+        built.close,
+        built.cleanup_snapshot,
+        provider.provider,
+        built.cleanup_context
+      )
 
     case ResourceRegistrar.commit(provider.registrar, close) do
       :ok ->
@@ -644,7 +650,13 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   end
 
   defp handle_acquisition({:ok, built}, provider, session, _current) do
-    close = cleanup_action(built.close, provider.provider, built.cleanup_context)
+    close =
+      cleanup_action(
+        built.close,
+        built.cleanup_snapshot,
+        provider.provider,
+        built.cleanup_context
+      )
 
     case ResourceRegistrar.commit(provider.registrar, close) do
       :ok ->
@@ -678,10 +690,10 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
     {:halt, callback_error(reason, provider, session)}
   end
 
-  defp cleanup_action(nil, _provider, _context), do: nil
+  defp cleanup_action(nil, _snapshot, _provider, _context), do: nil
 
-  defp cleanup_action(close, provider, context),
-    do: ProviderCleanup.new(close, provider, context)
+  defp cleanup_action(close, snapshot, provider, context),
+    do: ProviderCleanup.new(close, snapshot, provider, context)
 
   # An active command must classify here, because a `provider_acquisition` code
   # requires a subject bearing an occurrence and this is the last frame that

@@ -1507,7 +1507,13 @@ defmodule PtcRunner.Kernel.ProviderSession do
             cleanup_failure(close, :transport_failed, transport, started_at_ms, timeout_ms)
 
           {:error, :timeout} ->
-            cleanup_failure(close, :cleanup_deadline_expired, %{}, started_at_ms, timeout_ms)
+            cleanup_failure(
+              close,
+              :cleanup_deadline_expired,
+              cleanup_snapshot(close),
+              started_at_ms,
+              timeout_ms
+            )
 
           _failure ->
             {:error, :provider_cleanup_failed}
@@ -1521,6 +1527,17 @@ defmodule PtcRunner.Kernel.ProviderSession do
 
   defp cleanup_function(%ProviderCleanup{run: run}), do: run
   defp cleanup_function(close), do: close
+
+  defp cleanup_snapshot(%ProviderCleanup{snapshot: snapshot}) when is_function(snapshot, 0) do
+    case snapshot.() do
+      details when is_map(details) -> details
+      _invalid -> %{}
+    end
+  catch
+    _kind, _reason -> %{}
+  end
+
+  defp cleanup_snapshot(_close), do: %{}
 
   defp cleanup_failure(%ProviderCleanup{} = close, reason, transport, started_at_ms, budget_ms) do
     details =
