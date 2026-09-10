@@ -1,0 +1,84 @@
+{
+  "source": {
+    "runner": {
+      "clean": true,
+      "revision": "3c5e762c51b066198d0181260e349b90f3ca19b7"
+    },
+    "transport": {
+      "clean": true,
+      "revision": "cfc88690ac64455c5ddef0ad433f65985572d28c"
+    }
+  },
+  "captured_at": "2026-09-10T13:34:58.750336Z",
+  "criteria": {
+    "duration_ms": 30000,
+    "concurrency": 2,
+    "minimum_workflows": 200,
+    "maximum_error_rate": 0.0,
+    "maximum_connections_per_concurrency": 1,
+    "minimum_requests_per_connection": 20
+  },
+  "observations": [
+    {
+      "requests": 1712,
+      "adapter": "PtcRunner.LLM.ReqLLMAdapter",
+      "failures": 0,
+      "resources": {
+        "after": {
+          "ports": 8,
+          "processes": 215
+        },
+        "before": {
+          "ports": 6,
+          "processes": 208
+        }
+      },
+      "duration_ms": 30004,
+      "latency_ms": {
+        "p50": 68.605,
+        "p95": 76.53,
+        "p99": 80.699
+      },
+      "accepted_connections": 1,
+      "workflows": 856,
+      "successful_handshakes": 1,
+      "requests_per_connection": 856.0,
+      "connections_used": 2,
+      "connections_observed": 2,
+      "accepted": true,
+      "workflows_per_second": 28.529529396080523,
+      "new_connections": 1
+    },
+    {
+      "requests": 1460,
+      "adapter": "PtcRunner.Labs.HttpAdapter",
+      "failures": 0,
+      "resources": {
+        "after": {
+          "ports": 4,
+          "processes": 201
+        },
+        "before": {
+          "ports": 8,
+          "processes": 215
+        }
+      },
+      "duration_ms": 30034,
+      "latency_ms": {
+        "p50": 79.291,
+        "p95": 93.302,
+        "p99": 102.291
+      },
+      "accepted_connections": 1460,
+      "workflows": 730,
+      "successful_handshakes": 1460,
+      "requests_per_connection": 1.0,
+      "connections_used": 1460,
+      "connections_observed": 1460,
+      "accepted": false,
+      "workflows_per_second": 24.305786774988345,
+      "new_connections": 1460
+    }
+  ],
+  "conclusion": "Keep configured ReqLLM/Finch for the gateway: it meets the fixed TLS connection-reuse envelope and the experimental transport does not."
+}

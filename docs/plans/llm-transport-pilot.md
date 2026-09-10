@@ -1,25 +1,27 @@
 # Bounded LLM transport pilot
 
-**Status:** lab implementation and evidence recorded for all three milestones,
-2026-09-06; promotion gates remain open. The
+**Status:** lab implementation and evidence recorded for all three milestones;
+the sustained TLS/reuse gate passed for ReqLLM and failed for the experimental
+transport on 2026-09-10. The
 [comparison record](evidence/llm-transport-comparison.md) extends the
 [initial baseline](evidence/llm-transport-baseline.md) with concurrent complete
 workflows, a narrow opt-in adapter, live tool execution, accounting boundaries,
-and HTTP-disconnect ownership. ReqLLM remains the default. This is a maintainer
-experiment, not an accepted production adapter or completed gateway.
+and HTTP-disconnect ownership. The
+[sustained record](evidence/llm-transport-sustained.md) resolves the pooling
+decision. ReqLLM remains the default. This is a maintainer experiment, not a
+completed gateway.
 
 | Milestone | Implemented and checked | Remaining acceptance gate |
 | --- | --- | --- |
-| 1 — baseline | Configured Finch control; Dispatcher/direct-call saturation; concurrent support-triage batches; cancellation and recovery; fixed local serving envelope | A deployment-specific latency threshold is needed only if both transports pass the fixed reuse envelope |
-| 2 — opt-in parity | Lab adapter, exact-control refusal, metadata/reservations, cache observations, decimal cost, tools, structured output, truncation, and fresh-process live workflow | Publish the tested upstream fixes and pin that release before consumer promotion; preparation still delegates to ReqLLM |
-| 3 — shared hosting | Shared physical capacity; repeated cancellations; provider/runtime failure; real HTTP disconnect; separate bounded workflow admission | Run the fixed sustained TLS/reuse acceptance comparison below; gateway release/conformance remains separate |
+| 1 — baseline | Configured Finch control; Dispatcher/direct-call saturation; concurrent support-triage batches; cancellation and recovery; fixed local serving envelope | None for the current transport decision |
+| 2 — opt-in parity | Lab adapter, exact-control refusal, metadata/reservations, cache observations, decimal cost, tools, structured output, truncation, and fresh-process live workflow | Publish and pin upstream fixes only if transport research resumes; preparation still delegates to ReqLLM |
+| 3 — shared hosting | Shared physical capacity; repeated cancellations; provider/runtime failure; real HTTP disconnect; separate bounded workflow admission; sustained TLS/reuse comparison | Gateway implementation, release, and conformance remain separate |
 
-Current decision: keep ReqLLM as default and retain this opt-in lab. Both
-transports pass the demonstrated workflow cancellation chain; only the new
-transport directly supplies fail-fast global/group physical-attempt admission.
-The baseline's direct adapter checkout ignores its short LLM deadline, while
-the existing Dispatcher enforces that deadline. These observations justify a
-bounded experiment, not a default switch or a broad rewrite.
+Current decision: keep configured ReqLLM/Finch for the first gateway and put
+aggregate request admission above it. ReqLLM reused two connections across
+1,712 measured requests. The experimental transport opened 1,460 connections
+for 1,460 requests, so it does not meet the fixed serving envelope. Retain the
+opt-in lab as research, not as a gateway dependency.
 
 Related work: [aggregate concurrency #1290](https://github.com/andreasronge/ptc_runner/issues/1290)
 and [MCP gateway #1465](https://github.com/andreasronge/ptc_runner/issues/1465).
@@ -91,20 +93,17 @@ bounds preparation/execution/publication work; it does not bound accepted
 sockets, HTTP parsing, provisional workers, copied closures, or control
 mailboxes. Gate replacement requires draining old work and is not automatic.
 
-Next, run the fixed sustained TLS/reuse envelope below, then carry the selected
-runtime and tested lifecycles into the sibling gateway with a bounded listener
-and the public serving facade described by #1465. The acceptance fixture keeps
-HTTP/1.1 connections alive and counts physical sessions separately from
-requests. Upstream transport fixes still require a reviewed published release
-and explicit dependency pin before adapter promotion. ReqLLM and LLMDB remain
-in place; no merge, release, or default transport change is part of this branch
-validation.
+Next, carry configured ReqLLM/Finch and the tested ownership lifecycles into the
+sibling gateway with a bounded listener and the public serving facade described
+by #1465. The current experimental transport is not a gateway prerequisite.
+ReqLLM and LLMDB remain in place; no transport release or default change is
+part of this branch validation.
 
-## Decision to make
+## Decision
 
-Does `ptc_llm_http` give concurrent hosted PtcRunner runs a meaningful,
-demonstrable improvement in request ownership or reliability over configured
-ReqLLM/Finch, at an acceptable connection and maintenance cost?
+`ptc_llm_http` does not give the selected hosted workload enough benefit over
+configured ReqLLM/Finch at an acceptable connection cost. Keep ReqLLM/Finch
+and solve aggregate admission at the gateway boundary.
 
 ## Fixed serving acceptance envelope
 
