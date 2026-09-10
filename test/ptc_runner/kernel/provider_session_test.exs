@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
 
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.ProviderCleanup
   alias PtcRunner.Kernel.ProviderScopeOwner
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ProviderTaskTracker
@@ -184,6 +185,40 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     # The operation budget is gone and the abort still settles cooperatively.
     assert :ok = ResourceRegistrar.abort(registrar)
     assert %{scopes: %{}, scope_order: []} = :sys.get_state(session.pid)
+  end
+
+  test "a timed out typed closer retains its provider and budget context" do
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+
+    close =
+      ProviderCleanup.new(
+        fn ->
+          receive do
+            :never -> :ok
+          end
+        end,
+        "workspace",
+        %{transport: :stdio, grace_ms: 2_000}
+      )
+
+    assert :ok = ResourceRegistrar.commit(registrar, close)
+
+    assert {:error,
+            {:provider_cleanup_failed,
+             %{
+               provider: "workspace",
+               transport: :stdio,
+               grace_ms: 2_000,
+               reason: :cleanup_deadline_expired,
+               cleanup_budget_ms: cleanup_budget_ms,
+               duration_ms: duration_ms
+             }}} = ProviderSession.close_detailed(session)
+
+    assert cleanup_budget_ms in 1..100
+    assert duration_ms >= cleanup_budget_ms
   end
 
   test "a wedged session cannot leave a committed closer ambiguously owned" do

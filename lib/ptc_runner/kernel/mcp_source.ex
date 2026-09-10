@@ -22,6 +22,12 @@ defmodule PtcRunner.Kernel.MCPSource do
   credentials and environment values are never part of those bodies or
   records.
 
+  A failed stdio close retains bounded operator-facing cleanup evidence: the
+  installed provider alias, transport type, launcher finish reason and child
+  exit status, elapsed time against `grace_ms` and the cleanup budget, and a
+  sanitized stderr excerpt. Cleanup-budget expiry also points operators to
+  `limits.provider_cleanup_timeout_ms`.
+
   Streamable HTTP supports JSON and SSE responses to POST requests and rejects
   redirects and remote endpoint changes. It uses a direct Mint HTTP/1 response
   streaming boundary: a completed SSE response, response-size rejection, or
@@ -509,13 +515,14 @@ defmodule PtcRunner.Kernel.MCPSource do
            %{
              capabilities: capabilities,
              snapshot: snapshot,
+             cleanup_context: cleanup_context(installed.transport),
              close: fn -> close_transport(transport) end
            }}
 
         {:error, reason} ->
           case close_transport(transport) do
             :ok -> {:error, reason}
-            {:error, :mcp_transport_error} -> {:error, :mcp_transport_error}
+            {:error, _cleanup_reason} -> {:error, :mcp_transport_error}
           end
       end
     end
@@ -674,6 +681,11 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   defp close_transport(%{type: :stdio, handle: %MCPStdioTransport{} = handle}),
     do: MCPStdioTransport.close(handle)
+
+  defp cleanup_context(%{type: :stdio, options: options}),
+    do: %{transport: :stdio, grace_ms: Keyword.get(options, :grace_ms, 250)}
+
+  defp cleanup_context(%{type: :streamable_http}), do: %{transport: :streamable_http}
 
   defp stage_launcher(source, staging) do
     with {:ok, stat} <- File.stat(source),

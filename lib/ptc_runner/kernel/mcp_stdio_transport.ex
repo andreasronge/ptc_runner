@@ -11,7 +11,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   @enforce_keys [:pid, :outcome]
   defstruct [:pid, :outcome]
 
-  @type t :: %__MODULE__{pid: pid(), outcome: :atomics.atomics_ref()}
+  @type t :: %__MODULE__{pid: pid(), outcome: map()}
 
   @protocol_version 1
   @protocol_metadata %{"io.modelcontextprotocol/protocolVersion" => "2026-07-28"}
@@ -41,6 +41,8 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
 
   def start(opts, owner, registrar) when is_list(opts) and is_pid(owner) do
     outcome = :atomics.new(1, signed: false)
+    outcome_details = :ets.new(__MODULE__, outcome_table_options(owner))
+    outcome = %{status: outcome, details: outcome_details}
 
     with {:ok, config} <- validate_options(opts) do
       case GenServer.start(__MODULE__, {owner, config, outcome, registrar}) do
@@ -52,6 +54,9 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   end
 
   def start(_opts, _owner, _registrar), do: {:error, :invalid_mcp_stdio_launch}
+
+  defp outcome_table_options(owner) when owner == self(), do: [:set, :public]
+  defp outcome_table_options(owner), do: [:set, :public, {:heir, owner, :cleanup_outcome}]
 
   @doc false
   @spec validate_options(keyword()) :: {:ok, map()} | {:error, :invalid_mcp_stdio_launch}
@@ -106,7 +111,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     safe_call(pid, {:request, method, params, metadata, max_bytes, timeout_ms, true})
   end
 
-  @spec close(t()) :: :ok | {:error, :mcp_transport_error}
+  @spec close(t()) :: :ok | {:error, :mcp_transport_error | {:mcp_transport_error, map()}}
   def close(%__MODULE__{pid: pid, outcome: outcome}) do
     ref = Process.monitor(pid)
 
@@ -120,10 +125,24 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
           10_000 -> false
         end
 
-      case {result, down?, :atomics.get(outcome, 1)} do
-        {:ok, true, @outcome_clean} -> :ok
-        {{:error, :closed}, true, @outcome_clean} -> :ok
-        _failed -> {:error, :mcp_transport_error}
+      case {result, down?, outcome_status(outcome)} do
+        {:ok, true, @outcome_clean} ->
+          :ok
+
+        {{:error, :closed}, true, @outcome_clean} ->
+          :ok
+
+        {{:error, {:mcp_transport_error, details}}, true, @outcome_failed} ->
+          {:error, {:mcp_transport_error, details}}
+
+        {{:error, :closed}, true, @outcome_failed} ->
+          case outcome_details(outcome) do
+            {:ok, details} -> {:error, {:mcp_transport_error, details}}
+            :error -> {:error, :mcp_transport_error}
+          end
+
+        _failed ->
+          {:error, :mcp_transport_error}
       end
     after
       Process.demonitor(ref, [:flush])
@@ -977,14 +996,26 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     {:stop, :normal, state}
   end
 
-  defp finish_transport(state, _finish), do: stop_transport(state)
+  defp finish_transport(state, finish) do
+    {stderr, truncated?, state} = drain_stderr(state)
+
+    details = %{
+      finish_reason: finish.reason,
+      exit_status: finish.exit_status,
+      stderr: stderr,
+      stderr_truncated?: truncated? or finish.stderr_truncated?
+    }
+
+    stop_transport(state, {:mcp_transport_error, details})
+  end
 
   defp stop_transport(state, reason \\ :mcp_transport_error) do
-    state = fail_pending(state, reason)
-    record_outcome(state.outcome, @outcome_failed)
+    pending_reason = if is_atom(reason), do: reason, else: :mcp_transport_error
+    state = fail_pending(state, pending_reason)
+    record_outcome(state.outcome, @outcome_failed, cleanup_details(reason))
 
     if is_list(state.closing),
-      do: reply_close_waiters(state.closing, {:error, :mcp_transport_error})
+      do: reply_close_waiters(state.closing, {:error, reason})
 
     close_port(state.port)
     {:stop, :normal, state}
@@ -1021,10 +1052,25 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     ArgumentError -> :ok
   end
 
-  defp record_outcome(outcome, value) do
-    :atomics.put(outcome, 1, value)
+  defp record_outcome(outcome, value, details \\ nil) do
+    if is_map(details), do: :ets.insert(outcome.details, {:cleanup, details})
+    :atomics.put(outcome.status, 1, value)
     :ok
   end
+
+  defp outcome_status(outcome), do: :atomics.get(outcome.status, 1)
+
+  defp outcome_details(outcome) do
+    case :ets.lookup(outcome.details, :cleanup) do
+      [{:cleanup, details}] -> {:ok, details}
+      [] -> :error
+    end
+  rescue
+    ArgumentError -> :error
+  end
+
+  defp cleanup_details({:mcp_transport_error, details}), do: details
+  defp cleanup_details(_reason), do: nil
 
   defp safe_call(pid, request) do
     GenServer.call(pid, request, :infinity)
@@ -1035,27 +1081,23 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   defp append_stderr(%{stderr_limit: limit} = state, _bytes) when limit <= 0, do: state
 
   defp append_stderr(state, bytes) when is_binary(bytes) do
-    taken = byte_size(state.stderr)
-    remaining = state.stderr_limit - taken
+    combined = state.stderr <> bytes
 
-    cond do
-      remaining <= 0 ->
-        %{state | stderr_truncated?: true}
+    if byte_size(combined) <= state.stderr_limit do
+      %{state | stderr: combined}
+    else
+      offset = byte_size(combined) - state.stderr_limit
 
-      byte_size(bytes) <= remaining ->
-        %{state | stderr: state.stderr <> bytes}
-
-      true ->
-        %{
-          state
-          | stderr: state.stderr <> binary_part(bytes, 0, remaining),
-            stderr_truncated?: true
-        }
+      %{
+        state
+        | stderr: binary_part(combined, offset, state.stderr_limit),
+          stderr_truncated?: true
+      }
     end
   end
 
   defp drain_stderr(%{stderr_truncated?: true} = state) do
-    text = Utf8.truncate_valid(state.stderr, state.stderr_limit)
+    text = valid_utf8_suffix(state.stderr)
 
     {text, true, %{state | stderr: "", stderr_truncated?: false}}
   end
@@ -1065,6 +1107,12 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     rest = binary_part(state.stderr, byte_size(text), byte_size(state.stderr) - byte_size(text))
 
     {text, false, %{state | stderr: rest, stderr_truncated?: false}}
+  end
+
+  defp valid_utf8_suffix(value) do
+    if String.valid?(value),
+      do: value,
+      else: valid_utf8_suffix(binary_part(value, 1, byte_size(value) - 1))
   end
 
   defp dispatch_request(from, method, params, metadata, max_bytes, timeout_ms, exchange?, state) do

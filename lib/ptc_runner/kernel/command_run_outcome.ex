@@ -17,6 +17,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.LLMUsageSummary
   alias PtcRunner.Kernel.ModelOutputDiagnostic
+  alias PtcRunner.Kernel.ProviderCleanupDiagnostic
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.ResultContractDiagnostic
@@ -342,8 +343,21 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   defp failure_diagnostic({:result_contract_failed, details}, provider_activity),
     do: result_contract_diagnostic(details, provider_activity)
 
-  defp failure_diagnostic(%Error{kind: :provider_cleanup_error}, _provider_activity),
-    do: diagnostic(:result_cleanup, :provider_cleanup_failed, true)
+  defp failure_diagnostic(
+         %Error{kind: :provider_cleanup_error, details: details},
+         _provider_activity
+       ) do
+    case ProviderCleanupDiagnostic.fields(details) do
+      {:ok, message, subject} ->
+        diagnostic(:result_cleanup, :provider_cleanup_failed, true,
+          message: message,
+          subject: subject
+        )
+
+      :error ->
+        diagnostic(:result_cleanup, :provider_cleanup_failed, true)
+    end
+  end
 
   defp failure_diagnostic(%Error{kind: :event_sink_error}, provider_activity),
     do: diagnostic(:execution, :event_sink_unavailable, provider_activity)

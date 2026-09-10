@@ -160,8 +160,10 @@ defmodule PtcRunner.Kernel.ResourceRegistrar do
   # look like dead code.
   @spec commit(t(), (-> term()) | nil) ::
           :ok | {:error, :resource_registrar_unavailable | :provider_cleanup_failed}
-  def commit(%__MODULE__{} = registrar, close) when is_function(close, 0) or is_nil(close),
-    do: ProviderSession.commit_registrar(registrar, close)
+  def commit(%__MODULE__{} = registrar, close)
+      when is_function(close, 0) or is_nil(close) or
+             is_struct(close, PtcRunner.Kernel.ProviderCleanup),
+      do: ProviderSession.commit_registrar(registrar, close)
 
   def commit(_registrar, _close), do: {:error, :resource_registrar_unavailable}
 

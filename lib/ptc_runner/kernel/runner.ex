@@ -1010,6 +1010,20 @@ defmodule PtcRunner.Kernel.Runner do
      }}
   end
 
+  defp apply_provider_cleanup_failure(
+         _result,
+         {:error, {:provider_cleanup_failed, details}},
+         usage
+       ) do
+    {:error,
+     %Error{
+       kind: :provider_cleanup_error,
+       reason: :provider_cleanup_failed,
+       details: details,
+       usage: usage
+     }}
+  end
+
   defp close_run_state(state) do
     RunState.close_and_drain(state)
     :ok

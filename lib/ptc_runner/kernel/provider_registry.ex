@@ -126,6 +126,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           capabilities: [Capability.t()],
           snapshot: map() | nil,
           close: close() | nil,
+          cleanup_context: map() | nil,
           data_class: :normal | :private_inspection,
           accepts_data: [:normal | :private_inspection],
           exports: %{optional(atom()) => term()},
@@ -705,16 +706,27 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   defp normalize_build({:ok, %{capabilities: capabilities} = built}, provides) do
     snapshot = Map.get(built, :snapshot)
     close = Map.get(built, :close)
+    cleanup_context = Map.get(built, :cleanup_context)
     data_class = Map.get(built, :data_class, :normal)
     accepts_data = Map.get(built, :accepts_data, [:normal])
     exports = Map.get(built, :exports, %{})
     warnings = Map.get(built, :warnings, [])
 
     if Map.keys(built) --
-         [:capabilities, :snapshot, :close, :data_class, :accepts_data, :exports, :warnings] == [] and
+         [
+           :capabilities,
+           :snapshot,
+           :close,
+           :cleanup_context,
+           :data_class,
+           :accepts_data,
+           :exports,
+           :warnings
+         ] == [] and
          valid_capabilities?(capabilities, provides) and
          (is_nil(snapshot) or JSONValue.map?(snapshot)) and
          (is_nil(close) or is_function(close, 0)) and
+         valid_cleanup_context?(cleanup_context) and
          data_class in [:normal, :private_inspection] and
          accepts_data != [] and accepts_data == Enum.uniq(accepts_data) and
          Enum.all?(accepts_data, &(&1 in [:normal, :private_inspection])) and
@@ -725,6 +737,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
          capabilities: capabilities,
          snapshot: snapshot,
          close: close,
+         cleanup_context: cleanup_context,
          data_class: data_class,
          accepts_data: accepts_data,
          exports: exports,
@@ -742,6 +755,16 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
     do: Enum.all?(warnings, &CommandWarning.valid?/1)
 
   defp valid_warnings?(_warnings), do: false
+
+  defp valid_cleanup_context?(nil), do: true
+
+  defp valid_cleanup_context?(%{transport: :stdio, grace_ms: grace_ms} = context),
+    do: map_size(context) == 2 and is_integer(grace_ms) and grace_ms in 1..5_000
+
+  defp valid_cleanup_context?(%{transport: :streamable_http} = context),
+    do: map_size(context) == 1
+
+  defp valid_cleanup_context?(_context), do: false
 
   defp valid_capabilities?(capabilities, provides) when is_list(capabilities) do
     (capabilities != [] or provides != []) and length(capabilities) <= 128 and
