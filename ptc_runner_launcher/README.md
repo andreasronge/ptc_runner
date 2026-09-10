@@ -10,8 +10,8 @@ host-authorized server with:
 - separate stdin, stdout, and bounded stderr streams;
 - acknowledged backpressure;
 - a new process group;
-- bounded EOF, TERM, and KILL cleanup, including descendant reaping on Linux;
-  and
+- bounded EOF, TERM, and KILL cleanup, with immediate final group retirement
+  after a clean leader exit and descendant reaping on Linux; and
 - a lifeline watchdog that retires that group with a single `SIGKILL` when the
   launcher itself is destroyed before it can run any of that cleanup.
 
