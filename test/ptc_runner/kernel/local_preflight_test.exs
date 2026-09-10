@@ -391,6 +391,38 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     assert_receive {:DOWN, ^ref, :process, ^root, _reason}, 5_000
   end
 
+  test "LLM metadata has its audited heap without a provider application" do
+    catalog =
+      catalog(%{
+        "model" => [report_heap: true],
+        "tools" => [destination: :mission, report_heap: true]
+      })
+
+    refute Map.has_key?(catalog.implementations["model"], :provider_application)
+    prepared = prepared(catalog, ["model"], ["tools"])
+    assert :ok = RunCoordinator.local_checks(prepared, catalog, services())
+    assert_received {:worker_heap, "model", %{size: 32_000_000, kill: true}}
+    assert_received {:worker_heap, "tools", %{size: 5_000_000, kill: true}}
+  end
+
+  test "an active LLM check retains the operation provider heap" do
+    catalog = catalog(%{"model" => [local_preflight: :unverified, report_heap: true]})
+    prepared = prepared(catalog, ["model"])
+    expected = prepared.request.package.limits.provider_heap_words
+    assert :ok = ProviderActivity.mark(prepared.provider_activity)
+
+    assert :ok =
+             LocalPreflight.run_unverified(
+               prepared,
+               catalog,
+               services(),
+               session(prepared),
+               false
+             )
+
+    assert_received {:worker_heap, "model", %{size: ^expected, kill: true}}
+  end
+
   test "an unverified callback spends the sealed provider heap, not the audited cap" do
     # Phase 7 holds shipped code to a fixed 200k words. An unverified callback is
     # held to the `provider_heap_words` the operation itself is held to, so a
@@ -733,6 +765,11 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
 
       if Keyword.get(options, :root), do: register_root(parent, context)
       if Keyword.get(options, :heap), do: allocate(parent)
+
+      if Keyword.get(options, :report_heap) do
+        {:max_heap_size, heap} = Process.info(self(), :max_heap_size)
+        send(parent, {:worker_heap, name, heap})
+      end
 
       case failing do
         nil ->
