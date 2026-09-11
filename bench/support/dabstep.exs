@@ -1,32 +1,36 @@
 defmodule PtcRunner.Bench.DabstepSupport do
   @moduledoc false
-  def prepared(source) do
+  def legacy_types(source) do
     source
-    |> String.replace("(defn- typed-cell [column value]", """
-    (defn- column-kind [column]
-      (cond
-        (contains? (integer-columns) column) :integer
-        (contains? (float-columns) column) :float
-        (contains? (boolean-columns) column) :boolean
-        :else :string))
-    (defn- typed-cell [column kind value]
-    """)
     |> String.replace(
-      "(contains? (integer-columns) column) (parse-number",
-      "(= kind :integer) (parse-number"
+      """
+      (defn- column-kind [column]
+        (cond
+          (contains? (integer-columns) column) :integer
+          (contains? (float-columns) column) :float
+          (contains? (boolean-columns) column) :boolean
+          :else :string))
+
+      """,
+      ""
+    )
+    |> String.replace("(defn- typed-cell [column kind value]", "(defn- typed-cell [column value]")
+    |> String.replace(
+      "(= kind :integer) (parse-number",
+      "(contains? (integer-columns) column) (parse-number"
     )
     |> String.replace(
-      "(contains? (float-columns) column) (parse-number",
-      "(= kind :float) (parse-number"
+      "(= kind :float) (parse-number",
+      "(contains? (float-columns) column) (parse-number"
     )
     |> String.replace(
-      "(contains? (boolean-columns) column) (parse-boolean",
-      "(= kind :boolean) (parse-boolean"
+      "(= kind :boolean) (parse-boolean",
+      "(contains? (boolean-columns) column) (parse-boolean"
     )
-    |> String.replace("[(get position c) c]", "[(get position c) c (column-kind c)]")
+    |> String.replace("[(get position c) c (column-kind c)]", "[(get position c) c]")
     |> String.replace(
-      "(typed-cell (nth selector 1) (get",
-      "(typed-cell (nth selector 1) (nth selector 2) (get"
+      "(typed-cell (nth selector 1)\n                                          (nth selector 2)\n                                          (get",
+      "(typed-cell (nth selector 1) (get"
     )
   end
 

@@ -2,7 +2,7 @@ Code.require_file("support/dabstep.exs", __DIR__)
 
 defmodule PtcRunner.Bench.DabstepExperiments do
   @moduledoc false
-  import PtcRunner.Bench.DabstepSupport, only: [prepared: 1, measure: 2]
+  import PtcRunner.Bench.DabstepSupport, only: [legacy_types: 1, measure: 2]
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Prelude.Compiler
   @columns ["ip_country", "eur_amount", "has_fraudulent_dispute"]
@@ -19,7 +19,7 @@ defmodule PtcRunner.Bench.DabstepExperiments do
     expected = native(lines, selectors)
     emit(%{fixture: %{rows: length(lines), bytes: byte_size(text), columns: columns}})
 
-    variants = [{"current", source}, {"prepared_types", prepared(source)}]
+    variants = [{"legacy_types", legacy_types(source)}, {"current", source}]
 
     variants =
       if System.get_env("DABSTEP_BENCH_REVERSE") == "1",

@@ -29,7 +29,7 @@ defmodule PtcRunner.Bench.DabstepScaling do
 
     case suite do
       "kernel" ->
-        for {variant, body} <- [{"current", source}, {"prepared", Bench.prepared(source)}] do
+        for {variant, body} <- [{"legacy_types", Bench.legacy_types(source)}, {"current", source}] do
           root = fixture(variant, body <> @fold, nil, headers)
 
           session(root, fn session ->
@@ -63,7 +63,7 @@ defmodule PtcRunner.Bench.DabstepScaling do
         end
 
       "replay" ->
-        root = fixture("prepared-replay", Bench.prepared(source), nil, headers)
+        root = fixture("current-replay", source, nil, headers)
 
         for sample <- 1..samples do
           if sample == 2 do
@@ -93,7 +93,7 @@ defmodule PtcRunner.Bench.DabstepScaling do
 
           IO.puts(
             Jason.encode!(%{
-              experiment: "prepared/replay",
+              experiment: "current/replay",
               recorded_model_calls: 11,
               identical_file_replaced: sample == 2,
               sample: sample,
@@ -128,7 +128,7 @@ defmodule PtcRunner.Bench.DabstepScaling do
 
       IO.puts(
         Jason.encode!(%{
-          experiment: "prepared/changed_byte",
+          experiment: "current/changed_byte",
           exit_status: failed.exit_status,
           code: failed.envelope["error"]["code"]
         })
