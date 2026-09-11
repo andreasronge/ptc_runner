@@ -4,8 +4,8 @@
 
 ### Changed
 
-- Added bounded reset-and-tail stderr snapshots during MCP stdio shutdown and
-  bumped the launcher protocol to version 2.
+- Added bounded atomic stderr-tail replacement snapshots during MCP stdio
+  shutdown and bumped the launcher protocol to version 2.
 
 ## [0.1.0] - 2026-08-23
 

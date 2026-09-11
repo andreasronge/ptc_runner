@@ -77,6 +77,7 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
   @type event ::
           {:stdout, binary()}
           | {:stderr, binary()}
+          | {:stderr_replacement, binary()}
           | :stderr_truncated
           | {:stdin_flushed, non_neg_integer()}
           | {:finished,
@@ -184,6 +185,9 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
 
       {^port, {:data, <<"E", bytes::binary>>}} ->
         {:ok, {:stderr, bytes}}
+
+      {^port, {:data, <<"S", bytes::binary>>}} ->
+        {:ok, {:stderr_replacement, bytes}}
 
       {^port, {:data, "T"}} ->
         {:ok, :stderr_truncated}
@@ -537,6 +541,15 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
 
       {^port, {:data, <<"E", bytes::binary>>}} ->
         await_stdin_flushed(port, ack_id, deadline_ms, [{:stderr, bytes} | events], stdout_bytes)
+
+      {^port, {:data, <<"S", bytes::binary>>}} ->
+        await_stdin_flushed(
+          port,
+          ack_id,
+          deadline_ms,
+          [{:stderr_replacement, bytes} | events],
+          stdout_bytes
+        )
 
       {^port, {:data, "T"}} ->
         await_stdin_flushed(port, ack_id, deadline_ms, [:stderr_truncated | events], stdout_bytes)

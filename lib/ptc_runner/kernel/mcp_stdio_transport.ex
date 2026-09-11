@@ -340,6 +340,11 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     {:noreply, record_stderr_snapshot(state)}
   end
 
+  def handle_info({port, {:data, <<"S", bytes::binary>>}}, %{port: port} = state) do
+    state = %{state | stderr: bytes}
+    {:noreply, record_stderr_snapshot(state)}
+  end
+
   def handle_info({port, {:data, <<"X", finish::binary-size(6)>>}}, %{port: port} = state) do
     case decode_finish(finish) do
       {:ok, finish} -> finish_transport(state, finish)

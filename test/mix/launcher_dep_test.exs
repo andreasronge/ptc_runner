@@ -19,7 +19,9 @@ defmodule PtcRunner.Mix.LauncherDepTest do
     stage(directory, @fetched_mix_files)
 
     assert {output, 0} = load_project(directory)
-    assert output =~ ~s({:ptc_runner_launcher, "~> 0.2.0", [optional: true]})
+
+    assert output =~
+             ~s({:ptc_runner_launcher, ">= 0.1.0 and < 0.3.0", [optional: true]})
   end
 
   test "a complete launcher checkout is still used as a path dependency", %{tmp_dir: directory} do

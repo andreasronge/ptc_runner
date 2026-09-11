@@ -237,11 +237,15 @@ defmodule PtcRunner.MixProject do
   # to install native support and `mix hex.build` never sees a path dependency.
   defp launcher_dep do
     launcher_path = Path.expand("ptc_runner_launcher", __DIR__)
+    # Keep the checked-in 0.1 lock resolvable while the independently published
+    # 0.2 companion is released from this tree. The protocol-2 handshake rejects
+    # the older binary before a provider starts; user-facing installation docs
+    # require 0.2.0.
 
     if local_launcher_checkout?(launcher_path) do
-      {:ptc_runner_launcher, "~> 0.2.0", path: "ptc_runner_launcher", optional: true}
+      {:ptc_runner_launcher, ">= 0.1.0 and < 0.3.0", path: "ptc_runner_launcher", optional: true}
     else
-      {:ptc_runner_launcher, "~> 0.2.0", optional: true}
+      {:ptc_runner_launcher, ">= 0.1.0 and < 0.3.0", optional: true}
     end
   end
 

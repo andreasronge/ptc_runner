@@ -202,9 +202,7 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     assert Port.command(launcher.port, "C")
     assert_receive {port, {:data, "T"}}, 500
     assert port == launcher.port
-    assert_receive {port, {:data, "R"}}, 500
-    assert port == launcher.port
-    assert_receive {port, {:data, <<"E", close_tail::binary>>}}, 500
+    assert_receive {port, {:data, <<"S", close_tail::binary>>}}, 500
     assert port == launcher.port
     assert byte_size(close_tail) == 32
 
@@ -224,8 +222,7 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     assert_receive {port, {:data, <<"E", _bytes::binary>>}}, 500
     assert port == launcher.port
     assert_receive {^port, {:data, "T"}}, 500
-    assert_receive {^port, {:data, "R"}}, 500
-    assert_receive {^port, {:data, <<"E", replacement::binary>>}}, 500
+    assert_receive {^port, {:data, <<"S", replacement::binary>>}}, 500
     assert String.ends_with?(replacement, "y")
 
     assert {tail, %{reason: :close, stderr_truncated?: true}} =
@@ -234,19 +231,17 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     assert String.ends_with?(tail, String.duplicate("y", 32))
   end
 
-  test "a capped shutdown update resets before retaining a partial suffix" do
+  test "a capped shutdown update atomically replaces the retained suffix" do
     launcher = open_launcher(["shutdown-stderr-overflow"], stderr_bytes: 32)
     assert %{truncated?: true} = collect_until(launcher, & &1.truncated?)
 
     assert Port.command(launcher.port, "C")
     assert_receive {port, {:data, "T"}}, 500
     assert port == launcher.port
-    assert_receive {^port, {:data, "R"}}, 500
-    assert_receive {^port, {:data, <<"E", initial::binary>>}}, 500
+    assert_receive {^port, {:data, <<"S", initial::binary>>}}, 500
     assert initial == String.duplicate("x", 32)
 
-    assert_receive {^port, {:data, "R"}}, 500
-    assert_receive {^port, {:data, <<"E", partial::binary>>}}, 500
+    assert_receive {^port, {:data, <<"S", partial::binary>>}}, 500
     assert partial == String.duplicate("y", 32)
 
     assert {_tail, %{reason: :close, stderr_truncated?: true}} = collect_finish(launcher, partial)
@@ -976,6 +971,9 @@ defmodule PtcRunnerLauncher.ConformanceTest do
             deadline
           )
 
+        {:ok, {:stderr_replacement, bytes}} ->
+          collect_until(launcher, predicate, %{output | stderr: bytes}, deadline)
+
         {:ok, :stderr_truncated} ->
           collect_until(launcher, predicate, %{output | truncated?: true}, deadline)
 
@@ -988,6 +986,7 @@ defmodule PtcRunnerLauncher.ConformanceTest do
   defp collect_finish(launcher, stderr) do
     case MCPStdioLauncher.receive_event(launcher, 2_000) do
       {:ok, {:stderr, bytes}} -> collect_finish(launcher, stderr <> bytes)
+      {:ok, {:stderr_replacement, bytes}} -> collect_finish(launcher, bytes)
       {:ok, :stderr_truncated} -> collect_finish(launcher, stderr)
       {:ok, {:finished, finish}} -> {stderr, finish}
       other -> flunk("launcher ended before its finish frame: #{inspect(other)}")

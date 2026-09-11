@@ -37,7 +37,7 @@ elixir -e '
       <<"name">> => <<"ptc_runner_launcher">>,
       <<"optional">> => true,
       <<"repository">> => <<"hexpm">>,
-      <<"requirement">> => <<"~> 0.2.0">>
+      <<"requirement">> => <<">= 0.1.0 and < 0.3.0">>
     }
 
   # The Viewer ships in the assembled release and the container image, not in
@@ -106,7 +106,7 @@ for mix_env in dev test; do
         |> Keyword.fetch!(:deps)
         |> Enum.find(&(elem(&1, 0) == :ptc_runner_launcher))
 
-      {:ptc_runner_launcher, "~> 0.2.0", options} = dependency
+      {:ptc_runner_launcher, ">= 0.1.0 and < 0.3.0", options} = dependency
       true = options[:optional]
       false = Keyword.has_key?(options, :path)
 
