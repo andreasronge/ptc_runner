@@ -529,7 +529,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
        when is_map(effects) and not is_struct(effects) and map_size(effects) <= 128,
        do:
          Enum.all?(effects, fn {name, effect} ->
-           valid_name?(name) and effect in [:read, :write]
+           Capability.valid_name?(name) and effect in [:read, :write]
          end)
 
   defp valid_capability_effects?(_effects), do: false

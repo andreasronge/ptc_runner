@@ -144,6 +144,10 @@ defmodule PtcRunner.Kernel.Capability do
     }
   end
 
+  @doc false
+  @spec valid_name?(term()) :: boolean()
+  def valid_name?(name), do: match?({:ok, _name}, valid_name(name))
+
   defp valid_name(name) when is_binary(name) do
     if name =~ @name,
       do: {:ok, RetainedSize.detach_binaries(name)},
