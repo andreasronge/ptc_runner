@@ -43,23 +43,14 @@ defmodule PtcRunner.Kernel.ProviderCallOwner do
           reference()
         ) :: {:ok, map()} | {:error, ProviderError.t()}
   defp checkout(admission, handle, deadline, context, admission_monitor) do
-    guardian = self()
+    case ProviderCallAdmission.begin_checkout(admission, deadline) do
+      {:ok, request_ref} ->
+        await_checkout(admission, handle, deadline, context, admission_monitor, request_ref)
 
-    {checkout_pid, checkout_monitor} =
-      spawn_monitor(fn ->
-        result = ProviderCallAdmission.checkout_for(admission, guardian, deadline)
-        send(guardian, {:provider_admission_checkout, self(), result})
-      end)
-
-    await_checkout(
-      admission,
-      handle,
-      deadline,
-      context,
-      admission_monitor,
-      checkout_pid,
-      checkout_monitor
-    )
+      {:error, reason} ->
+        _ = CancelableRequest.cancel_and_drain(handle, cleanup_deadline(context))
+        checkout_refusal(reason)
+    end
   end
 
   defp await_checkout(
@@ -68,50 +59,88 @@ defmodule PtcRunner.Kernel.ProviderCallOwner do
          deadline,
          context,
          admission_monitor,
-         checkout_pid,
-         checkout_monitor
+         request_ref
        ) do
     timeout = max(deadline - System.monotonic_time(:millisecond), 0)
 
     receive do
-      {:provider_admission_checkout, ^checkout_pid, {:ok, lease}} ->
-        Process.demonitor(checkout_monitor, [:flush])
+      {:provider_admission_checkout, ^request_ref, {:ok, lease}} ->
         granted(admission, lease, handle, deadline, context, admission_monitor)
 
-      {:provider_admission_checkout, ^checkout_pid, {:error, reason}} ->
-        Process.demonitor(checkout_monitor, [:flush])
+      {:provider_admission_checkout, ^request_ref, {:error, reason}} ->
         _ = CancelableRequest.cancel_and_drain(handle, cleanup_deadline(context))
         checkout_refusal(reason)
 
-      {:cancel_provider_call, tracker, request_ref, cleanup_deadline}
-      when is_pid(tracker) and is_reference(request_ref) and is_integer(cleanup_deadline) ->
-        Process.exit(checkout_pid, :kill)
-        await_checkout_down(checkout_pid, checkout_monitor)
-        drained = CancelableRequest.cancel_and_drain(handle, cleanup_deadline)
-        send(tracker, {:provider_call_drained, request_ref, self(), drained})
+      {:cancel_provider_call, tracker, cancel_ref, cleanup_deadline}
+      when is_pid(tracker) and is_reference(cancel_ref) and is_integer(cleanup_deadline) ->
+        ProviderCallAdmission.cancel_checkout(admission, request_ref)
+        result = await_cancelled_checkout(request_ref, admission_monitor, cleanup_deadline)
+        drained = settle_cancelled_checkout(result, handle, cleanup_deadline, context)
+        send(tracker, {:provider_call_drained, cancel_ref, self(), drained})
         checkout_cancelled(drained, context)
 
       {:DOWN, ^admission_monitor, :process, _admission, _reason} ->
-        Process.exit(checkout_pid, :kill)
-        await_checkout_down(checkout_pid, checkout_monitor)
-        _ = CancelableRequest.cancel_and_drain(handle, cleanup_deadline(context))
-        checkout_refusal(:provider_admission_unavailable)
-
-      {:DOWN, ^checkout_monitor, :process, ^checkout_pid, _reason} ->
         _ = CancelableRequest.cancel_and_drain(handle, cleanup_deadline(context))
         checkout_refusal(:provider_admission_unavailable)
     after
       timeout ->
-        Process.exit(checkout_pid, :kill)
-        await_checkout_down(checkout_pid, checkout_monitor)
-        _ = CancelableRequest.cancel_and_drain(handle, cleanup_deadline(context))
-        checkout_refusal(:provider_admission_timeout)
+        cleanup_deadline = cleanup_deadline(context)
+        ProviderCallAdmission.cancel_checkout(admission, request_ref)
+        result = await_cancelled_checkout(request_ref, admission_monitor, cleanup_deadline)
+        drained = settle_cancelled_checkout(result, handle, cleanup_deadline, context)
+
+        if drained == :drained,
+          do: checkout_refusal(:provider_admission_timeout),
+          else: cleanup_failed()
     end
   end
 
-  defp await_checkout_down(pid, monitor) do
+  defp await_cancelled_checkout(request_ref, admission_monitor, deadline) do
+    timeout = max(deadline - System.monotonic_time(:millisecond), 0)
+
     receive do
-      {:DOWN, ^monitor, :process, ^pid, _reason} -> :ok
+      {:provider_admission_checkout, ^request_ref, result} ->
+        result
+
+      {:DOWN, ^admission_monitor, :process, _pid, _reason} ->
+        {:error, :provider_admission_unavailable}
+    after
+      timeout -> {:error, :provider_admission_unavailable}
+    end
+  end
+
+  defp settle_cancelled_checkout({:ok, lease}, handle, deadline, context),
+    do: complete_unused_for_drain(lease, handle, deadline, context)
+
+  defp settle_cancelled_checkout(
+         {:error, :provider_admission_unavailable},
+         handle,
+         deadline,
+         context
+       ) do
+    _ = CancelableRequest.cancel_and_drain(handle, deadline)
+    mark_cleanup_failed(context)
+    :uncertain
+  end
+
+  defp settle_cancelled_checkout({:error, _reason}, handle, deadline, _context),
+    do: CancelableRequest.cancel_and_drain(handle, deadline)
+
+  defp complete_unused_for_drain(lease, handle, deadline, context) do
+    case CancelableRequest.cancel_and_drain(handle, deadline) do
+      :drained ->
+        case ProviderCallAdmission.complete(lease, :cancelled) do
+          :ok ->
+            :drained
+
+          _ ->
+            mark_cleanup_failed(context)
+            :uncertain
+        end
+
+      :uncertain ->
+        uncertain(lease, context)
+        :uncertain
     end
   end
 
@@ -139,12 +168,24 @@ defmodule PtcRunner.Kernel.ProviderCallOwner do
       :ok = CancelableRequest.dispatch(handle)
 
       case CancelableRequest.await_or_cancel(handle, deadline, admission_monitor) do
-        {:ok, result} -> publish_after_completion(lease, result, context)
-        {:error, :timeout} -> cancel(lease, handle, cleanup_deadline(context), context)
-        {:error, :cancellation_witness_unavailable} -> uncertain(lease, context)
-        {:error, :provider_admission_unavailable} -> cleanup_failed()
-        {:cancelled, :drained} -> complete_cancelled(lease)
-        {:cancelled, :uncertain} -> uncertain(lease, context)
+        {:ok, result} ->
+          publish_after_completion(lease, result, context)
+
+        {:error, :timeout} ->
+          cancel(lease, handle, cleanup_deadline(context), context)
+
+        {:error, :cancellation_witness_unavailable} ->
+          uncertain(lease, context)
+
+        {:error, :provider_admission_unavailable} ->
+          mark_cleanup_failed(context)
+          cleanup_failed()
+
+        {:cancelled, :drained} ->
+          complete_cancelled(lease, context)
+
+        {:cancelled, :uncertain} ->
+          uncertain(lease, context)
       end
     end
   end
@@ -153,8 +194,12 @@ defmodule PtcRunner.Kernel.ProviderCallOwner do
     case CancelableRequest.cancel_and_drain(handle, cleanup_deadline) do
       :drained ->
         case ProviderCallAdmission.complete(lease, :cancelled) do
-          :ok -> refusal(:timeout, @timeout_text, true)
-          _ -> cleanup_failed()
+          :ok ->
+            refusal(:timeout, @timeout_text, true)
+
+          _ ->
+            mark_cleanup_failed(context)
+            cleanup_failed()
         end
 
       :uncertain ->
@@ -185,6 +230,7 @@ defmodule PtcRunner.Kernel.ProviderCallOwner do
              )}
 
           _ ->
+            mark_cleanup_failed(context)
             cleanup_failed()
         end
 
@@ -212,7 +258,7 @@ defmodule PtcRunner.Kernel.ProviderCallOwner do
 
   defp mark_cleanup_failed(_context), do: :ok
 
-  defp complete_cancelled(lease) do
+  defp complete_cancelled(lease, context) do
     case ProviderCallAdmission.complete(lease, :cancelled) do
       :ok ->
         {:error,
@@ -222,6 +268,7 @@ defmodule PtcRunner.Kernel.ProviderCallOwner do
          )}
 
       _ ->
+        mark_cleanup_failed(context)
         cleanup_failed()
     end
   end

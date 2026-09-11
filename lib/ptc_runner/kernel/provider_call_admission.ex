@@ -102,6 +102,48 @@ defmodule PtcRunner.Kernel.ProviderCallAdmission do
   def checkout_for(_admission, _guardian, _deadline),
     do: {:error, :provider_admission_unavailable}
 
+  @doc false
+  def begin_checkout(admission, absolute_deadline_ms)
+      when is_pid(admission) and is_integer(absolute_deadline_ms) do
+    now = now_ms()
+
+    if absolute_deadline_ms <= now do
+      {:error, :provider_admission_timeout}
+    else
+      with {:ok, token, tickets, ticket_limit} <- domain(admission),
+           true <- claim_ticket(tickets, ticket_limit) do
+        ticket = Ticket.new()
+        request_ref = make_ref()
+
+        send(
+          admission,
+          {token, {:checkout_async, self(), absolute_deadline_ms, ticket, request_ref}}
+        )
+
+        {:ok, request_ref}
+      else
+        false -> {:error, :provider_capacity_exhausted}
+        _ -> {:error, :provider_admission_unavailable}
+      end
+    end
+  end
+
+  def begin_checkout(_admission, _deadline), do: {:error, :provider_admission_unavailable}
+
+  @doc false
+  def cancel_checkout(admission, request_ref)
+      when is_pid(admission) and is_reference(request_ref) do
+    case domain(admission) do
+      {:ok, token, _tickets, _limit} ->
+        send(admission, {token, {:cancel_checkout, self(), request_ref}})
+
+      :error ->
+        :ok
+    end
+
+    :ok
+  end
+
   @doc "Consumes a single-use lease on behalf of its bound guardian."
   @spec complete(Lease.t(), :completed | :cancelled | :uncertain) ::
           :ok
@@ -247,7 +289,7 @@ defmodule PtcRunner.Kernel.ProviderCallAdmission do
 
           _settled ->
             {state, replies} = promote(state)
-            Enum.each(replies, fn {from, reply} -> GenServer.reply(from, reply) end)
+            Enum.each(replies, fn {from, reply} -> reply_waiter(from, reply) end)
             {:reply, :ok, state}
         end
 
@@ -270,6 +312,34 @@ defmodule PtcRunner.Kernel.ProviderCallAdmission do
     do: {:reply, {:error, :provider_admission_unavailable}, state}
 
   @impl true
+  def handle_info(
+        {token, {:checkout_async, owner, deadline, ticket, request_ref}},
+        %{token: token} = state
+      ) do
+    {reply, state} = admit_async(owner, deadline, ticket, request_ref, state)
+    if reply, do: send(owner, {:provider_admission_checkout, request_ref, reply})
+    {:noreply, state}
+  end
+
+  def handle_info({token, {:cancel_checkout, owner, request_ref}}, %{token: token} = state) do
+    case state.waiting_by_ref[request_ref] do
+      %{owner: ^owner} = entry ->
+        {_entry, state} = pop_waiter(state, request_ref)
+        release_ticket(state, entry.ticket)
+
+        send(
+          owner,
+          {:provider_admission_checkout, request_ref, {:error, :provider_admission_timeout}}
+        )
+
+        {:noreply, state}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  @impl true
   def handle_info({:expire, request_ref}, state) do
     case pop_waiter(state, request_ref) do
       {nil, state} ->
@@ -277,7 +347,7 @@ defmodule PtcRunner.Kernel.ProviderCallAdmission do
 
       {entry, state} ->
         release_ticket(state, entry.ticket)
-        GenServer.reply(entry.from, {:error, :provider_admission_timeout})
+        reply_waiter(entry.from, {:error, :provider_admission_timeout})
         {:noreply, state}
     end
   end
@@ -369,7 +439,13 @@ defmodule PtcRunner.Kernel.ProviderCallAdmission do
 
       {entry, waiting_by_ref} ->
         cancel_waiter_monitor(entry)
-        {entry, %{state | waiting_by_ref: waiting_by_ref}}
+
+        {entry,
+         %{
+           state
+           | waiting_by_ref: waiting_by_ref,
+             waiting: :queue.delete(request_ref, state.waiting)
+         }}
     end
   end
 
@@ -385,7 +461,7 @@ defmodule PtcRunner.Kernel.ProviderCallAdmission do
     Enum.each(state.waiting_by_ref, fn {_ref, entry} ->
       cancel_waiter_monitor(entry)
       release_ticket(state, entry.ticket)
-      GenServer.reply(entry.from, {:error, :provider_admission_unavailable})
+      reply_waiter(entry.from, {:error, :provider_admission_unavailable})
     end)
 
     %{state | waiting: :queue.new(), waiting_by_ref: %{}, status: :unavailable}
@@ -398,12 +474,59 @@ defmodule PtcRunner.Kernel.ProviderCallAdmission do
     end)
   end
 
+  defp reply_waiter({:async, owner, request_ref}, reply),
+    do: send(owner, {:provider_admission_checkout, request_ref, reply})
+
+  defp reply_waiter(from, reply), do: GenServer.reply(from, reply)
+
   defp waiter_by_monitor(waiting, monitor, owner) do
     Enum.find_value(waiting, :error, fn
       {request_ref, %{monitor: ^monitor, owner: ^owner}} -> {:ok, request_ref}
       {request_ref, %{caller_monitor: ^monitor}} -> {:ok, request_ref}
       _ -> nil
     end)
+  end
+
+  defp admit_async(owner, deadline, ticket, request_ref, state) do
+    cond do
+      state.status == :unavailable or not Process.alive?(owner) ->
+        release_ticket(state, ticket)
+        {{:error, :provider_admission_unavailable}, state}
+
+      deadline <= now_ms() ->
+        release_ticket(state, ticket)
+        {{:error, :provider_admission_timeout}, state}
+
+      map_size(state.active) < state.capacity and :queue.is_empty(state.waiting) ->
+        release_ticket(state, ticket)
+        {lease, state} = grant(owner, state)
+        {{:ok, lease}, state}
+
+      map_size(state.waiting_by_ref) >= state.max_waiters ->
+        release_ticket(state, ticket)
+        {{:error, :provider_capacity_exhausted}, state}
+
+      true ->
+        monitor = Process.monitor(owner)
+        timer = Process.send_after(self(), {:expire, request_ref}, max(deadline - now_ms(), 1))
+
+        entry = %{
+          from: {:async, owner, request_ref},
+          owner: owner,
+          monitor: monitor,
+          caller_monitor: monitor,
+          timer: timer,
+          deadline: deadline,
+          ticket: ticket
+        }
+
+        {nil,
+         %{
+           state
+           | waiting: :queue.in(request_ref, state.waiting),
+             waiting_by_ref: Map.put(state.waiting_by_ref, request_ref, entry)
+         }}
+    end
   end
 
   @spec claim_ticket(atomics_ref(), pos_integer()) :: boolean()

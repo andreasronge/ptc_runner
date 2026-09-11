@@ -1130,7 +1130,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
          {:ok, prepared_model} <- prepare_llm_model(model, requirements, adapter),
          {:ok, credential} <-
            Map.fetch(Map.get(context, :credentials, %{}), installation.credential),
-         {:ok, timeout_ms, max_heap_words} <- connectivity_probe_bounds(context),
+         {:ok, deadline_ms, max_heap_words} <- connectivity_probe_bounds(context),
          cleanup_timeout_ms when is_integer(cleanup_timeout_ms) and cleanup_timeout_ms > 0 <-
            get_in(context, [:limits, :provider_cleanup_timeout_ms]) do
       {:ok,
@@ -1140,7 +1140,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
          credential: credential,
          cache: installation.cache,
          usage_guarantees: installation.usage_guarantees,
-         timeout_ms: timeout_ms,
+         deadline_ms: deadline_ms,
          cleanup_timeout_ms: cleanup_timeout_ms,
          max_heap_words: max_heap_words,
          adapter: adapter
@@ -1161,20 +1161,22 @@ defmodule PtcRunner.Kernel.HostInstallation do
            Map.get(limits, :doctor_connectivity_timeout_ms),
          max_heap_words when is_integer(max_heap_words) and max_heap_words > 0 <-
            Map.get(limits, :provider_heap_words) do
-      timeout_ms =
+      now = System.monotonic_time(:millisecond)
+
+      deadline_ms =
         case Map.get(context, :doctor_occurrence_deadline_ms) do
           deadline when is_integer(deadline) ->
-            min(timeout_ms, deadline - System.monotonic_time(:millisecond))
+            min(now + timeout_ms, deadline)
 
           nil ->
-            timeout_ms
+            now + timeout_ms
 
           _invalid ->
-            0
+            now
         end
 
-      if timeout_ms > 0,
-        do: {:ok, timeout_ms, max_heap_words},
+      if deadline_ms > now,
+        do: {:ok, deadline_ms, max_heap_words},
         else: {:error, :llm_connectivity_unavailable}
     else
       _invalid -> {:error, :llm_connectivity_unavailable}
@@ -1189,7 +1191,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   # The doctor connectivity deadline remains the outer `BoundedWorker` bound;
   # the probe does not participate in the ordinary whole-call LLM clock.
   defp run_llm_connectivity_probe(probe, admission) do
-    deadline = System.monotonic_time(:millisecond) + probe.timeout_ms
+    deadline = probe.deadline_ms
     binding = %{credential: probe.credential, cache: probe.cache}
 
     case PtcRunner.LLM.callback(probe.prepared_model, binding) do
@@ -1213,7 +1215,9 @@ defmodule PtcRunner.Kernel.HostInstallation do
                 )
               end
             end,
-            timeout_ms: probe.timeout_ms + probe.cleanup_timeout_ms,
+            timeout_ms:
+              max(deadline - System.monotonic_time(:millisecond), 0) +
+                probe.cleanup_timeout_ms,
             max_heap_words: probe.max_heap_words,
             cancel_with_caller: true
           )

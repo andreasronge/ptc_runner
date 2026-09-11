@@ -1,14 +1,17 @@
 defmodule PtcRunner.Kernel.CancelableRequest do
   @moduledoc false
 
-  @enforce_keys [:pid, :monitor, :gate, :owner]
+  alias PtcRunner.Kernel.AdapterCancellationWitness
+
+  @enforce_keys [:pid, :monitor, :gate, :owner, :dispatched]
   defstruct @enforce_keys
 
   @opaque t :: %__MODULE__{
             pid: pid(),
             monitor: reference(),
             gate: reference(),
-            owner: pid()
+            owner: pid(),
+            dispatched: reference()
           }
 
   @spec start_cancelable(function(), map(), map(), pid()) ::
@@ -17,6 +20,7 @@ defmodule PtcRunner.Kernel.CancelableRequest do
       when is_function(requester, 2) and is_map(request) and is_map(context) and
              guardian == self() do
     gate = make_ref()
+    dispatched = :atomics.new(1, signed: false)
     owner = self()
 
     {pid, monitor} =
@@ -26,7 +30,8 @@ defmodule PtcRunner.Kernel.CancelableRequest do
 
           receive do
             {:dispatch, ^gate} ->
-              result = requester.(request, context)
+              :ok = AdapterCancellationWitness.install(owner, gate)
+              result = invoke_requester(requester, request, context)
               send(owner, {:cancelable_request_result, gate, result})
 
             {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
@@ -36,7 +41,14 @@ defmodule PtcRunner.Kernel.CancelableRequest do
         [:link, :monitor]
       )
 
-    {:ok, %__MODULE__{pid: pid, monitor: monitor, gate: gate, owner: owner}}
+    {:ok,
+     %__MODULE__{
+       pid: pid,
+       monitor: monitor,
+       gate: gate,
+       owner: owner,
+       dispatched: dispatched
+     }}
   rescue
     _ -> {:error, :cancellation_witness_unavailable}
   catch
@@ -47,9 +59,14 @@ defmodule PtcRunner.Kernel.CancelableRequest do
     do: {:error, :cancellation_witness_unavailable}
 
   @spec dispatch(t()) :: :ok | {:error, :cancellation_witness_unavailable}
-  def dispatch(%__MODULE__{owner: owner, pid: pid, gate: gate}) when owner == self() do
-    send(pid, {:dispatch, gate})
-    :ok
+  def dispatch(%__MODULE__{owner: owner, pid: pid, gate: gate, dispatched: dispatched})
+      when owner == self() do
+    if :atomics.compare_exchange(dispatched, 1, 0, 1) == :ok do
+      send(pid, {:dispatch, gate})
+      :ok
+    else
+      {:error, :cancellation_witness_unavailable}
+    end
   end
 
   def dispatch(_handle), do: {:error, :cancellation_witness_unavailable}
@@ -68,7 +85,7 @@ defmodule PtcRunner.Kernel.CancelableRequest do
       {:cancelable_request_result, ^gate, result} ->
         receive do
           {:DOWN, ^monitor, :process, ^pid, :normal} ->
-            {:ok, result}
+            normalize_result(result)
 
           {:DOWN, ^monitor, :process, ^pid, _reason} ->
             {:error, :cancellation_witness_unavailable}
@@ -92,10 +109,45 @@ defmodule PtcRunner.Kernel.CancelableRequest do
   end
 
   @spec cancel_and_drain(t(), integer()) :: :drained | :uncertain
-  def cancel_and_drain(%__MODULE__{owner: owner, pid: pid, monitor: monitor}, deadline)
+  def cancel_and_drain(
+        %__MODULE__{
+          owner: owner,
+          pid: pid,
+          monitor: monitor,
+          gate: gate,
+          dispatched: dispatched
+        },
+        deadline
+      )
       when owner == self() and is_integer(deadline) do
     Process.unlink(pid)
-    Process.exit(pid, :kill)
+
+    if :atomics.get(dispatched, 1) == 0 do
+      Process.exit(pid, :kill)
+      await_down(pid, monitor, deadline)
+    else
+      send(pid, {:cancel_adapter_request, gate, owner})
+      await_adapter_drain(pid, monitor, gate, deadline, false)
+    end
+  end
+
+  def cancel_and_drain(_handle, _deadline), do: :uncertain
+
+  defp await_adapter_drain(pid, monitor, gate, deadline, acknowledged?) do
+    timeout = max(deadline - System.monotonic_time(:millisecond), 0)
+
+    receive do
+      {:adapter_request_drained, ^gate, ^pid} ->
+        await_adapter_drain(pid, monitor, gate, deadline, true)
+
+      {:DOWN, ^monitor, :process, ^pid, _reason} ->
+        if acknowledged?, do: :drained, else: :uncertain
+    after
+      timeout -> :uncertain
+    end
+  end
+
+  defp await_down(pid, monitor, deadline) do
     timeout = max(deadline - System.monotonic_time(:millisecond), 0)
 
     receive do
@@ -105,5 +157,14 @@ defmodule PtcRunner.Kernel.CancelableRequest do
     end
   end
 
-  def cancel_and_drain(_handle, _deadline), do: :uncertain
+  defp invoke_requester(requester, request, context) do
+    {:ok, requester.(request, context)}
+  rescue
+    _exception -> :requester_failed
+  catch
+    _kind, _reason -> :requester_failed
+  end
+
+  defp normalize_result({:ok, result}), do: {:ok, result}
+  defp normalize_result(:requester_failed), do: {:error, :cancellation_witness_unavailable}
 end

@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.ProviderCallOwnerTest do
 
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
 
+  alias PtcRunner.Kernel.AdapterCancellationWitness
   alias PtcRunner.Kernel.ProviderCallAdmission
   alias PtcRunner.Kernel.ProviderCallOwner
   alias PtcRunner.Kernel.ProviderError
@@ -109,4 +110,37 @@ defmodule PtcRunner.Kernel.ProviderCallOwnerTest do
                llm_request_deadline_ms: deadline
              })
   end
+
+  test "cooperative cancellation waits for the adapter-owned subtree acknowledgement" do
+    admission = start_supervised!({ProviderCallAdmission, max_active_calls: 1, max_waiters: 0})
+    parent = self()
+
+    requester = fn _, _ ->
+      AdapterCancellationWitness.run(fn ->
+        send(parent, {:transport_started, self()})
+        receive do: (:held -> :ok)
+      end)
+    end
+
+    guardian =
+      spawn(fn ->
+        ProviderCallOwner.run(admission, requester, %{}, %{
+          llm_request_deadline_ms: System.monotonic_time(:millisecond) + 5_000,
+          provider_cleanup_timeout_ms: 1_000
+        })
+      end)
+
+    assert_receive {:transport_started, transport}
+    transport_ref = Process.monitor(transport)
+    guardian_ref = Process.monitor(guardian)
+    request_ref = make_ref()
+    send(guardian, {:cancel_provider_call, self(), request_ref, monotonic_deadline(1_000)})
+
+    assert_receive {:DOWN, ^transport_ref, :process, ^transport, _reason}
+    assert_receive {:provider_call_drained, ^request_ref, ^guardian, :drained}
+    assert_receive {:DOWN, ^guardian_ref, :process, ^guardian, :normal}
+    assert {:ok, %{active: 0, status: :ready}} = ProviderCallAdmission.snapshot(admission)
+  end
+
+  defp monotonic_deadline(offset), do: System.monotonic_time(:millisecond) + offset
 end

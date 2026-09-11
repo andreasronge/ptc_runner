@@ -54,6 +54,11 @@ defmodule PtcRunner.Kernel.ProviderTaskTracker do
 
   def attach_guardian(_tracker, _guardian), do: {:error, :closed}
 
+  @spec cancel_guardian(t(), pid(), integer()) :: :ok | {:error, :provider_cleanup_failed}
+  def cancel_guardian(%__MODULE__{} = tracker, guardian, deadline)
+      when is_pid(guardian) and is_integer(deadline),
+      do: safe_call(tracker, {:cancel_guardian, guardian, deadline})
+
   # Kills and reaps every attached task and then ends the tracker, so terminal
   # cleanup can prove the run's callbacks are gone. Sealing is the point:
   # draining without it would let a dispatch that raced the drain attach a live
@@ -127,6 +132,27 @@ defmodule PtcRunner.Kernel.ProviderTaskTracker do
   def handle_call({token, {:drain, deadline}}, _from, %{token: token} = state) do
     {result, state} = drain(state, cleanup_deadline(state, deadline))
     {:stop, :normal, result, state}
+  end
+
+  def handle_call(
+        {token, {:cancel_guardian, guardian, deadline}},
+        _from,
+        %{token: token} = state
+      ) do
+    selected = Enum.filter(state.guardians, fn {_ref, pid} -> pid == guardian end) |> Map.new()
+    request_ref = make_ref()
+    send(guardian, {:cancel_provider_call, self(), request_ref, deadline})
+    {remaining, uncertain?} = drain_guardians(selected, request_ref, deadline, false)
+    Enum.each(remaining, fn {_ref, pid} -> Process.exit(pid, :kill) end)
+    drain_monitors(remaining)
+
+    guardians =
+      Enum.reduce(Map.keys(selected), state.guardians, fn ref, acc -> Map.delete(acc, ref) end)
+
+    result =
+      if uncertain? or map_size(remaining) > 0, do: {:error, :provider_cleanup_failed}, else: :ok
+
+    {:reply, result, %{state | guardians: guardians}}
   end
 
   def handle_call(_request, _from, state), do: {:reply, {:error, :closed}, state}

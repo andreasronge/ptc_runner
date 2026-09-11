@@ -65,6 +65,22 @@ defmodule PtcRunner.Kernel.ProviderCallAdmissionTest do
     assert {:complete, ^first_lease} = send(first, {:complete, first_lease})
   end
 
+  test "expired waiters leave no FIFO tombstones behind" do
+    admission = start_supervised!({ProviderCallAdmission, max_active_calls: 1, max_waiters: 2})
+    assert {:ok, lease} = ProviderCallAdmission.checkout(admission, monotonic_deadline(5_000))
+
+    for _ <- 1..20 do
+      task =
+        Task.async(fn -> ProviderCallAdmission.checkout(admission, monotonic_deadline(5)) end)
+
+      assert {:error, :provider_admission_timeout} = Task.await(task)
+    end
+
+    assert {:ok, %{active: 1, waiting: 0}} = ProviderCallAdmission.snapshot(admission)
+    assert :queue.len(:sys.get_state(admission).waiting) == 0
+    assert :ok = ProviderCallAdmission.complete(lease, :completed)
+  end
+
   test "guardian death while active fences the domain" do
     admission = start_supervised!({ProviderCallAdmission, max_active_calls: 1, max_waiters: 1})
     parent = self()
@@ -142,4 +158,6 @@ defmodule PtcRunner.Kernel.ProviderCallAdmissionTest do
       assert {:ok, %{status: :unavailable}} = ProviderCallAdmission.snapshot(admission)
     end
   end
+
+  defp monotonic_deadline(offset), do: System.monotonic_time(:millisecond) + offset
 end
