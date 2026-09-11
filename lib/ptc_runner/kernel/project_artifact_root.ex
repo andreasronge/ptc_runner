@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.ProjectArtifactRoot do
           | {:project_artifact_root_parent_missing, binary(), binary()}
           | {:project_artifact_root_parent_unsafe_mode, binary()}
           | {:project_artifact_root_parent_foreign_owner, binary()}
+          | {:project_artifact_root_parent_unwritable, binary()}
 
   @spec ensure_for(CommandArguments.t()) :: :ok | {:error, ensure_error()}
   def ensure_for(%CommandArguments{
@@ -83,6 +84,9 @@ defmodule PtcRunner.Kernel.ProjectArtifactRoot do
       {:foreign_owner, path} ->
         {:error, {:project_artifact_root_parent_foreign_owner, path}}
 
+      {:unwritable, path} ->
+        {:error, {:project_artifact_root_parent_unwritable, path}}
+
       :none ->
         {:error, :project_artifact_root_invalid}
     end
@@ -129,9 +133,9 @@ defmodule PtcRunner.Kernel.ProjectArtifactRoot do
   end
 
   defp validate(root) do
-    with :ok <- require_owner_directory(root),
-         {:ok, names} <- File.ls(root),
+    with {:ok, names} <- File.ls(root),
          :ok <- complete_children(root, names),
+         :ok <- require_owner_directory(root),
          :ok <- require_owner_children(root) do
       :ok
     else

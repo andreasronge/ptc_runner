@@ -224,6 +224,7 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
           {:missing, binary(), binary()}
           | {:unsafe_mode, binary()}
           | {:foreign_owner, binary()}
+          | {:unwritable, binary()}
           | :none
 
   @doc """
@@ -246,14 +247,15 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
   reported as it is now; the refusal itself is not revisited. When the second
   walk finds nothing wrong it answers `:none`, and the caller keeps its
   generic code — that is also what a refusal for some other reason, such as an
-  unwritable parent or an unrepresentable name, looks like from here.
+  unrepresentable name, looks like from here.
   """
   @spec parent_fault(binary()) :: parent_fault()
   def parent_fault(path) when is_binary(path) do
     with {:ok, id} <- authority_executable(),
          {:ok, uid} <- read_authority_uid(id),
+         {:ok, groups} <- read_authority_groups(id),
          {:ok, anchored} <- anchor(path) do
-      classify_fault(locate_parent_fault(anchored, uid), uid)
+      classify_fault(locate_parent_fault(anchored, uid), uid, groups)
     else
       _unavailable -> :none
     end
@@ -266,7 +268,11 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
   # Ownership and mode are separate refusals with separate remedies: `chmod`
   # cannot fix a directory another user owns, and a foreign owner is not made
   # safe by narrowing its mode.
-  defp classify_fault({:error, {:private_directory_parent_unsafe, faulted, _intended}}, uid) do
+  defp classify_fault(
+         {:error, {:private_directory_parent_unsafe, faulted, _intended}},
+         uid,
+         _groups
+       ) do
     case File.lstat(faulted, time: :posix) do
       {:ok, %File.Stat{uid: owner}} when owner not in [0, uid] -> {:foreign_owner, faulted}
       {:ok, %File.Stat{}} -> {:unsafe_mode, faulted}
@@ -274,14 +280,26 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
     end
   end
 
-  defp classify_fault({:error, {:private_directory_parent_unavailable, faulted, intended}}, _uid) do
+  defp classify_fault(
+         {:error, {:private_directory_parent_unavailable, faulted, intended}},
+         _uid,
+         _groups
+       ) do
     case File.lstat(faulted) do
       {:error, :enoent} -> {:missing, faulted, intended}
       _present_or_unreadable -> :none
     end
   end
 
-  defp classify_fault(_ok, _uid), do: :none
+  defp classify_fault({:ok, parent}, uid, groups) do
+    case File.stat(parent, time: :posix) do
+      {:ok, %File.Stat{type: :directory, uid: ^uid} = stat} ->
+        if writable_directory(stat, uid, groups) == :ok, do: :none, else: {:unwritable, parent}
+
+      _foreign_or_invalid ->
+        :none
+    end
+  end
 
   @spec create(binary()) :: :ok | {:error, error()}
   def create(path) when is_binary(path) do
@@ -404,7 +422,7 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
 
   defp safe_parent_hierarchy(path, uid) do
     case locate_parent_fault(path, uid) do
-      :ok -> :ok
+      {:ok, _parent} -> :ok
       {:error, {reason, _faulted, _intended}} -> {:error, reason}
     end
   end
@@ -424,7 +442,9 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
   defp resolve_components(current, _components, hops, _uid) when hops > 40,
     do: {:error, {:private_directory_parent_unavailable, current, current}}
 
-  defp resolve_components(current, [], _hops, uid), do: validate_directory(current, uid)
+  defp resolve_components(current, [], _hops, uid) do
+    with :ok <- validate_directory(current, uid), do: {:ok, current}
+  end
 
   defp resolve_components(current, ["." | rest], hops, uid),
     do: resolve_components(current, rest, hops, uid)

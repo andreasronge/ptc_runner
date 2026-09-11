@@ -57,6 +57,15 @@ defmodule PtcRunner.Kernel.ArtifactRootDiagnostic do
         "owned by you or by root; point artifacts.root under a directory you own"}}
   end
 
+  def describe({:project_artifact_root_parent_unwritable, path}) when is_binary(path) do
+    {:ok,
+     {:publication_failed,
+      "#{shown(path)} is not writable by its owner; the artifact root's parent must be " <>
+        "writable; " <>
+        remedy("chmod u+w", path, "make it owner-writable") <>
+        " or point artifacts.root elsewhere"}}
+  end
+
   def describe({:project_artifact_root_not_owner_only, path}) when is_binary(path) do
     {:ok,
      {:publication_failed,

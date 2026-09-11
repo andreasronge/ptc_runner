@@ -145,9 +145,10 @@ back to the generic publication failure:
 | an ancestor of the root does not exist | `envelope/destination_parent_unavailable` | `mkdir -p` the root's parent, or point `artifacts.root` at an existing directory |
 | an ancestor is group- or world-writable and not sticky | `envelope/destination_parent_unsafe` | `chmod go-w PATH` |
 | an ancestor is owned by another user | `envelope/destination_parent_unsafe` | point `artifacts.root` under a directory you own |
-| the root or a child exists at a wider mode | `envelope/publication_failed` | `chmod 700 PATH` |
-| the root exists without its four children | `envelope/publication_failed` | remove the root and let `ptc` recreate it |
-| any other refusal, such as a parent you own but cannot write to | `envelope/publication_failed` | make the parent writable, or point `artifacts.root` elsewhere |
+| the root exists without its four children, at any mode | `envelope/publication_failed` | remove the root and let `ptc` recreate it |
+| the complete root or a child exists at a wider mode | `envelope/publication_failed` | `chmod 700 PATH` |
+| the root's parent is not writable by its owner | `envelope/publication_failed` | `chmod u+w PATH`, or point `artifacts.root` elsewhere |
+| any other refusal | `envelope/publication_failed` | point `artifacts.root` elsewhere |
 
 The missing-ancestor message names the shallowest missing directory and offers
 `mkdir -p` on the resolved parent, so one command creates every level rather
@@ -161,13 +162,12 @@ only when its path holds no control characters. These arrive on stderr with
 exit 74, because the envelope that would normally carry a diagnostic is the
 artifact that could not be written.
 
-That last-resort channel is what carries the directory name, so the table above
-describes a run that publishes an envelope — the `ptc init` default, and any
-run given `--envelope`. With `artifacts.envelope` set to `false` the same
-refusals still stop the run before it executes, reported through the ordinary
-destination phase as `destination/invalid_destination` at exit 7 without the
-path. `ptc viewer` reports the named sentences as
-`viewer/artifact_root_unusable`.
+The `ptc init` default and any run given `--envelope` report these refusals at
+exit 74 because the envelope that would normally carry the diagnostic cannot
+be written. With `artifacts.envelope` set to `false`, the same preflight and
+sentences still name the path, rule, and remedy; they are reported through the
+ordinary destination phase as `destination/invalid_destination` at exit 7.
+`ptc viewer` reports the named sentences as `viewer/artifact_root_unusable`.
 
 The trace filenames are also the canonical directory-discovery contract. Each
 file contains exactly the run ID named by its stem and one trace identity;

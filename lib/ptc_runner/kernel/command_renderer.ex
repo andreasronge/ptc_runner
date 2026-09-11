@@ -155,10 +155,25 @@ defmodule PtcRunner.Kernel.CommandRenderer do
 
   def envelope_failure(run_ref, reason) when is_binary(run_ref) do
     case ArtifactRootDiagnostic.describe(reason) do
-      {:ok, {code, message}} -> "error: envelope/#{code}: #{message} (run_ref: #{run_ref})\n"
+      {:ok, {code, message}} -> artifact_root_failure_line("envelope/#{code}", message, run_ref)
       :error -> unexplained_envelope_failure(run_ref)
     end
   end
+
+  @doc false
+  @spec artifact_root_failure(binary(), term()) :: binary() | nil
+  def artifact_root_failure(run_ref, reason) when is_binary(run_ref) do
+    case ArtifactRootDiagnostic.describe(reason) do
+      {:ok, {_envelope_code, message}} ->
+        artifact_root_failure_line("destination/invalid_destination", message, run_ref)
+
+      :error ->
+        nil
+    end
+  end
+
+  defp artifact_root_failure_line(code, message, run_ref),
+    do: "error: #{code}: #{message} (run_ref: #{run_ref})\n"
 
   defp unexplained_envelope_failure(run_ref),
     do:
