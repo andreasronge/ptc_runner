@@ -37,12 +37,15 @@ defmodule PtcRunner.TestSupport.RunRecord do
       {:failed, failures} ->
         {:noreply, %{state | failures: [failure(test, failures) | state.failures]}}
 
-      {:invalid, _module} ->
-        {:noreply, %{state | failures: [failure(test, :invalid) | state.failures]}}
-
-      _passed_skipped_or_excluded ->
+      # An invalid test is a consequence of its module's setup_all failure,
+      # which `:module_finished` records once with the real error.
+      _passed_skipped_excluded_or_invalid ->
         {:noreply, state}
     end
+  end
+
+  def handle_cast({:module_finished, %ExUnit.TestModule{state: {:failed, failures}} = m}, state) do
+    {:noreply, %{state | failures: [module_failure(m, failures) | state.failures]}}
   end
 
   def handle_cast({:suite_finished, times_us}, state) do
@@ -77,23 +80,36 @@ defmodule PtcRunner.TestSupport.RunRecord do
     }
   end
 
-  defp failure(test, :invalid) do
-    test |> location() |> Map.put(:message, "invalid: setup_all failed")
-  end
-
   defp failure(test, failures) do
-    message = Enum.map_join(failures, " | ", fn {_kind, reason, _stack} -> first_line(reason) end)
-
-    test |> location() |> Map.put(:message, message)
-  end
-
-  defp location(test) do
     %{
       module: inspect(test.module),
       name: to_string(test.name),
-      file: Path.relative_to_cwd(test.tags.file),
-      line: test.tags.line
+      file: relative(test.tags[:file]),
+      line: test.tags[:line],
+      message: message(failures)
     }
+  end
+
+  defp module_failure(test_module, failures) do
+    %{
+      module: inspect(test_module.name),
+      name: "setup_all",
+      file: relative(test_module.file),
+      line: test_module.tags[:line],
+      message: message(failures)
+    }
+  end
+
+  defp relative(nil), do: nil
+  defp relative(path), do: Path.relative_to_cwd(path)
+
+  # A failure value can be anything a test raised, including structs whose
+  # Inspect or message implementations raise; rendering it must not take the
+  # formatter down with the test.
+  defp message(failures) do
+    Enum.map_join(failures, " | ", fn {_kind, reason, _stack} -> first_line(reason) end)
+  rescue
+    exception -> "unrenderable failure (#{inspect(exception.__struct__)})"
   end
 
   defp first_line(%{__exception__: true} = exception) do

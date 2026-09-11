@@ -4,7 +4,9 @@
 # under plain `elixir` so it needs nothing from the project.
 
 defmodule FlakeHuntSummary do
-  def main([path]) do
+  def main([path]), do: main([path, "--expected", "0"])
+
+  def main([path, "--expected", expected]) do
     case File.read(path) do
       {:ok, contents} ->
         records =
@@ -12,7 +14,7 @@ defmodule FlakeHuntSummary do
           |> String.split("\n", trim: true)
           |> Enum.map(&:json.decode/1)
 
-        report(records)
+        report(records, String.to_integer(expected))
 
       {:error, reason} ->
         IO.puts("flake-hunt: no run records at #{path} (#{:file.format_error(reason)})")
@@ -21,23 +23,32 @@ defmodule FlakeHuntSummary do
   end
 
   def main(_argv) do
-    IO.puts("usage: elixir flake_hunt_summary.exs RUNS.jsonl")
+    IO.puts("usage: elixir flake_hunt_summary.exs RUNS.jsonl [--expected RUNS]")
     System.halt(64)
   end
 
-  defp report([]) do
+  defp report([], _expected) do
     IO.puts("flake-hunt: the record file is empty")
     System.halt(65)
   end
 
-  defp report(records) do
-    failed_runs = Enum.count(records, &(&1["failures"] != []))
+  defp report(records, expected) do
+    # A run that dies before `suite_finished` -- a compile error, a VM crash,
+    # a killed job -- leaves no record. It is still a failed run, and a table
+    # that silently counted only the survivors would hide exactly the runs a
+    # flake investigation most wants to see.
+    missing = max(expected - length(records), 0)
+    failed_runs = Enum.count(records, &(&1["failures"] != [])) + missing
     schedulers = records |> Enum.map(& &1["schedulers"]) |> Enum.uniq() |> Enum.join(",")
 
     IO.puts(
       "flake-hunt: #{length(records)} runs, #{schedulers} schedulers, " <>
         "#{failed_runs} with failures"
     )
+
+    if missing > 0 do
+      IO.puts("  #{missing} of #{expected} runs left no record (ended before the suite finished)")
+    end
 
     records
     |> Enum.flat_map(fn record ->

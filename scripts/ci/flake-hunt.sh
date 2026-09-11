@@ -76,6 +76,6 @@ for ((i = 1; i <= runs; i++)); do
   echo "run $i/$runs: $verdict ($((SECONDS - started))s)"
 done
 
-elixir "$script_dir/flake_hunt_summary.exs" "$PTC_TEST_RUN_LOG" | tee "$out/summary.txt"
+elixir "$script_dir/flake_hunt_summary.exs" "$PTC_TEST_RUN_LOG" --expected "$runs" | tee "$out/summary.txt"
 
 [ "$failed_runs" -eq 0 ]

@@ -356,6 +356,21 @@ defmodule PtcRunner.Scripts.CIGatesTest do
       assert output =~ "record file is empty"
     end
 
+    test "a run that ended before the suite finished counts as a failure with no record" do
+      %{marker: marker} = fake_mix()
+      partial = Path.join(Path.dirname(marker), "partial.jsonl")
+      File.write!(partial, @passing_record <> "\n")
+
+      {output, status} =
+        System.cmd("elixir", [@flake_hunt_summary, partial, "--expected", "3"],
+          stderr_to_stdout: true
+        )
+
+      assert status == 0, output
+      assert output =~ "flake-hunt: 1 runs, 4 schedulers, 2 with failures"
+      assert output =~ "2 of 3 runs left no record (ended before the suite finished)"
+    end
+
     test "the nightly workflow runs the hunt on main and keeps its records" do
       nightly = File.read!(Path.join(@root, ".github/workflows/nightly.yml"))
 

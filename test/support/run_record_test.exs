@@ -72,4 +72,52 @@ defmodule PtcRunner.TestSupport.RunRecordTest do
     {:ok, state} = RunRecord.init(run_log: "", seed: 1)
     assert {:noreply, ^state} = RunRecord.handle_cast({:suite_finished, %{run: 1_000}}, state)
   end
+
+  test "a setup_all failure is recorded once with its real error, not per invalid test" do
+    {:ok, state} = RunRecord.init(run_log: nil, seed: 1)
+
+    invalid = %ExUnit.Test{
+      name: :"test never ran",
+      module: __MODULE__,
+      state: {:invalid, %ExUnit.TestModule{name: __MODULE__, file: __ENV__.file}},
+      tags: %{file: __ENV__.file, line: 3}
+    }
+
+    failed_module = %ExUnit.TestModule{
+      name: __MODULE__,
+      file: __ENV__.file,
+      tags: %{line: 1},
+      state: {:failed, [{:error, %RuntimeError{message: "fixture directory missing"}, []}]}
+    }
+
+    {:noreply, state} = RunRecord.handle_cast({:test_finished, invalid}, state)
+    {:noreply, state} = RunRecord.handle_cast({:module_finished, failed_module}, state)
+    record = RunRecord.record(state, %{run: 1_000})
+
+    assert record.tests == 1
+    assert [%{name: "setup_all", line: 1, message: "fixture directory missing"}] = record.failures
+  end
+
+  test "a failure value that cannot be rendered does not take the formatter down" do
+    {:ok, state} = RunRecord.init(run_log: nil, seed: 1)
+
+    hostile = %ExUnit.Test{
+      name: :"test raises something unprintable",
+      module: __MODULE__,
+      state: {:failed, [{:error, %PtcRunner.TestSupport.RaisingInspectStruct{body: 1}, []}]},
+      tags: %{file: __ENV__.file, line: 4}
+    }
+
+    untagged = %{hostile | name: :"test with no location", tags: %{}}
+
+    {:noreply, state} = RunRecord.handle_cast({:test_finished, hostile}, state)
+    {:noreply, state} = RunRecord.handle_cast({:test_finished, untagged}, state)
+
+    assert [%{message: message}, %{file: nil, line: nil}] =
+             RunRecord.record(state, %{run: 1_000}).failures
+
+    # Elixir's inspect already contains a raising implementation; the record
+    # keeps whatever rendering survived rather than nothing.
+    assert message =~ "Inspect.Error"
+  end
 end

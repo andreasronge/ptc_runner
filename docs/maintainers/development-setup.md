@@ -151,7 +151,7 @@ the `PTC_TEST_RUN_LOG` formatter, carrying the seed, scheduler count, the
 wall/async/sync split, and each failure's location. The `Nightly` workflow
 runs the same script on `main` and uploads the directory as the `flake-hunt`
 artifact. Reproduce a named failure with `mix test FILE:LINE --seed SEED`,
-then `--repeat-until-failure`; a test that passes alone with its seed is a
+then `--repeat-until-failure 100`; a test that passes alone with its seed is a
 load flake, not an ordering bug.
 
 ## Dialyzer PLT
