@@ -63,6 +63,20 @@ defmodule PtcRunner.Kernel.ProviderCallAdmission do
              | :provider_admission_unavailable}
   def checkout(admission, absolute_deadline_ms)
       when is_pid(admission) and is_integer(absolute_deadline_ms) do
+    checkout_for(admission, self(), absolute_deadline_ms)
+  end
+
+  def checkout(_admission, _deadline), do: {:error, :provider_admission_unavailable}
+
+  @doc false
+  @spec checkout_for(t(), pid(), integer()) ::
+          {:ok, Lease.t()}
+          | {:error,
+             :provider_capacity_exhausted
+             | :provider_admission_timeout
+             | :provider_admission_unavailable}
+  def checkout_for(admission, guardian, absolute_deadline_ms)
+      when is_pid(admission) and is_pid(guardian) and is_integer(absolute_deadline_ms) do
     now = System.monotonic_time(:millisecond)
 
     if absolute_deadline_ms <= now do
@@ -71,7 +85,13 @@ defmodule PtcRunner.Kernel.ProviderCallAdmission do
       with {:ok, token, tickets, ticket_limit} <- domain(admission),
            true <- claim_ticket(tickets, ticket_limit) do
         ticket = Ticket.new()
-        call(admission, token, {:checkout, absolute_deadline_ms, ticket}, {tickets, ticket})
+
+        call(
+          admission,
+          token,
+          {:checkout, guardian, absolute_deadline_ms, ticket},
+          {tickets, ticket}
+        )
       else
         false -> {:error, :provider_capacity_exhausted}
         _ -> {:error, :provider_admission_unavailable}
@@ -79,7 +99,8 @@ defmodule PtcRunner.Kernel.ProviderCallAdmission do
     end
   end
 
-  def checkout(_admission, _deadline), do: {:error, :provider_admission_unavailable}
+  def checkout_for(_admission, _guardian, _deadline),
+    do: {:error, :provider_admission_unavailable}
 
   @doc "Consumes a single-use lease on behalf of its bound guardian."
   @spec complete(Lease.t(), :completed | :cancelled | :uncertain) ::
@@ -113,8 +134,10 @@ defmodule PtcRunner.Kernel.ProviderCallAdmission do
   @doc "Returns bounded capacity health without exposing calls or leases."
   @spec snapshot(t()) :: {:ok, snapshot()} | {:error, :provider_admission_unavailable}
   def snapshot(admission) when is_pid(admission) do
-    with {:ok, token, _tickets, _limit} <- domain(admission),
-         do: call(admission, token, :snapshot, nil)
+    case domain(admission) do
+      {:ok, token, _tickets, _limit} -> call(admission, token, :snapshot, nil)
+      :error -> {:error, :provider_admission_unavailable}
+    end
   end
 
   def snapshot(_admission), do: {:error, :provider_admission_unavailable}
@@ -122,8 +145,10 @@ defmodule PtcRunner.Kernel.ProviderCallAdmission do
   @doc false
   @spec valid?(term()) :: boolean()
   def valid?(admission) when is_pid(admission) do
-    with {:ok, token, _tickets, _limit} <- domain(admission),
-         do: call(admission, token, :valid, nil) == :ok
+    case domain(admission) do
+      {:ok, token, _tickets, _limit} -> call(admission, token, :valid, nil) == :ok
+      :error -> false
+    end
   end
 
   def valid?(_), do: false
@@ -162,10 +187,8 @@ defmodule PtcRunner.Kernel.ProviderCallAdmission do
       }}, state}
   end
 
-  def handle_call({token, {:checkout, deadline, ticket}}, from, %{token: token} = state)
+  def handle_call({token, {:checkout, owner, deadline, ticket}}, from, %{token: token} = state)
       when is_struct(ticket, Ticket) do
-    owner = elem(from, 0)
-
     cond do
       state.status == :unavailable or not Process.alive?(owner) ->
         release_ticket(state, ticket)
@@ -187,12 +210,14 @@ defmodule PtcRunner.Kernel.ProviderCallAdmission do
       true ->
         request_ref = make_ref()
         monitor = Process.monitor(owner)
+        caller_monitor = Process.monitor(elem(from, 0))
         timer = Process.send_after(self(), {:expire, request_ref}, max(deadline - now_ms(), 1))
 
         entry = %{
           from: from,
           owner: owner,
           monitor: monitor,
+          caller_monitor: caller_monitor,
           timer: timer,
           deadline: deadline,
           ticket: ticket
@@ -209,6 +234,9 @@ defmodule PtcRunner.Kernel.ProviderCallAdmission do
 
   def handle_call({token, {:complete, lease_ref, status}}, {owner, _}, %{token: token} = state) do
     case state.active[lease_ref] do
+      %{owner: ^owner} when state.status == :unavailable ->
+        {:reply, {:error, :provider_admission_unavailable}, state}
+
       %{owner: ^owner} = active when state.status == :ready ->
         Process.demonitor(active.monitor, [:flush])
         state = %{state | active: Map.delete(state.active, lease_ref)}
@@ -347,6 +375,7 @@ defmodule PtcRunner.Kernel.ProviderCallAdmission do
 
   defp cancel_waiter_monitor(entry) do
     Process.demonitor(entry.monitor, [:flush])
+    Process.demonitor(entry.caller_monitor, [:flush])
     Process.cancel_timer(entry.timer, async: true, info: false)
   end
 
@@ -372,6 +401,7 @@ defmodule PtcRunner.Kernel.ProviderCallAdmission do
   defp waiter_by_monitor(waiting, monitor, owner) do
     Enum.find_value(waiting, :error, fn
       {request_ref, %{monitor: ^monitor, owner: ^owner}} -> {:ok, request_ref}
+      {request_ref, %{caller_monitor: ^monitor}} -> {:ok, request_ref}
       _ -> nil
     end)
   end

@@ -623,8 +623,9 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
 
   defp runtime_context(context, services) do
     case ProviderRuntimeServices.provider_call_admission(services) do
-      nil -> context
-      admission -> Map.put(context, :provider_call_admission, admission)
+      {:ok, nil} -> context
+      {:ok, admission} -> Map.put(context, :provider_call_admission, admission)
+      {:error, reason} -> Map.put(context, :provider_call_admission_error, reason)
     end
   end
 

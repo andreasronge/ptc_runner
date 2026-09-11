@@ -315,9 +315,23 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
     do: {:error, :invalid_provider_runtime_services}
 
   @doc false
-  @spec provider_call_admission(t()) :: ProviderCallAdmission.t() | nil
+  @spec provider_call_admission(t()) ::
+          {:ok, ProviderCallAdmission.t() | nil}
+          | {:error, :provider_admission_unavailable | :invalid_provider_runtime_services}
   def provider_call_admission(%__MODULE__{} = services) do
-    if valid?(services), do: services.provider_call_admission, else: nil
+    cond do
+      not sealed_fields_valid?(services) ->
+        {:error, :invalid_provider_runtime_services}
+
+      is_nil(services.provider_call_admission) ->
+        {:ok, nil}
+
+      ProviderCallAdmission.valid?(services.provider_call_admission) ->
+        {:ok, services.provider_call_admission}
+
+      true ->
+        {:error, :provider_admission_unavailable}
+    end
   end
 
   defp unique_allowed_options?(opts) do
@@ -375,6 +389,16 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
         valid_oauth_mode?(services.oauth_mode) and
         valid_provider_call_admission?(services.provider_call_admission) and
         valid_runtime_binding?(services.runtime_binding, services.host_payload)
+
+  defp sealed_fields_valid?(%__MODULE__{attestation: attestation} = services),
+    do:
+      Enum.sort(Map.keys(services)) == @field_keys and
+        is_function(services.activation, 0) and
+        is_function(services.credential_resolver, 1) and
+        services.provider_application_mode in [:host_owned, :command_vm] and
+        valid_oauth_mode?(services.oauth_mode) and
+        valid_runtime_binding?(services.runtime_binding, services.host_payload) and
+        Attestation.valid?(__MODULE__, payload(services), attestation)
 
   defp valid_provider_call_admission?(nil), do: true
   defp valid_provider_call_admission?(admission), do: ProviderCallAdmission.valid?(admission)

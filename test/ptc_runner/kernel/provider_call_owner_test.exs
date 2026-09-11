@@ -1,6 +1,8 @@
 defmodule PtcRunner.Kernel.ProviderCallOwnerTest do
   use ExUnit.Case, async: true
 
+  import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
+
   alias PtcRunner.Kernel.ProviderCallAdmission
   alias PtcRunner.Kernel.ProviderCallOwner
   alias PtcRunner.Kernel.ProviderError
@@ -8,16 +10,17 @@ defmodule PtcRunner.Kernel.ProviderCallOwnerTest do
   test "holds one slot around the complete requester invocation" do
     admission = start_supervised!({ProviderCallAdmission, max_active_calls: 1, max_waiters: 1})
     parent = self()
+    deadline = System.monotonic_time(:millisecond) + 5_000
 
-    requester = fn request, _context ->
+    requester = fn request, context ->
+      assert %{llm_request_deadline_ms: ^deadline} = context
+      assert map_size(context) == 1
       send(parent, {:entered, request.id, self()})
 
       receive do
         {:return, response} -> {:ok, %{response: response}}
       end
     end
-
-    deadline = System.monotonic_time(:millisecond) + 5_000
 
     first =
       Task.async(fn ->
@@ -46,6 +49,34 @@ defmodule PtcRunner.Kernel.ProviderCallOwnerTest do
 
     assert {:ok, %{active: 0, waiting: 0, status: :ready}} =
              ProviderCallAdmission.snapshot(admission)
+  end
+
+  test "guardian death terminates the admitted requester and fences the domain" do
+    admission = start_supervised!({ProviderCallAdmission, max_active_calls: 1, max_waiters: 0})
+    parent = self()
+    deadline = System.monotonic_time(:millisecond) + 5_000
+
+    guardian =
+      spawn(fn ->
+        ProviderCallOwner.run(
+          admission,
+          fn _, _ ->
+            send(parent, {:requester_entered, self()})
+            receive do: (:never -> :ok)
+          end,
+          %{},
+          %{llm_request_deadline_ms: deadline, provider_cleanup_timeout_ms: 100}
+        )
+      end)
+
+    assert_receive {:requester_entered, requester}
+    requester_monitor = Process.monitor(requester)
+    Process.exit(guardian, :kill)
+    assert_receive {:DOWN, ^requester_monitor, :process, ^requester, _reason}
+
+    assert_eventually(fn ->
+      match?({:ok, %{status: :unavailable}}, ProviderCallAdmission.snapshot(admission))
+    end)
   end
 
   test "maps pre-dispatch capacity and admission failures to fixed provider errors" do

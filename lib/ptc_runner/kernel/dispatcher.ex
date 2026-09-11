@@ -639,6 +639,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
                     capability.inspection_capture
                   )
                 )
+                |> Map.put(:provider_run_state, state)
 
               {invoke(
                  state,

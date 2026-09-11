@@ -1,6 +1,8 @@
 defmodule PtcRunner.Kernel.ProviderCallAdmissionTest do
   use ExUnit.Case, async: true
 
+  import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
+
   alias PtcRunner.Kernel.ProviderCallAdmission
 
   test "validates its closed options and exposes a temporary child" do
@@ -90,6 +92,27 @@ defmodule PtcRunner.Kernel.ProviderCallAdmissionTest do
              ProviderCallAdmission.checkout(admission, System.monotonic_time(:millisecond) + 100)
   end
 
+  test "a queued checkout caller death removes its guardian's ticket" do
+    admission = start_supervised!({ProviderCallAdmission, max_active_calls: 1, max_waiters: 1})
+    deadline = System.monotonic_time(:millisecond) + 5_000
+    assert {:ok, lease} = ProviderCallAdmission.checkout(admission, deadline)
+
+    checkout =
+      spawn(fn -> ProviderCallAdmission.checkout_for(admission, self(), deadline) end)
+
+    assert_eventually(fn ->
+      match?({:ok, %{waiting: 1}}, ProviderCallAdmission.snapshot(admission))
+    end)
+
+    Process.exit(checkout, :kill)
+
+    assert_eventually(fn ->
+      match?({:ok, %{waiting: 0, status: :ready}}, ProviderCallAdmission.snapshot(admission))
+    end)
+
+    assert :ok = ProviderCallAdmission.complete(lease, :completed)
+  end
+
   test "uncertain and protocol-fault completions fence" do
     for completion <- [:uncertain, :duplicate, :foreign] do
       admission =
@@ -117,20 +140,6 @@ defmodule PtcRunner.Kernel.ProviderCallAdmissionTest do
       end
 
       assert {:ok, %{status: :unavailable}} = ProviderCallAdmission.snapshot(admission)
-    end
-  end
-
-  defp assert_eventually(assertion, attempts \\ 100)
-  defp assert_eventually(assertion, 0), do: assert(assertion.())
-
-  defp assert_eventually(assertion, attempts) do
-    if assertion.() do
-      :ok
-    else
-      receive do
-      after
-        1 -> assert_eventually(assertion, attempts - 1)
-      end
     end
   end
 end

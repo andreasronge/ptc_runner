@@ -224,7 +224,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
                  binding,
                  {:connectivity_probe, name, selection, context}
                ),
-             admission = ProviderRuntimeServices.provider_call_admission(services),
+             {:ok, admission} <- ProviderRuntimeServices.provider_call_admission(services),
              true <- cancellation_witness_supported?(probe.adapter, admission) do
           run_llm_connectivity_probe(
             probe,
@@ -788,7 +788,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
   end
 
   defp preflight(_host, %{source: :llm} = installation, selection, context, _oauth_runtime) do
-    with :ok <- placement(installation, context.destination),
+    with nil <- Map.get(context, :provider_call_admission_error),
+         :ok <- placement(installation, context.destination),
          {:ok, selected} <- llm_selection(installation, selection, context),
          {:ok, model, adapter} <- preflight_llm(installation.model),
          {:ok, requirements} <- live_llm_requirements(installation, context),
@@ -1129,7 +1130,9 @@ defmodule PtcRunner.Kernel.HostInstallation do
          {:ok, prepared_model} <- prepare_llm_model(model, requirements, adapter),
          {:ok, credential} <-
            Map.fetch(Map.get(context, :credentials, %{}), installation.credential),
-         {:ok, timeout_ms, max_heap_words} <- connectivity_probe_bounds(context) do
+         {:ok, timeout_ms, max_heap_words} <- connectivity_probe_bounds(context),
+         cleanup_timeout_ms when is_integer(cleanup_timeout_ms) and cleanup_timeout_ms > 0 <-
+           get_in(context, [:limits, :provider_cleanup_timeout_ms]) do
       {:ok,
        %{
          model: model,
@@ -1138,6 +1141,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
          cache: installation.cache,
          usage_guarantees: installation.usage_guarantees,
          timeout_ms: timeout_ms,
+         cleanup_timeout_ms: cleanup_timeout_ms,
          max_heap_words: max_heap_words,
          adapter: adapter
        }}
@@ -1185,6 +1189,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   # The doctor connectivity deadline remains the outer `BoundedWorker` bound;
   # the probe does not participate in the ordinary whole-call LLM clock.
   defp run_llm_connectivity_probe(probe, admission) do
+    deadline = System.monotonic_time(:millisecond) + probe.timeout_ms
     binding = %{credential: probe.credential, cache: probe.cache}
 
     case PtcRunner.LLM.callback(probe.prepared_model, binding) do
@@ -1193,7 +1198,6 @@ defmodule PtcRunner.Kernel.HostInstallation do
           BoundedWorker.run(
             fn ->
               request = %{messages: [%{role: :user, content: "Health check."}]}
-              deadline = System.monotonic_time(:millisecond) + probe.timeout_ms
 
               if is_nil(admission) do
                 requester.(request, %{llm_request_deadline_ms: deadline})
@@ -1202,11 +1206,14 @@ defmodule PtcRunner.Kernel.HostInstallation do
                   admission,
                   requester,
                   request,
-                  %{llm_request_deadline_ms: deadline}
+                  %{
+                    llm_request_deadline_ms: deadline,
+                    provider_cleanup_timeout_ms: probe.cleanup_timeout_ms
+                  }
                 )
               end
             end,
-            timeout_ms: probe.timeout_ms,
+            timeout_ms: probe.timeout_ms + probe.cleanup_timeout_ms,
             max_heap_words: probe.max_heap_words,
             cancel_with_caller: true
           )
@@ -1554,6 +1561,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
        when is_integer(deadline) or is_nil(deadline) do
     %{llm_request_deadline_ms: deadline}
     |> maybe_put_provider_call_admission(context)
+    |> maybe_put_provider_run_state(context)
   end
 
   defp llm_requester_context(_context), do: %{llm_request_deadline_ms: nil}
@@ -1563,6 +1571,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
        do: Map.put(context, :provider_call_admission, admission)
 
   defp maybe_put_provider_call_admission(context, _requester_context), do: context
+
+  defp maybe_put_provider_run_state(context, %{provider_run_state: run_state}),
+    do: Map.put(context, :provider_run_state, run_state)
+
+  defp maybe_put_provider_run_state(context, _requester_context), do: context
 
   defp maybe_put_cleanup_timeout(context, timeout_ms)
        when is_integer(timeout_ms) and timeout_ms > 0,

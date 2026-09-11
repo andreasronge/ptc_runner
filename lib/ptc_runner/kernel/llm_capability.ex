@@ -139,6 +139,7 @@ defmodule PtcRunner.Kernel.LLMCapability do
        when is_integer(deadline) or is_nil(deadline) do
     %{llm_request_deadline_ms: deadline}
     |> maybe_put_admission(context)
+    |> maybe_put_run_state(context)
   end
 
   defp requester_context(_context), do: %{llm_request_deadline_ms: nil}
@@ -147,6 +148,11 @@ defmodule PtcRunner.Kernel.LLMCapability do
     do: Map.put(context, :provider_call_admission, admission)
 
   defp maybe_put_admission(context, _source), do: context
+
+  defp maybe_put_run_state(context, %{provider_run_state: run_state}),
+    do: Map.put(context, :provider_run_state, run_state)
+
+  defp maybe_put_run_state(context, _source), do: context
 
   defp invoke(requester, request, context, response_limit, usage_guarantees)
        when is_function(requester, 2) do

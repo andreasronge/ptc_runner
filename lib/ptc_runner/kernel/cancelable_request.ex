@@ -20,18 +20,21 @@ defmodule PtcRunner.Kernel.CancelableRequest do
     owner = self()
 
     {pid, monitor} =
-      spawn_monitor(fn ->
-        owner_monitor = Process.monitor(owner)
+      :erlang.spawn_opt(
+        fn ->
+          owner_monitor = Process.monitor(owner)
 
-        receive do
-          {:dispatch, ^gate} ->
-            result = requester.(request, context)
-            send(owner, {:cancelable_request_result, gate, result})
+          receive do
+            {:dispatch, ^gate} ->
+              result = requester.(request, context)
+              send(owner, {:cancelable_request_result, gate, result})
 
-          {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
-            :ok
-        end
-      end)
+            {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
+              :ok
+          end
+        end,
+        [:link, :monitor]
+      )
 
     {:ok, %__MODULE__{pid: pid, monitor: monitor, gate: gate, owner: owner}}
   rescue
@@ -91,6 +94,7 @@ defmodule PtcRunner.Kernel.CancelableRequest do
   @spec cancel_and_drain(t(), integer()) :: :drained | :uncertain
   def cancel_and_drain(%__MODULE__{owner: owner, pid: pid, monitor: monitor}, deadline)
       when owner == self() and is_integer(deadline) do
+    Process.unlink(pid)
     Process.exit(pid, :kill)
     timeout = max(deadline - System.monotonic_time(:millisecond), 0)
 
