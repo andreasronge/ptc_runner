@@ -3153,6 +3153,41 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "doctor resolves a path-shaped stdio command from the host document", %{
+    tmp_dir: directory
+  } do
+    probe_directory = Path.join(directory, "probe")
+    host_directory = Path.join(directory, "config")
+    File.mkdir!(probe_directory)
+    File.mkdir!(host_directory)
+
+    executable = Path.join(probe_directory, "wiretap.sh")
+    File.write!(executable, "#!/bin/sh\nexit 0\n")
+    File.chmod!(executable, 0o755)
+
+    host_path =
+      write_host_config(
+        host_directory,
+        "doctor-relative-command",
+        stdio_host_config("../probe/wiretap.sh", System.find_executable("sh"), ".")
+      )
+
+    application =
+      doctor_application(directory, "selects-relative-command", mission: ["workspace"])
+
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare(["doctor", application, "--host-config", host_path])
+
+    assert %{"status" => "pass", "code" => "available"} =
+             Enum.find(
+               outcome.envelope["result"]["checks"],
+               &(&1["name"] == "provider/workspace/local")
+             )
+
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
   test "default doctor reports a missing stdio command as a failed local check", %{
     tmp_dir: directory
   } do

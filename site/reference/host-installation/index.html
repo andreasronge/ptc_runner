@@ -365,8 +365,10 @@ while <code class="inline">calls</code> increments, and <code class="inline">cap
 model and may incur provider cost; the readiness report's <code class="inline">usage</code> field
 attributes what each probe spent, on the rows a run reports. <code class="inline">--show-model-selectors</code> adds only safe
 selectors; endpoint-bearing <code class="inline">openai-compat:</code> selectors remain hidden. <code class="inline">ptc models</code> reports the same <code class="inline">model_selector</code> field under the same rule, without a
-flag and without reading the application.</p><h3 id="resolve-local-transport-paths">Resolve local transport paths</h3><p>Stdio <code class="inline">cwd</code> and relative command arguments resolve from the host document, not
-from PtcRunner's source checkout and not from the shell's current directory.
+flag and without reading the application.</p><h3 id="resolve-local-transport-paths">Resolve local transport paths</h3><p>Stdio path-shaped <code class="inline">command</code> values, <code class="inline">cwd</code>, and relative command arguments resolve
+from the host document, not from PtcRunner's source checkout and not from the
+shell's current directory. A bare <code class="inline">command</code> such as <code class="inline">node</code> is found on the
+inherited <code class="inline">PATH</code>; an absolute <code class="inline">command</code> is used directly.
 For an application in a separate repository, keep its MCP server bundle in
 that repository (for example <code class="inline">tools/files/server.js</code>) and use a host-relative
 path, or install the server executable at a stable absolute location. A
