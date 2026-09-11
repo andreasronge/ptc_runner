@@ -1,4 +1,7 @@
 defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
+  # async: false — ten cases kill and restart the named ManagerCleanup application child, and
+  # deadlines of 1-2 s are asserted on expiry (class D, A); the other 18 could run async in a
+  # sibling module.
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.Deadline

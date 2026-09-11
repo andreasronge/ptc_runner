@@ -31,6 +31,8 @@ defmodule PtcRunner.Soak.CredentialLeaseSoakTest do
   behaviour rather than a churn property.
   """
 
+  # async: false — measures VM-wide counters (processes, ETS, atoms, memory) that any concurrent
+  # test would perturb (class D).
   use ExUnit.Case, async: false
 
   @moduletag :soak

@@ -1,4 +1,6 @@
 defmodule PtcRunner.Kernel.MCPAddressResolverTest do
+  # async: false — one case flips :erlang.system_flag(:schedulers_online, 1) for the whole VM
+  # (class D); the other 3 could run async in a sibling module.
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.MCPAddressResolver

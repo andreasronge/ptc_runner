@@ -1,4 +1,6 @@
 defmodule PtcRunner.Lisp.ConformanceRunnerTest do
+  # async: false — drives the Babashka subprocess with a wall-clock budget (class C); serialized so
+  # load from other tests cannot spend it.
   use ExUnit.Case, async: false
 
   alias PtcRunner.Lisp.ClojureValidator

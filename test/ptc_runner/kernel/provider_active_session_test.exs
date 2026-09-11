@@ -1,4 +1,6 @@
 defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
+  # async: false — nine cases stop and restart :req_llm and :llm_db and set persistent ReqLLM pool
+  # app env (class D); the other 32 could run async in a sibling module.
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.ApplicationPackage

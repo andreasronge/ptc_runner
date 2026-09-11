@@ -1,4 +1,6 @@
 defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
+  # async: false — six cases trace :new_processes VM-wide, stop and restart :req_llm, or mutate the
+  # OS environment (class D); the other 8 could run async in a sibling module.
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.ApplicationPackage

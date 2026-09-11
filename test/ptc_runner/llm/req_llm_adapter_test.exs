@@ -1,4 +1,6 @@
 defmodule PtcRunner.LLM.ReqLLMAdapterTest do
+  # async: false — setup_all starts :req_llm and stops it on exit, which is VM-wide application
+  # state (class D).
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.Dispatcher

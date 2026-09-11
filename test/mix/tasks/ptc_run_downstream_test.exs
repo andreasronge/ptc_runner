@@ -1,4 +1,6 @@
 defmodule Mix.Tasks.Ptc.RunDownstreamTest do
+  # async: false — waits on real mix subprocesses that share the fixed _build/downstream_consumer
+  # cache (class C).
   use ExUnit.Case, async: false
 
   @root Path.expand("../../..", __DIR__)

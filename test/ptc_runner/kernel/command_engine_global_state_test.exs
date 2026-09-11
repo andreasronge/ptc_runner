@@ -1,4 +1,6 @@
 defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
+  # async: false — the extracted bucket for CommandEngine cases that mutate app env, OS env, cwd, or
+  # :persistent_term (class D).
   use ExUnit.Case, async: false
 
   import PtcRunner.TestSupport.CommandEngineFixtures

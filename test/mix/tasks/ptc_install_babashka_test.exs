@@ -1,4 +1,5 @@
 defmodule Mix.Tasks.Ptc.InstallBabashkaTest do
+  # async: false — reenables a Mix task, mutating the global Mix.TasksServer run-state (class D).
   use ExUnit.Case, async: false
 
   alias Mix.Tasks.Ptc.InstallBabashka

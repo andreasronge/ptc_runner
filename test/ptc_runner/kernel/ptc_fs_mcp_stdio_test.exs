@@ -4,6 +4,8 @@ defmodule PtcRunner.Kernel.PtcFsMCPStdioTest do
   published `ptc-fs-mcp` package over a hermetic spawn.
   """
 
+  # async: false — live end-to-end run against real providers or servers (class C); serialized so
+  # its wall-clock budget and rate limits are its own.
   use ExUnit.Case, async: false
 
   @moduletag :e2e

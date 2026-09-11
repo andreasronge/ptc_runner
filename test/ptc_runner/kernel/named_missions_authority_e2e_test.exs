@@ -12,6 +12,8 @@ defmodule PtcRunner.Kernel.NamedMissionsAuthorityE2ETest do
   host-owned, so declaring one mapping `write` is a host statement about
   authority, not a claim about what the server does.
   """
+  # async: false — live end-to-end run against real providers or servers (class C); serialized so
+  # its wall-clock budget and rate limits are its own.
   use ExUnit.Case, async: false
 
   @moduletag :e2e

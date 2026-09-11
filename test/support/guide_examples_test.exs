@@ -1,4 +1,6 @@
 defmodule PtcRunner.TestSupport.GuideExamplesTest do
+  # async: false — runs bash subprocesses (32 at once) from the repo cwd and sets an OS env var
+  # (class C, D).
   use ExUnit.Case, async: false
 
   alias PtcRunner.TestSupport.GuideExamples

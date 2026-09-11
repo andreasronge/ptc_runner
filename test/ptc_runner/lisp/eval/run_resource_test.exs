@@ -1,4 +1,6 @@
 defmodule PtcRunner.Lisp.Eval.RunResourceTest do
+  # async: false — a VM-global :erlang.trace_pattern on RunResources.new_counter/0 backs an
+  # exact-count assertion (class D).
   use ExUnit.Case, async: false
 
   alias PtcRunner.Lisp

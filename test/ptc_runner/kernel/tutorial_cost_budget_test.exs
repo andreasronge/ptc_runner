@@ -1,4 +1,6 @@
 defmodule PtcRunner.Kernel.TutorialCostBudgetTest do
+  # async: false — stops and restarts the :req_llm and :llm_db applications and their persistent app
+  # env (class D).
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.CommandEngine

@@ -1,4 +1,6 @@
 defmodule PtcRunner.Kernel.ProviderApplicationAdmissionTest do
+  # async: false — admits the provider application, setting VM-global persistent ReqLLM pool app env
+  # (class D).
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.Limits

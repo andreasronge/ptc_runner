@@ -32,6 +32,8 @@ defmodule PtcRunner.AtomLeakSoakTest do
       PTC_SOAK_ITERATIONS=1000 \\
         mix test --only soak test/soak/atom_leak_soak_test.exs
   """
+  # async: false — measures VM-wide counters (processes, ETS, atoms, memory) that any concurrent
+  # test would perturb (class D).
   use ExUnit.Case, async: false
 
   alias PtcRunner.Lisp

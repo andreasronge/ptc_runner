@@ -1,6 +1,5 @@
 defmodule PtcRunner.DotenvTest do
-  # async: false — these tests mutate the real process environment and the
-  # current working directory.
+  # async: false — load_file/1 writes the real OS process environment, which is VM-global (class D).
   use ExUnit.Case, async: false
 
   alias PtcRunner.Dotenv

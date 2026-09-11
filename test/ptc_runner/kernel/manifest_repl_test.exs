@@ -1,4 +1,7 @@
 defmodule PtcRunner.Kernel.ManifestReplTest do
+  # async: false — ten cases poison a :persistent_term attestation key, set app env, or assert the
+  # VM-wide set of provider owner processes (class D); the other 16 could run async in a sibling
+  # module.
   use ExUnit.Case, async: false
 
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]

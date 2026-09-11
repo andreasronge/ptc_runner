@@ -1,4 +1,6 @@
 defmodule PtcRunner.LLM.PtcLlmHttpSmokeTest do
+  # async: false — a 5 s stream deadline spans several blocking handshakes and capacity slots are
+  # asserted mid-stream (class A); no VM-global state.
   use ExUnit.Case, async: false
 
   alias PtcLlmHttp.{Credential, Deadline, Error, ProcessBudget, Request, Runtime, Target}

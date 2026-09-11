@@ -1,4 +1,6 @@
 defmodule Mix.Tasks.Ptc.MaterializeTest do
+  # async: false — every case reenables and runs a Mix task, sharing the global Mix.TasksServer
+  # state (class D).
   use ExUnit.Case, async: false
 
   @moduledoc """

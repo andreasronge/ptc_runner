@@ -24,6 +24,8 @@ defmodule PtcRunner.Soak.ReplSessionSoakTest do
   silently verify nothing. This captures the owner from the table entry.
   """
 
+  # async: false — measures VM-wide counters (processes, ETS, atoms, memory) that any concurrent
+  # test would perturb (class D).
   use ExUnit.Case, async: false
 
   @moduletag :soak

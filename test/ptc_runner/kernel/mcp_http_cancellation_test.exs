@@ -1,4 +1,6 @@
 defmodule PtcRunner.Kernel.MCPHTTPCancellationTest do
+  # async: false — asserts kill/DOWN ordering and inspects a dying process's links under a 250 ms
+  # request timeout that contention would spend (class B, A).
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.Limits

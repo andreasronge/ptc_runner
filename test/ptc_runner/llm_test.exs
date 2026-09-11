@@ -1,7 +1,6 @@
 defmodule PtcRunner.LLMTest do
-  # async: false because tests mutate `Application.put_env(:ptc_runner,
-  # :llm_adapter, ...)` which is global. Under async: true a concurrent
-  # test can clobber the adapter mid-run.
+  # async: false — setup sets the :ptc_runner :llm_adapter app env for every case, which is
+  # VM-global (class D).
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.ModelContractDiagnostic

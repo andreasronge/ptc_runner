@@ -1,4 +1,6 @@
 defmodule PtcRunner.Kernel.ReplTraceLifecycleTest do
+  # async: false — one case changes the VM's cwd with File.cd! so a relative trace path binds to the
+  # invocation directory (class D); the other 6 could run async in a sibling module.
   use ExUnit.Case, async: false
 
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]

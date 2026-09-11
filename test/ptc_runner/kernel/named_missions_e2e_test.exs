@@ -6,6 +6,8 @@ defmodule PtcRunner.Kernel.NamedMissionsE2ETest do
   against a named space sees only that space's API and commits only into that
   space's continuation.
   """
+  # async: false — the :e2e setup stops and restarts :req_llm and :llm_db and loads .env into the OS
+  # environment (class D); the one non-e2e case only compiles a bundle.
   use ExUnit.Case, async: false
 
   @moduletag timeout: 180_000

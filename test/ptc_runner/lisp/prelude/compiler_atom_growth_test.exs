@@ -1,4 +1,6 @@
 defmodule PtcRunner.Lisp.Prelude.CompilerAtomGrowthTest do
+  # async: false — asserts :erlang.system_info(:atom_count) is unchanged across compiles; the atom
+  # table is VM-wide (class D).
   use ExUnit.Case, async: false
 
   alias PtcRunner.Lisp.Prelude.Compiler

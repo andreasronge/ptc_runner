@@ -7,6 +7,8 @@ defmodule PtcRunner.StandaloneCLIPipeTest do
   and that is the only entry that crash-dumps 3/3 today.
   """
 
+  # async: false — drives a real Mix/OS subprocess with a multi-second budget (class C); serialized
+  # so load from other tests cannot spend it.
   use ExUnit.Case, async: false
 
   @root Path.expand("../..", __DIR__)

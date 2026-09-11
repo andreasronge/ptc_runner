@@ -1,5 +1,7 @@
 defmodule PtcRunner.LiveStatusTest do
-  # async: false — mutates the PTC_VIEWER_URL environment variable.
+  # async: false — three cases set PTC_VIEWER_URL and PTC_VIEWER_TOKEN, which every Kernel.run in
+  # the VM reads, and one asserts elapsed time (class D, A); the other 18 could run async in a
+  # sibling module.
   use ExUnit.Case, async: false
 
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]

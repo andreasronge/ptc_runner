@@ -1,4 +1,6 @@
 defmodule PtcRunner.Kernel.ResultArtifactTest do
+  # async: false — four cases change the VM's cwd and repoint PATH at a wrapper bin to probe the
+  # mkdir helper (class D); the other 5 are :tmp_dir-only.
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.DeterministicJSON

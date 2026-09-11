@@ -4,6 +4,8 @@ defmodule PtcRunner.CLILoggerTest do
   doctor JSON report remains parseable when OTP logs a TLS alert (#1583).
   """
 
+  # async: false — replaces the VM-global :default logger handler and the global Logger level
+  # (class D).
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureIO

@@ -1,8 +1,7 @@
 defmodule PtcRunner.Kernel.MCPSourceTest do
-  # This integration suite uses real TCP requests and intentionally exercises
-  # short request deadlines. Running it beside unrelated async suites makes
-  # scheduler and connection-pool contention part of those deadlines, causing
-  # valid fixture responses to be reported intermittently as `:mcp_timeout`.
+  # async: false — real loopback TCP plus 100-900 ms request deadlines that scheduler and pool
+  # contention turn into :mcp_timeout (class A); no VM-global state, so async: true once the
+  # deadlines are held paths.
   use ExUnit.Case, async: false
 
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]

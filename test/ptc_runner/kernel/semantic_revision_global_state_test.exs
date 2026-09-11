@@ -1,4 +1,6 @@
 defmodule PtcRunner.Kernel.SemanticRevisionGlobalStateTest do
+  # async: false — :persistent_term.put and :erlang.system_flag(:schedulers_online) are VM-global
+  # (class D).
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.SemanticRevision
