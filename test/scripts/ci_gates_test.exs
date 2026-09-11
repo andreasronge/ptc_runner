@@ -277,16 +277,22 @@ defmodule PtcRunner.Scripts.CIGatesTest do
       %{marker: marker} = fake = fake_mix()
       out = Path.join(Path.dirname(marker), "hunt")
 
-      for _hunt <- 1..2 do
+      for runs <- ["3", "2"] do
         {output, status} =
           run_gate(@flake_hunt, fake,
-            args: ["2", "--out", out],
+            args: [runs, "--out", out],
             env: [{"MIX_RUN_RECORD", @passing_record}]
           )
 
         assert status == 0, output
-        assert output =~ "flake-hunt: 2 runs, 4 schedulers, 0 with failures"
+        assert output =~ "flake-hunt: #{runs} runs, 4 schedulers, 0 with failures"
       end
+
+      assert out
+             |> Path.join("run-*.log")
+             |> Path.wildcard()
+             |> Enum.map(&Path.basename/1)
+             |> Enum.sort() == ["run-1.log", "run-2.log"]
 
       assert File.read!(Path.join(out, "runs.jsonl"))
              |> String.split("\n", trim: true)
