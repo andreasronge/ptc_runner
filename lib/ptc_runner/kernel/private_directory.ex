@@ -265,6 +265,23 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
 
   def parent_fault(_path), do: :none
 
+  @doc false
+  @spec resolved_parent(binary()) :: {:ok, binary()} | :error
+  def resolved_parent(path) when is_binary(path) do
+    with {:ok, id} <- authority_executable(),
+         {:ok, uid} <- read_authority_uid(id),
+         {:ok, anchored} <- anchor(path),
+         {:ok, parent} <- locate_parent_fault(anchored, uid) do
+      {:ok, parent}
+    else
+      _unavailable_or_unsafe -> :error
+    end
+  rescue
+    _exception -> :error
+  end
+
+  def resolved_parent(_path), do: :error
+
   # Ownership and mode are separate refusals with separate remedies: `chmod`
   # cannot fix a directory another user owns, and a foreign owner is not made
   # safe by narrowing its mode.

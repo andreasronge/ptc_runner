@@ -62,8 +62,16 @@ defmodule PtcRunner.Kernel.ArtifactRootDiagnostic do
      {:publication_failed,
       "#{shown(path)} is not writable by its owner; the artifact root's parent must be " <>
         "writable; " <>
-        remedy("chmod u+w", path, "make it owner-writable") <>
+        remedy("chmod u+wx", path, "make it owner-writable and searchable") <>
         " or point artifacts.root elsewhere"}}
+  end
+
+  def describe({:project_artifact_root_parent_creation_refused, path}) when is_binary(path) do
+    {:ok,
+     {:publication_failed,
+      "#{shown(path)} refused creation of the artifact root even though its mode permits it; " <>
+        "the filesystem must allow creating directories there; point artifacts.root to a " <>
+        "writable filesystem"}}
   end
 
   def describe({:project_artifact_root_not_owner_only, path}) when is_binary(path) do

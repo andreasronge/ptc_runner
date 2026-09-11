@@ -16,6 +16,7 @@ defmodule PtcRunner.Kernel.ProjectArtifactRoot do
           | {:project_artifact_root_parent_unsafe_mode, binary()}
           | {:project_artifact_root_parent_foreign_owner, binary()}
           | {:project_artifact_root_parent_unwritable, binary()}
+          | {:project_artifact_root_parent_creation_refused, binary()}
 
   @spec ensure_for(CommandArguments.t()) :: :ok | {:error, ensure_error()}
   def ensure_for(%CommandArguments{
@@ -49,7 +50,7 @@ defmodule PtcRunner.Kernel.ProjectArtifactRoot do
   def ensure(_root), do: {:error, :project_artifact_root_invalid}
 
   defp create(root), do: create(root, @attempts)
-  defp create(_root, 0), do: {:error, :project_artifact_root_invalid}
+  defp create(root, 0), do: creation_refused(root)
 
   defp create(root, attempts) do
     with :ok <- PrivateDirectory.preflight(root),
@@ -62,6 +63,13 @@ defmodule PtcRunner.Kernel.ProjectArtifactRoot do
     else
       {:error, :private_directory_creation_failed} -> create(root, attempts - 1)
       {:error, _reason} -> parent_failure(root)
+    end
+  end
+
+  defp creation_refused(root) do
+    case PrivateDirectory.resolved_parent(root) do
+      {:ok, parent} -> {:error, {:project_artifact_root_parent_creation_refused, parent}}
+      :error -> {:error, :project_artifact_root_invalid}
     end
   end
 

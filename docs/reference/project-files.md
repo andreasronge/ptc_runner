@@ -147,7 +147,8 @@ back to the generic publication failure:
 | an ancestor is owned by another user | `envelope/destination_parent_unsafe` | point `artifacts.root` under a directory you own |
 | the root exists without its four children, at any mode | `envelope/publication_failed` | remove the root and let `ptc` recreate it |
 | the complete root or a child exists at a wider mode | `envelope/publication_failed` | `chmod 700 PATH` |
-| the root's parent is not writable by its owner | `envelope/publication_failed` | `chmod u+w PATH`, or point `artifacts.root` elsewhere |
+| the root's parent is not writable and searchable by its owner | `envelope/publication_failed` | `chmod u+wx PATH`, or point `artifacts.root` elsewhere |
+| the filesystem refuses creation despite writable mode bits, such as on a read-only mount | `envelope/publication_failed` | point `artifacts.root` at a writable filesystem |
 | any other refusal | `envelope/publication_failed` | point `artifacts.root` elsewhere |
 
 The missing-ancestor message names the shallowest missing directory and offers

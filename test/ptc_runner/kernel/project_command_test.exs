@@ -446,7 +446,7 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     assert presentation.stderr =~ "envelope/publication_failed"
     assert presentation.stderr =~ "#{inspect(parent)} is not writable by its owner"
     assert presentation.stderr =~ "artifact root's parent must be writable"
-    assert presentation.stderr =~ "chmod u+w '#{parent}'"
+    assert presentation.stderr =~ "chmod u+wx '#{parent}'"
   end
 
   @tag :tmp_dir
@@ -466,7 +466,7 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     assert presentation.exit_status == 7
     assert presentation.stderr =~ "destination/invalid_destination"
     assert presentation.stderr =~ "#{inspect(parent)} is not writable by its owner"
-    assert presentation.stderr =~ "chmod u+w '#{parent}'"
+    assert presentation.stderr =~ "chmod u+wx '#{parent}'"
   end
 
   # Past a dangling symlink the shallowest missing path is the link's target,
