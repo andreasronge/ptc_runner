@@ -196,6 +196,12 @@ independently, so a completed run retains its ledger record even when the copy
 cannot be written. Trace, inspection, and result overrides still replace their
 project defaults.
 
+The command reserves an explicit `--envelope` destination before bootstrap. A
+syntactically valid path that the filesystem cannot reserve is reported as
+`destination/envelope_destination_unavailable` at exit 7, with the resolved
+path and a bounded reason such as `eacces`, `enospc`, `edquot`, or `erofs`.
+Invalid path syntax remains an argument error at exit 2.
+
 Mission selection, input, and component-override switches remain
 invocation-only. Mission names stay in the application manifest rather than
 being duplicated as project defaults. An environment file explicitly selected

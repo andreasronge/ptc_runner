@@ -167,7 +167,8 @@ defmodule PtcRunner.Kernel.CommandFrontend do
     render_options = [
       named_env_file: named_env_file?,
       application_path: terminal_application_path(entry.arguments),
-      artifact_destinations: entry.destinations
+      artifact_destinations: entry.destinations,
+      envelope_destination_failure: entry.envelope_destination_failure
     ]
 
     case CommandRenderer.render(outcome, rejection, render_options) do

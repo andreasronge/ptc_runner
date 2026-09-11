@@ -35,6 +35,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
     :rejection,
     :envelope_path,
     :envelope_handle,
+    :envelope_destination_failure,
     :destinations
   ]
   defstruct @enforce_keys
@@ -47,6 +48,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
           rejection: CommandRejection.t() | nil,
           envelope_path: binary() | nil,
           envelope_handle: %PublicationHandle{} | nil,
+          envelope_destination_failure: {binary(), atom()} | nil,
           destinations: {map(), [atom()]} | nil
         }
 
@@ -218,6 +220,17 @@ defmodule PtcRunner.Kernel.CommandEntry do
                CommandRejection.envelope_destination_exists(arguments.command, frontend)
              )}
 
+          {:error, {:destination_unavailable, reason}} ->
+            {:error,
+             destination_failed(
+               arguments,
+               destinations,
+               run_ref,
+               frontend,
+               envelope,
+               reason
+             )}
+
           {:error, {:destination_collision, key}} ->
             destination_collision(arguments, run_ref, frontend, key, :envelope)
 
@@ -239,13 +252,13 @@ defmodule PtcRunner.Kernel.CommandEntry do
     case PublicationHandle.reserve(path, :result, 0o600) do
       {:ok, handle} -> {:ok, handle}
       {:error, :destination_exists} -> {:error, :destination_exists}
-      {:error, _reason} -> reserve_unavailable_envelope(arguments, path)
+      {:error, reason} -> reserve_unavailable_envelope(arguments, path, reason)
     end
   end
 
   # A derived ledger path is owned by project artifact admission. Explicit
   # destinations must hold a claim before bootstrap, including on a fresh project.
-  defp reserve_unavailable_envelope(arguments, path) do
+  defp reserve_unavailable_envelope(arguments, path, reason) do
     case arguments.project do
       %{derived_options: derived, config: %{artifact_root: root}} ->
         cond do
@@ -258,17 +271,40 @@ defmodule PtcRunner.Kernel.CommandEntry do
               {:ok, handle}
             else
               {:error, :destination_exists} -> {:error, :destination_exists}
-              _failure -> {:error, :invalid_destination}
+              {:error, retry_reason} -> {:error, {:destination_unavailable, retry_reason}}
             end
 
           true ->
-            {:error, :invalid_destination}
+            {:error, {:destination_unavailable, reason}}
         end
 
       _other ->
-        {:error, :invalid_destination}
+        {:error, {:destination_unavailable, reason}}
     end
   end
+
+  defp destination_failed(arguments, destinations, run_ref, frontend, path, reason) do
+    %__MODULE__{
+      run_ref: run_ref,
+      frontend: frontend,
+      arguments: arguments,
+      diagnostic: CommandDiagnostic.new!(:destination, :envelope_destination_unavailable),
+      rejection: nil,
+      envelope_path: nil,
+      envelope_handle: nil,
+      envelope_destination_failure: {path, destination_failure_reason(path, reason)},
+      destinations: destinations
+    }
+  end
+
+  defp destination_failure_reason(path, :private_directory_parent_unavailable) do
+    case PrivateDirectory.parent_fault(path) do
+      {:missing, _missing, _parent} -> :enoent
+      _present_or_unknown -> :eacces
+    end
+  end
+
+  defp destination_failure_reason(_path, reason), do: reason
 
   @doc false
   @spec release(t()) :: :ok
@@ -453,6 +489,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
       rejection: nil,
       envelope_path: envelope_path,
       envelope_handle: envelope_handle,
+      envelope_destination_failure: nil,
       destinations: destinations
     }
   end
@@ -466,6 +503,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
       rejection: rejection,
       envelope_path: nil,
       envelope_handle: nil,
+      envelope_destination_failure: nil,
       destinations: nil
     }
   end

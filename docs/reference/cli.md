@@ -643,6 +643,7 @@ Embedding runtimes can supply authorization targets directly.
 | 6 | `execution` | `runtime_limit_exceeded` | no | a runtime limit was exceeded |
 | 6 | `execution` | `turn_limit_exceeded` | no | the agent turn limit was exceeded |
 | 7 | `destination` | `destination_exists` | no | an artifact destination already exists |
+| 7 | `destination` | `envelope_destination_unavailable` | no | the envelope destination is unavailable |
 | 7 | `destination` | `inspection_destination_unavailable` | no | the inspection destination is unavailable |
 | 7 | `destination` | `inspection_destination_unsafe` | no | the inspection destination is unsafe |
 | 7 | `destination` | `inspection_directory_missing` | no | --inspect must name a file in an existing directory |

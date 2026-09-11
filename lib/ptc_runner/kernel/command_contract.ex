@@ -1193,6 +1193,18 @@ defmodule PtcRunner.Kernel.CommandContract do
        when code in @destination_codes,
        do: true
 
+  defp diagnostic_pair_allowed?(mode, :destination, :envelope_destination_unavailable)
+       when mode in [
+              :init,
+              :validate,
+              :models,
+              :doctor,
+              {:doctor, :connect},
+              :materialize,
+              :transcript
+            ],
+       do: true
+
   defp diagnostic_pair_allowed?(mode, :bundle, code)
        when mode in [:validate, :doctor, {:doctor, :connect}, :run_unclassified, :materialize] and
               code in @bundle_codes,

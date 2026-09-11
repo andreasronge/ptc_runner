@@ -174,8 +174,35 @@ defmodule PtcRunner.Kernel.CommandRenderer do
 
   defp failure_line(diagnostic, run_ref, rejection, opts) do
     {:ok, rendered} = CommandDiagnosticRenderer.render_with_run_ref(diagnostic, run_ref, opts)
-    "error: " <> rendered <> rejection_suffix(rejection) <> "\n"
+
+    "error: " <>
+      rendered <>
+      envelope_destination_suffix(opts) <> rejection_suffix(rejection) <> "\n"
   end
+
+  defp envelope_destination_suffix(opts) do
+    case Keyword.get(opts, :envelope_destination_failure) do
+      {path, reason} when is_binary(path) and is_atom(reason) ->
+        "; --envelope #{inspect(path)}: " <> filesystem_reason(reason)
+
+      _other ->
+        ""
+    end
+  end
+
+  defp filesystem_reason(:eacces), do: "permission denied (eacces)"
+  defp filesystem_reason(:eperm), do: "operation not permitted (eperm)"
+  defp filesystem_reason(:enospc), do: "no space left on device (enospc)"
+  defp filesystem_reason(:edquot), do: "storage quota exceeded (edquot)"
+  defp filesystem_reason(:erofs), do: "read-only filesystem (erofs)"
+
+  defp filesystem_reason(reason)
+       when reason in [:enoent, :destination_directory_missing],
+       do: "parent directory is missing (enoent)"
+
+  defp filesystem_reason(:enotdir), do: "a parent path is not a directory (enotdir)"
+  defp filesystem_reason(:enametoolong), do: "path is too long (enametoolong)"
+  defp filesystem_reason(_reason), do: "filesystem destination is unavailable"
 
   defp evaluation_line(%{
          "execution" => %{
