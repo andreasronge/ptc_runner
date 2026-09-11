@@ -61,7 +61,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   @doc false
   def cleanup_snapshot(%__MODULE__{outcome: outcome}) do
     case :ets.lookup(outcome.details, :stderr) do
-      [{:stderr, details}] -> details
+      [{:stderr, %{stderr: stderr} = details}] -> %{details | stderr: Utf8.sanitize(stderr)}
       [] -> %{}
     end
   rescue
@@ -1125,11 +1125,9 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   end
 
   defp record_stderr_snapshot(state) do
-    {stderr, truncated?, _state} = drain_stderr(state)
-
     :ets.insert(
       state.outcome.details,
-      {:stderr, %{stderr: stderr, stderr_truncated?: truncated?}}
+      {:stderr, %{stderr: state.stderr, stderr_truncated?: state.stderr_truncated?}}
     )
 
     state
@@ -1144,9 +1142,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   end
 
   defp drain_stderr(state) do
-    text = Utf8.truncate_valid(state.stderr, state.stderr_limit)
-    rest = binary_part(state.stderr, byte_size(text), byte_size(state.stderr) - byte_size(text))
-
+    {text, rest} = Utf8.sanitize_complete(state.stderr)
     {text, false, %{state | stderr: rest, stderr_truncated?: false}}
   end
 

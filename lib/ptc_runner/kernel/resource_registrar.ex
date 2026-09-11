@@ -158,7 +158,7 @@ defmodule PtcRunner.Kernel.ResourceRegistrar do
   # Omitting it made every caller's match on that reason unreachable to the type
   # checker, which is how the branch that reports an unreleased resource came to
   # look like dead code.
-  @spec commit(t(), (-> term()) | nil) ::
+  @spec commit(t(), (-> term()) | PtcRunner.Kernel.ProviderCleanup.t() | nil) ::
           :ok | {:error, :resource_registrar_unavailable | :provider_cleanup_failed}
   def commit(%__MODULE__{} = registrar, close)
       when is_function(close, 0) or is_nil(close) or

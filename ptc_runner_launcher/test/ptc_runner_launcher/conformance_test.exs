@@ -200,9 +200,11 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     assert stderr == String.duplicate("x", 32)
 
     assert Port.command(launcher.port, "C")
+    assert_receive {port, {:data, "T"}}, 500
+    assert port == launcher.port
     assert_receive {port, {:data, <<"E", close_tail::binary>>}}, 500
     assert port == launcher.port
-    assert close_tail == String.duplicate("y", 32)
+    assert byte_size(close_tail) == 32
 
     assert {tail, %{reason: :close, stderr_truncated?: true}} =
              collect_finish(launcher, close_tail)

@@ -3,6 +3,7 @@ defmodule PtcRunner.CLIProgress do
   use GenServer
 
   alias PtcRunner.CLIProgress.Format
+  alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandPresentation
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.LiveStatus.Target
@@ -126,8 +127,22 @@ defmodule PtcRunner.CLIProgress do
   end
 
   @impl GenServer
-  def handle_call({:finish, %CommandPresentation{exit_status: status}}, _from, state) do
+  def handle_call(
+        {:finish, %CommandPresentation{exit_status: status} = presentation},
+        _from,
+        state
+      ) do
     frame = state.last_frame || %{elapsed_ms: state.clock.() - state.started, usage: nil}
+
+    frame =
+      case terminal_reason(presentation) do
+        reason when is_binary(reason) ->
+          frame |> Map.put(:outcome_reason, reason) |> Map.put(:phase, "failed")
+
+        nil ->
+          frame
+      end
+
     event = if status == 0, do: "completed", else: "failed"
     state = terminal(state, frame, event)
     {:stop, :normal, :ok, state}
@@ -136,6 +151,15 @@ defmodule PtcRunner.CLIProgress do
   catch
     _, _ -> {:stop, :normal, :ok, state}
   end
+
+  defp terminal_reason(%CommandPresentation{outcome: %CommandOutcome{} = outcome}) do
+    case CommandOutcome.to_map(outcome) do
+      %{"error" => %{"message" => message}} when is_binary(message) -> message
+      _outcome -> nil
+    end
+  end
+
+  defp terminal_reason(_presentation), do: nil
 
   defp render(%{width: width} = state, frame) when is_integer(width) do
     line = Format.interactive(with_agents(frame), width)
@@ -171,7 +195,7 @@ defmodule PtcRunner.CLIProgress do
   end
 
   defp terminal(state, frame, event) do
-    if milestone_event(frame) == event,
+    if milestone_event(frame) == event and not is_binary(Map.get(frame, :outcome_reason)),
       do: state,
       else: write(state, Format.milestone(frame, event) <> "\n")
   end

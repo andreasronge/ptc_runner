@@ -1013,7 +1013,8 @@ static bool consume_input_frames(
     bool *stdout_ack_pending,
     enum shutdown_phase *phase, enum finish_reason *finish_reason,
     int *child_stdin, uint32_t grace_ms, int64_t *deadline,
-    bool stderr_truncated, size_t stderr_tail_length) {
+    bool stderr_truncated, size_t stderr_tail_length,
+    bool *stderr_snapshot_streaming) {
   size_t consumed = 0;
 
   while (*input_length - consumed >= 4U) {
@@ -1063,8 +1064,12 @@ static bool consume_input_frames(
                *stdout_ack_pending) {
       *stdout_ack_pending = false;
     } else if (input[consumed + 4U] == 'C' && frame_length == 1U) {
-      if (stderr_truncated && !emit_stderr_tail(stderr_tail_length)) {
-        return false;
+      if (stderr_truncated) {
+        if (!emit_frame('T', NULL, 0) ||
+            !emit_stderr_tail(stderr_tail_length)) {
+          return false;
+        }
+        *stderr_snapshot_streaming = true;
       }
       begin_shutdown(phase, finish_reason, FINISH_CLOSE, pending, child_stdin,
                      grace_ms, deadline);
@@ -1087,7 +1092,8 @@ static bool consume_input_frames(
 
 static bool emit_stderr(const uint8_t *bytes, size_t length,
                         uint64_t stderr_limit, uint64_t *stderr_emitted,
-                        bool *stderr_truncated, size_t *stderr_tail_length) {
+                        bool *stderr_truncated, size_t *stderr_tail_length,
+                        bool stderr_snapshot_streaming) {
   size_t allowed = 0;
 
   if (stderr_limit > 0) {
@@ -1118,6 +1124,10 @@ static bool emit_stderr(const uint8_t *bytes, size_t length,
   }
 
   if (allowed > 0 && !emit_frame('E', bytes, allowed)) {
+    return false;
+  }
+
+  if (stderr_snapshot_streaming && !emit_frame('E', bytes, length)) {
     return false;
   }
 
@@ -1448,6 +1458,7 @@ static int supervise(const struct launcher_config *config, pid_t child_pid,
   int64_t deadline = 0;
   uint64_t stderr_emitted = 0;
   bool stderr_truncated = false;
+  bool stderr_snapshot_streaming = false;
   size_t stderr_tail_length = 0;
   bool child_exited = false;
   bool child_reaped = false;
@@ -1553,7 +1564,7 @@ static int supervise(const struct launcher_config *config, pid_t child_pid,
       (void)consume_input_frames(
           input, &input_length, &pending, &stdout_ack_pending, &phase,
           &finish_reason, &child_stdin, config->grace_ms, &deadline,
-          stderr_truncated, stderr_tail_length);
+          stderr_truncated, stderr_tail_length, &stderr_snapshot_streaming);
     }
 
     /*
@@ -1647,7 +1658,7 @@ static int supervise(const struct launcher_config *config, pid_t child_pid,
           (void)consume_input_frames(
               input, &input_length, &pending, &stdout_ack_pending, &phase,
               &finish_reason, &child_stdin, config->grace_ms, &deadline,
-              stderr_truncated, stderr_tail_length);
+              stderr_truncated, stderr_tail_length, &stderr_snapshot_streaming);
         } else if (count == 0) {
           stdout_ack_pending = false;
           begin_shutdown(&phase, &finish_reason, FINISH_OWNER_EOF, &pending,
@@ -1689,7 +1700,7 @@ static int supervise(const struct launcher_config *config, pid_t child_pid,
         if (count > 0) {
           if (!emit_stderr(chunk, (size_t)count, config->stderr_limit,
                            &stderr_emitted, &stderr_truncated,
-                           &stderr_tail_length)) {
+                           &stderr_tail_length, stderr_snapshot_streaming)) {
             begin_shutdown(&phase, &finish_reason, FINISH_OWNER_EOF,
                            &pending, &child_stdin, config->grace_ms,
                            &deadline);
