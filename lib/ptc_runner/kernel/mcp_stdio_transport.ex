@@ -335,6 +335,11 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     {:noreply, record_stderr_snapshot(state)}
   end
 
+  def handle_info({port, {:data, "R"}}, %{port: port} = state) do
+    state = %{state | stderr: ""}
+    {:noreply, record_stderr_snapshot(state)}
+  end
+
   def handle_info({port, {:data, <<"X", finish::binary-size(6)>>}}, %{port: port} = state) do
     case decode_finish(finish) do
       {:ok, finish} -> finish_transport(state, finish)
@@ -1013,7 +1018,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   end
 
   defp finish_transport(state, finish) do
-    {stderr, truncated?, state} = drain_stderr(state)
+    {stderr, truncated?} = diagnostic_stderr(state)
 
     details = %{
       finish_reason: finish.reason,
@@ -1089,7 +1094,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   defp cleanup_details(_reason), do: nil
 
   defp transport_failure(state, finish_reason) do
-    {stderr, truncated?, _state} = drain_stderr(state)
+    {stderr, truncated?} = diagnostic_stderr(state)
 
     {:mcp_transport_error,
      %{
@@ -1144,6 +1149,13 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   defp drain_stderr(state) do
     {text, rest} = Utf8.sanitize_complete(state.stderr)
     {text, false, %{state | stderr: rest, stderr_truncated?: false}}
+  end
+
+  defp diagnostic_stderr(state) do
+    max_bytes = 2_048
+    offset = max(byte_size(state.stderr) - max_bytes, 0)
+    raw = binary_part(state.stderr, offset, byte_size(state.stderr) - offset)
+    {Utf8.sanitize(raw), state.stderr_truncated? or offset > 0}
   end
 
   defp dispatch_request(from, method, params, metadata, max_bytes, timeout_ms, exchange?, state) do

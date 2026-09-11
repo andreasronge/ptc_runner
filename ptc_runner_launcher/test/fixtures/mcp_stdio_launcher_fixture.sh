@@ -31,6 +31,18 @@ case "$1" in
     done
     ;;
 
+  shutdown-stderr)
+    printf xxxxxxxxxxxxxxxx >&2
+    while IFS= read -r _line; do
+      :
+    done
+    index=0
+    while [ "$index" -lt 128 ]; do
+      printf y >&2
+      index=$((index + 1))
+    done
+    ;;
+
   stdout-flood)
     while :; do
       printf 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'

@@ -137,7 +137,14 @@ defmodule PtcRunner.CLIProgress do
     frame =
       case terminal_reason(presentation) do
         reason when is_binary(reason) ->
-          frame |> Map.put(:outcome_reason, reason) |> Map.put(:phase, "failed")
+          already_rendered? =
+            Map.get(frame, :phase) in ["error", "failed"] and
+              Map.get(frame, :outcome_reason) == reason
+
+          frame
+          |> Map.put(:outcome_reason, reason)
+          |> Map.put(:phase, "failed")
+          |> Map.put(:terminal_reason_rendered?, already_rendered?)
 
         nil ->
           frame
@@ -195,9 +202,10 @@ defmodule PtcRunner.CLIProgress do
   end
 
   defp terminal(state, frame, event) do
-    if milestone_event(frame) == event and not is_binary(Map.get(frame, :outcome_reason)),
-      do: state,
-      else: write(state, Format.milestone(frame, event) <> "\n")
+    if Map.get(frame, :terminal_reason_rendered?, false) or
+         (milestone_event(frame) == event and not is_binary(Map.get(frame, :outcome_reason))),
+       do: state,
+       else: write(state, Format.milestone(frame, event) <> "\n")
   end
 
   defp milestone_key(frame), do: {Map.get(frame, :phase), Map.get(frame, :agents)}

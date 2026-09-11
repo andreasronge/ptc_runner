@@ -202,12 +202,34 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     assert Port.command(launcher.port, "C")
     assert_receive {port, {:data, "T"}}, 500
     assert port == launcher.port
+    assert_receive {port, {:data, "R"}}, 500
+    assert port == launcher.port
     assert_receive {port, {:data, <<"E", close_tail::binary>>}}, 500
     assert port == launcher.port
     assert byte_size(close_tail) == 32
 
     assert {tail, %{reason: :close, stderr_truncated?: true}} =
              collect_finish(launcher, close_tail)
+
+    assert String.ends_with?(tail, String.duplicate("y", 32))
+  end
+
+  test "starts bounded tail replacement when stderr first overflows during close" do
+    launcher = open_launcher(["shutdown-stderr"], stderr_bytes: 32)
+
+    assert %{stderr: "xxxxxxxxxxxxxxxx", truncated?: false} =
+             collect_until(launcher, &(&1.stderr == "xxxxxxxxxxxxxxxx"))
+
+    assert Port.command(launcher.port, "C")
+    assert_receive {port, {:data, <<"E", _bytes::binary>>}}, 500
+    assert port == launcher.port
+    assert_receive {^port, {:data, "T"}}, 500
+    assert_receive {^port, {:data, "R"}}, 500
+    assert_receive {^port, {:data, <<"E", replacement::binary>>}}, 500
+    assert String.ends_with?(replacement, "y")
+
+    assert {tail, %{reason: :close, stderr_truncated?: true}} =
+             collect_finish(launcher, replacement)
 
     assert String.ends_with?(tail, String.duplicate("y", 32))
   end
