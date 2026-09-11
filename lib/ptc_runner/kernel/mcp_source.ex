@@ -256,11 +256,16 @@ defmodule PtcRunner.Kernel.MCPSource do
     case installed_config(opts) do
       {:ok, installed} ->
         ProviderRegistry.staged(fn selection, context ->
-          {:ok,
-           %{
-             credential_names: [],
-             preflight: fn -> {:ok, fn %{} -> build(installed, selection, context) end} end
-           }}
+          with {:ok, selected} <- selection(installed, selection, context) do
+            {:ok,
+             %{
+               credential_names: [],
+               capability_effects: selected_effects(installed, selected),
+               preflight: fn ->
+                 {:ok, fn %{} -> build_selected(installed, selected, context) end}
+               end
+             }}
+          end
         end)
 
       {:error, reason} ->
@@ -501,8 +506,13 @@ defmodule PtcRunner.Kernel.MCPSource do
         not String.contains?(value, <<0>>)
 
   defp build(installed, selection, context) do
-    with {:ok, selected} <- selection(installed, selection, context),
-         {:ok, transport} <- acquire_transport(installed.transport, context, selected) do
+    with {:ok, selected} <- selection(installed, selection, context) do
+      build_selected(installed, selected, context)
+    end
+  end
+
+  defp build_selected(installed, selected, context) do
+    with {:ok, transport} <- acquire_transport(installed.transport, context, selected) do
       case discover(transport, installed, selected, context.provider) do
         {:ok, capabilities, snapshot} ->
           {:ok,
@@ -519,6 +529,12 @@ defmodule PtcRunner.Kernel.MCPSource do
           end
       end
     end
+  end
+
+  defp selected_effects(installed, selected) do
+    installed.tools
+    |> Enum.filter(fn {_upstream, mapping} -> MapSet.member?(selected.allow, mapping.as) end)
+    |> Map.new(fn {_upstream, mapping} -> {mapping.as, mapping.effect} end)
   end
 
   defp acquire_transport(%{type: :streamable_http} = installed, context, selected) do

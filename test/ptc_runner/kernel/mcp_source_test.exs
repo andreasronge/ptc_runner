@@ -1290,6 +1290,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
              )
              |> directory_request(registry(fixture.endpoint, tools: tools))
              |> RunLifecycle.build()
+
+    refute_receive {:mcp_request, _method, _headers}
   end
 
   @tag :tmp_dir
@@ -1319,6 +1321,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
              )
              |> directory_request(registry(fixture.endpoint, tools: tools))
              |> RunLifecycle.build()
+
+    refute_receive {:mcp_request, _method, _headers}
   end
 
   @tag :tmp_dir

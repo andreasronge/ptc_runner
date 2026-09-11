@@ -6601,8 +6601,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     end
   end
 
-  # Only a run that already assembled providers can reach this code, so the
-  # commands that stop before assembly must not admit it at all.
+  # Limit capacity is late-only, while a declared-read refusal can arise during
+  # inert preparation or as the late environment-construction backstop.
   test "the capacity refusal is admitted only by a run" do
     for mode <- [:validate, :doctor, {:doctor, :connect}, :run_unclassified] do
       refute CommandContract.diagnostic_allowed?(mode, :application, :limit_capacity_invalid),
@@ -6617,6 +6617,72 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     end
 
     assert CommandContract.diagnostic_allowed?(:run, :application, :limit_capacity_invalid)
+
+    for mode <- [:validate, :doctor, {:doctor, :connect}, :run_unclassified, :run] do
+      assert CommandContract.diagnostic_allowed?(
+               mode,
+               :application,
+               :declared_read_effect_invalid
+             ),
+             "#{inspect(mode)} loses declared_read_effect_invalid"
+    end
+  end
+
+  @tag :tmp_dir
+  test "run and validate preserve inert declared-read preparation diagnostics", %{
+    tmp_dir: directory
+  } do
+    manifest =
+      valid_manifest(%{
+        "providers" => %{
+          "workflow" => [],
+          "mission" => [%{"name" => "workspace", "config" => %{"allow" => ["workspace.write"]}}]
+        },
+        "missions" => %{
+          "default" => %{
+            "components" => [%{"id" => "actions", "path" => "actions.clj"}],
+            "providers" => ["workspace"]
+          }
+        }
+      })
+
+    application =
+      write_application(directory, "declared-read-command-boundary", manifest, %{
+        "actions.clj" => """
+        (ns actions)
+        (defn save {:signature "() -> :any" :effect :read} []
+          (tool/workspace.write {}))
+        """
+      })
+
+    host =
+      write_host_config(directory, "declared-read-command-boundary", %{
+        "install" => %{
+          "workspace" => %{
+            "source" => "mcp",
+            "installation_revision" => "write-v1",
+            "transport" => %{
+              "type" => "stdio",
+              "command" => "ptc-must-not-start-1916"
+            },
+            "tools" => %{
+              "write" => %{"as" => "workspace.write", "effect" => "write"}
+            }
+          }
+        }
+      })
+
+    for command <- ["validate", "run"] do
+      assert {:error, %CommandOutcome{} = outcome} =
+               CommandEngine.dispatch([command, application, "--host-config", host])
+
+      assert_schema_valid(outcome.envelope)
+      assert outcome.envelope["error"]["phase"] == "application"
+      assert outcome.envelope["error"]["code"] == "declared_read_effect_invalid"
+      assert outcome.envelope["error"]["provider_activity"] == false
+      assert outcome.envelope["error"]["message"] =~ "actions/save"
+      refute outcome.envelope["error"]["code"] == "internal_error"
+    end
   end
 
   # The refusal is computed after provider assembly, so it can be reported with

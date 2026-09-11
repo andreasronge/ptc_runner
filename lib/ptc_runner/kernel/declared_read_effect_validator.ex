@@ -12,14 +12,40 @@ defmodule PtcRunner.Kernel.DeclaredReadEffectValidator do
           [map()]
         ) :: :ok | {:error, {:declared_read_effect_violation, binary(), :write | :unknown}}
   def validate(workflow_bundle, mission_bundles, missions, declarations) do
-    with :ok <- validate_bundle(workflow_bundle, effects_for(declarations, :workflow, nil)) do
+    validate_with(workflow_bundle, mission_bundles, missions, fn destination, occurrences ->
+      effects_for(declarations, destination, occurrences)
+    end)
+  end
+
+  @spec validate_prepared(
+          PtcRunner.Kernel.FrozenBundle.t(),
+          %{binary() => PtcRunner.Kernel.FrozenBundle.t() | nil},
+          map(),
+          [map()]
+        ) :: :ok | {:error, {:declared_read_effect_violation, binary(), :write | :unknown}}
+  def validate_prepared(workflow_bundle, mission_bundles, missions, preparations) do
+    declarations =
+      Enum.map(preparations, fn preparation ->
+        %{
+          destination: preparation.destination,
+          index: preparation.index,
+          capability_effects: preparation.capability_effects
+        }
+      end)
+
+    validate_with(workflow_bundle, mission_bundles, missions, fn destination, occurrences ->
+      prepared_effects(declarations, destination, occurrences)
+    end)
+  end
+
+  defp validate_with(workflow_bundle, mission_bundles, missions, effects_for) do
+    with :ok <- validate_bundle(workflow_bundle, effects_for.(:workflow, nil)) do
       mission_bundles
       |> Enum.sort_by(&elem(&1, 0))
       |> Enum.reduce_while(:ok, fn {name, bundle}, :ok ->
         occurrences = Map.fetch!(missions, name).provider_occurrences
-        effects = effects_for(declarations, :mission, occurrences)
 
-        case validate_bundle(bundle, effects) do
+        case validate_bundle(bundle, effects_for.(:mission, occurrences)) do
           :ok -> {:cont, :ok}
           {:error, _reason} = error -> {:halt, error}
         end
@@ -50,6 +76,16 @@ defmodule PtcRunner.Kernel.DeclaredReadEffectValidator do
         (is_nil(occurrences) or declaration.index in occurrences)
     end)
     |> Enum.flat_map(&declaration_effects/1)
+    |> Map.new()
+  end
+
+  defp prepared_effects(declarations, destination, occurrences) do
+    declarations
+    |> Enum.filter(fn declaration ->
+      declaration.destination == destination and
+        (is_nil(occurrences) or declaration.index in occurrences)
+    end)
+    |> Enum.flat_map(& &1.capability_effects)
     |> Map.new()
   end
 

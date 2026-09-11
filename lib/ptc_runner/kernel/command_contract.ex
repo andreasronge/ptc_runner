@@ -76,11 +76,10 @@ defmodule PtcRunner.Kernel.CommandContract do
   @preclassification_only_phases @unclassified_run_phases -- [:internal]
 
   # The application phase is otherwise decided before a run has a result class.
-  # These assembly refusals depend on resolved capabilities, which are not known
-  # until provider assembly, by which point the run already carries its result
-  # class. They get their own branch rather than joining the general classified
-  # union, so the envelope keeps stating what the codes mean — the run never
-  # started and wrote nothing.
+  # These refusals can also be discovered during late environment assembly, by
+  # which point the run already carries its result class. They get a capacity
+  # branch as well as any earlier branch that can discover them, so the envelope
+  # keeps stating what the codes mean — the run never started and wrote nothing.
   @capacity_pairs [
     {:application, :limit_capacity_invalid},
     {:application, :declared_read_effect_invalid}
@@ -92,11 +91,11 @@ defmodule PtcRunner.Kernel.CommandContract do
   @project_codes Map.fetch!(@codes_by_phase, :project)
   @host_codes Map.fetch!(@codes_by_phase, :host)
   @application_codes Map.fetch!(@codes_by_phase, :application)
-  # Every other application code is decided before provider assembly, so only
-  # these assembly refusals can come from a run that already has a result class:
-  # `validate`, `doctor`, and the unclassified run branch must not admit it.
-  @capacity_codes Enum.map(@capacity_pairs, &elem(&1, 1))
-  @preassembly_application_codes @application_codes -- @capacity_codes
+  # Limit capacity is computable only after environment assembly. Declared-read
+  # validation is authoritative during inert preparation and remains a late
+  # assembly backstop, so it belongs to both command branches.
+  @late_only_application_codes [:limit_capacity_invalid]
+  @preassembly_application_codes @application_codes -- @late_only_application_codes
   @static_application_codes @preassembly_application_codes --
                               [:override_invalid, :event_identity_conflict]
   @bundle_codes Map.fetch!(@codes_by_phase, :bundle)
