@@ -1,6 +1,6 @@
 defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   # async: false — 33 of 35 cases spawn a real launcher plus a child Elixir VM (over 3 s under CPU
-  # contention), and the stall cases scan VM-global Port.list() (class C).
+  # contention), and one case scans VM-global Port.list() (class C).
   use ExUnit.Case, async: false
 
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
