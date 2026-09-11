@@ -59,23 +59,25 @@ export PTC_TEST_RUN_LOG="$out/runs.jsonl"
 # one's. Each hunt starts from an empty record and no run logs.
 rm -f "$out"/run-*.log "$out/summary.txt"
 : > "$PTC_TEST_RUN_LOG"
+: > "$out/verdicts.txt"
 
 echo "flake-hunt: $runs runs, $schedulers schedulers, records in $out"
 
 mix compile --warnings-as-errors
 
-failed_runs=0
+# Each run's exit status goes to the summary beside its record, so the table
+# cannot say "0 with failures" about a run that Mix reported as failed.
 for ((i = 1; i <= runs; i++)); do
   started=$SECONDS
-  if mix test --warnings-as-errors > "$out/run-$i.log" 2>&1; then
-    verdict=pass
-  else
-    verdict=FAIL
-    failed_runs=$((failed_runs + 1))
-  fi
+  status=0
+  mix test --warnings-as-errors > "$out/run-$i.log" 2>&1 || status=$?
+  echo "$i $status" >> "$out/verdicts.txt"
+  if [ "$status" -eq 0 ]; then verdict=pass; else verdict="FAIL (exit $status)"; fi
   echo "run $i/$runs: $verdict ($((SECONDS - started))s)"
 done
 
-elixir "$script_dir/flake_hunt_summary.exs" "$PTC_TEST_RUN_LOG" --expected "$runs" | tee "$out/summary.txt"
-
-[ "$failed_runs" -eq 0 ]
+# The summary's exit status is the hunt's verdict: it fails on any failed
+# run, any non-zero exit, and any run that left no record.
+elixir "$script_dir/flake_hunt_summary.exs" "$PTC_TEST_RUN_LOG" \
+  --expected "$runs" --verdicts "$out/verdicts.txt" | tee "$out/summary.txt"
+exit "${PIPESTATUS[0]}"

@@ -310,8 +310,9 @@ defmodule PtcRunner.Scripts.CIGatesTest do
         )
 
       assert status == 1, output
-      assert output =~ "run 1/2: FAIL"
-      assert output =~ "run 2/2: FAIL"
+      assert output =~ "run 1/2: FAIL (exit 1)"
+      assert output =~ "run 2/2: FAIL (exit 1)"
+      assert File.read!(Path.join(out, "verdicts.txt")) == "1 1\n2 1\n"
       assert output =~ "flake-hunt: 2 runs, 4 schedulers, 2 with failures"
       assert output =~ "2x  test/a_test.exs:451  PtcRunner.ReplSessionTest  test owners"
       assert output =~ "seeds: 7, 7"
@@ -366,9 +367,28 @@ defmodule PtcRunner.Scripts.CIGatesTest do
           stderr_to_stdout: true
         )
 
-      assert status == 0, output
+      assert status == 1, output
       assert output =~ "flake-hunt: 1 runs, 4 schedulers, 2 with failures"
       assert output =~ "2 of 3 runs left no record (ended before the suite finished)"
+    end
+
+    test "a run that Mix reported as failed counts even when its record is failure-free" do
+      %{marker: marker} = fake_mix()
+      records = Path.join(Path.dirname(marker), "runs.jsonl")
+      verdicts = Path.join(Path.dirname(marker), "verdicts.txt")
+      File.write!(records, @passing_record <> "\n" <> @passing_record <> "\n")
+      File.write!(verdicts, "1 0\n2 1\n")
+
+      {output, status} =
+        System.cmd(
+          "elixir",
+          [@flake_hunt_summary, records, "--expected", "2", "--verdicts", verdicts],
+          stderr_to_stdout: true
+        )
+
+      assert status == 1, output
+      assert output =~ "flake-hunt: 2 runs, 4 schedulers, 1 with failures"
+      assert output =~ "1 runs exited non-zero with a failure-free record: run 2 exit 1"
     end
 
     test "the nightly workflow runs the hunt on main and keeps its records" do
