@@ -234,6 +234,24 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     assert String.ends_with?(tail, String.duplicate("y", 32))
   end
 
+  test "a capped shutdown update resets before retaining a partial suffix" do
+    launcher = open_launcher(["shutdown-stderr-overflow"], stderr_bytes: 32)
+    assert %{truncated?: true} = collect_until(launcher, & &1.truncated?)
+
+    assert Port.command(launcher.port, "C")
+    assert_receive {port, {:data, "T"}}, 500
+    assert port == launcher.port
+    assert_receive {^port, {:data, "R"}}, 500
+    assert_receive {^port, {:data, <<"E", initial::binary>>}}, 500
+    assert initial == String.duplicate("x", 32)
+
+    assert_receive {^port, {:data, "R"}}, 500
+    assert_receive {^port, {:data, <<"E", partial::binary>>}}, 500
+    assert partial == String.duplicate("y", 32)
+
+    assert {_tail, %{reason: :close, stderr_truncated?: true}} = collect_finish(launcher, partial)
+  end
+
   test "keeps at most one stdout frame in flight for a stalled owner" do
     launcher = open_launcher(["stdout-flood"], grace_ms: 50)
 

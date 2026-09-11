@@ -736,7 +736,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   test "rejects a launcher protocol mismatch before spawning", %{tmp_dir: tmp_dir} do
     assert {:error, :invalid_mcp_stdio_launch} =
              MCPStdioTransport.start(
-               Keyword.put(launch_options(tmp_dir), :launcher_protocol_version, 2)
+               Keyword.put(launch_options(tmp_dir), :launcher_protocol_version, 1)
              )
   end
 

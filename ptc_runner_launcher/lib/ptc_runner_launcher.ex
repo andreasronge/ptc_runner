@@ -9,7 +9,7 @@ defmodule PtcRunnerLauncher do
   transport supervision, and initialization state.
   """
 
-  @protocol_version 1
+  @protocol_version 2
   @executable_name "ptc_runner_launcher"
   @publish_timeout_ms 10_000
 

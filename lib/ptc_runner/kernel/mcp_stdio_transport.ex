@@ -13,7 +13,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
 
   @type t :: %__MODULE__{pid: pid(), outcome: map()}
 
-  @protocol_version 1
+  @protocol_version 2
   @protocol_metadata %{"io.modelcontextprotocol/protocolVersion" => "2026-07-28"}
   @max_frame_bytes 1_048_576
   @max_response_bytes 2_097_152

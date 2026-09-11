@@ -76,7 +76,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   @max_credential_bytes 65_536
   @max_executable_bytes 268_435_456
   @max_launcher_bytes 16_777_216
-  @launcher_protocol_version 1
+  @launcher_protocol_version 2
 
   @doc """
   Builds the inert declaration catalog installed by a loaded host document.

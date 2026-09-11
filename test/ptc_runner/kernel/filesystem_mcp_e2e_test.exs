@@ -52,7 +52,7 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
     assert snapshot["declaration"]["source"] == "mcp"
     assert snapshot["acquisition"]["protocol"] == "mcp-2026-07-28"
     assert snapshot["acquisition"]["transport"] == "stdio"
-    assert snapshot["acquisition"]["launcher_protocol_version"] == 1
+    assert snapshot["acquisition"]["launcher_protocol_version"] == 2
     assert snapshot["acquisition"]["launcher_sha256"] =~ ~r/\A[0-9a-f]{64}\z/
     assert snapshot["acquisition"]["server_executable_sha256"] =~ ~r/\A[0-9a-f]{64}\z/
     assert snapshot["snapshot_hash"] =~ ~r/\A[0-9a-f]{64}\z/

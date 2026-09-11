@@ -20,7 +20,7 @@
 
 /* Reference implementation of the PtcRunner MCP stdio launcher contract. */
 
-#define BOOT_VERSION 1U
+#define BOOT_VERSION 2U
 #define MAX_FRAME_BYTES (1024U * 1024U)
 #define MAX_PENDING_BYTES (1024U * 1024U)
 #define MAX_ARGUMENTS 256U
@@ -1152,9 +1152,14 @@ static bool emit_stderr(const uint8_t *bytes, size_t length,
             ? length
             : (size_t)*stderr_snapshot_remaining;
 
-    if (snapshot_allowed > 0 &&
-        !emit_frame('E', bytes + length - snapshot_allowed,
-                    snapshot_allowed)) {
+    if (snapshot_allowed > 0 && snapshot_allowed < length) {
+      if (!emit_frame('R', NULL, 0) ||
+          !emit_frame('E', bytes + length - snapshot_allowed,
+                      snapshot_allowed)) {
+        return false;
+      }
+    } else if (snapshot_allowed > 0 &&
+               !emit_frame('E', bytes, snapshot_allowed)) {
       return false;
     }
     *stderr_snapshot_remaining -= snapshot_allowed;

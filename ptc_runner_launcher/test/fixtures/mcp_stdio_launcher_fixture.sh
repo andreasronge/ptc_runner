@@ -20,11 +20,7 @@ case "$1" in
       printf x >&2
       index=$((index + 1))
     done
-    index=0
-    while [ "$index" -lt 128 ]; do
-      printf y >&2
-      index=$((index + 1))
-    done
+    printf yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy >&2
 
     while IFS= read -r _line; do
       :
@@ -41,6 +37,18 @@ case "$1" in
       printf y >&2
       index=$((index + 1))
     done
+    ;;
+
+  shutdown-stderr-overflow)
+    index=0
+    while [ "$index" -lt 64 ]; do
+      printf x >&2
+      index=$((index + 1))
+    done
+    while IFS= read -r _line; do
+      :
+    done
+    printf yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy >&2
     ;;
 
   stdout-flood)

@@ -80,7 +80,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   @max_outbound_header_bytes 32_768
   @max_launcher_bytes 16_777_216
   @max_launcher_symlinks 40
-  @launcher_protocol_version 1
+  @launcher_protocol_version 2
   @header_token ~r/\A[!#$%&'*+\-.^_`|~0-9A-Za-z]+\z/
   @sha256 ~r/\Asha256:[0-9a-f]{64}\z/
   @name ~r/\A[a-z][a-z0-9._-]{0,127}\z/
@@ -129,8 +129,8 @@ defmodule PtcRunner.Kernel.MCPSource do
       `[A-Za-z_][A-Za-z0-9_]*` form. The launcher is limited to 16 MiB. The
       optional absolute `:launcher` path is a trusted custom override.
       Otherwise stdio requires
-      the optional `ptc_runner_launcher ~> 0.1.0` companion dependency. The
-      core owns launcher protocol version 1, copies the canonical launcher into
+      the optional `ptc_runner_launcher ~> 0.2.0` companion dependency. The
+      core owns launcher protocol version 2, copies the canonical launcher into
       a private mode-0700 staging directory, hashes and executes those same
       staged bytes, and removes the staged path after the startup handshake.
       The configured server executable and working-directory hierarchies must

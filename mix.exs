@@ -239,9 +239,9 @@ defmodule PtcRunner.MixProject do
     launcher_path = Path.expand("ptc_runner_launcher", __DIR__)
 
     if local_launcher_checkout?(launcher_path) do
-      {:ptc_runner_launcher, "~> 0.1.0", path: "ptc_runner_launcher", optional: true}
+      {:ptc_runner_launcher, "~> 0.2.0", path: "ptc_runner_launcher", optional: true}
     else
-      {:ptc_runner_launcher, "~> 0.1.0", optional: true}
+      {:ptc_runner_launcher, "~> 0.2.0", optional: true}
     end
   end
 
