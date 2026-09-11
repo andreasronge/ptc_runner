@@ -55,7 +55,9 @@ mkdir -p "$out"
 export ERL_FLAGS="+S $schedulers:$schedulers"
 export PTC_TEST_RUN_LOG="$out/runs.jsonl"
 # The formatter appends, so a reused directory would fold an earlier hunt's
-# runs into this summary. Each hunt starts from an empty record.
+# runs into this summary and leave its higher-numbered logs beside this
+# one's. Each hunt starts from an empty record and no run logs.
+rm -f "$out"/run-*.log "$out/summary.txt"
 : > "$PTC_TEST_RUN_LOG"
 
 echo "flake-hunt: $runs runs, $schedulers schedulers, records in $out"
