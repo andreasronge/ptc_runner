@@ -164,7 +164,7 @@ defmodule PtcRunner.Kernel.ProviderCallAdmission do
         call(admission, lease_token(lease), {:fault, :duplicate_completion}, nil)
 
       true ->
-        call(admission, lease_token(lease), {:complete, lease.reference, status}, nil)
+        complete_call(admission, lease_token(lease), lease.reference, status)
     end
   end
 
@@ -280,17 +280,16 @@ defmodule PtcRunner.Kernel.ProviderCallAdmission do
         {:reply, {:error, :provider_admission_unavailable}, state}
 
       %{owner: ^owner} = active when state.status == :ready ->
-        Process.demonitor(active.monitor, [:flush])
-        state = %{state | active: Map.delete(state.active, lease_ref)}
-
         case status do
           :uncertain ->
+            Process.demonitor(active.monitor, [:flush])
+            state = %{state | active: Map.delete(state.active, lease_ref)}
             {:reply, {:error, :provider_cleanup_failed}, fence(state)}
 
           _settled ->
-            {state, replies} = promote(state)
-            Enum.each(replies, fn {from, reply} -> reply_waiter(from, reply) end)
-            {:reply, :ok, state}
+            receipt = make_ref()
+            active = Map.put(active, :completion_receipt, receipt)
+            {:reply, {:completion_ack, receipt}, put_in(state.active[lease_ref], active)}
         end
 
       %{owner: _other} ->
@@ -307,6 +306,24 @@ defmodule PtcRunner.Kernel.ProviderCallAdmission do
   def handle_call({token, {:fault, fault}}, _from, %{token: token} = state)
       when fault in [:duplicate_completion, :invalid_lease, :not_lease_owner],
       do: {:reply, {:error, fault}, fence(state)}
+
+  def handle_call(
+        {token, {:completion_received, owner, lease_ref, receipt}},
+        {owner, _},
+        %{token: token} = state
+      ) do
+    case state.active[lease_ref] do
+      %{owner: ^owner, completion_receipt: ^receipt} = active when state.status == :ready ->
+        Process.demonitor(active.monitor, [:flush])
+        state = %{state | active: Map.delete(state.active, lease_ref)}
+        {state, replies} = promote(state)
+        Enum.each(replies, fn {from, reply} -> reply_waiter(from, reply) end)
+        {:reply, :ok, state}
+
+      _ ->
+        {:reply, {:error, :provider_admission_unavailable}, fence(state)}
+    end
+  end
 
   def handle_call(_request, _from, state),
     do: {:reply, {:error, :provider_admission_unavailable}, state}
@@ -339,7 +356,6 @@ defmodule PtcRunner.Kernel.ProviderCallAdmission do
     end
   end
 
-  @impl true
   def handle_info({:expire, request_ref}, state) do
     case pop_waiter(state, request_ref) do
       {nil, state} ->
@@ -557,6 +573,21 @@ defmodule PtcRunner.Kernel.ProviderCallAdmission do
       end
 
       {:error, :provider_admission_unavailable}
+  end
+
+  defp complete_call(admission, token, lease_ref, status) do
+    case call(admission, token, {:complete, lease_ref, status}, nil) do
+      {:completion_ack, receipt} ->
+        call(
+          admission,
+          token,
+          {:completion_received, self(), lease_ref, receipt},
+          nil
+        )
+
+      result ->
+        result
+    end
   end
 
   @spec release_ticket_once(atomics_ref(), term()) :: integer() | :ok

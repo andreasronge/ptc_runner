@@ -167,7 +167,12 @@ defmodule PtcRunner.Kernel.ProviderCallOwner do
     else
       :ok = CancelableRequest.dispatch(handle)
 
-      case CancelableRequest.await_or_cancel(handle, deadline, admission_monitor) do
+      case CancelableRequest.await_or_cancel(
+             handle,
+             deadline,
+             admission_monitor,
+             cleanup_deadline(context)
+           ) do
         {:ok, result} ->
           publish_after_completion(lease, result, context)
 
@@ -210,7 +215,7 @@ defmodule PtcRunner.Kernel.ProviderCallOwner do
   defp publish_after_completion(lease, result, context) do
     case ProviderCallAdmission.complete(lease, :completed) do
       :ok ->
-        result
+        restore_requester_result(result)
 
       _ ->
         mark_cleanup_failed(context)
@@ -285,6 +290,14 @@ defmodule PtcRunner.Kernel.ProviderCallOwner do
        ProviderError.new(:admission_unavailable, @unavailable_text,
          dispatch_provenance: :possibly_dispatched
        )}
+
+  defp restore_requester_result({CancelableRequest, :raised, exception, stacktrace}),
+    do: reraise(exception, stacktrace)
+
+  defp restore_requester_result({CancelableRequest, :caught, kind, reason}),
+    do: :erlang.raise(kind, reason, [])
+
+  defp restore_requester_result(result), do: result
 
   defp refusal(kind, text, retryable?) do
     {:error,
