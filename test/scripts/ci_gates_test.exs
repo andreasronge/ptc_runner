@@ -240,7 +240,8 @@ defmodule PtcRunner.Scripts.CIGatesTest do
 
   describe "flake hunt" do
     @passing_record ~s({"seed":1,"schedulers":4,"wall_ms":4000,"async_ms":1000,"sync_ms":3000,"failures":[]})
-    @failing_record ~s({"seed":7,"schedulers":4,"wall_ms":5000,"async_ms":1500,"sync_ms":3500,) <>
+    # `"run":null` is what a plain `mix test` writes: only flake-hunt.sh numbers runs.
+    @failing_record ~s({"run":null,"seed":7,"schedulers":4,"wall_ms":5000,"async_ms":1500,"sync_ms":3500,) <>
                       ~s("failures":[{"module":"PtcRunner.ReplSessionTest","name":"test owners","file":"test/a_test.exs","line":451,"message":"no matching message after 2000ms"}]})
 
     test "compiles once, then runs the whole suite N times under the CI contract" do
@@ -338,6 +339,19 @@ defmodule PtcRunner.Scripts.CIGatesTest do
       refute File.exists?(marker)
     end
 
+    test "an unnumbered failing record from a plain mix test still fails the summary" do
+      %{marker: marker} = fake_mix()
+      records = Path.join(Path.dirname(marker), "plain.jsonl")
+      File.write!(records, @passing_record <> "\n" <> @failing_record <> "\n")
+
+      {output, status} =
+        System.cmd("elixir", [@flake_hunt_summary, records], stderr_to_stdout: true)
+
+      assert status == 1, output
+      assert output =~ "flake-hunt: 2 runs, 4 schedulers, 1 with failures"
+      assert output =~ "seeds: 7"
+    end
+
     test "the summary refuses a missing or empty record file" do
       %{marker: marker} = fake_mix()
       missing = Path.join(Path.dirname(marker), "missing.jsonl")
@@ -384,7 +398,7 @@ defmodule PtcRunner.Scripts.CIGatesTest do
         [
           @passing_record |> String.replace(~s({"seed":1), ~s({"run":1,"seed":1)),
           @passing_record |> String.replace(~s({"seed":1), ~s({"run":3,"seed":1)),
-          @failing_record |> String.replace(~s({"seed":7), ~s({"run":4,"seed":7))
+          @failing_record |> String.replace(~s({"run":null,"seed":7), ~s({"run":4,"seed":7))
         ]
         |> Enum.join("\n")
         |> Kernel.<>("\n")

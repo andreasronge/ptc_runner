@@ -62,8 +62,9 @@ defmodule FlakeHuntSummary do
     records =
       records
       |> Enum.with_index(1)
-      |> Enum.map(fn {record, position} -> Map.put_new_lazy(record, "run", fn -> position end) end)
-      |> Enum.map(fn record -> if is_integer(record["run"]), do: record, else: %{record | "run" => nil} end)
+      |> Enum.map(fn {record, position} ->
+        if is_integer(record["run"]), do: record, else: Map.put(record, "run", position)
+      end)
 
     by_run = Map.new(records, &{&1["run"], &1})
     verdicts = Map.new(opts.verdicts)
