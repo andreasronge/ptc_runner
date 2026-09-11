@@ -21,6 +21,7 @@ defmodule PtcRunner.TestSupport.RunRecord do
   def init(config) do
     {:ok,
      %{
+       log: Keyword.get(config, :run_log, System.get_env("PTC_TEST_RUN_LOG")),
        seed: Keyword.get(config, :seed),
        max_cases: Keyword.get(config, :max_cases),
        tests: 0,
@@ -45,7 +46,7 @@ defmodule PtcRunner.TestSupport.RunRecord do
   end
 
   def handle_cast({:suite_finished, times_us}, state) do
-    state |> record(times_us) |> append()
+    append(state.log, record(state, times_us))
     {:noreply, state}
   end
 
@@ -105,15 +106,20 @@ defmodule PtcRunner.TestSupport.RunRecord do
 
   defp first_line(reason), do: reason |> inspect(limit: 20) |> first_line()
 
-  defp append(record) do
-    case System.get_env("PTC_TEST_RUN_LOG") do
-      nil ->
-        :ok
+  # A formatter exception aborts `mix test`, and a lost record must never
+  # cost the run it describes, so every failure here is reported and dropped.
+  defp append(path, _record) when path in [nil, ""], do: :ok
 
-      path ->
-        File.mkdir_p!(Path.dirname(path))
-        File.write!(path, Jason.encode!(record) <> "\n", [:append])
-        IO.puts("\n[run-record] #{path}")
+  defp append(path, record) do
+    with :ok <- File.mkdir_p(Path.dirname(path)),
+         :ok <- File.write(path, Jason.encode!(record) <> "\n", [:append]) do
+      IO.puts("\n[run-record] #{path}")
+    else
+      {:error, reason} ->
+        IO.puts(:stderr, "\n[run-record] not written to #{path}: #{:file.format_error(reason)}")
     end
+  rescue
+    exception ->
+      IO.puts(:stderr, "\n[run-record] not written to #{path}: #{Exception.message(exception)}")
   end
 end

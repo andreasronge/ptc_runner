@@ -48,4 +48,28 @@ defmodule PtcRunner.TestSupport.RunRecordTest do
     assert message == "Assertion failed, no matching message after 2000ms | :shutdown"
     assert Path.type(hd(record.failures).file) == :relative
   end
+
+  @tag :tmp_dir
+  test "an unwritable record destination is reported, never raised", %{tmp_dir: directory} do
+    blocker = Path.join(directory, "blocker")
+    File.write!(blocker, "a file where a directory is needed")
+    {:ok, state} = RunRecord.init(run_log: Path.join(blocker, "runs.jsonl"), seed: 1)
+
+    stderr =
+      ExUnit.CaptureIO.capture_io(:stderr, fn ->
+        assert {:noreply, ^state} =
+                 RunRecord.handle_cast(
+                   {:suite_finished, %{run: 1_000, async: nil, load: nil}},
+                   state
+                 )
+      end)
+
+    assert stderr =~ "[run-record] not written to #{blocker}/runs.jsonl"
+    refute File.exists?(Path.join(blocker, "runs.jsonl"))
+  end
+
+  test "an empty destination records nothing" do
+    {:ok, state} = RunRecord.init(run_log: "", seed: 1)
+    assert {:noreply, ^state} = RunRecord.handle_cast({:suite_finished, %{run: 1_000}}, state)
+  end
 end

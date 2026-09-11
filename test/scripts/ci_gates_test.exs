@@ -273,6 +273,26 @@ defmodule PtcRunner.Scripts.CIGatesTest do
              |> length() == 3
     end
 
+    test "a reused output directory starts from an empty record" do
+      %{marker: marker} = fake = fake_mix()
+      out = Path.join(Path.dirname(marker), "hunt")
+
+      for _hunt <- 1..2 do
+        {output, status} =
+          run_gate(@flake_hunt, fake,
+            args: ["2", "--out", out],
+            env: [{"MIX_RUN_RECORD", @passing_record}]
+          )
+
+        assert status == 0, output
+        assert output =~ "flake-hunt: 2 runs, 4 schedulers, 0 with failures"
+      end
+
+      assert File.read!(Path.join(out, "runs.jsonl"))
+             |> String.split("\n", trim: true)
+             |> length() == 2
+    end
+
     test "a failing run does not stop the hunt and fails the exit status" do
       %{marker: marker} = fake = fake_mix()
       out = Path.join(Path.dirname(marker), "hunt")
