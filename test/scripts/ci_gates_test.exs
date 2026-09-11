@@ -369,26 +369,42 @@ defmodule PtcRunner.Scripts.CIGatesTest do
 
       assert status == 1, output
       assert output =~ "flake-hunt: 1 runs, 4 schedulers, 2 with failures"
-      assert output =~ "2 of 3 runs left no record (ended before the suite finished)"
+      assert output =~ "run 2 left no record (exit 0): it ended before the suite finished"
+      assert output =~ "run 3 left no record (exit 0): it ended before the suite finished"
     end
 
-    test "a run that Mix reported as failed counts even when its record is failure-free" do
+    test "runs are paired with their verdicts by index, not by subtracting counts" do
       %{marker: marker} = fake_mix()
       records = Path.join(Path.dirname(marker), "runs.jsonl")
       verdicts = Path.join(Path.dirname(marker), "verdicts.txt")
-      File.write!(records, @passing_record <> "\n" <> @passing_record <> "\n")
-      File.write!(verdicts, "1 0\n2 1\n")
+      # Run 2's record is missing; run 3 exited 1 with a clean record; run 4
+      # failed a test and exited 1. Only run 1 passed.
+      File.write!(
+        records,
+        [
+          @passing_record |> String.replace(~s({"seed":1), ~s({"run":1,"seed":1)),
+          @passing_record |> String.replace(~s({"seed":1), ~s({"run":3,"seed":1)),
+          @failing_record |> String.replace(~s({"seed":7), ~s({"run":4,"seed":7))
+        ]
+        |> Enum.join("\n")
+        |> Kernel.<>("\n")
+      )
+
+      File.write!(verdicts, "1 0\n2 0\n3 1\n4 1\n")
 
       {output, status} =
         System.cmd(
           "elixir",
-          [@flake_hunt_summary, records, "--expected", "2", "--verdicts", verdicts],
+          [@flake_hunt_summary, records, "--expected", "4", "--verdicts", verdicts],
           stderr_to_stdout: true
         )
 
       assert status == 1, output
-      assert output =~ "flake-hunt: 2 runs, 4 schedulers, 1 with failures"
-      assert output =~ "1 runs exited non-zero with a failure-free record: run 2 exit 1"
+      assert output =~ "flake-hunt: 3 runs, 4 schedulers, 3 with failures"
+      assert output =~ "run 2 left no record (exit 0)"
+      assert output =~ "run 3 exited 1 with a failure-free record"
+      refute output =~ "run 4 exited"
+      assert output =~ "1x  test/a_test.exs:451"
     end
 
     test "the nightly workflow runs the hunt on main and keeps its records" do

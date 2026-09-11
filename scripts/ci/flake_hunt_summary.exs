@@ -56,31 +56,51 @@ defmodule FlakeHuntSummary do
   end
 
   defp report(records, opts) do
-    # A run that dies before `suite_finished` -- a compile error, a VM crash,
-    # a killed job -- leaves no record. It is still a failed run, and a table
-    # that silently counted only the survivors would hide exactly the runs a
-    # flake investigation most wants to see.
-    missing = max(opts.expected - length(records), 0)
-    failed_records = Enum.count(records, &(&1["failures"] != []))
-    nonzero = Enum.filter(opts.verdicts, fn {_run, status} -> status != 0 end)
-    # Mix can report a failed run after a failure-free record: a warning under
-    # --warnings-as-errors, a crash on shutdown. Those runs failed too.
-    unexplained = max(length(nonzero) - failed_records - missing, 0)
-    failed_runs = failed_records + missing + unexplained
+    # Each record names its run (PTC_TEST_RUN_INDEX); records from a plain
+    # `mix test` are numbered by position. Verdicts and records are then
+    # paired per run, never by subtracting aggregate counts.
+    records =
+      records
+      |> Enum.with_index(1)
+      |> Enum.map(fn {record, position} -> Map.put_new_lazy(record, "run", fn -> position end) end)
+      |> Enum.map(fn record -> if is_integer(record["run"]), do: record, else: %{record | "run" => nil} end)
+
+    by_run = Map.new(records, &{&1["run"], &1})
+    verdicts = Map.new(opts.verdicts)
+    expected = max(opts.expected, records |> Enum.map(& &1["run"]) |> Enum.reject(&is_nil/1) |> Enum.max(fn -> 0 end))
     schedulers = records |> Enum.map(& &1["schedulers"]) |> Enum.uniq() |> Enum.join(",")
+
+    # A run that dies before `suite_finished` -- a compile error, a VM crash,
+    # a killed job -- leaves no record, and Mix can report a failed run after
+    # a failure-free record -- a warning under --warnings-as-errors, a crash
+    # on shutdown. Both are failed runs, and a table that counted only the
+    # survivors would hide exactly the runs a flake investigation most wants.
+    runs =
+      for run <- 1..expected//1 do
+        record = by_run[run]
+        status = Map.get(verdicts, run, 0)
+
+        cond do
+          is_nil(record) -> {run, :no_record, status}
+          record["failures"] != [] -> {run, :failed, status}
+          status != 0 -> {run, :nonzero_exit, status}
+          true -> {run, :passed, status}
+        end
+      end
+
+    failed_runs = Enum.count(runs, fn {_run, outcome, _status} -> outcome != :passed end)
 
     IO.puts(
       "flake-hunt: #{length(records)} runs, #{schedulers} schedulers, " <>
         "#{failed_runs} with failures"
     )
 
-    if missing > 0 do
-      IO.puts("  #{missing} of #{opts.expected} runs left no record (ended before the suite finished)")
+    for {run, :no_record, status} <- runs do
+      IO.puts("  run #{run} left no record (exit #{status}): it ended before the suite finished")
     end
 
-    if unexplained > 0 do
-      runs = Enum.map_join(nonzero, ", ", fn {run, status} -> "run #{run} exit #{status}" end)
-      IO.puts("  #{unexplained} runs exited non-zero with a failure-free record: #{runs}")
+    for {run, :nonzero_exit, status} <- runs do
+      IO.puts("  run #{run} exited #{status} with a failure-free record")
     end
 
     records

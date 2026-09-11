@@ -4,7 +4,7 @@ defmodule PtcRunner.TestSupport.RunRecordTest do
   alias PtcRunner.TestSupport.RunRecord
 
   test "a record carries the split, the seed, and each failure's first line" do
-    {:ok, state} = RunRecord.init(seed: 99, max_cases: 4)
+    {:ok, state} = RunRecord.init(seed: 99, max_cases: 4, run_index: 7)
 
     passed = %ExUnit.Test{
       name: :"test passes",
@@ -34,6 +34,7 @@ defmodule PtcRunner.TestSupport.RunRecordTest do
     record = RunRecord.record(state, %{run: 4_500_000, async: 1_000_000, load: 250_000})
 
     assert %{
+             run: 7,
              seed: 99,
              max_cases: 4,
              tests: 2,

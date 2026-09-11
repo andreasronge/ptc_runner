@@ -70,7 +70,7 @@ mix compile --warnings-as-errors
 for ((i = 1; i <= runs; i++)); do
   started=$SECONDS
   status=0
-  mix test --warnings-as-errors > "$out/run-$i.log" 2>&1 || status=$?
+  PTC_TEST_RUN_INDEX=$i mix test --warnings-as-errors > "$out/run-$i.log" 2>&1 || status=$?
   echo "$i $status" >> "$out/verdicts.txt"
   if [ "$status" -eq 0 ]; then verdict=pass; else verdict="FAIL (exit $status)"; fi
   echo "run $i/$runs: $verdict ($((SECONDS - started))s)"

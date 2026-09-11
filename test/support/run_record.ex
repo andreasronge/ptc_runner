@@ -22,6 +22,7 @@ defmodule PtcRunner.TestSupport.RunRecord do
     {:ok,
      %{
        log: Keyword.get(config, :run_log, System.get_env("PTC_TEST_RUN_LOG")),
+       run: Keyword.get(config, :run_index, run_index(System.get_env("PTC_TEST_RUN_INDEX"))),
        seed: Keyword.get(config, :seed),
        max_cases: Keyword.get(config, :max_cases),
        tests: 0,
@@ -68,6 +69,7 @@ defmodule PtcRunner.TestSupport.RunRecord do
 
     %{
       recorded_at: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601(),
+      run: state.run,
       seed: state.seed,
       schedulers: System.schedulers_online(),
       max_cases: state.max_cases,
@@ -98,6 +100,17 @@ defmodule PtcRunner.TestSupport.RunRecord do
       line: test_module.tags[:line],
       message: message(failures)
     }
+  end
+
+  # flake-hunt.sh numbers its runs so the summary can pair each record with
+  # that run's exit status; a plain `mix test` has no number.
+  defp run_index(nil), do: nil
+
+  defp run_index(value) do
+    case Integer.parse(value) do
+      {index, ""} -> index
+      _other -> nil
+    end
   end
 
   defp relative(nil), do: nil
