@@ -258,6 +258,16 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     assert {:error, :timeout} = MCPStdioLauncher.receive_event(launcher, 0)
   end
 
+  test "close finishes promptly when the server exits and its streams reach EOF" do
+    launcher = open_launcher(["basic", "prompt-close"], grace_ms: 1_500)
+    started_at = System.monotonic_time(:millisecond)
+
+    assert {:ok, %{reason: :close, exit_status: 0}} =
+             MCPStdioLauncher.close(launcher, 1_000)
+
+    assert System.monotonic_time(:millisecond) - started_at < 1_000
+  end
+
   test "a timed-out write closes the launcher instead of flushing queued input" do
     launcher = open_launcher(["no-read"], grace_ms: 50)
     assert %{stdout: "ready\n"} = collect_until(launcher, &(&1.stdout == "ready\n"))

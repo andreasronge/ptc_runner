@@ -844,6 +844,17 @@ static void signal_process_group(pid_t process_group, int signal_number) {
   }
 }
 
+static void begin_kill_wait(enum shutdown_phase *phase, pid_t child_pid,
+                            uint32_t grace_ms, int64_t now,
+                            int64_t *deadline) {
+  uint32_t final_wait_ms =
+      grace_ms > MIN_FINAL_KILL_WAIT_MS ? grace_ms : MIN_FINAL_KILL_WAIT_MS;
+
+  signal_process_group(child_pid, SIGKILL);
+  *phase = PHASE_KILL_WAIT;
+  *deadline = now + (int64_t)final_wait_ms;
+}
+
 /*
  * Observe the leader without releasing its PID. The PID is also the process
  * group identifier, so reaping it before the last group signal would permit
@@ -1451,13 +1462,7 @@ static int supervise(const struct launcher_config *config, pid_t child_pid,
       phase = PHASE_TERM_WAIT;
       deadline = now + (int64_t)config->grace_ms;
     } else if (phase == PHASE_TERM_WAIT && now >= deadline) {
-      uint32_t final_wait_ms =
-          config->grace_ms > MIN_FINAL_KILL_WAIT_MS
-              ? config->grace_ms
-              : MIN_FINAL_KILL_WAIT_MS;
-      signal_process_group(child_pid, SIGKILL);
-      phase = PHASE_KILL_WAIT;
-      deadline = now + (int64_t)final_wait_ms;
+      begin_kill_wait(&phase, child_pid, config->grace_ms, now, &deadline);
     } else if (phase == PHASE_KILL_WAIT && now >= deadline) {
       close_if_open(&child_stdout);
       close_if_open(&child_stderr);
@@ -1466,6 +1471,18 @@ static int supervise(const struct launcher_config *config, pid_t child_pid,
       }
       return finish_supervision(FINISH_TERMINATION_TIMEOUT, child_reaped,
                                 child_status, stderr_truncated);
+    }
+
+    /*
+     * Once the leader has exited and both of its streams are drained, no
+     * graceful work remains. Retire the watchdog and any descendants now
+     * instead of charging the full EOF and TERM waits to every clean close.
+     * The un-reaped leader still reserves the process-group identifier until
+     * this final group signal has been sent.
+     */
+    if (phase != PHASE_RUNNING && phase != PHASE_KILL_WAIT && child_exited &&
+        stdout_eof && stderr_eof) {
+      begin_kill_wait(&phase, child_pid, config->grace_ms, now, &deadline);
     }
 
     /*
