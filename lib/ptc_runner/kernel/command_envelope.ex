@@ -85,7 +85,7 @@ defmodule PtcRunner.Kernel.CommandEnvelope do
         |> Enum.map(fn destination ->
           result =
             if ledger_path && same_destination?(ledger_path, destination),
-              do: {:error, reason},
+              do: skipped_ledger(destination, reason),
               else: publish(outcome, destination)
 
           {destination_path(destination), result}
@@ -105,6 +105,13 @@ defmodule PtcRunner.Kernel.CommandEnvelope do
       {published, failures} -> {:partial, published, failures}
     end
   end
+
+  defp skipped_ledger(%PublicationHandle{} = handle, reason) do
+    _ = discard(handle)
+    {:error, reason}
+  end
+
+  defp skipped_ledger(_path, reason), do: {:error, reason}
 
   defp destination_path(%PublicationHandle{} = handle), do: PublicationHandle.path(handle)
   defp destination_path(path), do: path

@@ -199,6 +199,31 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
   end
 
   @tag :tmp_dir
+  test "an invalid pre-existing artifact root releases its reserved ledger", %{tmp_dir: directory} do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
+    root = Path.join(target, ".ptc")
+    File.mkdir_p!(Path.join(root, "envelopes"))
+    File.chmod!(Path.join(root, "envelopes"), 0o700)
+    File.chmod!(root, 0o755)
+    on_exit(fn -> File.chmod(root, 0o700) end)
+
+    assert {:ok, entry} = CommandEntry.open(["run", project], :standalone)
+    owner = entry.envelope_handle.owner
+    assert Process.alive?(owner)
+
+    presentation =
+      CommandFrontend.present_entry(entry, fn _arguments ->
+        {:ok, CommandRuntime.standalone()}
+      end)
+
+    assert presentation.exit_status == CommandFrontend.envelope_failure_exit_status()
+    refute Process.alive?(owner)
+    assert File.ls!(Path.join(root, "envelopes")) == []
+  end
+
+  @tag :tmp_dir
   test "a permissive artifact child names that directory and the owner-only rule", %{
     tmp_dir: directory
   } do
