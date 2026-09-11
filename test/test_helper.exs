@@ -64,15 +64,20 @@ exunit_opts = [
   assert_receive_timeout: 5_000
 ]
 
-exunit_opts =
-  if System.get_env("PTC_PROFILE_SLOW") do
-    Keyword.put(exunit_opts, :formatters, [
-      ExUnit.CLIFormatter,
-      PtcRunner.TestSupport.SlowTestProfiler
-    ])
-  else
-    exunit_opts
-  end
+# Set PTC_TEST_RUN_LOG to a file path to append one JSON line per run with
+# the seed, scheduler count, wall/async/sync split, and every failed test.
+# `scripts/ci/flake-hunt.sh` sets it and tabulates the file across runs; the
+# sync figure is the serial `async: false` phase and is what to watch when
+# moving modules to async.
+formatters =
+  [
+    ExUnit.CLIFormatter,
+    System.get_env("PTC_PROFILE_SLOW") && PtcRunner.TestSupport.SlowTestProfiler,
+    System.get_env("PTC_TEST_RUN_LOG") && PtcRunner.TestSupport.RunRecord
+  ]
+  |> Enum.filter(& &1)
+
+exunit_opts = Keyword.put(exunit_opts, :formatters, formatters)
 
 ExUnit.configure(exunit_opts)
 

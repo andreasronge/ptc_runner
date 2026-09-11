@@ -95,6 +95,9 @@ body. An assignee marks the issue as taken.
 - `scripts/ci/core-tests.sh` — the core compile/test gate used by pre-push and
   CI (`CI=1`, 300 StreamData cases). `--schedulers 4` reproduces GitHub's CPU
   shape.
+- `scripts/ci/flake-hunt.sh N` — run the suite N times at four schedulers
+  and tabulate failing tests by frequency and seed. Use it before calling a
+  failure a flake and after any change that moves a module to `async: true`.
 - `MIX_ENV=dev mix docs --warnings-as-errors` — ExDoc gate; run when changing
   user-facing documentation.
 - `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`). The

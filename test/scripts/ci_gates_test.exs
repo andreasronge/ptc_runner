@@ -9,6 +9,8 @@ defmodule PtcRunner.Scripts.CIGatesTest do
   @preflight Path.join(@root, "scripts/ci/preflight.sh")
   @viewer Path.join(@root, "scripts/ci/viewer.sh")
   @launcher_package Path.join(@root, "scripts/ci/launcher-package.sh")
+  @flake_hunt Path.join(@root, "scripts/ci/flake-hunt.sh")
+  @flake_hunt_summary Path.join(@root, "scripts/ci/flake_hunt_summary.exs")
   @git_env GitEnv.clear()
 
   test "core tests establish the CI contract without reducing native scheduler pressure" do
@@ -236,6 +238,136 @@ defmodule PtcRunner.Scripts.CIGatesTest do
     refute nightly =~ ~r/PTC_SKIP_PTY_GATE=/
   end
 
+  describe "flake hunt" do
+    @passing_record ~s({"seed":1,"schedulers":4,"wall_ms":4000,"async_ms":1000,"sync_ms":3000,"failures":[]})
+    @failing_record ~s({"seed":7,"schedulers":4,"wall_ms":5000,"async_ms":1500,"sync_ms":3500,) <>
+                      ~s("failures":[{"module":"PtcRunner.ReplSessionTest","name":"test owners","file":"test/a_test.exs","line":451,"message":"no matching message after 2000ms"}]})
+
+    test "compiles once, then runs the whole suite N times under the CI contract" do
+      %{marker: marker} = fake = fake_mix()
+      out = Path.join(Path.dirname(marker), "hunt")
+
+      {output, status} =
+        run_gate(@flake_hunt, fake,
+          args: ["3", "--out", out],
+          env: [{"ERL_FLAGS", "+S 9:9"}, {"MIX_RUN_RECORD", @passing_record}]
+        )
+
+      assert status == 0, output
+
+      assert File.read!(marker) |> String.split("\n", trim: true) ==
+               [
+                 "CI=1 MIX_ENV=test HEX_SPONSOR=false ERL_FLAGS=+S 4:4 PWD=. :: compile --warnings-as-errors"
+               ] ++
+                 List.duplicate(
+                   "CI=1 MIX_ENV=test HEX_SPONSOR=false ERL_FLAGS=+S 4:4 PWD=. :: test --warnings-as-errors",
+                   3
+                 )
+
+      assert output =~ "flake-hunt: 3 runs, 4 schedulers, 0 with failures"
+      assert output =~ ~r/wall  min 4\.0s  median 4\.0s  max 4\.0s/
+      assert File.read!(Path.join(out, "summary.txt")) =~ "0 with failures"
+
+      assert File.read!(Path.join(out, "runs.jsonl"))
+             |> String.split("\n", trim: true)
+             |> length() == 3
+    end
+
+    test "a failing run does not stop the hunt and fails the exit status" do
+      %{marker: marker} = fake = fake_mix()
+      out = Path.join(Path.dirname(marker), "hunt")
+
+      {output, status} =
+        run_gate(@flake_hunt, fake,
+          args: ["2", "--schedulers", "6", "--out", out],
+          env: [{"MIX_TEST_EXIT", "1"}, {"MIX_RUN_RECORD", @failing_record}]
+        )
+
+      assert status == 1, output
+      assert output =~ "run 1/2: FAIL"
+      assert output =~ "run 2/2: FAIL"
+      assert output =~ "flake-hunt: 2 runs, 4 schedulers, 2 with failures"
+      assert output =~ "2x  test/a_test.exs:451  PtcRunner.ReplSessionTest  test owners"
+      assert output =~ "seeds: 7, 7"
+      assert output =~ "no matching message after 2000ms"
+
+      assert File.read!(marker)
+             |> String.split("\n", trim: true)
+             |> Enum.count(
+               &(&1 ==
+                   "CI=1 MIX_ENV=test HEX_SPONSOR=false ERL_FLAGS=+S 6:6 PWD=. :: test --warnings-as-errors")
+             ) == 2
+    end
+
+    test "rejects malformed arguments before invoking Mix" do
+      %{marker: marker} = fake = fake_mix()
+
+      for args <- [["zero"], ["--schedulers", "many"], ["--out"]] do
+        {output, status} = run_gate(@flake_hunt, fake, args: args)
+        assert status == 64, output
+        assert output =~ "usage: flake-hunt.sh [RUNS] [--schedulers POSITIVE_INTEGER] [--out DIR]"
+      end
+
+      refute File.exists?(marker)
+    end
+
+    test "the summary refuses a missing or empty record file" do
+      %{marker: marker} = fake_mix()
+      missing = Path.join(Path.dirname(marker), "missing.jsonl")
+      empty = Path.join(Path.dirname(marker), "empty.jsonl")
+      File.write!(empty, "")
+
+      {output, status} =
+        System.cmd("elixir", [@flake_hunt_summary, missing], stderr_to_stdout: true)
+
+      assert status == 65
+      assert output =~ "no run records at #{missing}"
+
+      {output, status} =
+        System.cmd("elixir", [@flake_hunt_summary, empty], stderr_to_stdout: true)
+
+      assert status == 65
+      assert output =~ "record file is empty"
+    end
+
+    test "the nightly workflow runs the hunt on main and keeps its records" do
+      nightly = File.read!(Path.join(@root, ".github/workflows/nightly.yml"))
+
+      assert nightly =~
+               ~s(scripts/ci/flake-hunt.sh 10 --schedulers 4 --out "$RUNNER_TEMP/flake-hunt")
+
+      assert nightly =~
+               ~r/if: always\(\)\n\s+uses: actions\/upload-artifact@v6\n\s+with:\n\s+name: flake-hunt/
+    end
+
+    # The formatter is the only producer of the record file, so it is proven
+    # through a real `mix test` rather than by feeding it synthetic events.
+    @tag :nightly
+    test "a real suite run appends one record with its seed, split, and failures" do
+      %{marker: marker} = fake_mix()
+      log = Path.join(Path.dirname(marker), "runs.jsonl")
+
+      {output, status} =
+        System.cmd(
+          "mix",
+          ["test", "test/support/test_helpers_test.exs", "--seed", "4242"],
+          cd: @root,
+          env: @git_env ++ [{"PTC_TEST_RUN_LOG", log}, {"MIX_ENV", "test"}],
+          stderr_to_stdout: true
+        )
+
+      assert status == 0, output
+      assert [line] = log |> File.read!() |> String.split("\n", trim: true)
+      record = Jason.decode!(line)
+      assert record["seed"] == 4242
+      assert record["schedulers"] == System.schedulers_online()
+      assert record["failures"] == []
+      assert record["tests"] > 0
+      assert record["wall_ms"] >= record["async_ms"]
+      assert record["sync_ms"] == record["wall_ms"] - record["async_ms"]
+    end
+  end
+
   # Every gate is exercised the same way: the repository root as the working
   # directory, a cleared git environment, and a fake `mix` first on PATH that
   # records what it was asked to do. `:env` entries are appended, so a test can
@@ -278,6 +410,12 @@ defmodule PtcRunner.Scripts.CIGatesTest do
     rel="${rel#/}"
     printf 'CI=%s MIX_ENV=%s HEX_SPONSOR=%s ERL_FLAGS=%s PWD=%s :: %s\n' \\
       "$CI" "$MIX_ENV" "$HEX_SPONSOR" "${ERL_FLAGS:-}" "${rel:-.}" "$*" >> "$MIX_MARKER"
+    if [ "$1" = test ] && [ -n "${PTC_TEST_RUN_LOG:-}" ] && [ -n "${MIX_RUN_RECORD:-}" ]; then
+      printf '%s\n' "$MIX_RUN_RECORD" >> "$PTC_TEST_RUN_LOG"
+    fi
+    if [ "$1" = test ] && [ -n "${MIX_TEST_EXIT:-}" ]; then
+      exit "$MIX_TEST_EXIT"
+    fi
     exit "${MIX_GATE_EXIT:-0}"
     """)
 
