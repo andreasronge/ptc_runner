@@ -1158,8 +1158,8 @@ defmodule PtcRunner.Kernel.PublicationHandle do
       :ok ->
         claim_created_reservation(reservation_path)
 
-      {:error, _reason} ->
-        retry_reservation(reservation_path, destination, retry?)
+      {:error, reason} ->
+        retry_reservation(reservation_path, destination, retry?, reason)
     end
   end
 
@@ -1204,9 +1204,10 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     end
   end
 
-  defp retry_reservation(_path, _destination, false), do: {:error, :destination_exists}
+  defp retry_reservation(_path, _destination, false, _reason),
+    do: {:error, :destination_exists}
 
-  defp retry_reservation(path, destination, true) do
+  defp retry_reservation(path, destination, true, reason) do
     if match?({:ok, _}, File.lstat(path)) do
       # Serialize reclaimers across VMs with the existing same-host OS
       # lock. Re-read under the lock so a delayed reaper cannot remove a
@@ -1220,7 +1221,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
       end)
       |> normalize_reservation_refusal()
     else
-      {:error, :destination_unavailable}
+      {:error, reason}
     end
   end
 

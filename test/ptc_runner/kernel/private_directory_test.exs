@@ -1,14 +1,15 @@
 defmodule PtcRunner.Kernel.PrivateDirectoryTest do
   use ExUnit.Case, async: false
 
-  alias PtcRunner.Kernel.PrivateDirectory
+  alias PtcRunner.Kernel.CommandFrontend
 
   @moduletag :tmp_dir
 
-  test "directory creation preserves a no-space filesystem cause", %{tmp_dir: directory} do
+  test "envelope admission preserves a no-space filesystem cause", %{tmp_dir: directory} do
     real_id = System.find_executable("id")
     fake_bin = Path.join(directory, "bin")
     destination = Path.join(directory, "destination")
+    envelope = Path.join(directory, "envelope.json")
     original_path = System.get_env("PATH")
 
     assert is_binary(real_id)
@@ -26,8 +27,19 @@ defmodule PtcRunner.Kernel.PrivateDirectoryTest do
     System.put_env("PATH", fake_bin)
     on_exit(fn -> restore_env("PATH", original_path) end)
 
-    assert {:error, :enospc} = PrivateDirectory.create(destination)
+    presentation =
+      CommandFrontend.execute(
+        ["init", destination, "--envelope", envelope],
+        :standalone,
+        fn _arguments -> flunk("must not bootstrap") end
+      )
+
+    assert presentation.exit_status == 7
+    assert presentation.stderr =~ "destination/envelope_destination_unavailable"
+    assert presentation.stderr =~ inspect(envelope)
+    assert presentation.stderr =~ "no space left on device (enospc)"
     refute File.exists?(destination)
+    refute File.exists?(envelope)
   end
 
   defp restore_env(name, nil), do: System.delete_env(name)

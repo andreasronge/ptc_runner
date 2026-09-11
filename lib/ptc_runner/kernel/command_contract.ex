@@ -40,6 +40,7 @@ defmodule PtcRunner.Kernel.CommandContract do
     {"doctor", {:doctor, :connect}, :catalog, true},
     {"models", :models, false, false},
     {"materialize", :materialize, false, false},
+    {"transcript", :transcript, false, false},
     {"unknown", :unknown, false, false}
   ]
   @run_ref "^cmd-[0-7][0-9abcdefghjkmnpqrstvwxyz]{25}$(?![\\s\\S])"

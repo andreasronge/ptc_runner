@@ -199,6 +199,47 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
     refute internal.stderr =~ "repl/"
   end
 
+  @tag :tmp_dir
+  test "transcript reports an unavailable envelope before bootstrap", %{tmp_dir: dir} do
+    traces = Path.join(dir, "traces")
+    inspection = Path.join(dir, "inspection")
+    File.mkdir!(traces)
+    File.mkdir!(inspection)
+    envelope = Path.join([dir, "missing", "envelope.json"])
+    parent = self()
+
+    presentation =
+      CommandRouter.execute(
+        [
+          "transcript",
+          @run_ref,
+          "--traces",
+          traces,
+          "--inspection",
+          inspection,
+          "--private-unattended",
+          "--private-output",
+          Path.join(dir, "transcript.private.json"),
+          "--envelope",
+          envelope
+        ],
+        :standalone,
+        fn _arguments ->
+          send(parent, :unexpected_bootstrap)
+          {:error, :command_bootstrap_failed}
+        end,
+        fn _arguments, _runtime -> send(parent, :unexpected_runner) end
+      )
+
+    assert presentation.exit_status == 7
+    assert presentation.outcome.command_mode == :transcript
+    assert presentation.outcome.envelope["error"]["phase"] == "destination"
+    assert presentation.outcome.envelope["error"]["code"] == "envelope_destination_unavailable"
+    assert presentation.stderr =~ inspect(envelope)
+    refute_received :unexpected_bootstrap
+    refute_received :unexpected_runner
+  end
+
   test "the one-shot frontend rejects repl without invoking bootstrap" do
     parent = self()
 
