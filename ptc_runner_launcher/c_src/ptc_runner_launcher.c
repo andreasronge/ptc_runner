@@ -1006,11 +1006,14 @@ static void handle_child_stdin_failure(
                  deadline);
 }
 
+static bool emit_stderr_tail(size_t length);
+
 static bool consume_input_frames(
     uint8_t *input, size_t *input_length, struct byte_queue *pending,
     bool *stdout_ack_pending,
     enum shutdown_phase *phase, enum finish_reason *finish_reason,
-    int *child_stdin, uint32_t grace_ms, int64_t *deadline) {
+    int *child_stdin, uint32_t grace_ms, int64_t *deadline,
+    bool stderr_truncated, size_t stderr_tail_length) {
   size_t consumed = 0;
 
   while (*input_length - consumed >= 4U) {
@@ -1060,6 +1063,9 @@ static bool consume_input_frames(
                *stdout_ack_pending) {
       *stdout_ack_pending = false;
     } else if (input[consumed + 4U] == 'C' && frame_length == 1U) {
+      if (stderr_truncated && !emit_stderr_tail(stderr_tail_length)) {
+        return false;
+      }
       begin_shutdown(phase, finish_reason, FINISH_CLOSE, pending, child_stdin,
                      grace_ms, deadline);
     } else {
@@ -1546,7 +1552,8 @@ static int supervise(const struct launcher_config *config, pid_t child_pid,
     if (phase == PHASE_RUNNING && input_length > 0) {
       (void)consume_input_frames(
           input, &input_length, &pending, &stdout_ack_pending, &phase,
-          &finish_reason, &child_stdin, config->grace_ms, &deadline);
+          &finish_reason, &child_stdin, config->grace_ms, &deadline,
+          stderr_truncated, stderr_tail_length);
     }
 
     /*
@@ -1639,7 +1646,8 @@ static int supervise(const struct launcher_config *config, pid_t child_pid,
           input_length += (size_t)count;
           (void)consume_input_frames(
               input, &input_length, &pending, &stdout_ack_pending, &phase,
-              &finish_reason, &child_stdin, config->grace_ms, &deadline);
+              &finish_reason, &child_stdin, config->grace_ms, &deadline,
+              stderr_truncated, stderr_tail_length);
         } else if (count == 0) {
           stdout_ack_pending = false;
           begin_shutdown(&phase, &finish_reason, FINISH_OWNER_EOF, &pending,

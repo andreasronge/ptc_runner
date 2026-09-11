@@ -4789,7 +4789,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert is_binary(trace_reason)
     assert String.valid?(trace_reason)
     assert byte_size(trace_reason) <= 1_020
-    assert trace_reason =~ "launcher reported close_timeout"
+    assert trace_reason =~ "transport close timed out"
   end
 
   test "success construction rejects results outside the command schema" do

@@ -224,6 +224,60 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     assert duration_ms >= cleanup_budget_ms
   end
 
+  test "invalid or blocking cleanup evidence falls back without extending cleanup indefinitely" do
+    blocking_snapshot = fn ->
+      receive do
+        :never -> %{}
+      end
+    end
+
+    for snapshot <- [fn -> %{stderr: <<255>>} end, blocking_snapshot] do
+      {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
+      {:ok, session} = ProviderSession.start(limits)
+      {:ok, registrar} = ProviderSession.open_registrar(session)
+      assert :ok = ResourceRegistrar.activate(registrar)
+
+      close =
+        ProviderCleanup.new(
+          fn ->
+            receive do
+              :never -> :ok
+            end
+          end,
+          snapshot,
+          "workspace",
+          %{transport: :stdio, grace_ms: 100}
+        )
+
+      assert :ok = ResourceRegistrar.commit(registrar, close)
+      started_at = System.monotonic_time(:millisecond)
+
+      assert {:error, {:provider_cleanup_failed, details}} =
+               ProviderSession.close_detailed(session)
+
+      assert Map.take(details, [:stderr, :stderr_truncated?]) == %{}
+      assert System.monotonic_time(:millisecond) - started_at < 500
+    end
+  end
+
+  test "malformed detailed transport evidence is normalized" do
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+
+    close =
+      ProviderCleanup.new(
+        fn -> {:error, {:mcp_transport_error, :invalid}} end,
+        nil,
+        "workspace",
+        %{transport: :stdio, grace_ms: 100}
+      )
+
+    assert :ok = ResourceRegistrar.commit(registrar, close)
+    assert {:error, :provider_cleanup_failed} = ProviderSession.close_detailed(session)
+  end
+
   test "a wedged session cannot leave a committed closer ambiguously owned" do
     # A session that never answers is the case a reply grace cannot decide. The
     # commit keeps its request alive, spends one cleanup budget waiting for the

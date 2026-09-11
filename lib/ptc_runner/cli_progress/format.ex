@@ -3,7 +3,13 @@ defmodule PtcRunner.CLIProgress.Format do
 
   @spec interactive(map(), pos_integer()) :: binary()
   def interactive(frame, width) do
-    primary = [phase(frame) <> " " <> duration(frame.elapsed_ms), agent(frame), remaining(frame)]
+    primary = [
+      phase(frame) <> " " <> duration(frame.elapsed_ms),
+      outcome_reason(frame),
+      agent(frame),
+      remaining(frame)
+    ]
+
     optional = [llm(frame), evaluations(frame), workers(frame), spend(frame)]
 
     Enum.reduce(optional, Enum.reject(primary, &is_nil/1), fn segment, segments ->
@@ -19,7 +25,7 @@ defmodule PtcRunner.CLIProgress.Format do
     details =
       case event do
         "still running" -> [llm_calls(frame), remaining(frame)]
-        _terminal -> [llm_calls(frame), spend(frame)]
+        _terminal -> [outcome_reason(frame), llm_calls(frame), spend(frame)]
       end
 
     "[#{duration(frame.elapsed_ms)}] " <>
@@ -30,6 +36,12 @@ defmodule PtcRunner.CLIProgress.Format do
   defp phase(%{phase: phase}) when phase in ["error", "failed"], do: "failed"
   defp phase(%{phase: phase}) when is_binary(phase), do: phase
   defp phase(_), do: "running"
+
+  defp outcome_reason(%{phase: phase, outcome_reason: reason})
+       when phase in ["error", "failed"] and is_binary(reason) and reason != "",
+       do: reason
+
+  defp outcome_reason(_frame), do: nil
 
   defp agent(%{agents: agents}) when is_list(agents) and length(agents) > 1,
     do: "#{length(agents)} agents active"

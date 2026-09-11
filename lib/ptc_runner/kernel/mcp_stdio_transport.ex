@@ -1138,7 +1138,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   end
 
   defp drain_stderr(%{stderr_truncated?: true} = state) do
-    text = valid_utf8_suffix(state.stderr)
+    text = Utf8.sanitize(state.stderr)
 
     {text, true, %{state | stderr: "", stderr_truncated?: false}}
   end
@@ -1148,12 +1148,6 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     rest = binary_part(state.stderr, byte_size(text), byte_size(state.stderr) - byte_size(text))
 
     {text, false, %{state | stderr: rest, stderr_truncated?: false}}
-  end
-
-  defp valid_utf8_suffix(value) do
-    if String.valid?(value),
-      do: value,
-      else: valid_utf8_suffix(binary_part(value, 1, byte_size(value) - 1))
   end
 
   defp dispatch_request(from, method, params, metadata, max_bytes, timeout_ms, exchange?, state) do

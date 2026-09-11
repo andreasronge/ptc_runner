@@ -74,6 +74,14 @@ defmodule PtcRunner.CLIProgressTest do
     assert Format.interactive(Map.put(one, :agents, [%{}, %{}]), 80) =~ "2 agents active"
   end
 
+  test "terminal formatters render the failure reason" do
+    failed =
+      Map.merge(frame(18_000, 0), %{phase: "failed", outcome_reason: "provider cleanup timed out"})
+
+    assert Format.interactive(failed, 80) =~ "provider cleanup timed out"
+    assert Format.milestone(failed, "failed") =~ "provider cleanup timed out"
+  end
+
   test "formatter counts only canonical LLM requests and preserves exact spend" do
     frame = frame(1_000, 1_000)
     calls = %{workflow: %{"llm-request" => 3, "non-llm-cache" => 9}, mission: %{}}

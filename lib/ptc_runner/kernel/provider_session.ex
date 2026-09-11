@@ -89,6 +89,8 @@ defmodule PtcRunner.Kernel.ProviderSession do
   a reply or a `:DOWN`, never by elapsed time.
   """
 
+  @cleanup_snapshot_timeout_ms 50
+
   use GenServer
   use PtcRunner.Kernel.OwnerStatusRedaction
 
@@ -1503,14 +1505,14 @@ defmodule PtcRunner.Kernel.ProviderSession do
           {:ok, :ok} ->
             :ok
 
-          {:ok, {:error, {:mcp_transport_error, transport}}} ->
+          {:ok, {:error, {:mcp_transport_error, transport}}} when is_map(transport) ->
             cleanup_failure(close, :transport_failed, transport, started_at_ms, timeout_ms)
 
           {:error, :timeout} ->
             cleanup_failure(
               close,
               :cleanup_deadline_expired,
-              cleanup_snapshot(close),
+              cleanup_snapshot(close, heap_words),
               started_at_ms,
               timeout_ms
             )
@@ -1528,35 +1530,83 @@ defmodule PtcRunner.Kernel.ProviderSession do
   defp cleanup_function(%ProviderCleanup{run: run}), do: run
   defp cleanup_function(close), do: close
 
-  defp cleanup_snapshot(%ProviderCleanup{snapshot: snapshot}) when is_function(snapshot, 0) do
-    case snapshot.() do
-      details when is_map(details) -> details
+  defp cleanup_snapshot(%ProviderCleanup{snapshot: snapshot}, heap_words)
+       when is_function(snapshot, 0) do
+    case BoundedWorker.run(snapshot,
+           timeout_ms: @cleanup_snapshot_timeout_ms,
+           max_heap_words: heap_words,
+           cancel_with_caller: true
+         ) do
+      {:ok, details} when is_map(details) -> valid_snapshot(details)
       _invalid -> %{}
     end
-  catch
-    _kind, _reason -> %{}
   end
 
-  defp cleanup_snapshot(_close), do: %{}
+  defp cleanup_snapshot(_close, _heap_words), do: %{}
 
   defp cleanup_failure(%ProviderCleanup{} = close, reason, transport, started_at_ms, budget_ms) do
-    details =
-      transport
-      |> Map.take([:finish_reason, :exit_status, :stderr, :stderr_truncated?])
-      |> Map.merge(%{
-        provider: close.provider,
-        transport: close.transport,
-        grace_ms: close.grace_ms,
-        reason: reason,
-        duration_ms: max(System.monotonic_time(:millisecond) - started_at_ms, 0),
-        cleanup_budget_ms: budget_ms
-      })
+    case valid_cleanup_evidence(reason, transport) do
+      {:ok, transport} ->
+        details =
+          transport
+          |> Map.take([:finish_reason, :exit_status, :stderr, :stderr_truncated?])
+          |> Map.merge(%{
+            provider: close.provider,
+            transport: close.transport,
+            grace_ms: close.grace_ms,
+            reason: reason,
+            duration_ms: max(System.monotonic_time(:millisecond) - started_at_ms, 0),
+            cleanup_budget_ms: budget_ms
+          })
 
-    {:error, {:provider_cleanup_failed, details}}
+        {:error, {:provider_cleanup_failed, details}}
+
+      :error ->
+        {:error, :provider_cleanup_failed}
+    end
   end
 
   defp cleanup_failure(_close, _reason, _transport, _started_at_ms, _budget_ms),
     do: {:error, :provider_cleanup_failed}
+
+  defp valid_snapshot(details) do
+    if Map.keys(details) -- [:stderr, :stderr_truncated?] == [] and
+         valid_stderr?(Map.get(details, :stderr, "")) and
+         Map.get(details, :stderr_truncated?, false) in [true, false],
+       do: details,
+       else: %{}
+  end
+
+  defp valid_cleanup_evidence(:cleanup_deadline_expired, details) when is_map(details),
+    do: {:ok, valid_snapshot(details)}
+
+  defp valid_cleanup_evidence(:transport_failed, details), do: valid_transport_evidence(details)
+
+  defp valid_transport_evidence(details) when is_map(details) do
+    allowed = [:finish_reason, :exit_status, :stderr, :stderr_truncated?]
+    finish_reason = Map.get(details, :finish_reason)
+    exit_status = Map.get(details, :exit_status)
+
+    if Map.keys(details) -- allowed == [] and
+         finish_reason in [
+           :server_exit,
+           :close,
+           :owner_eof,
+           :launcher_signal,
+           :protocol_error,
+           :termination_timeout,
+           :close_timeout,
+           :finish_missing
+         ] and
+         (is_nil(exit_status) or is_integer(exit_status)) and
+         valid_stderr?(Map.get(details, :stderr, "")) and
+         Map.get(details, :stderr_truncated?, false) in [true, false],
+       do: {:ok, details},
+       else: :error
+  end
+
+  defp valid_stderr?(stderr),
+    do: is_binary(stderr) and byte_size(stderr) <= 1_048_576 and String.valid?(stderr)
 
   defp cleanup_slots(scopes, entries) do
     Enum.reduce(scopes, 0, fn scope, count ->

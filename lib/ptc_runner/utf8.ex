@@ -39,6 +39,22 @@ defmodule PtcRunner.Utf8 do
     end
   end
 
+  @doc false
+  @spec sanitize(binary()) :: binary()
+  def sanitize(value) when is_binary(value) do
+    value |> sanitize_segments([]) |> IO.iodata_to_binary()
+  end
+
+  defp sanitize_segments(<<>>, segments), do: Enum.reverse(segments)
+
+  defp sanitize_segments(value, segments) do
+    case :unicode.characters_to_binary(value, :utf8, :utf8) do
+      valid when is_binary(valid) -> Enum.reverse([valid | segments])
+      {:error, valid, <<_invalid, rest::binary>>} -> sanitize_segments(rest, [valid | segments])
+      {:incomplete, valid, _rest} -> Enum.reverse([valid | segments])
+    end
+  end
+
   defp copy_valid_prefix(value), do: value |> valid_prefix() |> :binary.copy()
 
   defp valid_prefix(value) do

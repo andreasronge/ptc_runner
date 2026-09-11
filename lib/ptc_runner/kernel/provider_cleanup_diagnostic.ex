@@ -3,7 +3,7 @@ defmodule PtcRunner.Kernel.ProviderCleanupDiagnostic do
 
   alias PtcRunner.Kernel.CommandSubject
 
-  @message ~r/\Aprovider cleanup failed for [a-z][a-z0-9._-]{0,127} over (stdio|streamable_http): (cleanup deadline expired|launcher reported (server_exit|close|owner_eof|launcher_signal|protocol_error|termination_timeout|close_timeout|finish_missing))( \(exit status -?[0-9]+\))? after [0-9]+ ms \(grace_ms [0-9]+; cleanup budget [0-9]+ ms\)(; stderr: [^\r\n]{1,1024})?(; stderr truncated)?(; increase limits\.provider_cleanup_timeout_ms)?\z/u
+  @message ~r/\Aprovider cleanup failed for [a-z][a-z0-9._-]{0,127} over (stdio|streamable_http): (cleanup deadline expired|launcher reported (server_exit|close|owner_eof|launcher_signal|protocol_error|termination_timeout)|transport (close timed out|closed without a finish frame))( \(exit status -?[0-9]+\))? after [0-9]+ ms \(grace_ms [0-9]+; cleanup budget [0-9]+ ms\)(; stderr: [^\r\n]{1,1024})?(; stderr truncated)?(; increase limits\.provider_cleanup_timeout_ms)?\z/u
 
   def fields(
         %{
@@ -68,9 +68,7 @@ defmodule PtcRunner.Kernel.ProviderCleanupDiagnostic do
               :owner_eof,
               :launcher_signal,
               :protocol_error,
-              :termination_timeout,
-              :close_timeout,
-              :finish_missing
+              :termination_timeout
             ] do
     suffix =
       case Map.get(details, :exit_status) do
@@ -80,6 +78,12 @@ defmodule PtcRunner.Kernel.ProviderCleanupDiagnostic do
 
     {:ok, "launcher reported #{finish_reason}" <> suffix}
   end
+
+  defp cause(:transport_failed, %{finish_reason: :close_timeout}),
+    do: {:ok, "transport close timed out"}
+
+  defp cause(:transport_failed, %{finish_reason: :finish_missing}),
+    do: {:ok, "transport closed without a finish frame"}
 
   defp cause(_reason, _details), do: :error
 
