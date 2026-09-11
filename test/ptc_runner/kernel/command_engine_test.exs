@@ -41,6 +41,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.ModelContractDiagnostic
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
+  alias PtcRunner.Kernel.ProviderCleanupDiagnostic
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunBuilder
@@ -4729,6 +4730,66 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              trace_publication,
              inspection_publication
            ])
+  end
+
+  test "provider cleanup diagnostics expose bounded stdio timeout context" do
+    details = %{
+      provider: "workspace",
+      transport: :stdio,
+      grace_ms: 2_000,
+      reason: :cleanup_deadline_expired,
+      duration_ms: 5_001,
+      cleanup_budget_ms: 5_000
+    }
+
+    assert {:ok, message, subject} = ProviderCleanupDiagnostic.fields(details)
+    assert message =~ "cleanup deadline expired after 5001 ms"
+    assert message =~ "grace_ms 2000; cleanup budget 5000 ms"
+    assert message =~ "increase limits.provider_cleanup_timeout_ms"
+    assert subject.name == "workspace"
+    assert subject.operation == :cleanup
+
+    diagnostic =
+      CommandDiagnostic.new!(:result_cleanup, :provider_cleanup_failed,
+        message: message,
+        subject: subject,
+        provider_activity: true
+      )
+
+    assert {:ok, root} =
+             JSV.build(CommandContract.catalog_diagnostic_schema(),
+               atoms: false,
+               warnings: :silent
+             )
+
+    assert {:ok, _validated} =
+             JSV.validate(CommandDiagnostic.to_map(diagnostic), root, cast: false)
+  end
+
+  test "provider cleanup diagnostics sanitize Unicode controls and obey byte bounds" do
+    details = %{
+      provider: "workspace",
+      transport: :stdio,
+      grace_ms: 2_000,
+      reason: :transport_failed,
+      finish_reason: :close_timeout,
+      exit_status: nil,
+      stderr: "hidden\u200Bline\u2028" <> String.duplicate("€", 600),
+      stderr_truncated?: true,
+      duration_ms: 2_001,
+      cleanup_budget_ms: 5_000
+    }
+
+    assert {:ok, message, _subject} = ProviderCleanupDiagnostic.fields(details)
+    refute message =~ "\u200B"
+    refute message =~ "\u2028"
+    assert byte_size(message) <= 2_048
+
+    trace_reason = ProviderCleanupDiagnostic.trace_reason(details)
+    assert is_binary(trace_reason)
+    assert String.valid?(trace_reason)
+    assert byte_size(trace_reason) <= 1_020
+    assert trace_reason =~ "transport close timed out"
   end
 
   test "success construction rejects results outside the command schema" do

@@ -89,6 +89,8 @@ defmodule PtcRunner.Kernel.ProviderSession do
   a reply or a `:DOWN`, never by elapsed time.
   """
 
+  @cleanup_snapshot_timeout_ms 50
+
   use GenServer
   use PtcRunner.Kernel.OwnerStatusRedaction
 
@@ -96,6 +98,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.ProviderCleanup
   alias PtcRunner.Kernel.ProviderScopeOwner
   alias PtcRunner.Kernel.ProviderTaskTracker
   alias PtcRunner.Kernel.ResourceRegistrar
@@ -542,7 +545,17 @@ defmodule PtcRunner.Kernel.ProviderSession do
   def open_registrar(_session), do: {:error, :provider_session_unavailable}
 
   @spec close(t()) :: :ok | {:error, :provider_cleanup_failed}
-  def close(%__MODULE__{} = session) do
+  def close(session) do
+    case close_detailed(session) do
+      {:error, {:provider_cleanup_failed, _details}} -> {:error, :provider_cleanup_failed}
+      result -> result
+    end
+  end
+
+  @doc false
+  @spec close_detailed(t()) ::
+          :ok | {:error, :provider_cleanup_failed | {:provider_cleanup_failed, map()}}
+  def close_detailed(%__MODULE__{} = session) do
     if valid?(session) do
       close_within_anchored_budget(session)
     else
@@ -550,7 +563,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
     end
   end
 
-  def close(_session), do: {:error, :provider_cleanup_failed}
+  def close_detailed(_session), do: {:error, :provider_cleanup_failed}
 
   # The caller waits what is left of the one anchored deadline, not the whole
   # installed duration again: an OAuth cancellation may already have spent part
@@ -689,7 +702,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
 
   @doc false
   def commit_registrar(registrar, close)
-      when is_function(close, 0) or is_nil(close) do
+      when is_function(close, 0) or is_nil(close) or is_struct(close, ProviderCleanup) do
     if ResourceRegistrar.valid?(registrar) do
       commit_valid_registrar(registrar, close)
     else
@@ -1149,7 +1162,8 @@ defmodule PtcRunner.Kernel.ProviderSession do
   end
 
   def handle_call({token, {:close_with_unregistered, close, share_ms}}, _from, state)
-      when token == state.token and (is_function(close, 0) or is_nil(close)) and
+      when token == state.token and
+             (is_function(close, 0) or is_nil(close) or is_struct(close, ProviderCleanup)) and
              is_integer(share_ms) and share_ms >= 0 do
     state =
       state
@@ -1320,7 +1334,8 @@ defmodule PtcRunner.Kernel.ProviderSession do
   defp commit_scope(scope, close, state) do
     case Map.fetch(state.scopes, scope) do
       {:ok, %{phase: :active, scope_controller: scope_controller} = entry}
-      when (is_function(close, 0) or is_nil(close)) and is_pid(scope_controller) ->
+      when (is_function(close, 0) or is_nil(close) or is_struct(close, ProviderCleanup)) and
+             is_pid(scope_controller) ->
         if Process.alive?(scope_controller) do
           entry = %{entry | phase: :committed, close: close}
 
@@ -1480,13 +1495,30 @@ defmodule PtcRunner.Kernel.ProviderSession do
       if remaining_ms > 0 and remaining_slots > 0 do
         timeout_ms = max(div(remaining_ms, remaining_slots), 1)
 
-        case BoundedWorker.run(close,
+        started_at_ms = System.monotonic_time(:millisecond)
+
+        case BoundedWorker.run(cleanup_function(close),
                timeout_ms: timeout_ms,
                max_heap_words: heap_words,
                cancel_with_caller: true
              ) do
-          {:ok, :ok} -> :ok
-          _failure -> {:error, :provider_cleanup_failed}
+          {:ok, :ok} ->
+            :ok
+
+          {:ok, {:error, {:mcp_transport_error, transport}}} when is_map(transport) ->
+            cleanup_failure(close, :transport_failed, transport, started_at_ms, timeout_ms)
+
+          {:error, :timeout} ->
+            cleanup_failure(
+              close,
+              :cleanup_deadline_expired,
+              cleanup_snapshot(close, heap_words),
+              started_at_ms,
+              timeout_ms
+            )
+
+          _failure ->
+            {:error, :provider_cleanup_failed}
         end
       else
         {:error, :provider_cleanup_failed}
@@ -1495,12 +1527,93 @@ defmodule PtcRunner.Kernel.ProviderSession do
     {result, max(remaining_slots - 1, 0)}
   end
 
+  defp cleanup_function(%ProviderCleanup{run: run}), do: run
+  defp cleanup_function(close), do: close
+
+  defp cleanup_snapshot(%ProviderCleanup{snapshot: snapshot}, heap_words)
+       when is_function(snapshot, 0) do
+    case BoundedWorker.run(snapshot,
+           timeout_ms: @cleanup_snapshot_timeout_ms,
+           max_heap_words: heap_words,
+           cancel_with_caller: true
+         ) do
+      {:ok, details} when is_map(details) -> valid_snapshot(details)
+      _invalid -> %{}
+    end
+  end
+
+  defp cleanup_snapshot(_close, _heap_words), do: %{}
+
+  defp cleanup_failure(%ProviderCleanup{} = close, reason, transport, started_at_ms, budget_ms) do
+    case valid_cleanup_evidence(reason, transport) do
+      {:ok, transport} ->
+        details =
+          transport
+          |> Map.take([:finish_reason, :exit_status, :stderr, :stderr_truncated?])
+          |> Map.merge(%{
+            provider: close.provider,
+            transport: close.transport,
+            grace_ms: close.grace_ms,
+            reason: reason,
+            duration_ms: max(System.monotonic_time(:millisecond) - started_at_ms, 0),
+            cleanup_budget_ms: budget_ms
+          })
+
+        {:error, {:provider_cleanup_failed, details}}
+
+      :error ->
+        {:error, :provider_cleanup_failed}
+    end
+  end
+
+  defp cleanup_failure(_close, _reason, _transport, _started_at_ms, _budget_ms),
+    do: {:error, :provider_cleanup_failed}
+
+  defp valid_snapshot(details) do
+    if Map.keys(details) -- [:stderr, :stderr_truncated?] == [] and
+         valid_stderr?(Map.get(details, :stderr, "")) and
+         Map.get(details, :stderr_truncated?, false) in [true, false],
+       do: details,
+       else: %{}
+  end
+
+  defp valid_cleanup_evidence(:cleanup_deadline_expired, details) when is_map(details),
+    do: {:ok, valid_snapshot(details)}
+
+  defp valid_cleanup_evidence(:transport_failed, details), do: valid_transport_evidence(details)
+
+  defp valid_transport_evidence(details) when is_map(details) do
+    allowed = [:finish_reason, :exit_status, :stderr, :stderr_truncated?]
+    finish_reason = Map.get(details, :finish_reason)
+    exit_status = Map.get(details, :exit_status)
+
+    if Map.keys(details) -- allowed == [] and
+         finish_reason in [
+           :server_exit,
+           :close,
+           :owner_eof,
+           :launcher_signal,
+           :protocol_error,
+           :termination_timeout,
+           :close_timeout,
+           :finish_missing
+         ] and
+         (is_nil(exit_status) or is_integer(exit_status)) and
+         valid_stderr?(Map.get(details, :stderr, "")) and
+         Map.get(details, :stderr_truncated?, false) in [true, false],
+       do: {:ok, details},
+       else: :error
+  end
+
+  defp valid_stderr?(stderr),
+    do: is_binary(stderr) and byte_size(stderr) <= 1_048_576 and String.valid?(stderr)
+
   defp cleanup_slots(scopes, entries) do
     Enum.reduce(scopes, 0, fn scope, count ->
       case Map.fetch(entries, scope) do
         {:ok, entry} ->
           count +
-            if(entry.phase == :committed and is_function(entry.close, 0), do: 1, else: 0) +
+            if(entry.phase == :committed and cleanup_action?(entry.close), do: 1, else: 0) +
             if(entry.roots_registered?, do: 1, else: 0)
 
         :error ->
@@ -1508,6 +1621,8 @@ defmodule PtcRunner.Kernel.ProviderSession do
       end
     end)
   end
+
+  defp cleanup_action?(close), do: is_function(close, 0) or is_struct(close, ProviderCleanup)
 
   defp ensure_cleanup_deadline(%{cleanup_deadline: nil} = state),
     do: %{state | cleanup_deadline: Deadline.new(state.cleanup_timeout_ms)}
@@ -1642,6 +1757,8 @@ defmodule PtcRunner.Kernel.ProviderSession do
   end
 
   defp merge_cleanup(:ok, :ok), do: :ok
+  defp merge_cleanup(:ok, {:error, {:provider_cleanup_failed, _details}} = right), do: right
+  defp merge_cleanup({:error, {:provider_cleanup_failed, _details}} = left, _right), do: left
   defp merge_cleanup(_left, _right), do: {:error, :provider_cleanup_failed}
 
   defp merge_abort_cleanup({:ok, state}, :ok), do: {:ok, state}
@@ -1650,6 +1767,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
     do: {{:error, :provider_cleanup_failed}, state}
 
   defp normalize_cleanup(:ok), do: :ok
+  defp normalize_cleanup({:error, {:provider_cleanup_failed, _details}} = failure), do: failure
   defp normalize_cleanup(_failure), do: {:error, :provider_cleanup_failed}
 
   defp payload(session) do

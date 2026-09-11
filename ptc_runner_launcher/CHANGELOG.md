@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0] - 2026-09-11
+
+### Changed
+
+- Added bounded atomic stderr-tail replacement snapshots during MCP stdio
+  shutdown and bumped the launcher protocol to version 2.
+
 ## [0.1.0] - 2026-08-23
 
 ### Added
@@ -28,4 +35,5 @@
   tarball without rebuilding it after checking both build and release
   attestations.
 
+[0.2.0]: https://github.com/andreasronge/ptc_runner/releases/tag/ptc_runner_launcher-v0.2.0
 [0.1.0]: https://github.com/andreasronge/ptc_runner/releases/tag/ptc_runner_launcher-v0.1.0

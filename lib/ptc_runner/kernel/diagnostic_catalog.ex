@@ -22,6 +22,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   alias PtcRunner.Kernel.ModelContractDiagnostic
   alias PtcRunner.Kernel.ModelOutputDiagnostic
   alias PtcRunner.Kernel.OptionalBudgetDiagnostic
+  alias PtcRunner.Kernel.ProviderCleanupDiagnostic
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.SchemaViolationDiagnostic
@@ -451,6 +452,13 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def message_schema(%{phase: :result_cleanup, code: :result_limit_exceeded, message: fallback}),
     do: RuntimeLimitDiagnostic.result_limit_message_schema(fallback)
 
+  def message_schema(%{
+        phase: :result_cleanup,
+        code: :provider_cleanup_failed,
+        message: fallback
+      }),
+      do: ProviderCleanupDiagnostic.message_schema(fallback)
+
   def message_schema(%{phase: :application, code: :installed_limit_exceeded, message: fallback}),
     do: RuntimeLimitDiagnostic.installed_ceiling_message_schema(fallback)
 
@@ -582,6 +590,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   defp valid_dynamic_message?(:result_cleanup, :result_limit_exceeded, message),
     do: RuntimeLimitDiagnostic.result_limit_message?(message)
+
+  defp valid_dynamic_message?(:result_cleanup, :provider_cleanup_failed, message),
+    do: ProviderCleanupDiagnostic.valid_message?(message)
 
   defp valid_dynamic_message?(:application, :installed_limit_exceeded, message),
     do: RuntimeLimitDiagnostic.installed_ceiling_message?(message)

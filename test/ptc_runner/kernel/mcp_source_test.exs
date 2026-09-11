@@ -847,7 +847,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert snapshot["transport"] == "stdio"
     assert snapshot["snapshot_hash"] =~ ~r/\A[0-9a-f]{64}\z/
     assert snapshot["server_info_hash"] =~ ~r/\A[0-9a-f]{64}\z/
-    assert snapshot["launcher_protocol_version"] == 1
+    assert snapshot["launcher_protocol_version"] == 2
     {:ok, launcher} = PtcRunnerLauncher.executable_path()
     assert snapshot["launcher_sha256"] == file_sha256(launcher)
     assert snapshot["server_executable_sha256"] == file_sha256(System.find_executable("sh"))

@@ -45,6 +45,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
     {:provider_acquisition, :provider_tool_missing},
     {:provider_declaration, :selection_invalid},
     {:publication, :candidate_refused},
+    {:result_cleanup, :provider_cleanup_failed},
     {:result_cleanup, :result_contract_failed}
   ]
 

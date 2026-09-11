@@ -126,6 +126,8 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           capabilities: [Capability.t()],
           snapshot: map() | nil,
           close: close() | nil,
+          cleanup_snapshot: (-> map()) | nil,
+          cleanup_context: map() | nil,
           data_class: :normal | :private_inspection,
           accepts_data: [:normal | :private_inspection],
           exports: %{optional(atom()) => term()},
@@ -705,26 +707,21 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   defp normalize_build({:ok, %{capabilities: capabilities} = built}, provides) do
     snapshot = Map.get(built, :snapshot)
     close = Map.get(built, :close)
+    cleanup_snapshot = Map.get(built, :cleanup_snapshot)
+    cleanup_context = Map.get(built, :cleanup_context)
     data_class = Map.get(built, :data_class, :normal)
     accepts_data = Map.get(built, :accepts_data, [:normal])
     exports = Map.get(built, :exports, %{})
     warnings = Map.get(built, :warnings, [])
 
-    if Map.keys(built) --
-         [:capabilities, :snapshot, :close, :data_class, :accepts_data, :exports, :warnings] == [] and
-         valid_capabilities?(capabilities, provides) and
-         (is_nil(snapshot) or JSONValue.map?(snapshot)) and
-         (is_nil(close) or is_function(close, 0)) and
-         data_class in [:normal, :private_inspection] and
-         accepts_data != [] and accepts_data == Enum.uniq(accepts_data) and
-         Enum.all?(accepts_data, &(&1 in [:normal, :private_inspection])) and
-         is_map(exports) and Enum.sort(Map.keys(exports)) == Enum.sort(provides) and
-         valid_warnings?(warnings) do
+    if valid_build?(built, provides) do
       {:ok,
        %{
          capabilities: capabilities,
          snapshot: snapshot,
          close: close,
+         cleanup_snapshot: cleanup_snapshot,
+         cleanup_context: cleanup_context,
          data_class: data_class,
          accepts_data: accepts_data,
          exports: exports,
@@ -738,10 +735,58 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   defp normalize_build({:error, _reason} = error, _provides), do: error
   defp normalize_build(_result, _provides), do: {:error, :invalid_provider_build}
 
+  defp valid_build?(built, provides) do
+    allowed_keys = [
+      :capabilities,
+      :snapshot,
+      :close,
+      :cleanup_snapshot,
+      :cleanup_context,
+      :data_class,
+      :accepts_data,
+      :exports,
+      :warnings
+    ]
+
+    Map.keys(built) -- allowed_keys == [] and
+      valid_capabilities?(built.capabilities, provides) and
+      optional_json_map?(Map.get(built, :snapshot)) and
+      optional_zero_arity_function?(Map.get(built, :close)) and
+      optional_zero_arity_function?(Map.get(built, :cleanup_snapshot)) and
+      valid_cleanup_context?(Map.get(built, :cleanup_context)) and
+      Map.get(built, :data_class, :normal) in [:normal, :private_inspection] and
+      valid_accepts_data?(Map.get(built, :accepts_data, [:normal])) and
+      valid_exports?(Map.get(built, :exports, %{}), provides) and
+      valid_warnings?(Map.get(built, :warnings, []))
+  end
+
+  defp optional_json_map?(nil), do: true
+  defp optional_json_map?(value), do: JSONValue.map?(value)
+  defp optional_zero_arity_function?(nil), do: true
+  defp optional_zero_arity_function?(value), do: is_function(value, 0)
+
+  defp valid_accepts_data?(accepts_data),
+    do:
+      accepts_data != [] and accepts_data == Enum.uniq(accepts_data) and
+        Enum.all?(accepts_data, &(&1 in [:normal, :private_inspection]))
+
+  defp valid_exports?(exports, provides),
+    do: is_map(exports) and Enum.sort(Map.keys(exports)) == Enum.sort(provides)
+
   defp valid_warnings?(warnings) when is_list(warnings) and length(warnings) <= 128,
     do: Enum.all?(warnings, &CommandWarning.valid?/1)
 
   defp valid_warnings?(_warnings), do: false
+
+  defp valid_cleanup_context?(nil), do: true
+
+  defp valid_cleanup_context?(%{transport: :stdio, grace_ms: grace_ms} = context),
+    do: map_size(context) == 2 and is_integer(grace_ms) and grace_ms in 1..5_000
+
+  defp valid_cleanup_context?(%{transport: :streamable_http} = context),
+    do: map_size(context) == 1
+
+  defp valid_cleanup_context?(_context), do: false
 
   defp valid_capabilities?(capabilities, provides) when is_list(capabilities) do
     (capabilities != [] or provides != []) and length(capabilities) <= 128 and

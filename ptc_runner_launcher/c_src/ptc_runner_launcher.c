@@ -20,7 +20,7 @@
 
 /* Reference implementation of the PtcRunner MCP stdio launcher contract. */
 
-#define BOOT_VERSION 1U
+#define BOOT_VERSION 2U
 #define MAX_FRAME_BYTES (1024U * 1024U)
 #define MAX_PENDING_BYTES (1024U * 1024U)
 #define MAX_ARGUMENTS 256U
@@ -31,6 +31,8 @@
 #define KILL_WAIT_POLL_MS 5
 #define SHA256_BYTES 32U
 #define SHA256_BLOCK_BYTES 64U
+
+static uint8_t stderr_tail[MAX_FRAME_BYTES];
 
 enum shutdown_phase {
   PHASE_RUNNING = 0,
@@ -1004,11 +1006,17 @@ static void handle_child_stdin_failure(
                  deadline);
 }
 
+static bool emit_stderr_tail(size_t length);
+static bool emit_stderr_snapshot(size_t length);
+
 static bool consume_input_frames(
     uint8_t *input, size_t *input_length, struct byte_queue *pending,
     bool *stdout_ack_pending,
     enum shutdown_phase *phase, enum finish_reason *finish_reason,
-    int *child_stdin, uint32_t grace_ms, int64_t *deadline) {
+    int *child_stdin, uint32_t grace_ms, int64_t *deadline,
+    bool stderr_truncated, size_t stderr_tail_length,
+    uint64_t stderr_limit, bool *stderr_snapshot_active,
+    uint64_t *stderr_snapshot_remaining) {
   size_t consumed = 0;
 
   while (*input_length - consumed >= 4U) {
@@ -1058,6 +1066,14 @@ static bool consume_input_frames(
                *stdout_ack_pending) {
       *stdout_ack_pending = false;
     } else if (input[consumed + 4U] == 'C' && frame_length == 1U) {
+      *stderr_snapshot_active = true;
+      *stderr_snapshot_remaining = stderr_limit;
+      if (stderr_truncated) {
+        if (!emit_frame('T', NULL, 0) ||
+            !emit_stderr_snapshot(stderr_tail_length)) {
+          return false;
+        }
+      }
       begin_shutdown(phase, finish_reason, FINISH_CLOSE, pending, child_stdin,
                      grace_ms, deadline);
     } else {
@@ -1079,8 +1095,33 @@ static bool consume_input_frames(
 
 static bool emit_stderr(const uint8_t *bytes, size_t length,
                         uint64_t stderr_limit, uint64_t *stderr_emitted,
-                        bool *stderr_truncated) {
+                        bool *stderr_truncated, size_t *stderr_tail_length,
+                        bool stderr_snapshot_active,
+                        uint64_t *stderr_snapshot_remaining) {
   size_t allowed = 0;
+  bool was_truncated = *stderr_truncated;
+
+  if (stderr_limit > 0) {
+    size_t limit = (size_t)stderr_limit;
+
+    if (length >= limit) {
+      memcpy(stderr_tail, bytes + length - limit, limit);
+      *stderr_tail_length = limit;
+    } else {
+      size_t overflow =
+          *stderr_tail_length + length > limit
+              ? *stderr_tail_length + length - limit
+              : 0;
+
+      if (overflow > 0) {
+        memmove(stderr_tail, stderr_tail + overflow,
+                *stderr_tail_length - overflow);
+        *stderr_tail_length -= overflow;
+      }
+      memcpy(stderr_tail + *stderr_tail_length, bytes, length);
+      *stderr_tail_length += length;
+    }
+  }
 
   if (*stderr_emitted < stderr_limit) {
     uint64_t remaining = stderr_limit - *stderr_emitted;
@@ -1100,7 +1141,39 @@ static bool emit_stderr(const uint8_t *bytes, size_t length,
     }
   }
 
+  if (stderr_snapshot_active && !was_truncated && *stderr_truncated) {
+    if (!emit_stderr_snapshot(*stderr_tail_length)) {
+      return false;
+    }
+  } else if (stderr_snapshot_active && was_truncated &&
+             *stderr_snapshot_remaining > 0) {
+    size_t snapshot_allowed =
+        length < *stderr_snapshot_remaining
+            ? length
+            : (size_t)*stderr_snapshot_remaining;
+
+    if (snapshot_allowed == length &&
+        !emit_frame('E', bytes, snapshot_allowed)) {
+      return false;
+    }
+
+    if (snapshot_allowed > 0 && snapshot_allowed < length) {
+      if (!emit_stderr_snapshot(*stderr_tail_length)) {
+        return false;
+      }
+    }
+    *stderr_snapshot_remaining -= snapshot_allowed;
+  }
+
   return true;
+}
+
+static bool emit_stderr_tail(size_t length) {
+  return emit_frame('S', stderr_tail, length);
+}
+
+static bool emit_stderr_snapshot(size_t length) {
+  return emit_frame('S', stderr_tail, length);
 }
 
 /*
@@ -1402,6 +1475,9 @@ static int supervise(const struct launcher_config *config, pid_t child_pid,
   int64_t deadline = 0;
   uint64_t stderr_emitted = 0;
   bool stderr_truncated = false;
+  bool stderr_snapshot_active = false;
+  uint64_t stderr_snapshot_remaining = 0;
+  size_t stderr_tail_length = 0;
   bool child_exited = false;
   bool child_reaped = false;
   bool child_stdin_failed = false;
@@ -1469,6 +1545,9 @@ static int supervise(const struct launcher_config *config, pid_t child_pid,
       if (!child_reaped) {
         child_reaped = reap_child(child_pid, &child_status);
       }
+      if (stderr_truncated && !emit_stderr_tail(stderr_tail_length)) {
+        return 74;
+      }
       return finish_supervision(FINISH_TERMINATION_TIMEOUT, child_reaped,
                                 child_status, stderr_truncated);
     }
@@ -1502,7 +1581,9 @@ static int supervise(const struct launcher_config *config, pid_t child_pid,
     if (phase == PHASE_RUNNING && input_length > 0) {
       (void)consume_input_frames(
           input, &input_length, &pending, &stdout_ack_pending, &phase,
-          &finish_reason, &child_stdin, config->grace_ms, &deadline);
+          &finish_reason, &child_stdin, config->grace_ms, &deadline,
+          stderr_truncated, stderr_tail_length, config->stderr_limit,
+          &stderr_snapshot_active, &stderr_snapshot_remaining);
     }
 
     /*
@@ -1513,6 +1594,9 @@ static int supervise(const struct launcher_config *config, pid_t child_pid,
     group_alive = process_group_alive(child_pid);
     if (phase != PHASE_RUNNING && child_reaped && !group_alive &&
         stdout_eof && stderr_eof) {
+      if (stderr_truncated && !emit_stderr_tail(stderr_tail_length)) {
+        return 74;
+      }
       return finish_supervision(finish_reason, child_reaped, child_status,
                                 stderr_truncated);
     }
@@ -1592,7 +1676,9 @@ static int supervise(const struct launcher_config *config, pid_t child_pid,
           input_length += (size_t)count;
           (void)consume_input_frames(
               input, &input_length, &pending, &stdout_ack_pending, &phase,
-              &finish_reason, &child_stdin, config->grace_ms, &deadline);
+              &finish_reason, &child_stdin, config->grace_ms, &deadline,
+              stderr_truncated, stderr_tail_length, config->stderr_limit,
+              &stderr_snapshot_active, &stderr_snapshot_remaining);
         } else if (count == 0) {
           stdout_ack_pending = false;
           begin_shutdown(&phase, &finish_reason, FINISH_OWNER_EOF, &pending,
@@ -1633,7 +1719,9 @@ static int supervise(const struct launcher_config *config, pid_t child_pid,
 
         if (count > 0) {
           if (!emit_stderr(chunk, (size_t)count, config->stderr_limit,
-                           &stderr_emitted, &stderr_truncated)) {
+                           &stderr_emitted, &stderr_truncated,
+                           &stderr_tail_length, stderr_snapshot_active,
+                           &stderr_snapshot_remaining)) {
             begin_shutdown(&phase, &finish_reason, FINISH_OWNER_EOF,
                            &pending, &child_stdin, config->grace_ms,
                            &deadline);

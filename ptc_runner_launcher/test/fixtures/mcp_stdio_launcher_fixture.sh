@@ -16,14 +16,47 @@ case "$1" in
 
   stderr)
     index=0
-    while [ "$index" -lt 256 ]; do
+    while [ "$index" -lt 128 ]; do
       printf x >&2
       index=$((index + 1))
     done
+    printf yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy >&2
 
     while IFS= read -r _line; do
       :
     done
+    ;;
+
+  shutdown-stderr)
+    printf xxxxxxxxxxxxxxxx >&2
+    while IFS= read -r _line; do
+      :
+    done
+    index=0
+    while [ "$index" -lt 128 ]; do
+      printf y >&2
+      index=$((index + 1))
+    done
+    ;;
+
+  shutdown-stderr-overflow)
+    index=0
+    while [ "$index" -lt 64 ]; do
+      printf x >&2
+      index=$((index + 1))
+    done
+    while IFS= read -r _line; do
+      :
+    done
+    printf yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy >&2
+    ;;
+
+  shutdown-stderr-small)
+    printf xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx >&2
+    while IFS= read -r _line; do
+      :
+    done
+    printf yz >&2
     ;;
 
   stdout-flood)

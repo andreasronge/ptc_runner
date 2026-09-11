@@ -48,6 +48,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   alias PtcRunner.Kernel.MissionReplTarget
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderCallbackBoundary
+  alias PtcRunner.Kernel.ProviderCleanup
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ResourceRegistrar
@@ -603,7 +604,15 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   defp handle_acquisition({:ok, built}, provider, _session, current)
        when built.data_class == provider.data_class and
               built.accepts_data == provider.accepts_data do
-    case ResourceRegistrar.commit(provider.registrar, built.close) do
+    close =
+      cleanup_action(
+        built.close,
+        built.cleanup_snapshot,
+        provider.provider,
+        built.cleanup_context
+      )
+
+    case ResourceRegistrar.commit(provider.registrar, close) do
       :ok ->
         environment = Map.fetch!(current, provider.destination)
 
@@ -641,7 +650,15 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   end
 
   defp handle_acquisition({:ok, built}, provider, session, _current) do
-    case ResourceRegistrar.commit(provider.registrar, built.close) do
+    close =
+      cleanup_action(
+        built.close,
+        built.cleanup_snapshot,
+        provider.provider,
+        built.cleanup_context
+      )
+
+    case ResourceRegistrar.commit(provider.registrar, close) do
       :ok ->
         {:halt, callback_error(:provider_data_policy_changed, provider, session)}
 
@@ -672,6 +689,11 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
     _ = ResourceRegistrar.abort(provider.registrar)
     {:halt, callback_error(reason, provider, session)}
   end
+
+  defp cleanup_action(nil, _snapshot, _provider, _context), do: nil
+
+  defp cleanup_action(close, snapshot, provider, context),
+    do: ProviderCleanup.new(close, snapshot, provider, context)
 
   # An active command must classify here, because a `provider_acquisition` code
   # requires a subject bearing an occurrence and this is the last frame that

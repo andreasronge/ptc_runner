@@ -99,10 +99,11 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     # launcher's multiplexed O/E delivery under suite load and can drain an
     # empty buffer with stderr_truncated? still false.
     send(transport.pid, {port, {:data, <<"E", "abcdefgh">>}})
+    send(transport.pid, {port, {:data, <<"E", "ijkl">>}})
     send(transport.pid, {port, {:data, "T"}})
 
     assert_eventually(fn ->
-      match?(%{stderr: "abcdefgh", stderr_truncated?: true}, safe_state(transport.pid))
+      match?(%{stderr: "efghijkl", stderr_truncated?: true}, safe_state(transport.pid))
     end)
 
     assert {:ok,
@@ -121,7 +122,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
                1_000
              )
 
-    assert stderr == "abcdefgh"
+    assert stderr == "efghijkl"
     assert :ok = MCPStdioTransport.close(transport)
   end
 
@@ -599,7 +600,15 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     )
 
     :sys.resume(transport.pid)
-    assert {:error, :mcp_transport_error} = Task.await(close, 5_000)
+
+    assert {:error,
+            {:mcp_transport_error,
+             %{
+               finish_reason: :termination_timeout,
+               exit_status: 0,
+               stderr: "",
+               stderr_truncated?: false
+             }}} = Task.await(close, 5_000)
   end
 
   @tag :tmp_dir
@@ -611,7 +620,38 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     send(transport.pid, {state.port, {:data, <<"X", 5, 0::signed-big-32, 0>>}})
 
     assert_receive {:DOWN, ^ref, :process, _pid, _reason}, 5_000
-    assert {:error, :mcp_transport_error} = MCPStdioTransport.close(transport)
+
+    assert {:error,
+            {:mcp_transport_error,
+             %{finish_reason: :termination_timeout, exit_status: 0, stderr: ""}}} =
+             MCPStdioTransport.close(transport)
+  end
+
+  @tag :tmp_dir
+  test "preserves cleanup evidence after the starting worker exits", %{tmp_dir: tmp_dir} do
+    owner = self()
+
+    start =
+      Task.async(fn ->
+        MCPStdioTransport.start(launch_options(tmp_dir), owner, nil)
+      end)
+
+    assert {:ok, transport} = Task.await(start, 5_000)
+    assert_receive {:"ETS-TRANSFER", _table, _worker, :cleanup_outcome}
+
+    state = :sys.get_state(transport.pid)
+    ref = Process.monitor(transport.pid)
+    send(transport.pid, {state.port, {:data, <<"X", 5, 17::signed-big-32, 1>>}})
+
+    assert_receive {:DOWN, ^ref, :process, _pid, _reason}, 5_000
+
+    assert {:error,
+            {:mcp_transport_error,
+             %{
+               finish_reason: :termination_timeout,
+               exit_status: 17,
+               stderr_truncated?: true
+             }}} = MCPStdioTransport.close(transport)
   end
 
   @tag :tmp_dir
@@ -696,7 +736,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   test "rejects a launcher protocol mismatch before spawning", %{tmp_dir: tmp_dir} do
     assert {:error, :invalid_mcp_stdio_launch} =
              MCPStdioTransport.start(
-               Keyword.put(launch_options(tmp_dir), :launcher_protocol_version, 2)
+               Keyword.put(launch_options(tmp_dir), :launcher_protocol_version, 1)
              )
   end
 

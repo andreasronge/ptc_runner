@@ -46,6 +46,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   alias PtcRunner.Kernel.ModelContractDiagnostic
   alias PtcRunner.Kernel.ModelOutputDiagnostic
   alias PtcRunner.Kernel.OptionalBudgetDiagnostic
+  alias PtcRunner.Kernel.ProviderCleanupDiagnostic
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.SchemaViolationDiagnostic
@@ -387,6 +388,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   defp valid_span?(_span, _source), do: false
 
   defp valid_message_source?(message, %{message: message}, _source), do: true
+
+  defp valid_message_source?(
+         message,
+         %{phase: :result_cleanup, code: :provider_cleanup_failed},
+         nil
+       ),
+       do: ProviderCleanupDiagnostic.valid_message?(message)
 
   defp valid_message_source?(
          message,

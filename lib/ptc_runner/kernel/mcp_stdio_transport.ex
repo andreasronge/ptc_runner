@@ -11,9 +11,9 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   @enforce_keys [:pid, :outcome]
   defstruct [:pid, :outcome]
 
-  @type t :: %__MODULE__{pid: pid(), outcome: :atomics.atomics_ref()}
+  @type t :: %__MODULE__{pid: pid(), outcome: map()}
 
-  @protocol_version 1
+  @protocol_version 2
   @protocol_metadata %{"io.modelcontextprotocol/protocolVersion" => "2026-07-28"}
   @max_frame_bytes 1_048_576
   @max_response_bytes 2_097_152
@@ -41,6 +41,8 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
 
   def start(opts, owner, registrar) when is_list(opts) and is_pid(owner) do
     outcome = :atomics.new(1, signed: false)
+    outcome_details = :ets.new(__MODULE__, outcome_table_options(owner))
+    outcome = %{status: outcome, details: outcome_details}
 
     with {:ok, config} <- validate_options(opts) do
       case GenServer.start(__MODULE__, {owner, config, outcome, registrar}) do
@@ -52,6 +54,19 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   end
 
   def start(_opts, _owner, _registrar), do: {:error, :invalid_mcp_stdio_launch}
+
+  defp outcome_table_options(owner) when owner == self(), do: [:set, :public]
+  defp outcome_table_options(owner), do: [:set, :public, {:heir, owner, :cleanup_outcome}]
+
+  @doc false
+  def cleanup_snapshot(%__MODULE__{outcome: outcome}) do
+    case :ets.lookup(outcome.details, :stderr) do
+      [{:stderr, %{stderr: stderr} = details}] -> %{details | stderr: Utf8.sanitize(stderr)}
+      [] -> %{}
+    end
+  rescue
+    ArgumentError -> %{}
+  end
 
   @doc false
   @spec validate_options(keyword()) :: {:ok, map()} | {:error, :invalid_mcp_stdio_launch}
@@ -106,7 +121,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     safe_call(pid, {:request, method, params, metadata, max_bytes, timeout_ms, true})
   end
 
-  @spec close(t()) :: :ok | {:error, :mcp_transport_error}
+  @spec close(t()) :: :ok | {:error, :mcp_transport_error | {:mcp_transport_error, map()}}
   def close(%__MODULE__{pid: pid, outcome: outcome}) do
     ref = Process.monitor(pid)
 
@@ -120,10 +135,24 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
           10_000 -> false
         end
 
-      case {result, down?, :atomics.get(outcome, 1)} do
-        {:ok, true, @outcome_clean} -> :ok
-        {{:error, :closed}, true, @outcome_clean} -> :ok
-        _failed -> {:error, :mcp_transport_error}
+      case {result, down?, outcome_status(outcome)} do
+        {:ok, true, @outcome_clean} ->
+          :ok
+
+        {{:error, :closed}, true, @outcome_clean} ->
+          :ok
+
+        {{:error, {:mcp_transport_error, details}}, true, @outcome_failed} ->
+          {:error, {:mcp_transport_error, details}}
+
+        {{:error, :closed}, true, @outcome_failed} ->
+          case outcome_details(outcome) do
+            {:ok, details} -> {:error, {:mcp_transport_error, details}}
+            :error -> {:error, :mcp_transport_error}
+          end
+
+        _failed ->
+          {:error, :mcp_transport_error}
       end
     after
       Process.demonitor(ref, [:flush])
@@ -296,11 +325,25 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     end
   end
 
-  def handle_info({port, {:data, <<"E", bytes::binary>>}}, %{port: port} = state),
-    do: {:noreply, append_stderr(state, bytes)}
+  def handle_info({port, {:data, <<"E", bytes::binary>>}}, %{port: port} = state) do
+    state = state |> append_stderr(bytes) |> record_stderr_snapshot()
+    {:noreply, state}
+  end
 
-  def handle_info({port, {:data, "T"}}, %{port: port} = state),
-    do: {:noreply, %{state | stderr_truncated?: true}}
+  def handle_info({port, {:data, "T"}}, %{port: port} = state) do
+    state = %{state | stderr_truncated?: true}
+    {:noreply, record_stderr_snapshot(state)}
+  end
+
+  def handle_info({port, {:data, "R"}}, %{port: port} = state) do
+    state = %{state | stderr: ""}
+    {:noreply, record_stderr_snapshot(state)}
+  end
+
+  def handle_info({port, {:data, <<"S", bytes::binary>>}}, %{port: port} = state) do
+    state = %{state | stderr: bytes}
+    {:noreply, record_stderr_snapshot(state)}
+  end
 
   def handle_info({port, {:data, <<"X", finish::binary-size(6)>>}}, %{port: port} = state) do
     case decode_finish(finish) do
@@ -320,7 +363,8 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   def handle_info({:EXIT, port, _reason}, %{port: port} = state),
     do: defer_terminal_failure(state)
 
-  def handle_info(:terminal_without_finish, state), do: stop_transport(state)
+  def handle_info(:terminal_without_finish, state),
+    do: stop_transport(state, transport_failure(state, :finish_missing))
 
   def handle_info({:request_timeout, id}, state) do
     case Map.fetch(state.pending, id) do
@@ -350,7 +394,8 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   def handle_info(:flush_writes, state),
     do: state |> Map.put(:retry_scheduled?, false) |> continue_after_flush()
 
-  def handle_info(:close_timeout, state), do: stop_transport(state)
+  def handle_info(:close_timeout, state),
+    do: stop_transport(state, transport_failure(state, :close_timeout))
 
   def handle_info(
         {:DOWN, ref, :process, _pid, _reason},
@@ -977,14 +1022,26 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     {:stop, :normal, state}
   end
 
-  defp finish_transport(state, _finish), do: stop_transport(state)
+  defp finish_transport(state, finish) do
+    {stderr, truncated?} = diagnostic_stderr(state)
+
+    details = %{
+      finish_reason: finish.reason,
+      exit_status: finish.exit_status,
+      stderr: stderr,
+      stderr_truncated?: truncated? or finish.stderr_truncated?
+    }
+
+    stop_transport(state, {:mcp_transport_error, details})
+  end
 
   defp stop_transport(state, reason \\ :mcp_transport_error) do
-    state = fail_pending(state, reason)
-    record_outcome(state.outcome, @outcome_failed)
+    pending_reason = if is_atom(reason), do: reason, else: :mcp_transport_error
+    state = fail_pending(state, pending_reason)
+    record_outcome(state.outcome, @outcome_failed, cleanup_details(reason))
 
     if is_list(state.closing),
-      do: reply_close_waiters(state.closing, {:error, :mcp_transport_error})
+      do: reply_close_waiters(state.closing, {:error, reason})
 
     close_port(state.port)
     {:stop, :normal, state}
@@ -1021,9 +1078,36 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     ArgumentError -> :ok
   end
 
-  defp record_outcome(outcome, value) do
-    :atomics.put(outcome, 1, value)
+  defp record_outcome(outcome, value, details \\ nil) do
+    if is_map(details), do: :ets.insert(outcome.details, {:cleanup, details})
+    :atomics.put(outcome.status, 1, value)
     :ok
+  end
+
+  defp outcome_status(outcome), do: :atomics.get(outcome.status, 1)
+
+  defp outcome_details(outcome) do
+    case :ets.lookup(outcome.details, :cleanup) do
+      [{:cleanup, details}] -> {:ok, details}
+      [] -> :error
+    end
+  rescue
+    ArgumentError -> :error
+  end
+
+  defp cleanup_details({:mcp_transport_error, details}), do: details
+  defp cleanup_details(_reason), do: nil
+
+  defp transport_failure(state, finish_reason) do
+    {stderr, truncated?} = diagnostic_stderr(state)
+
+    {:mcp_transport_error,
+     %{
+       finish_reason: finish_reason,
+       exit_status: nil,
+       stderr: stderr,
+       stderr_truncated?: truncated?
+     }}
   end
 
   defp safe_call(pid, request) do
@@ -1035,36 +1119,48 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   defp append_stderr(%{stderr_limit: limit} = state, _bytes) when limit <= 0, do: state
 
   defp append_stderr(state, bytes) when is_binary(bytes) do
-    taken = byte_size(state.stderr)
-    remaining = state.stderr_limit - taken
+    combined = state.stderr <> bytes
 
-    cond do
-      remaining <= 0 ->
-        %{state | stderr_truncated?: true}
+    if byte_size(combined) <= state.stderr_limit do
+      %{state | stderr: combined}
+    else
+      offset = byte_size(combined) - state.stderr_limit
 
-      byte_size(bytes) <= remaining ->
-        %{state | stderr: state.stderr <> bytes}
-
-      true ->
-        %{
-          state
-          | stderr: state.stderr <> binary_part(bytes, 0, remaining),
-            stderr_truncated?: true
-        }
+      %{
+        state
+        | stderr: binary_part(combined, offset, state.stderr_limit),
+          stderr_truncated?: true
+      }
     end
   end
 
+  defp record_stderr_snapshot(state) do
+    :ets.insert(
+      state.outcome.details,
+      {:stderr, %{stderr: state.stderr, stderr_truncated?: state.stderr_truncated?}}
+    )
+
+    state
+  rescue
+    ArgumentError -> state
+  end
+
   defp drain_stderr(%{stderr_truncated?: true} = state) do
-    text = Utf8.truncate_valid(state.stderr, state.stderr_limit)
+    text = Utf8.sanitize(state.stderr)
 
     {text, true, %{state | stderr: "", stderr_truncated?: false}}
   end
 
   defp drain_stderr(state) do
-    text = Utf8.truncate_valid(state.stderr, state.stderr_limit)
-    rest = binary_part(state.stderr, byte_size(text), byte_size(state.stderr) - byte_size(text))
-
+    {text, rest} = Utf8.sanitize_complete(state.stderr)
     {text, false, %{state | stderr: rest, stderr_truncated?: false}}
+  end
+
+  defp diagnostic_stderr(state) do
+    max_bytes = 2_048
+    offset = max(byte_size(state.stderr) - max_bytes, 0)
+    raw = binary_part(state.stderr, offset, byte_size(state.stderr) - offset)
+    {Utf8.sanitize(raw), state.stderr_truncated? or offset > 0}
   end
 
   defp dispatch_request(from, method, params, metadata, max_bytes, timeout_ms, exchange?, state) do
