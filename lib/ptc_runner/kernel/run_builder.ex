@@ -56,6 +56,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CompileDiagnostic
   alias PtcRunner.Kernel.ComponentCatalog
+  alias PtcRunner.Kernel.DeclaredReadEffectDiagnostic
   alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.ExecutionOutcome
@@ -136,6 +137,26 @@ defmodule PtcRunner.Kernel.RunBuilder do
      CommandDiagnostic.new!(
        :application,
        :limit_capacity_invalid,
+       [source: CommandSource.fixed(:application)] ++ opts
+     )}
+  end
+
+  def environment_failure_diagnostic(
+        {:declared_read_effect_violation, ref, effect},
+        %PreparedRun{},
+        provider_activity
+      )
+      when is_binary(ref) and effect in [:write, :unknown] and is_boolean(provider_activity) do
+    opts =
+      case DeclaredReadEffectDiagnostic.message(ref, effect) do
+        {:ok, message} -> [message: message, provider_activity: provider_activity]
+        :error -> [provider_activity: provider_activity]
+      end
+
+    {:ok,
+     CommandDiagnostic.new!(
+       :application,
+       :declared_read_effect_invalid,
        [source: CommandSource.fixed(:application)] ++ opts
      )}
   end

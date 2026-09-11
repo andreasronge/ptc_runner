@@ -1262,7 +1262,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
-  test "operator write effects reach capabilities, snapshots, and wrapper inventory unchanged", %{
+  test "application assembly rejects a read export directly backed by an installed write tool", %{
     tmp_dir: dir
   } do
     fixture = fixture(self(), spec_extras?: true)
@@ -1282,7 +1282,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       (tool/remote.structured {"query" query}))
     """
 
-    assert {:ok, built} =
+    assert {:error, {:declared_read_effect_violation, "actions/save", :write}} =
              dir
              |> manifest(["remote.structured"],
                mission_source: mission_source,
@@ -1290,29 +1290,35 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
              )
              |> directory_request(registry(fixture.endpoint, tools: tools))
              |> RunLifecycle.build()
+  end
 
-    assert %Capability{effect: :write} =
-             built.config.missions["default"].environment.capabilities["remote.structured"]
+  @tag :tmp_dir
+  test "application assembly rejects a read export transitively backed by an installed write tool",
+       %{
+         tmp_dir: dir
+       } do
+    fixture = fixture(self(), spec_extras?: true)
+    on_exit(fixture.close)
 
-    assert [%{"name" => "remote.structured", "effect" => "write"} = snapshot_tool] =
-             built.config.connector_snapshots |> hd() |> Map.fetch!("tools")
+    tools =
+      Map.put(mappings(), "structured", %{as: "remote.structured", effect: :write})
 
-    refute Map.has_key?(snapshot_tool, "annotations")
+    mission_source = """
+    (ns actions "Write facade" {:visibility :prompt})
+    (defn- persist [query] (tool/remote.structured {"query" query}))
+    (defn save {:signature "(query :string) -> :any" :effect :read}
+      [query]
+      (persist query))
+    """
 
-    inventory = Jason.decode!(built.config.missions["default"].inventory.rendered)
-    assert [%{"ref" => "actions/save", "effect" => "write"}] = inventory["exports"]
-
-    model_inventory = Jason.decode!(built.config.missions["default"].inventory.model_rendered)
-
-    assert %{"effect" => "write"} =
-             Enum.find(model_inventory["entries"], &(&1["form"] == "(actions/save query)"))
-
-    assert {:ok, result} = Kernel.run(built.entry_source, built.config)
-
-    assert %{"status" => "ok", "value" => %{"value" => 42}} =
-             get_in(result.value, ["value", "value"])
-
-    EventSink.stop(built.config.event_sink)
+    assert {:error, {:declared_read_effect_violation, "actions/save", :write}} =
+             dir
+             |> manifest(["remote.structured"],
+               mission_source: mission_source,
+               program: single_call_program("remote.structured", "x")
+             )
+             |> directory_request(registry(fixture.endpoint, tools: tools))
+             |> RunLifecycle.build()
   end
 
   @tag :tmp_dir

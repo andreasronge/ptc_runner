@@ -531,6 +531,7 @@ Embedding runtimes can supply authorization targets directly.
 | 3 | `application` | `application_unavailable` | no | the application is unavailable |
 | 3 | `application` | `contract_invalid` | no | an application value contract is invalid |
 | 3 | `application` | `contract_projection_limit_exceeded` | no | application contract prompt projections exceed their bounded admission limit |
+| 3 | `application` | `declared_read_effect_invalid` | no | export `example/read` declares effect read but resolves to write; change the declaration or use only read capabilities |
 | 3 | `application` | `document_limit_exceeded` | no | the application document closure exceeds its limit |
 | 3 | `application` | `duplicate_mission_provider` | no | a mission selects the same provider more than once; list each provider at most once |
 | 3 | `application` | `duplicate_property` | no | an application document contains a duplicate property |

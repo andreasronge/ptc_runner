@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   alias PtcRunner.Kernel.CompileDiagnostic
   alias PtcRunner.Kernel.ComponentOverrideDiagnostic
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
+  alias PtcRunner.Kernel.DeclaredReadEffectDiagnostic
   alias PtcRunner.Kernel.ExplicitFailureDiagnostic
   alias PtcRunner.Kernel.LimitCapacityDiagnostic
   alias PtcRunner.Kernel.LimitConfigurationDiagnostic
@@ -93,6 +94,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "normal_event_bytes effective limit 4000000 is below the required 12003450 bytes for event_payload_bytes 4000000; raise limits.normal_event_bytes, and its installed host ceiling if it is lower, or lower limits.event_payload_bytes"},
     {:application, :limit_capacity_invalid, 3, false,
      "event_payload_bytes effective limit 8662 is below the required 12000 bytes for this application's resolved terminal usage; raise limits.event_payload_bytes, and its installed host ceiling if it is lower, or declare fewer capabilities or missions"},
+    {:application, :declared_read_effect_invalid, 3, false,
+     "export `example/read` declares effect read but resolves to write; change the declaration or use only read capabilities"},
     {:application, :required_property_missing, 3, false,
      "the application manifest is missing a required property"},
     {:application, :reference_missing, 3, false,
@@ -470,6 +473,13 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def message_schema(%{phase: :application, code: :limit_capacity_invalid, message: fallback}),
     do: LimitCapacityDiagnostic.message_schema(fallback)
 
+  def message_schema(%{
+        phase: :application,
+        code: :declared_read_effect_invalid,
+        message: fallback
+      }),
+      do: DeclaredReadEffectDiagnostic.message_schema(fallback)
+
   def message_schema(%{phase: :host, code: :host_schema_invalid, message: fallback}),
     do:
       SchemaViolationDiagnostic.message_schema(
@@ -597,6 +607,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   defp valid_dynamic_message?(:application, :limit_capacity_invalid, message),
     do: LimitCapacityDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:application, :declared_read_effect_invalid, message),
+    do: DeclaredReadEffectDiagnostic.valid_message?(message)
 
   defp valid_dynamic_message?(:host, :host_schema_invalid, message),
     do:
@@ -935,6 +948,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
              :limit_unavailable,
              :limit_configuration_invalid,
              :limit_capacity_invalid,
+             :declared_read_effect_invalid,
              :required_property_missing,
              :event_identity_conflict
            ],
@@ -991,10 +1005,12 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def source_kinds(_phase, _code), do: []
 
   @spec provider_activity_policy(phase(), atom()) :: false | true | :boolean
-  # Every other application-phase code is decided before any provider work. This
-  # one is computed after provider assembly, so it spans the marker: the
+  # Every other application-phase code is decided before any provider work.
+  # These are computed after provider assembly, so they span the marker: the
   # provider-free owner path reports false and the active path reports true.
-  def provider_activity_policy(:application, :limit_capacity_invalid), do: :boolean
+  def provider_activity_policy(:application, code)
+      when code in [:limit_capacity_invalid, :declared_read_effect_invalid],
+      do: :boolean
 
   def provider_activity_policy(phase, _code)
       when phase in [

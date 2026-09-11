@@ -58,7 +58,11 @@ defmodule PtcRunner.Kernel.MissionInventory do
         }
 
   @spec build(MissionEnvironment.t(), Limits.t(), keyword()) ::
-          {:ok, t()} | {:error, :invalid_mission_inventory | :mission_inventory_exceeded}
+          {:ok, t()}
+          | {:error,
+             :invalid_mission_inventory
+             | :mission_inventory_exceeded
+             | {:declared_read_effect_violation, binary(), :write | :unknown}}
   @doc "Builds one bounded version 3 mission inventory."
   def build(mission, limits, opts \\ [])
 
@@ -68,6 +72,7 @@ defmodule PtcRunner.Kernel.MissionInventory do
            Keyword.get(opts, :max_bytes, @max_bytes),
          max_model_bytes when is_integer(max_model_bytes) and max_model_bytes > 0 <-
            Keyword.get(opts, :max_model_bytes, @max_model_bytes),
+         :ok <- validate_declared_read_effects(mission),
          {:ok, data_entries} <- data_entries(mission),
          {:ok, rendered} <- DeterministicJSON.encode(projection(mission, limits, data_entries)),
          true <- byte_size(rendered) <= max_bytes,
@@ -86,6 +91,7 @@ defmodule PtcRunner.Kernel.MissionInventory do
          model_bytes: byte_size(model_rendered)
        }}
     else
+      {:error, {:declared_read_effect_violation, _ref, _effect}} = error -> error
       false -> {:error, :mission_inventory_exceeded}
       _reason -> {:error, :invalid_mission_inventory}
     end
@@ -358,6 +364,25 @@ defmodule PtcRunner.Kernel.MissionInventory do
 
     join_effects([export.effect | dependency_effects])
   end
+
+  @doc false
+  @spec validate_declared_read_effects(MissionEnvironment.t() | map()) ::
+          :ok | {:error, {:declared_read_effect_violation, binary(), :write | :unknown}}
+  def validate_declared_read_effects(%{bundle: %{prelude: %{exports: exports}}} = environment) do
+    exports
+    |> Enum.sort_by(& &1.ref)
+    |> Enum.reduce_while(:ok, fn export, :ok ->
+      resolved = resolved_export_effect(export, environment)
+
+      if export.declared_effect == :read and resolved != :read do
+        {:halt, {:error, {:declared_read_effect_violation, export.ref, resolved}}}
+      else
+        {:cont, :ok}
+      end
+    end)
+  end
+
+  def validate_declared_read_effects(_environment), do: :ok
 
   defp join_effects(effects) do
     cond do

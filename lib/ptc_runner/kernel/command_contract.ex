@@ -76,13 +76,15 @@ defmodule PtcRunner.Kernel.CommandContract do
   @preclassification_only_phases @unclassified_run_phases -- [:internal]
 
   # The application phase is otherwise decided before a run has a result class.
-  # `limit_capacity_invalid` is the exception: the terminal-usage requirement it
-  # reports scales with the resolved capability and mission inventory, which is
-  # not known until provider assembly, by which point the run already carries
-  # its result class. It gets its own branch rather than joining the general
-  # classified union, so the envelope keeps stating what the code means — the
-  # run never started and wrote nothing.
-  @capacity_pairs [{:application, :limit_capacity_invalid}]
+  # These assembly refusals depend on resolved capabilities, which are not known
+  # until provider assembly, by which point the run already carries its result
+  # class. They get their own branch rather than joining the general classified
+  # union, so the envelope keeps stating what the codes mean — the run never
+  # started and wrote nothing.
+  @capacity_pairs [
+    {:application, :limit_capacity_invalid},
+    {:application, :declared_read_effect_invalid}
+  ]
   @capacity_artifact_states ~w(not_requested not_written)
 
   @codes_by_phase DiagnosticCatalog.rows()
@@ -91,7 +93,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   @host_codes Map.fetch!(@codes_by_phase, :host)
   @application_codes Map.fetch!(@codes_by_phase, :application)
   # Every other application code is decided before provider assembly, so only
-  # the capacity refusal can come from a run that already has a result class:
+  # these assembly refusals can come from a run that already has a result class:
   # `validate`, `doctor`, and the unclassified run branch must not admit it.
   @capacity_codes Enum.map(@capacity_pairs, &elem(&1, 1))
   @preassembly_application_codes @application_codes -- @capacity_codes
