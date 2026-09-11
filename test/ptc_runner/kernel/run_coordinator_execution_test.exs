@@ -1,4 +1,6 @@
 defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
+  # async: false — three cases install VM-global :erlang.trace_pattern and trace(:new_processes) on
+  # EventSink and PublicationAuthority (class D); the other 17 could run async in a sibling module.
   use ExUnit.Case, async: false
 
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]

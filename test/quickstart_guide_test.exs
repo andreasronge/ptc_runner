@@ -1,4 +1,6 @@
 defmodule PtcRunner.QuickstartGuideTest do
+  # async: false — every guide example shells out to bash and `mix ptc` in the repo root, sharing
+  # _build/test (class C).
   use ExUnit.Case, async: false
 
   @moduletag timeout: 180_000

@@ -1,4 +1,7 @@
 defmodule PtcRunner.Kernel.ExampleLibraryTest do
+  # async: false — two cases mutate the OS environment (OPENROUTER_API_KEY, a .env load) and
+  # reinstall the :default logger handler (class D); the other 12 could run async in a sibling
+  # module.
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureIO

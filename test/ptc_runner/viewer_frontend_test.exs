@@ -1,4 +1,6 @@
 defmodule PtcRunner.ViewerFrontendTest do
+  # async: false — four cases set PTC_VIEWER_TOKEN or a project env var, capture :stderr globally,
+  # or run Mix.Task.run (class D); the other 22 could run async in a sibling module.
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureIO

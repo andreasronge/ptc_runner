@@ -1,4 +1,6 @@
 defmodule PtcRunner.Kernel.ApplicationPackageTest do
+  # async: false — one case overrides the :ptc_runner :default_max_heap app env for the whole VM
+  # (class D); the other 30 cases could run async in a sibling module.
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.ApplicationPackage

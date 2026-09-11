@@ -1,4 +1,6 @@
 defmodule PtcRunner.Kernel.MCPRemoteE2ETest do
+  # async: false — live end-to-end run against real providers or servers (class C); serialized so
+  # its wall-clock budget and rate limits are its own.
   use ExUnit.Case, async: false
 
   @moduledoc """

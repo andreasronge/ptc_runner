@@ -1,4 +1,6 @@
 defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
+  # async: false — setup forces Logger level :debug and adds a VM-global :logger handler that
+  # catches every event (class D).
   use ExUnit.Case, async: false
 
   import PtcRunner.TestSupport.TestHelpers, only: [long_running_body: 0]

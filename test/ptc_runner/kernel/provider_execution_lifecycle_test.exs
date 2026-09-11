@@ -1,4 +1,7 @@
 defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
+  # async: false — three cases install VM-global :erlang.trace_pattern breakpoints on
+  # ProviderSession and ProviderRegistry close (class D); the other 15 could run async in a sibling
+  # module.
   use ExUnit.Case, async: false
   import PtcRunner.TestSupport.ProviderExecutionFixture
 

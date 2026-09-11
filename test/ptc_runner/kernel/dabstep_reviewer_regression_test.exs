@@ -1,4 +1,6 @@
 defmodule PtcRunner.Kernel.DabstepReviewerRegressionTest do
+  # async: false — drives a real Mix/OS subprocess with a multi-second budget (class C); serialized
+  # so load from other tests cannot spend it.
   use ExUnit.Case, async: false
 
   @moduletag :nightly

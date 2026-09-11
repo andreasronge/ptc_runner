@@ -1,7 +1,6 @@
 defmodule PtcRunner.Lisp.DefaultLimitsTest do
-  # Mutates the global `:ptc_runner` application environment that every sandbox
-  # on the node reads, so this case cannot share the scheduler with concurrent
-  # ones.
+  # async: false — sets :ptc_runner :default_timeout to 1 ms, which every sandbox on the node reads
+  # (class D).
   use ExUnit.Case, async: false
 
   alias PtcRunner.Lisp

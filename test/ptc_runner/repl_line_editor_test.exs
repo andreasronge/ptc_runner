@@ -1,4 +1,6 @@
 defmodule PtcRunner.ReplLineEditorTest do
+  # async: false — one case deletes and reads the :kernel :shell_history app env that the terminal
+  # path writes (class D); the other 5 could run async in a sibling module.
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureIO

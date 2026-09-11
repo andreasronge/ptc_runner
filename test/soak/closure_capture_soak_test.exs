@@ -35,6 +35,8 @@ defmodule PtcRunner.ClosureCaptureSoakTest do
       PTC_SOAK_ITERATIONS=10000 \\
         mix test --only soak test/soak/closure_capture_soak_test.exs
   """
+  # async: false — measures VM-wide counters (processes, ETS, atoms, memory) that any concurrent
+  # test would perturb (class D).
   use ExUnit.Case, async: false
 
   alias PtcRunner.Lisp

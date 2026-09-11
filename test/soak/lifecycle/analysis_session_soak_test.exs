@@ -37,6 +37,8 @@ defmodule PtcRunner.Soak.AnalysisSessionSoakTest do
   outright.
   """
 
+  # async: false — measures VM-wide counters (processes, ETS, atoms, memory) that any concurrent
+  # test would perturb (class D).
   use ExUnit.Case, async: false
 
   @moduletag :soak

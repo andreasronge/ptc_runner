@@ -1,4 +1,6 @@
 defmodule PtcRunner.TestSupport.TestHelpersTest do
+  # async: false — one describe sets and deletes PTC_TEST_HELPER_* OS env vars, which are VM-global
+  # (class D); the other 5 cases could run async in a sibling module.
   use ExUnit.Case, async: false
 
   import PtcRunner.TestSupport.TestHelpers,

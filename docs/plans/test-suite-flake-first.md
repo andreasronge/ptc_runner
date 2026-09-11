@@ -70,8 +70,7 @@ Every class below has already been root-caused at least once (PRs #1200,
    frequencies. Add a nightly job that runs it ten times on `main` so the
    flake rate per test becomes a number instead of a feeling.
 3. Put a one-line reason on every `async: false` `use` line, naming the
-   class (A to D). This is the inventory Phase 2 works from; a file that
-   gets no honest reason is a candidate for the first tranche.
+   class (A to D). Done: this is the inventory Phase 2 works from.
 
 Gate: the nightly table exists and has a week of data.
 
@@ -107,10 +106,15 @@ Phase 0 and passes ten `flake-hunt` runs.
 
 | Tranche | Modules | Approach | Serial time freed |
 |---|---|---|---|
-| 1 | ReplFrontendTest, ViewerFrontendTest, ExampleLibraryTest, PublicationAuthorityTest | Move the few env-mutating tests into a `*GlobalStateTest` sibling, the pattern CommandEngine already uses; flip the rest to async | ~110 s |
-| 2 | MCPSourceTest, MCPStdioTransportTest | Convert deadline assertions to class A held paths; keep any test whose contract is a true wall-clock bound in a small serial sibling | ~67 s |
-| 3 | QuickstartGuideTest, TutorialCostBudgetTest, CommandMaterializeTest, Mix.Tasks.Ptc.MaterializeTest | These boot `mix` or `ptc` subprocesses. The repository rule already routes operator-path subprocess walks to `:nightly`; apply it, or run through the in-process command path where the guide contract allows | ~50 s |
-| 4 | HostInstallationTest, ProviderActiveSessionTest, ManifestReplTest, the rest | Mostly `Application.put_env` fixtures. Where the code under test can take its configuration as an argument, do that; otherwise leave serial with the reason stated | ~40 s |
+| 1 | The 17 modules whose `use` line says "could run async in a sibling module": ViewerFrontendTest (4 of 26 cases global), ExampleLibraryTest (2 of 14), PublicationAuthorityTest (1 of 25), ManifestReplTest (10 of 26), TokenManagerTest (10 of 28), InspectionPreflightTest (9 of 30), ProviderActiveSessionTest (9 of 41), ApplicationPackageTest (1 of 31), RunAdmissionTest (1 of 12), RunCoordinatorExecutionTest (3 of 20), ProviderExecutionLifecycleTest (3 of 18), ProviderExecutionOAuthTest (6 of 14), LiveStatusTest (3 of 22), and the small ones; plus CommandMaterializeTest, where no reason was found | Move the global-state cases into a `*GlobalStateTest` sibling, the pattern CommandEngine already uses; flip the rest to async | ~110 s |
+| 2 | MCPSourceTest (class A), ParallelProviderLimitTest, PtcLlmHttpSmokeTest | Convert deadline assertions to held paths; keep any test whose contract is a true wall-clock bound in a small serial sibling | ~36 s |
+| 3 | QuickstartGuideTest, MCPStdioTransportTest | The guide walks boot `mix ptc` per example and 33 of the 35 transport cases boot a child Elixir VM. The repository rule already routes operator-path subprocess walks to `:nightly`; apply it to the guide walks, and give the stdio transport one child VM per module through `setup_all` where the cases allow | ~55 s |
+| 4 | ReplFrontendTest (33 s), CliLoggerTest | Not splittable: `MixCommandAdapter.run_task/2` reinstalls the VM-global `:default` logger handler on every case. Make the handler install idempotent or process-scoped in `lib/`, then the 96 REPL cases can run async | ~33 s |
+| 5 | HostInstallationTest, the `:req_llm` application stop/start families (ReqLLMAdapter*, LLMTest, TutorialCostBudgetTest), the rest | Mostly `Application.put_env` and application restarts. Where the code under test can take its configuration as an argument, do that; otherwise leave serial with the reason stated | ~40 s |
+
+The inventory behind this table is the reason comment on every `async: false`
+`use` line: 51 modules are class D alone, 17 class C, 3 class A, 1 class B
+with A, 6 mixed (D with A or C), and 1 has no reason at all.
 
 Expected result after tranches 1 to 3: roughly 255 s wall instead of 428 s.
 Fully async: about 160 s, with PrePushTest as the floor.

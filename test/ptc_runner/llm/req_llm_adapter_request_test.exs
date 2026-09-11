@@ -1,4 +1,6 @@
 defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
+  # async: false — setup stops and restarts :req_llm and :llm_db and rewrites their app env for
+  # every case; some cases set AWS_REGION (class D).
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureIO

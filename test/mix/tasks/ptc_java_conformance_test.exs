@@ -1,4 +1,6 @@
 defmodule Mix.Tasks.Ptc.JavaConformanceTest do
+  # async: false — runs and reenables a Mix task through the global Mix.TasksServer run-state
+  # (class D).
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureIO

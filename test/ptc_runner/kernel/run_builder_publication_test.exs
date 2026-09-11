@@ -1,4 +1,6 @@
 defmodule PtcRunner.Kernel.RunBuilderPublicationTest do
+  # async: false — one case changes the VM's cwd with File.cd! and installs a VM-global
+  # :erlang.trace_pattern (class D); the other case is clean.
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.ApplicationPackage

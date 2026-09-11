@@ -1,4 +1,6 @@
 defmodule PtcRunner.Kernel.PublicationAuthorityTest do
+  # async: false — one case blanks PATH VM-wide to prove the destination check fails closed
+  # (class D); the other 24 are :tmp_dir-only and could run async in a sibling module.
   use ExUnit.Case, async: false
 
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]

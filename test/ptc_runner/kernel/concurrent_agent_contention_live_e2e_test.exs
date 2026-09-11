@@ -30,6 +30,8 @@ defmodule PtcRunner.Kernel.ConcurrentAgentContentionLiveE2ETest do
   The default is deliberately low so the `:e2e` suite stays affordable.
   """
 
+  # async: false — live end-to-end run against real providers or servers (class C); serialized so
+  # its wall-clock budget and rate limits are its own.
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel

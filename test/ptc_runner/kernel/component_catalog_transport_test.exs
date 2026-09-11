@@ -1,4 +1,6 @@
 defmodule PtcRunner.Kernel.ComponentCatalogTransportTest do
+  # async: false — samples VM-wide :erlang.memory(:binary) and garbage-collects every process to
+  # measure sharing (class D).
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel

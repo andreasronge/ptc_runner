@@ -1,4 +1,6 @@
 defmodule PtcRunner.LispTelemetryTest do
+  # async: false — subscribes to the unfiltered [:ptc_runner, :lisp, :execute, *] events that every
+  # Lisp.run in the VM emits (class D).
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog

@@ -1,4 +1,7 @@
 defmodule PtcRunner.Kernel.HostInstallationTest do
+  # async: false — sets :ptc_runner :llm_adapter app env, asserts the VM-wide set of
+  # HostInstallationOwner processes, captures :stderr globally, and spawns real stdio servers
+  # (class D, C); roughly 14 of 40 cases need it.
   use ExUnit.Case, async: false
 
   defmodule PreparingHostLLMAdapter do

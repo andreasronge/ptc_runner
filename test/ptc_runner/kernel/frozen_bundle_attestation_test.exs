@@ -1,4 +1,6 @@
 defmodule PtcRunner.Kernel.FrozenBundleAttestationTest do
+  # async: false — erases the VM-global :persistent_term attestation key {Attestation, FrozenBundle}
+  # (class D).
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel

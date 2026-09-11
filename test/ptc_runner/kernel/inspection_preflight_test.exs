@@ -1,4 +1,6 @@
 defmodule PtcRunner.Kernel.InspectionPreflightTest do
+  # async: false — nine cases mutate PATH and the VM's cwd (File.cd!) and spawn helper subprocesses
+  # (class D, C); the other 21 are :tmp_dir-only and could run async in a sibling module.
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.ApplicationPackage

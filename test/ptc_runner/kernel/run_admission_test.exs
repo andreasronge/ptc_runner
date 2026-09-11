@@ -1,4 +1,6 @@
 defmodule PtcRunner.Kernel.RunAdmissionTest do
+  # async: false — one case installs a node-wide :telemetry handler that blocks every sandbox arm in
+  # the VM (class D); the other 11 cases could run async in a sibling module.
   use ExUnit.Case, async: false
   import PtcRunner.TestSupport.ProviderExecutionFixture
   import PtcRunner.TestSupport.Eventually

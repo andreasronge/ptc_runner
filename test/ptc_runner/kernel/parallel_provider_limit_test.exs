@@ -1,4 +1,7 @@
 defmodule PtcRunner.Kernel.ParallelProviderLimitTest do
+  # async: false — only for 5 s run/workflow deadlines and a 1 s provider handshake that suite
+  # contention can spend (class A); no global state, so an async: true candidate once the deadlines
+  # are held paths.
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel

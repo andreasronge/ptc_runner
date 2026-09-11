@@ -12,6 +12,8 @@ defmodule PtcRunner.TestSupport.LifecycleSoakTest do
   the breakage of.
   """
 
+  # async: false — gates on VM-wide :erlang.memory slopes and a 50 ms termination deadline, and
+  # spawns a port (class D, A).
   use ExUnit.Case, async: false
 
   alias PtcRunner.TestSupport.LifecycleSoak
