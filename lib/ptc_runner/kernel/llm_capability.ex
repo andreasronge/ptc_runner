@@ -58,7 +58,8 @@ defmodule PtcRunner.Kernel.LLMCapability do
                :usage_guarantees,
                :max_request_bytes,
                :max_response_bytes,
-               :llm_reservation
+               :llm_reservation,
+               :provider_call_guardian
              ] == [],
          requester when is_function(requester, 1) or is_function(requester, 2) <-
            Keyword.get(opts, :requester),
@@ -94,6 +95,7 @@ defmodule PtcRunner.Kernel.LLMCapability do
              },
              output_schema: %{"type" => "object", "additionalProperties" => true},
              llm_reservation: Keyword.get(opts, :llm_reservation),
+             provider_call_guardian: Keyword.get(opts, :provider_call_guardian, false),
              validate: fn request -> validate_request(request, request_limit) end,
              callback: requester_callback(requester, response_limit, usage_guarantees)
            ) do
@@ -133,11 +135,18 @@ defmodule PtcRunner.Kernel.LLMCapability do
     end
   end
 
-  defp requester_context(%{llm_request_deadline_ms: deadline})
-       when is_integer(deadline) or is_nil(deadline),
-       do: %{llm_request_deadline_ms: deadline}
+  defp requester_context(%{llm_request_deadline_ms: deadline} = context)
+       when is_integer(deadline) or is_nil(deadline) do
+    %{llm_request_deadline_ms: deadline}
+    |> maybe_put_admission(context)
+  end
 
   defp requester_context(_context), do: %{llm_request_deadline_ms: nil}
+
+  defp maybe_put_admission(context, %{provider_call_admission: admission}) when is_pid(admission),
+    do: Map.put(context, :provider_call_admission, admission)
+
+  defp maybe_put_admission(context, _source), do: context
 
   defp invoke(requester, request, context, response_limit, usage_guarantees)
        when is_function(requester, 2) do

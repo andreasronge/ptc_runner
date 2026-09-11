@@ -557,7 +557,8 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
   defp build_runtime_registry(catalog, services, selected_names, oauth_runtimes, owner) do
     result =
       with :ok <- install_oauth_runtimes(owner, oauth_runtimes) do
-        ProviderRegistry.new(runtime_builders(catalog, selected_names, oauth_runtimes, owner),
+        ProviderRegistry.new(
+          runtime_builders(catalog, selected_names, oauth_runtimes, owner, services),
           credential_resolver: runtime_credential_resolver(services, owner),
           installed_limits: catalog.installed_limits,
           authority_owner: owner
@@ -580,20 +581,21 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
          catalog,
          selected_names,
          _oauth_runtimes,
-         %HostInstallationAuthority{} = owner
+         %HostInstallationAuthority{} = owner,
+         services
        ) do
     catalog.implementations
     |> Map.take(selected_names)
     |> Map.new(fn {name, _implementation} ->
       {name,
        ProviderRegistry.staged(
-         HostInstallation.runtime_builder(owner, name),
+         admitted_runtime_builder(owner, name, services),
          declared_policy(catalog, name)
        )}
     end)
   end
 
-  defp runtime_builders(catalog, selected_names, oauth_runtimes, nil) do
+  defp runtime_builders(catalog, selected_names, oauth_runtimes, nil, services) do
     catalog.implementations
     |> Map.take(selected_names)
     |> Map.new(fn {name, implementation} ->
@@ -605,11 +607,25 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
             end
 
           :error ->
-            implementation.builder
+            fn selection, context ->
+              implementation.builder.(selection, runtime_context(context, services))
+            end
         end
 
       {name, ProviderRegistry.staged(builder, declared_policy(catalog, name))}
     end)
+  end
+
+  defp admitted_runtime_builder(owner, name, services) do
+    builder = HostInstallation.runtime_builder(owner, name)
+    fn selection, context -> builder.(selection, runtime_context(context, services)) end
+  end
+
+  defp runtime_context(context, services) do
+    case ProviderRuntimeServices.provider_call_admission(services) do
+      nil -> context
+      admission -> Map.put(context, :provider_call_admission, admission)
+    end
   end
 
   defp declared_policy(catalog, name),

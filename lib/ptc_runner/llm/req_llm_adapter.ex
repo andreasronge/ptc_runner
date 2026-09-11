@@ -121,6 +121,11 @@ if Code.ensure_loaded?(ReqLLM) do
 
     # --- Behaviour Callbacks ---
 
+    @doc false
+    @impl true
+    @spec cancellation_witness?() :: true
+    def cancellation_witness?, do: true
+
     @impl true
     @doc """
     Loads the `llm_db` model catalog into its VM-global `:persistent_term`

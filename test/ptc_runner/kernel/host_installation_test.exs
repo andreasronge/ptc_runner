@@ -1486,7 +1486,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert request.credential == "pre-resolved-secret"
     assert request.cache == false
     assert request.exact_options.max_tokens == 1
-    assert request.llm_request_deadline_ms == nil
+    assert is_integer(request.llm_request_deadline_ms)
     assert [%{role: :user, content: "Health check."}] = request.messages
     refute Map.has_key?(request, :schema)
     refute_receive {:host_llm_request, _, _}
@@ -2101,7 +2101,8 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   defp reseal_services(services) do
     payload =
       {services.activation, services.credential_resolver, services.provider_application_mode,
-       services.oauth_mode, services.runtime_binding, services.host_payload}
+       services.oauth_mode, services.provider_call_admission, services.runtime_binding,
+       services.host_payload}
 
     %{services | attestation: Attestation.attest(ProviderRuntimeServices, payload)}
   end

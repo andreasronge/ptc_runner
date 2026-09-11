@@ -22,6 +22,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
   alias PtcRunner.Kernel.HostInstallationAuthority
   alias PtcRunner.Kernel.HostRuntimePayload
   alias PtcRunner.Kernel.MCPOAuth.Context, as: OAuthContext
+  alias PtcRunner.Kernel.ProviderCallAdmission
 
   @enforce_keys [
     :activation,
@@ -29,7 +30,8 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
     :provider_application_mode,
     :oauth_mode,
     :runtime_binding,
-    :host_payload
+    :host_payload,
+    :provider_call_admission
   ]
   defstruct @enforce_keys ++ [attestation: nil]
   @context_heap_words 100_000
@@ -48,6 +50,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
           oauth_mode: oauth_mode(),
           runtime_binding: binary() | nil,
           host_payload: struct() | nil,
+          provider_call_admission: ProviderCallAdmission.t() | nil,
           attestation: binary() | nil
         }
 
@@ -62,6 +65,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
         Keyword.get(opts, :credential_resolver, &default_credential_resolver/1),
         Keyword.get(opts, :provider_application_mode, :host_owned),
         Keyword.get(opts, :oauth_mode, :disabled),
+        Keyword.get(opts, :provider_call_admission),
         nil,
         nil
       )
@@ -86,6 +90,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
             fn names -> HostRuntimePayload.resolve_credentials(payload, names) end,
             Keyword.get(opts, :provider_application_mode, :host_owned),
             Keyword.get(opts, :oauth_mode, :disabled),
+            Keyword.get(opts, :provider_call_admission),
             binding,
             payload
           )
@@ -279,6 +284,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
            ^deadline -> {:ok, context}
            _other -> {:error, :authorization_context_required}
          end},
+        services.provider_call_admission,
         services.runtime_binding,
         services.host_payload
       )
@@ -308,17 +314,30 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
   def oauth_authorities(_services, _selected_names),
     do: {:error, :invalid_provider_runtime_services}
 
+  @doc false
+  @spec provider_call_admission(t()) :: ProviderCallAdmission.t() | nil
+  def provider_call_admission(%__MODULE__{} = services) do
+    if valid?(services), do: services.provider_call_admission, else: nil
+  end
+
   defp unique_allowed_options?(opts) do
     keys = Keyword.keys(opts)
 
-    keys -- [:activation, :credential_resolver, :provider_application_mode, :oauth_mode] == [] and
+    keys --
+      [
+        :activation,
+        :credential_resolver,
+        :provider_application_mode,
+        :oauth_mode,
+        :provider_call_admission
+      ] == [] and
       length(keys) == MapSet.size(MapSet.new(keys))
   end
 
   defp unique_oauth_options?(opts) do
     keys = Keyword.keys(opts)
 
-    keys -- [:provider_application_mode, :oauth_mode] == [] and
+    keys -- [:provider_application_mode, :oauth_mode, :provider_call_admission] == [] and
       length(keys) == MapSet.size(MapSet.new(keys))
   end
 
@@ -327,6 +346,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
          credential_resolver,
          provider_application_mode,
          oauth_mode,
+         provider_call_admission,
          runtime_binding,
          host_payload
        ) do
@@ -335,6 +355,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
       credential_resolver: credential_resolver,
       provider_application_mode: provider_application_mode,
       oauth_mode: oauth_mode,
+      provider_call_admission: provider_call_admission,
       runtime_binding: runtime_binding,
       host_payload: host_payload
     }
@@ -352,7 +373,11 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
         is_function(services.credential_resolver, 1) and
         services.provider_application_mode in [:host_owned, :command_vm] and
         valid_oauth_mode?(services.oauth_mode) and
+        valid_provider_call_admission?(services.provider_call_admission) and
         valid_runtime_binding?(services.runtime_binding, services.host_payload)
+
+  defp valid_provider_call_admission?(nil), do: true
+  defp valid_provider_call_admission?(admission), do: ProviderCallAdmission.valid?(admission)
 
   defp valid_oauth_mode?(:disabled), do: true
   defp valid_oauth_mode?({:context_factory, factory}), do: is_function(factory, 1)
@@ -371,5 +396,6 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
   defp payload(services),
     do:
       {services.activation, services.credential_resolver, services.provider_application_mode,
-       services.oauth_mode, services.runtime_binding, services.host_payload}
+       services.oauth_mode, services.provider_call_admission, services.runtime_binding,
+       services.host_payload}
 end

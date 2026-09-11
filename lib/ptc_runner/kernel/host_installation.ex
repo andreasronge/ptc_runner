@@ -61,6 +61,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   alias PtcRunner.Kernel.MCPOAuth.TokenManager
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.ModelContractPricingCause
+  alias PtcRunner.Kernel.ProviderCallOwner
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderRegistry
@@ -222,8 +223,16 @@ defmodule PtcRunner.Kernel.HostInstallation do
                  services,
                  binding,
                  {:connectivity_probe, name, selection, context}
-               ) do
-          run_llm_connectivity_probe(probe)
+               ),
+             admission = ProviderRuntimeServices.provider_call_admission(services),
+             true <- cancellation_witness_supported?(probe.adapter, admission) do
+          run_llm_connectivity_probe(
+            probe,
+            admission
+          )
+        else
+          {:error, :invalid_provider_runtime_services} = error -> error
+          _ -> {:error, :llm_connectivity_unavailable}
         end
       end
     )
@@ -1129,7 +1138,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
          cache: installation.cache,
          usage_guarantees: installation.usage_guarantees,
          timeout_ms: timeout_ms,
-         max_heap_words: max_heap_words
+         max_heap_words: max_heap_words,
+         adapter: adapter
        }}
     else
       {:error, %ModelContractPricingCause{} = cause} ->
@@ -1174,7 +1184,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   # probe; absent promised usage fails connectivity rather than being invented.
   # The doctor connectivity deadline remains the outer `BoundedWorker` bound;
   # the probe does not participate in the ordinary whole-call LLM clock.
-  defp run_llm_connectivity_probe(probe) do
+  defp run_llm_connectivity_probe(probe, admission) do
     binding = %{credential: probe.credential, cache: probe.cache}
 
     case PtcRunner.LLM.callback(probe.prepared_model, binding) do
@@ -1182,10 +1192,19 @@ defmodule PtcRunner.Kernel.HostInstallation do
         result =
           BoundedWorker.run(
             fn ->
-              requester.(
-                %{messages: [%{role: :user, content: "Health check."}]},
-                %{llm_request_deadline_ms: nil}
-              )
+              request = %{messages: [%{role: :user, content: "Health check."}]}
+              deadline = System.monotonic_time(:millisecond) + probe.timeout_ms
+
+              if is_nil(admission) do
+                requester.(request, %{llm_request_deadline_ms: deadline})
+              else
+                ProviderCallOwner.run(
+                  admission,
+                  requester,
+                  request,
+                  %{llm_request_deadline_ms: deadline}
+                )
+              end
             end,
             timeout_ms: probe.timeout_ms,
             max_heap_words: probe.max_heap_words,
@@ -1461,13 +1480,30 @@ defmodule PtcRunner.Kernel.HostInstallation do
              credential: credential,
              cache: installation.cache
            }),
+         provider_call_admission = Map.get(context, :provider_call_admission),
+         true <- cancellation_witness_supported?(adapter, provider_call_admission),
+         provider_cleanup_timeout_ms = get_in(context, [:limits, :provider_cleanup_timeout_ms]),
          {:ok, capability} <-
            LLMCapability.new(
-             requester: fn request, context ->
+             provider_call_guardian: not is_nil(provider_call_admission),
+             requester: fn request, requester_context ->
                with :ok <- provider_application_ready(adapter, model) do
-                 request
-                 |> ProviderRegistry.adapter_request()
-                 |> requester.(llm_requester_context(context))
+                 request = ProviderRegistry.adapter_request(request)
+                 context = llm_requester_context(requester_context)
+                 context = maybe_put_cleanup_timeout(context, provider_cleanup_timeout_ms)
+
+                 case provider_call_admission do
+                   admission when not is_nil(admission) ->
+                     ProviderCallOwner.run(
+                       admission,
+                       requester,
+                       request,
+                       context
+                     )
+
+                   nil ->
+                     requester.(request, Map.take(context, [:llm_request_deadline_ms]))
+                 end
                end
              end,
              llm_reservation: %{
@@ -1514,11 +1550,30 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  defp llm_requester_context(%{llm_request_deadline_ms: deadline})
-       when is_integer(deadline) or is_nil(deadline),
-       do: %{llm_request_deadline_ms: deadline}
+  defp llm_requester_context(%{llm_request_deadline_ms: deadline} = context)
+       when is_integer(deadline) or is_nil(deadline) do
+    %{llm_request_deadline_ms: deadline}
+    |> maybe_put_provider_call_admission(context)
+  end
 
   defp llm_requester_context(_context), do: %{llm_request_deadline_ms: nil}
+
+  defp maybe_put_provider_call_admission(context, %{provider_call_admission: admission})
+       when not is_nil(admission),
+       do: Map.put(context, :provider_call_admission, admission)
+
+  defp maybe_put_provider_call_admission(context, _requester_context), do: context
+
+  defp maybe_put_cleanup_timeout(context, timeout_ms)
+       when is_integer(timeout_ms) and timeout_ms > 0,
+       do: Map.put(context, :provider_cleanup_timeout_ms, timeout_ms)
+
+  defp maybe_put_cleanup_timeout(context, _timeout_ms), do: context
+
+  defp cancellation_witness_supported?(_adapter, nil), do: true
+
+  defp cancellation_witness_supported?(adapter, admission) when not is_nil(admission),
+    do: function_exported?(adapter, :cancellation_witness?, 0) and adapter.cancellation_witness?()
 
   # The core no longer starts an adapter's backing application on a host's
   # behalf; a run admits it through ProviderApplicationGate. An embedding host

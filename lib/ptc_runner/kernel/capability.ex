@@ -35,7 +35,7 @@ defmodule PtcRunner.Kernel.Capability do
   alias PtcRunner.LLM.Requirements
 
   @effects [:read, :write, :unknown]
-  @options ~w(name callback validate description model_visible input_schema output_schema effect inspection_capture llm_reservation)a
+  @options ~w(name callback validate description model_visible input_schema output_schema effect inspection_capture llm_reservation provider_call_guardian)a
   @enforce_keys [:name, :callback, :input_schema]
   defstruct [
     :name,
@@ -47,6 +47,7 @@ defmodule PtcRunner.Kernel.Capability do
     :input_validator,
     :output_validator,
     :llm_reservation,
+    provider_call_guardian: false,
     model_visible: true,
     effect: :unknown,
     inspection_capture: :full
@@ -105,6 +106,8 @@ defmodule PtcRunner.Kernel.Capability do
          inspection_capture when inspection_capture in [:full, :digest_results] <-
            Keyword.get(opts, :inspection_capture, :full),
          true <- inspection_capture == :full or effect == :read,
+         provider_call_guardian when is_boolean(provider_call_guardian) <-
+           Keyword.get(opts, :provider_call_guardian, false),
          :ok <- valid_llm_reservation(Keyword.get(opts, :llm_reservation)),
          {:ok, input_schema, input_validator} <-
            JSONSchema.compile(Keyword.get(opts, :input_schema)),
@@ -123,6 +126,7 @@ defmodule PtcRunner.Kernel.Capability do
          input_validator: input_validator,
          output_validator: output_validator,
          llm_reservation: Keyword.get(opts, :llm_reservation),
+         provider_call_guardian: provider_call_guardian,
          effect: effect,
          inspection_capture: inspection_capture
        }}

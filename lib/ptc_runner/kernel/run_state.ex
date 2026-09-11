@@ -295,6 +295,28 @@ defmodule PtcRunner.Kernel.RunState do
     end
   end
 
+  @doc false
+  @spec attach_provider_guardian(t(), reference(), pid()) ::
+          :ok | {:error, :closed | :provider_down | :unknown_reservation}
+  def attach_provider_guardian(%__MODULE__{} = state, reservation_id, guardian)
+      when is_reference(reservation_id) and is_pid(guardian) do
+    case ProviderTaskTracker.attach_guardian(state.provider_tracker, guardian) do
+      :ok ->
+        case safe_call(state, {:attach_provider, reservation_id, guardian}, {:error, :closed}) do
+          :ok ->
+            :ok
+
+          {:error, reason} = error when reason in [:closed, :unknown_reservation] ->
+            Process.exit(guardian, :kill)
+            error
+        end
+
+      {:error, reason} = error when reason in [:closed, :provider_down] ->
+        if reason == :closed, do: Process.exit(guardian, :kill)
+        error
+    end
+  end
+
   @spec open_provider_gate(t(), reference(), pid(), reference()) ::
           :ok
           | {:error,
@@ -2768,7 +2790,7 @@ defmodule PtcRunner.Kernel.RunState do
   defp start_state(args) do
     case GenServer.start(__MODULE__, args) do
       {:ok, pid} ->
-        case ProviderTaskTracker.start(pid) do
+        case ProviderTaskTracker.start(pid, elem(args, 0).provider_cleanup_timeout_ms) do
           {:ok, provider_tracker} ->
             token = elem(args, 1)
             {:ok, %__MODULE__{pid: pid, token: token, provider_tracker: provider_tracker}}

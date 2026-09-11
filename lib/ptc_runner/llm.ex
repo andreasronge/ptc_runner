@@ -149,10 +149,21 @@ defmodule PtcRunner.LLM do
   """
   @callback public_model(model :: String.t()) :: {:ok, String.t()} | :private
 
+  @doc """
+  Attests support for the hosted cancelable-request witness.
+
+  Optional. Return `true` only when termination of the adapter caller drains
+  every request and pool-checkout owner it creates. Hosted runtime services
+  with provider-call admission reject adapters which omit this attestation.
+  Direct callers remain outside that hosted guarantee.
+  """
+  @callback cancellation_witness?() :: true
+
   @optional_callbacks [
     ensure_ready: 0,
     provider_application: 1,
     public_model: 1,
+    cancellation_witness?: 0,
     reservation_bound: 3
   ]
 
