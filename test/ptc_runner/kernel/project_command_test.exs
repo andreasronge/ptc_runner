@@ -247,6 +247,57 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     refute File.exists?(missing)
   end
 
+  @tag :tmp_dir
+  test "an explicit envelope survives an unavailable project ledger", %{tmp_dir: directory} do
+    target = Path.join(directory, "demo")
+    project_path = project_with_artifact_root(target, "missing-artifact-parent/.ptc")
+    explicit = Path.join(directory, "rescue.json")
+
+    presentation =
+      CommandFrontend.execute(
+        ["run", project_path, "--envelope", explicit],
+        :standalone,
+        fn _arguments -> {:ok, CommandRuntime.standalone()} end
+      )
+
+    assert presentation.exit_status == 7
+    assert presentation.envelope_path == explicit
+    assert Jason.decode!(File.read!(explicit)) == presentation.outcome.envelope
+    assert presentation.stderr =~ "destination/invalid_destination"
+    assert presentation.stderr =~ "envelope/destination_parent_unavailable"
+    assert presentation.stderr =~ "missing-artifact-parent"
+  end
+
+  @tag :tmp_dir
+  test "an explicit envelope survives an unavailable artifact root when its ledger is disabled",
+       %{
+         tmp_dir: directory
+       } do
+    target = Path.join(directory, "demo")
+    project_path = project_with_artifact_root(target, "missing-artifact-parent/.ptc")
+    project = project_path |> File.read!() |> Jason.decode!()
+
+    File.write!(
+      project_path,
+      project |> put_in(["artifacts", "envelope"], false) |> Jason.encode!()
+    )
+
+    explicit = Path.join(directory, "rescue.json")
+
+    presentation =
+      CommandFrontend.execute(
+        ["run", project_path, "--envelope", explicit],
+        :standalone,
+        fn _arguments -> {:ok, CommandRuntime.standalone()} end
+      )
+
+    assert presentation.exit_status == 7
+    assert presentation.envelope_path == explicit
+    assert Jason.decode!(File.read!(explicit)) == presentation.outcome.envelope
+    assert presentation.stderr =~ "destination/invalid_destination"
+    refute presentation.stderr =~ "envelope/publication_failed"
+  end
+
   # The shallowest missing ancestor is what failed, but creating only it fails
   # again on the next level; the remedy has to name the whole parent.
   @tag :tmp_dir
