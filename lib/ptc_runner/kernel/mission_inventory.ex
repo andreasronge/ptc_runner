@@ -24,6 +24,7 @@ defmodule PtcRunner.Kernel.MissionInventory do
 
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Environment
+  alias PtcRunner.Kernel.ExportEffect
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
@@ -345,29 +346,15 @@ defmodule PtcRunner.Kernel.MissionInventory do
   defp entry_form({:object, pairs}), do: pairs |> Map.new() |> Map.fetch!("form")
 
   defp resolved_export_effect(export, %{capabilities: capabilities}) do
-    required_names =
-      export.requires
-      |> Enum.flat_map(fn
-        "tool:" <> name -> [name]
-        _requirement -> []
-      end)
-
-    dependency_effects =
-      (export.tool_refs ++ required_names)
-      |> Enum.uniq()
-      |> Enum.map(fn name ->
-        case Map.fetch(capabilities, name) do
-          {:ok, capability} -> capability.effect
-          :error -> :unknown
-        end
-      end)
-
-    join_effects([export.effect | dependency_effects])
+    effects = Map.new(capabilities, fn {name, capability} -> {name, capability.effect} end)
+    ExportEffect.resolve(export, effects)
   end
 
   @doc false
   @spec validate_declared_read_effects(MissionEnvironment.t() | map()) ::
           :ok | {:error, {:declared_read_effect_violation, binary(), :write | :unknown}}
+  def validate_declared_read_effects(%{inspect_only: true}), do: :ok
+
   def validate_declared_read_effects(%{bundle: %{prelude: %{exports: exports}}} = environment) do
     exports
     |> Enum.sort_by(& &1.ref)
@@ -383,15 +370,6 @@ defmodule PtcRunner.Kernel.MissionInventory do
   end
 
   def validate_declared_read_effects(_environment), do: :ok
-
-  defp join_effects(effects) do
-    cond do
-      :write in effects -> :write
-      :unknown in effects -> :unknown
-      :read in effects -> :read
-      true -> :unknown
-    end
-  end
 
   defp reverse_entries({:ok, entries}), do: {:ok, Enum.reverse(entries)}
   defp reverse_entries({:error, _} = error), do: error

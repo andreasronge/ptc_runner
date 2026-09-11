@@ -57,7 +57,13 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
     assert DeclaredReadEffectDiagnostic.valid_message?(message)
 
     refute DeclaredReadEffectDiagnostic.valid_message?(message <> " provider=https://secret")
-    assert :error = DeclaredReadEffectDiagnostic.message(String.duplicate("x", 300), :write)
+    assert {:ok, uppercase} = DeclaredReadEffectDiagnostic.message("CRM/Find!?", :write)
+    assert uppercase =~ "`CRM/Find!?`"
+
+    long_ref = String.duplicate("N", 300) <> "/" <> String.duplicate("f", 300)
+    assert {:ok, fingerprinted} = DeclaredReadEffectDiagnostic.message(long_ref, :write)
+    assert fingerprinted =~ ~r/export `sha256:[0-9a-f]{64}`/
+    assert DeclaredReadEffectDiagnostic.valid_message?(fingerprinted)
   end
 
   test "model output truncation messages retain tied bindings and reject suffixes" do

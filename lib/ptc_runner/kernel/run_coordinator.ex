@@ -25,6 +25,8 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.ConnectivityResult
   alias PtcRunner.Kernel.Deadline
+  alias PtcRunner.Kernel.DeclaredReadEffectDiagnostic
+  alias PtcRunner.Kernel.DeclaredReadEffectValidator
   alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.ExecutionSessionOwner
@@ -89,6 +91,13 @@ defmodule PtcRunner.Kernel.RunCoordinator do
          :ok <- validate_mission_capabilities(request.package.missions, mission_bundles),
          {:ok, declarations} <-
            prepare_providers(request, workflow_bundle, mission_bundles, catalog),
+         :ok <-
+           validate_declared_read_effects(
+             workflow_bundle,
+             mission_bundles,
+             request.package.missions,
+             declarations
+           ),
          {:ok, derived} <-
            derive_provider_plan(request, workflow_bundle, mission_bundles, declarations),
          declarations <- add_post_selection_context(declarations, derived.post_selection_context),
@@ -127,6 +136,32 @@ defmodule PtcRunner.Kernel.RunCoordinator do
 
   def prepare(_request, _registry),
     do: {:error, diagnostic(:internal, :internal_error)}
+
+  defp validate_declared_read_effects(workflow_bundle, mission_bundles, missions, declarations) do
+    case DeclaredReadEffectValidator.validate(
+           workflow_bundle,
+           mission_bundles,
+           missions,
+           declarations
+         ) do
+      :ok ->
+        :ok
+
+      {:error, {:declared_read_effect_violation, ref, effect}} ->
+        opts =
+          case DeclaredReadEffectDiagnostic.message(ref, effect) do
+            {:ok, message} -> [message: message]
+            :error -> []
+          end
+
+        {:error,
+         diagnostic(
+           :application,
+           :declared_read_effect_invalid,
+           [source: CommandSource.fixed(:application)] ++ opts
+         )}
+    end
+  end
 
   @doc """
   Runs the audited-local phase-7 step for one sealed preparation.
