@@ -1152,12 +1152,13 @@ static bool emit_stderr(const uint8_t *bytes, size_t length,
             ? length
             : (size_t)*stderr_snapshot_remaining;
 
-    if (snapshot_allowed > 0) {
-      const uint8_t *snapshot = snapshot_allowed < length
-                                    ? bytes + length - snapshot_allowed
-                                    : bytes;
+    if (snapshot_allowed == length &&
+        !emit_frame('E', bytes, snapshot_allowed)) {
+      return false;
+    }
 
-      if (!emit_frame('S', snapshot, snapshot_allowed)) {
+    if (snapshot_allowed > 0 && snapshot_allowed < length) {
+      if (!emit_stderr_snapshot(*stderr_tail_length)) {
         return false;
       }
     }
@@ -1168,19 +1169,7 @@ static bool emit_stderr(const uint8_t *bytes, size_t length,
 }
 
 static bool emit_stderr_tail(size_t length) {
-  size_t offset = 0;
-
-  while (offset < length) {
-    size_t remaining = length - offset;
-    size_t chunk = remaining < IO_CHUNK_BYTES ? remaining : IO_CHUNK_BYTES;
-
-    if (!emit_frame('E', stderr_tail + offset, chunk)) {
-      return false;
-    }
-    offset += chunk;
-  }
-
-  return true;
+  return emit_frame('S', stderr_tail, length);
 }
 
 static bool emit_stderr_snapshot(size_t length) {

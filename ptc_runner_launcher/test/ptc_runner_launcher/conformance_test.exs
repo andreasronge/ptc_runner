@@ -247,6 +247,23 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     assert {_tail, %{reason: :close, stderr_truncated?: true}} = collect_finish(launcher, partial)
   end
 
+  test "a complete shutdown chunk appends to the retained stderr context" do
+    launcher = open_launcher(["shutdown-stderr-small"], stderr_bytes: 32)
+    assert %{truncated?: true} = collect_until(launcher, & &1.truncated?)
+
+    assert Port.command(launcher.port, "C")
+    assert_receive {port, {:data, "T"}}, 500
+    assert port == launcher.port
+    assert_receive {^port, {:data, <<"S", initial::binary>>}}, 500
+    assert initial == String.duplicate("x", 32)
+
+    assert_receive {^port, {:data, "Eyz"}}, 500
+    assert_receive {^port, {:data, <<"S", final::binary>>}}, 500
+    assert final == String.duplicate("x", 30) <> "yz"
+
+    assert {^final, %{reason: :close, stderr_truncated?: true}} = collect_finish(launcher, final)
+  end
+
   test "keeps at most one stdout frame in flight for a stalled owner" do
     launcher = open_launcher(["stdout-flood"], grace_ms: 50)
 

@@ -51,6 +51,14 @@ case "$1" in
     printf yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy >&2
     ;;
 
+  shutdown-stderr-small)
+    printf xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx >&2
+    while IFS= read -r _line; do
+      :
+    done
+    printf yz >&2
+    ;;
+
   stdout-flood)
     while :; do
       printf 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
