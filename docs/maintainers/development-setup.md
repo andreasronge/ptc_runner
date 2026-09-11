@@ -137,6 +137,23 @@ scripts/ci/core-tests.sh --schedulers 4
 The second command still runs on the local operating system. It is CPU-shape
 parity, not an Ubuntu container; OS-level parity remains a separate concern.
 
+A test that fails only under load or under one seed needs repetition, not a
+rerun. `scripts/ci/flake-hunt.sh` runs the suite N times (default ten) at
+four schedulers with a fresh seed each, never stops at the first failure, and
+prints how often each test failed and with which seeds:
+
+```bash
+scripts/ci/flake-hunt.sh 5 --out /tmp/flake-hunt
+```
+
+Every run appends one JSON line to `runs.jsonl` in that directory through
+the `PTC_TEST_RUN_LOG` formatter, carrying the seed, scheduler count, the
+wall/async/sync split, and each failure's location. The `Nightly` workflow
+runs the same script on `main` and uploads the directory as the `flake-hunt`
+artifact. Reproduce a named failure with `mix test FILE:LINE --seed SEED`,
+then `--repeat-until-failure 100`; a test that passes alone with its seed is a
+load flake, not an ordering bug.
+
 ## Dialyzer PLT
 
 Outside CI the core PLT lives under `~/.cache/ptc_runner/` and is shared across

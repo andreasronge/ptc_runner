@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+
+# Runs the PR test suite repeatedly under GitHub's CPU shape and tabulates
+# which tests failed, how often, and with which seeds.
+#
+# A flake is a test that fails only under load or under a particular seed,
+# so a single run says nothing about it. This runs the suite N times with a
+# fresh seed each, records every run through the RunRecord formatter
+# (`PTC_TEST_RUN_LOG`), and summarises the file. Unlike core-tests.sh it does
+# not stop at the first failure: a run that fails twice is two data points.
+#
+# Exit status is non-zero when any run failed, so the nightly job goes red
+# while the flake rate is above zero and the artifact says which tests.
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "$script_dir/_common.sh"
+
+export CI=1
+
+usage() {
+  echo "usage: flake-hunt.sh [RUNS] [--schedulers POSITIVE_INTEGER] [--out DIR]" >&2
+  exit 64
+}
+
+runs=10
+schedulers=4
+out=""
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --schedulers)
+      [ "$#" -ge 2 ] && [[ "$2" =~ ^[1-9][0-9]*$ ]] || usage
+      schedulers="$2"
+      shift 2
+      ;;
+    --out)
+      [ "$#" -ge 2 ] && [ -n "$2" ] || usage
+      out="$2"
+      shift 2
+      ;;
+    *)
+      [[ "$1" =~ ^[1-9][0-9]*$ ]] || usage
+      runs="$1"
+      shift
+      ;;
+  esac
+done
+
+if [ -z "$out" ]; then
+  out="${TMPDIR:-/tmp}/ptc-flake-hunt/$(date -u +%Y%m%dT%H%M%SZ)"
+fi
+
+mkdir -p "$out"
+export ERL_FLAGS="+S $schedulers:$schedulers"
+export PTC_TEST_RUN_LOG="$out/runs.jsonl"
+# The formatter appends, so a reused directory would fold an earlier hunt's
+# runs into this summary and leave its higher-numbered logs beside this
+# one's. Each hunt starts from an empty record and no run logs.
+rm -f "$out"/run-*.log "$out/summary.txt"
+: > "$PTC_TEST_RUN_LOG"
+: > "$out/verdicts.txt"
+
+echo "flake-hunt: $runs runs, $schedulers schedulers, records in $out"
+
+mix compile --warnings-as-errors
+
+# Each run's exit status goes to the summary beside its record, so the table
+# cannot say "0 with failures" about a run that Mix reported as failed.
+for ((i = 1; i <= runs; i++)); do
+  started=$SECONDS
+  status=0
+  PTC_TEST_RUN_INDEX=$i mix test --warnings-as-errors > "$out/run-$i.log" 2>&1 || status=$?
+  echo "$i $status" >> "$out/verdicts.txt"
+  if [ "$status" -eq 0 ]; then verdict=pass; else verdict="FAIL (exit $status)"; fi
+  echo "run $i/$runs: $verdict ($((SECONDS - started))s)"
+done
+
+# The summary's exit status is the hunt's verdict: it fails on any failed
+# run, any non-zero exit, and any run that left no record.
+elixir "$script_dir/flake_hunt_summary.exs" "$PTC_TEST_RUN_LOG" \
+  --expected "$runs" --verdicts "$out/verdicts.txt" | tee "$out/summary.txt"
+exit "${PIPESTATUS[0]}"

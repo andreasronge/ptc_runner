@@ -121,3 +121,37 @@ jobs:
 
       - name: Verify the packaged interactive REPL
         run: scripts/verify_standalone_release.sh
+
+  # Runs the PR suite ten times at GitHub's four-scheduler shape without
+  # stopping at the first failure, and uploads every run's record and log.
+  # The summary names each failing test with its frequency and seeds, which
+  # is the number a flake investigation starts from; the job is red while
+  # that number is above zero. See docs/maintainers/development-setup.md.
+  flake-hunt:
+    runs-on: ubuntu-latest
+    name: Flake hunt
+    timeout-minutes: 180
+    env:
+      MIX_ENV: test
+      HEX_SPONSOR: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+        with:
+          cache-plt: 'false'
+          install-babashka: 'false'
+
+      - name: Run the suite ten times at four schedulers
+        run: scripts/ci/flake-hunt.sh 10 --schedulers 4 --out "$RUNNER_TEMP/flake-hunt"
+
+      - name: Upload the run records and logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: flake-hunt
+          path: ${{ runner.temp }}/flake-hunt
+          if-no-files-found: warn
