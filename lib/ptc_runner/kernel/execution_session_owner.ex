@@ -125,12 +125,28 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
         ) ::
           {:ok, t()} | {:error, term()}
   def start_admitted(host, prepared, authority, caller, execution) do
+    start_with_admission(host, :admit, prepared, authority, caller, execution)
+  end
+
+  @doc false
+  def start_reserved(host, ref, ticket, prepared, authority, caller, execution) do
+    start_with_admission(
+      host,
+      {:transfer, ref, ticket, caller},
+      prepared,
+      authority,
+      caller,
+      execution
+    )
+  end
+
+  defp start_with_admission(host, admission_request, prepared, authority, caller, execution) do
     with :ok <- admissible(prepared, authority, execution, nil, :run, nil) do
       token = make_ref()
 
       case GenServer.start(
              __MODULE__,
-             {:admitted, host, prepared, authority, caller, token, execution}
+             {:admitted, host, admission_request, prepared, authority, caller, token, execution}
            ) do
         {:ok, pid} -> activate_admitted(pid, token, authority)
         {:error, reason} -> {:error, reason}
@@ -239,8 +255,8 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   def pid(%__MODULE__{pid: pid}), do: pid
 
   @impl GenServer
-  def init({:admitted, host, prepared, authority, caller, token, execution}) do
-    case RunAdmission.admit(host) do
+  def init({:admitted, host, admission_request, prepared, authority, caller, token, execution}) do
+    case acquire_admission(host, admission_request) do
       :ok ->
         {:ok,
          %{
@@ -257,6 +273,11 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   end
 
   def init(args), do: initialize(args, nil)
+
+  defp acquire_admission(host, :admit), do: RunAdmission.admit(host)
+
+  defp acquire_admission(host, {:transfer, ref, ticket, caller}),
+    do: RunAdmission.transfer(host, ref, ticket, caller)
 
   defp initialize(
          {prepared, authority, caller, token, lease, provider_execution, notifier, operation,
@@ -392,6 +413,12 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   def handle_cast(_message, state), do: {:noreply, state}
 
   @impl GenServer
+  def handle_info({:run_admission_cancel, host}, %{pending: _, admission: {host, _}} = state),
+    do: {:stop, :normal, state}
+
+  def handle_info({:run_admission_cancel, host}, %{admission: {host, _}} = state),
+    do: {:stop, :normal, abort(state)}
+
   def handle_info({:DOWN, ref, :process, pid, _}, %{pending: _} = state) do
     if ref == state.caller_ref or state.admission == {pid, ref},
       do: {:stop, :normal, state},
