@@ -173,7 +173,12 @@ symlinked layout is refused. When a pre-existing directory fails the owner-only
 (0700) check, a run that publishes an envelope names the path and the
 <code class="inline">chmod 700</code> remedy rather than reporting a bare publication failure; the
 conditions for that are in the table below. Artifact files retain the normal
-no-replace and privacy rules.</p><p>The run creates the root and its four children, and nothing above them. A
+no-replace and privacy rules.</p><p><code class="inline">artifacts.result</code> controls both the standalone result artifact and result-value
+retention in command envelopes. When it is <code class="inline">false</code> and no <code class="inline">--output</code> or
+<code class="inline">--private-output</code> override requests a result artifact, persisted project-ledger
+and <code class="inline">--envelope</code> documents keep <code class="inline">result_class</code> but omit <code class="inline">result.value</code>. Normal
+results still print to stdout. An explicit result destination makes the artifact
+state <code class="inline">written</code> and retains the value in the envelope.</p><p>The run creates the root and its four children, and nothing above them. A
 directory above the root is yours, so its mode and ownership are not the
 command's to choose; <code class="inline">artifacts.root</code> may name a path several levels deep, but
 every level above the root must already exist.</p><p>Ancestors are held to a weaker rule than the root itself: each one must be
@@ -187,13 +192,18 @@ than only the first. Where a symlink stands in the ancestry the two differ: the
 message names the link's target, because creating the link's own name would
 fail on a path that already exists.</p><p>Every path is printed quoted and escaped, since a symlink target is filesystem
 content rather than something you typed, and a suggested command is offered
-only when its path holds no control characters. These arrive on stderr with
-exit 74, because the envelope that would normally carry a diagnostic is the
-artifact that could not be written.</p><p>The <code class="inline">ptc init</code> default and any run given <code class="inline">--envelope</code> report these refusals at
-exit 74 because the envelope that would normally carry the diagnostic cannot
-be written. With <code class="inline">artifacts.envelope</code> set to <code class="inline">false</code>, the same preflight and
-sentences still name the path, rule, and remedy; they are reported through the
-ordinary destination phase as <code class="inline">destination/invalid_destination</code> at exit 7.
+only when its path holds no control characters. If no envelope destination
+succeeds, these arrive on stderr with exit 74 because the envelope that would
+normally carry a diagnostic is the artifact that could not be written. A
+separately writable <code class="inline">--envelope</code> convenience copy is still attempted; when it
+succeeds, the command retains its original exit status and reports the failed
+project-ledger destination on stderr.</p><p>The table above describes a run with the project envelope ledger enabled, the
+<code class="inline">ptc init</code> default, where these refusals arrive at exit 74. With
+<code class="inline">artifacts.envelope</code> set to <code class="inline">false</code> the same preflight still stops the run
+before it executes and its sentences still name the path, rule, and remedy;
+they are reported through the ordinary destination phase as
+<code class="inline">destination/invalid_destination</code> at exit 7. A requested <code class="inline">--envelope</code> copy
+carries that diagnostic when its independent destination is writable.
 <code class="inline">ptc viewer</code> reports the named sentences as <code class="inline">viewer/artifact_root_unusable</code>.</p><p>The trace filenames are also the canonical directory-discovery contract. Each
 file contains exactly the run ID named by its stem and one trace identity;
 arbitrary aggregate filenames and split histories remain supported only when a

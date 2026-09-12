@@ -77,15 +77,16 @@ defmodule PtcRunner.Kernel.CommandDiagnosticRenderer do
        ) do
     case Keyword.get(opts, :artifact_destinations) do
       {destinations, _failures} when map_size(destinations) > 0 ->
-        paths =
-          Enum.map_join(Enum.sort(destinations), ", ", fn {key, path} ->
-            switch = "--" <> String.replace(Atom.to_string(key), "_", "-")
-            switch <> " " <> TerminalLiteral.render(path, @terminal_path_pattern)
-          end)
+        switch = Keyword.get(opts, :artifact_destination_switch)
 
-        "; requested destinations: " <>
-          paths <>
-          "; remove an existing artifact or wait for its active run to finish, or choose another path"
+        case Keyword.get(opts, :artifact_destination_path) ||
+               destination_for_switch(destinations, switch) do
+          nil ->
+            ""
+
+          path ->
+            ": #{switch} #{TerminalLiteral.render(path, @terminal_path_pattern)}"
+        end
 
       _absent ->
         ""
@@ -93,6 +94,14 @@ defmodule PtcRunner.Kernel.CommandDiagnosticRenderer do
   end
 
   defp local_context_suffix(_error, _opts), do: ""
+
+  defp destination_for_switch(destinations, switch) when is_binary(switch) do
+    Enum.find_value(destinations, fn {key, path} ->
+      if "--" <> String.replace(Atom.to_string(key), "_", "-") == switch, do: path
+    end)
+  end
+
+  defp destination_for_switch(_destinations, _switch), do: nil
 
   defp diagnostic_suffix(%{
          "phase" => "active_preflight",

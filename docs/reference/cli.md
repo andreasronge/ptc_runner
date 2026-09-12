@@ -193,8 +193,9 @@ whose owner is gone is reclaimed automatically if the destination is absent.
 Older reservations without an owner marker are reclaimed only after 60 seconds.
 Live owners, uncertain owner status, and existing destinations are always
 preserved. Cross-host recovery on network filesystems is not supported.
-A `destination/destination_exists` terminal error lists the requested paths
-and a remedy; the command envelope remains path-free.
+A `destination/destination_exists` terminal error identifies the colliding
+switch and resolved path and gives a remedy; the command envelope remains
+path-free.
 
 Atomic publication may reserve owner-only sibling paths named
 `.ptc-private-*` or `.ptc-private-result-*`. They normally disappear at commit
@@ -400,7 +401,9 @@ failures use their diagnostic catalog status; caught internal failures use
 
 `run`, `validate`, `doctor`, `models`, `init`, `materialize`, `transcript`, and
 `version` accept `--envelope`. `repl`, `viewer`, `docs`, and help do not. A private run
-envelope omits the result value. Installation, packaging, and container
+envelope omits the result value. A normal run envelope also omits it when the
+settled result artifact state is `not_requested`; the successful value still goes
+to stdout. Installation, packaging, and container
 commands live in the [installation documentation](../installation/standalone.md),
 not in this process-contract reference.
 
@@ -1011,7 +1014,10 @@ One shell-level check can use the stable envelope:
 ptc init kernel-tutorial --example kernel-tutorial
 artifact_dir="$(mktemp -d)"
 envelope="$artifact_dir/command-envelope.json"
-ptc run kernel-tutorial/01-orders/ptc.json --envelope "$envelope"
+result="$artifact_dir/result.json"
+ptc run kernel-tutorial/01-orders/ptc.json \
+  --output "$result" \
+  --envelope "$envelope"
 actual="$(jq -c '.result.value' "$envelope")"
 test "$actual" = \
   '{"order_count":3,"paid_count":2,"paid_total":335.75,"pending_ids":["A-101"]}'

@@ -126,6 +126,13 @@ symlinked layout is refused. When a pre-existing directory fails the owner-only
 conditions for that are in the table below. Artifact files retain the normal
 no-replace and privacy rules.
 
+`artifacts.result` controls both the standalone result artifact and result-value
+retention in command envelopes. When it is `false` and no `--output` or
+`--private-output` override requests a result artifact, persisted project-ledger
+and `--envelope` documents keep `result_class` but omit `result.value`. Normal
+results still print to stdout. An explicit result destination makes the artifact
+state `written` and retains the value in the envelope.
+
 The run creates the root and its four children, and nothing above them. A
 directory above the root is yours, so its mode and ownership are not the
 command's to choose; `artifacts.root` may name a path several levels deep, but
@@ -159,15 +166,20 @@ fail on a path that already exists.
 
 Every path is printed quoted and escaped, since a symlink target is filesystem
 content rather than something you typed, and a suggested command is offered
-only when its path holds no control characters. These arrive on stderr with
-exit 74, because the envelope that would normally carry a diagnostic is the
-artifact that could not be written.
+only when its path holds no control characters. If no envelope destination
+succeeds, these arrive on stderr with exit 74 because the envelope that would
+normally carry a diagnostic is the artifact that could not be written. A
+separately writable `--envelope` convenience copy is still attempted; when it
+succeeds, the command retains its original exit status and reports the failed
+project-ledger destination on stderr.
 
-The `ptc init` default and any run given `--envelope` report these refusals at
-exit 74 because the envelope that would normally carry the diagnostic cannot
-be written. With `artifacts.envelope` set to `false`, the same preflight and
-sentences still name the path, rule, and remedy; they are reported through the
-ordinary destination phase as `destination/invalid_destination` at exit 7.
+The table above describes a run with the project envelope ledger enabled, the
+`ptc init` default, where these refusals arrive at exit 74. With
+`artifacts.envelope` set to `false` the same preflight still stops the run
+before it executes and its sentences still name the path, rule, and remedy;
+they are reported through the ordinary destination phase as
+`destination/invalid_destination` at exit 7. A requested `--envelope` copy
+carries that diagnostic when its independent destination is writable.
 `ptc viewer` reports the named sentences as `viewer/artifact_root_unusable`.
 
 The trace filenames are also the canonical directory-discovery contract. Each

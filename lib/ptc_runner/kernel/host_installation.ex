@@ -1252,7 +1252,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
     with {:ok, environment} <- compatibility_environment(transport.inherit_environment),
          {:ok, cwd} <- canonical_directory(host.directory, transport.cwd),
          {:ok, executable, executable_sha256} <-
-           resolve_command(transport.command, environment),
+           resolve_command(host.directory, transport.command, environment),
          {:ok, launcher, launcher_sha256} <- resolve_launcher(host.runtime.stdio_launcher) do
       {:ok,
        Map.merge(transport, %{
@@ -1878,7 +1878,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  defp resolve_command(command, environment) do
+  defp resolve_command(host_directory, command, environment) do
     case Path.type(command) do
       :absolute ->
         canonical_mcp_executable(command)
@@ -1887,7 +1887,9 @@ defmodule PtcRunner.Kernel.HostInstallation do
         if Path.basename(command) == command do
           resolve_bare_command(command, Map.get(environment, "PATH"))
         else
-          {:error, :invalid_mcp_executable}
+          command
+          |> Path.expand(host_directory)
+          |> canonical_mcp_executable()
         end
     end
   end
