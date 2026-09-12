@@ -129,7 +129,6 @@ defmodule PtcRunner.Kernel.DispatcherBoundedSchemaTest do
 
   test "an expired shared validation deadline does not admit valid output" do
     parent = self()
-    deadline_ms = System.monotonic_time(:millisecond) + 200
 
     {:ok, capability} =
       Capability.new(
@@ -156,15 +155,22 @@ defmodule PtcRunner.Kernel.DispatcherBoundedSchemaTest do
         end
       )
 
+    prepared = prepare_dispatch(capability)
+
     task =
       Task.async(fn ->
+        deadline_ms = System.monotonic_time(:millisecond) + 1_000
+        send(parent, {:validation_deadline, deadline_ms})
+
         dispatch_capability(
           capability,
           %{"schema" => @request_schema},
-          validation_deadline_ms: deadline_ms
+          [validation_deadline_ms: deadline_ms, timeout_ms: 5_000],
+          prepared
         )
       end)
 
+    assert_receive {:validation_deadline, deadline_ms}
     assert_receive {:in_callback, worker}
 
     wait_ms = max(deadline_ms - System.monotonic_time(:millisecond) + 1, 0)
@@ -305,10 +311,18 @@ defmodule PtcRunner.Kernel.DispatcherBoundedSchemaTest do
   end
 
   defp dispatch_capability(capability, arguments, opts \\ []) do
+    dispatch_capability(capability, arguments, opts, prepare_dispatch(capability))
+  end
+
+  defp prepare_dispatch(capability) do
     {:ok, environment} = WorkflowEnvironment.new(capabilities: [capability])
     {:ok, limits} = Limits.new()
     {:ok, state} = RunState.start(limits)
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "bounded-schema")
+    {environment, state, sink}
+  end
+
+  defp dispatch_capability(capability, arguments, opts, {environment, state, sink}) do
     timeout_ms = Keyword.get(opts, :timeout_ms, 1_000)
 
     result =
