@@ -811,9 +811,13 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
 
       presentation = run_with_output(application, output)
       assert presentation.exit_status == 7
-      assert presentation.stderr =~ "destination/destination_exists"
-      assert presentation.stderr =~ output
-      assert presentation.stderr =~ "another path"
+
+      assert presentation.stderr ==
+               "error: destination/destination_exists: an artifact destination already exists: " <>
+                 "--output #{output} (run_ref: #{presentation.outcome.envelope["run_ref"]}); " <>
+                 "remove it or point --output at " <>
+                 "another path\n"
+
       refute Jason.encode!(presentation.outcome.envelope) =~ output
       assert File.stat!(reservation) == before
       if owner, do: assert(File.read!(Path.join(reservation, "owner")) == owner)
@@ -831,6 +835,31 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
     assert run_with_output(application, output).exit_status == 0
     assert File.regular?(output)
     refute File.exists?(reservation)
+  end
+
+  @tag :tmp_dir
+  test "an existing trace names the resolved child file, not --trace-dir", %{tmp_dir: dir} do
+    application = write_application(dir)
+    trace = Path.join(dir, @run_ref <> ".jsonl")
+    File.write!(trace, "original")
+
+    assert {:ok, entry} =
+             CommandEntry.open_with_ref(
+               ["run", application, "--trace-dir", dir],
+               :standalone,
+               @run_ref
+             )
+
+    presentation =
+      CommandFrontend.present_entry(entry, fn _arguments ->
+        {:ok, CommandRuntime.standalone()}
+      end)
+
+    assert presentation.exit_status == 7
+    assert presentation.stderr =~ "--trace-dir #{trace}"
+    assert presentation.stderr =~ "remove it or point --trace-dir at another path"
+    refute presentation.stderr =~ "--trace-dir #{dir} (run_ref:"
+    assert File.read!(trace) == "original"
   end
 
   for stale? <- [false, true] do

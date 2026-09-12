@@ -62,6 +62,7 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
   @type authorization_error ::
           atom()
           | {atom(), artifact_destination()}
+          | {atom(), artifact_destination(), binary()}
           | {:conflicting_destinations, [atom()]}
 
   @doc false
@@ -102,6 +103,25 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
   def authorize(run_ref, opts, event_policy, provider_class)
       when is_binary(run_ref) and is_list(opts) and event_policy in [:normal, :private] and
              provider_class in [:normal, :private_inspection] do
+    case authorize_with_context(run_ref, opts, event_policy, provider_class) do
+      {:error, {:destination_exists, _destination, _path}} -> {:error, :destination_exists}
+      result -> result
+    end
+  end
+
+  def authorize(_run_ref, _opts, _event_policy, _provider_class),
+    do: {:error, :invalid_destination}
+
+  @doc false
+  @spec authorize_with_context(
+          binary(),
+          keyword(),
+          :normal | :private,
+          :normal | :private_inspection
+        ) :: {:ok, t()} | {:error, authorization_error()}
+  def authorize_with_context(run_ref, opts, event_policy, provider_class)
+      when is_binary(run_ref) and is_list(opts) and event_policy in [:normal, :private] and
+             provider_class in [:normal, :private_inspection] do
     with true <- valid_run_ref?(run_ref, true),
          true <- Keyword.keyword?(opts),
          private? <- private_result?(event_policy, provider_class),
@@ -140,7 +160,7 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
     end
   end
 
-  def authorize(_run_ref, _opts, _event_policy, _provider_class),
+  def authorize_with_context(_run_ref, _opts, _event_policy, _provider_class),
     do: {:error, :invalid_destination}
 
   @doc false
@@ -662,11 +682,11 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
 
           {:error, reason} ->
             cleanup_reserved([trace])
-            reservation_error(reason, :inspection)
+            reservation_error(reason, :inspection, targets.inspect)
         end
 
       {:error, reason} ->
-        reservation_error(reason, :trace)
+        reservation_error(reason, :trace, targets.trace)
     end
   end
 
@@ -680,12 +700,12 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
 
           {:error, reason} ->
             cleanup_reserved([trace, inspect, output])
-            reservation_error(reason, :result)
+            reservation_error(reason, :result, targets.private_output)
         end
 
       {:error, reason} ->
         cleanup_reserved([trace, inspect])
-        reservation_error(reason, :result)
+        reservation_error(reason, :result, targets.output)
     end
   end
 
@@ -695,11 +715,13 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
   defp tagged_destination({:error, reason}, destination),
     do: {:error, {reason, destination}}
 
-  defp reservation_error(reason, _destination)
-       when reason in [:destination_exists, :recovery_reservation_failed],
-       do: {:error, reason}
+  defp reservation_error(:destination_exists, destination, path),
+    do: {:error, {:destination_exists, destination, path}}
 
-  defp reservation_error(reason, destination), do: {:error, {reason, destination}}
+  defp reservation_error(:recovery_reservation_failed, _destination, _path),
+    do: {:error, :recovery_reservation_failed}
+
+  defp reservation_error(reason, destination, _path), do: {:error, {reason, destination}}
 
   defp reserve_optional(nil, _kind, _mode, _claim_owner), do: {:ok, nil}
 
