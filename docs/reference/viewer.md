@@ -7,12 +7,12 @@ local inspection surface, not a general remote administration service.
 
 The **Runs** tab lists the project's captured traces read-only. A run page shows
 turns, tool calls, effective prelude components, and every adapter-attested
-resolved model that answered. The separate model-label field is the manifest
-label fingerprint, not a record of which model served the run. When the project
-records `artifacts.inspection` and grants `viewer.private`, it also shows
-generated programs, prelude sources, and model exchanges. Each model response
-identifies its install alias and, when the adapter attested one, its resolved
-model.
+resolved model in the run's frozen connector snapshots. The separate
+model-label field is the manifest label fingerprint, not a record of which model
+served the run. When the project records `artifacts.inspection` and grants
+`viewer.private`, it also shows generated programs, prelude sources, and model
+exchanges. Each model response identifies its install alias and, when the
+adapter attested one, its resolved model.
 
 When the project enables `viewer.repl`, a run page can open a bounded analysis
 REPL over an immutable capture of the selected run. The **Live** tab shows runs

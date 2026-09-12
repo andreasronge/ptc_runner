@@ -102,8 +102,14 @@ defmodule PtcViewer.KernelTranscriptTest do
         "metadata" => %{
           "run_id" => "model-identity-run",
           "model" => model_fingerprint,
-          "llm_usage_by_model" => [
-            %{"resolved_model" => "openrouter:nex-agi/nex-n2-pro", "calls" => 1}
+          "connector_snapshots" => [
+            %{
+              "declaration" => %{"name" => "deepseek", "source" => "llm"},
+              "acquisition" => %{
+                "source" => "llm",
+                "resolved_model" => "openrouter:nex-agi/nex-n2-pro"
+              }
+            }
           ]
         },
         "turns" => %{"items" => []}

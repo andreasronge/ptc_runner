@@ -147,7 +147,7 @@ function ModelTurn({ turn, metadata }) {
             ${promptMessages.map((message, index) => html`
               <${Message} key=${message?.id || index} message=${message} />`)}
           </section>`}
-        <${AssistantOutput} assistant=${turn.assistant} metadata=${metadata} />
+        <${AssistantOutput} turn=${turn} metadata=${metadata} />
         ${programs.length > 0 && html`
           <section class="kt-turn-out">
             <div class="kt-turn-label">Generated programs</div>
@@ -204,12 +204,13 @@ function SystemPrompt({ turn }) {
   `;
 }
 
-function AssistantOutput({ assistant, metadata }) {
+function AssistantOutput({ turn, metadata }) {
+  const assistant = turn.assistant;
   if (!assistant) return null;
-  const identity = modelResponseIdentity(assistant, metadata);
-  const content = presentedAssistant(assistant, metadata).content;
+  const identity = modelResponseIdentity(turn, metadata);
+  const content = presentedAssistant(turn, metadata).content;
   const reasoning = assistant.reasoning;
-  if (content == null && reasoning == null) return null;
+  if (content == null && reasoning == null && !identity) return null;
 
   return html`
     <section class="kt-turn-out">

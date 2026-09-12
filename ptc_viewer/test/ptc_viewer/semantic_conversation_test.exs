@@ -200,6 +200,40 @@ defmodule PtcViewer.SemanticConversationTest do
               "turns" => [
                 %{
                   "turn" => 1,
+                  "response" => %{
+                    "value" => %{
+                      "content" => "ordinary answer",
+                      "model" => "deepseek"
+                    }
+                  },
+                  "assistant" => %{
+                    "role" => "assistant",
+                    "content" => "ordinary answer"
+                  }
+                },
+                %{
+                  "turn" => 2,
+                  "response" => %{
+                    "value" => %{
+                      "content" => nil,
+                      "model" => "deepseek",
+                      "tool_calls" => [%{"id" => "call-1", "args" => %{}}]
+                    }
+                  },
+                  "assistant" => %{
+                    "role" => "assistant",
+                    "content" => nil,
+                    "tool_calls" => [%{"id" => "call-1", "args" => %{}}]
+                  }
+                },
+                %{
+                  "turn" => 3,
+                  "response" => %{
+                    "value" => %{
+                      "model" => "deepseek",
+                      "structured_output" => %{"owner" => "Priya"}
+                    }
+                  },
                   "assistant" => %{
                     "role" => "assistant",
                     "content" => %{
@@ -229,6 +263,8 @@ defmodule PtcViewer.SemanticConversationTest do
     assert rendered =~ "deepseek"
     assert rendered =~ "Resolved model"
     assert rendered =~ "openrouter:nex-agi/nex-n2-pro"
+    assert rendered =~ "ordinary answer"
+    assert length(Regex.scan(~r/<strong>Install alias<\/strong> deepseek/, rendered)) == 3
     assert rendered =~ ~s(&quot;alias&quot;: &quot;deepseek&quot;)
     assert rendered =~ ~s(&quot;model&quot;: &quot;deepseek&quot;)
   end

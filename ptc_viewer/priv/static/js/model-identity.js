@@ -1,16 +1,16 @@
-export function calledResolvedModels(metadata) {
+export function attestedResolvedModels(metadata) {
   const models = [];
-  const rows = Array.isArray(metadata?.llm_usage_by_model) ? metadata.llm_usage_by_model : [];
-  for (const row of rows) {
-    if (typeof row?.resolved_model !== 'string' || row.resolved_model === '') continue;
-    if (!Number.isSafeInteger(row.calls) || row.calls <= 0) continue;
-    if (!models.includes(row.resolved_model)) models.push(row.resolved_model);
+  const connectors = Array.isArray(metadata?.connector_snapshots) ? metadata.connector_snapshots : [];
+  for (const connector of connectors) {
+    const acquisition = connector?.acquisition;
+    if (typeof acquisition?.resolved_model !== 'string' || acquisition.resolved_model === '') continue;
+    if (!models.includes(acquisition.resolved_model)) models.push(acquisition.resolved_model);
   }
   return models;
 }
 
-export function modelResponseIdentity(assistant, metadata) {
-  const alias = assistant?.content?.model;
+export function modelResponseIdentity(turn, metadata) {
+  const alias = turn?.response?.value?.model ?? turn?.assistant?.content?.model;
   if (typeof alias !== 'string' || alias === '') return null;
 
   const connectors = Array.isArray(metadata?.connector_snapshots) ? metadata.connector_snapshots : [];
@@ -25,9 +25,11 @@ export function modelResponseIdentity(assistant, metadata) {
   return { alias, resolvedModel: null };
 }
 
-export function presentedAssistant(assistant, metadata) {
-  const identity = modelResponseIdentity(assistant, metadata);
-  if (!identity) return assistant;
+export function presentedAssistant(turn, metadata) {
+  const assistant = turn?.assistant;
+  const identity = modelResponseIdentity(turn, metadata);
+  if (!identity || !assistant?.content || typeof assistant.content !== 'object' ||
+      Array.isArray(assistant.content) || assistant.content.model !== identity.alias) return assistant;
 
   const content = { ...assistant.content };
   delete content.model;

@@ -19,7 +19,7 @@ import { highlightLisp } from './highlight.js';
 import { privateEvidenceAbsence } from './private-evidence.js';
 import { evaluationPresentation } from './evaluation-evidence.js';
 import { modelSessionDomId } from './semantic-conversation.js';
-import { calledResolvedModels } from './model-identity.js';
+import { attestedResolvedModels } from './model-identity.js';
 
 const SUCCESS = new Set(['ok', 'continued', 'returned', 'completed', 'success']);
 const FAILURE = new Set([
@@ -206,7 +206,7 @@ function Hero({
 }) {
   const status = metadata.status || (metadata.complete ? 'complete' : 'incomplete');
   const bundle = metadata.workflow_prelude?.hash;
-  const resolvedModels = calledResolvedModels(metadata);
+  const resolvedModels = attestedResolvedModels(metadata);
   // A host-supplied display label can replace the cryptic run ID as the title;
   // the canonical ID remains a fact readers can copy and act on.
   const title = displayTitle || metadata.run_id || metadata.name || 'Kernel run';
