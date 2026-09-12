@@ -121,9 +121,9 @@ defmodule PtcRunner.Kernel.CommandDestination do
         rejection = collision_rejection(frontend, first, second)
         {:error, outcome, rejection}
 
-      {:error, {:destination_exists, destination} = reason} ->
+      {:error, {:destination_exists, destination, path} = reason} ->
         {:error, outcome} = destination_failure(preparation, destination_diagnostic(reason))
-        rejection = destination_exists_rejection(preparation, frontend, destination)
+        rejection = destination_exists_rejection(preparation, frontend, destination, path)
         {:error, outcome, rejection}
 
       {:error, reason} ->
@@ -216,6 +216,9 @@ defmodule PtcRunner.Kernel.CommandDestination do
             ],
        do: destination_diagnostic(reason)
 
+  defp destination_diagnostic({:destination_exists, _destination, _path}),
+    do: destination_diagnostic(:destination_exists)
+
   defp destination_diagnostic(:destination_exists), do: {:destination, :destination_exists}
 
   defp destination_diagnostic(:private_destination_required),
@@ -265,11 +268,11 @@ defmodule PtcRunner.Kernel.CommandDestination do
     CommandRejection.destination_collision(:run, first, second, frontend)
   end
 
-  defp destination_exists_rejection(_preparation, nil, _destination), do: nil
+  defp destination_exists_rejection(_preparation, nil, _destination, _path), do: nil
 
-  defp destination_exists_rejection(preparation, frontend, destination) do
+  defp destination_exists_rejection(preparation, frontend, destination, path) do
     key = destination_option(preparation.artifact_destinations, destination)
-    CommandRejection.artifact_destination_exists(preparation.command, key, frontend)
+    CommandRejection.artifact_destination_exists(preparation.command, key, path, frontend)
   end
 
   defp destination_option(_destinations, :trace), do: :trace_dir

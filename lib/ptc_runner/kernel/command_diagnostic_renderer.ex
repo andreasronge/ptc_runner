@@ -79,7 +79,8 @@ defmodule PtcRunner.Kernel.CommandDiagnosticRenderer do
       {destinations, _failures} when map_size(destinations) > 0 ->
         switch = Keyword.get(opts, :artifact_destination_switch)
 
-        case destination_for_switch(destinations, switch) do
+        case Keyword.get(opts, :artifact_destination_path) ||
+               destination_for_switch(destinations, switch) do
           nil ->
             ""
 

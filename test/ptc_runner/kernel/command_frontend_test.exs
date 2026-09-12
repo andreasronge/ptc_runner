@@ -836,6 +836,31 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
     refute File.exists?(reservation)
   end
 
+  @tag :tmp_dir
+  test "an existing trace names the resolved child file, not --trace-dir", %{tmp_dir: dir} do
+    application = write_application(dir)
+    trace = Path.join(dir, @run_ref <> ".jsonl")
+    File.write!(trace, "original")
+
+    assert {:ok, entry} =
+             CommandEntry.open_with_ref(
+               ["run", application, "--trace-dir", dir],
+               :standalone,
+               @run_ref
+             )
+
+    presentation =
+      CommandFrontend.present_entry(entry, fn _arguments ->
+        {:ok, CommandRuntime.standalone()}
+      end)
+
+    assert presentation.exit_status == 7
+    assert presentation.stderr =~ "--trace-dir #{trace}"
+    assert presentation.stderr =~ "remove it or point --trace-dir at another path"
+    refute presentation.stderr =~ "--trace-dir #{dir} (run_ref:"
+    assert File.read!(trace) == "original"
+  end
+
   for stale? <- [false, true] do
     @tag :tmp_dir
     @tag stale_reservation: stale?
