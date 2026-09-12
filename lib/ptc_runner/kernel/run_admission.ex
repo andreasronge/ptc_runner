@@ -35,7 +35,11 @@ defmodule PtcRunner.Kernel.RunAdmission do
   ServingTemplate retains a transferred reservation through calling-worker
   publication. Execution cleanup transfers its capacity back to the monitored
   caller, without making the slot available; only publication completion releases
-  it. Expiry marks it cancelled but retains it until publication cleanup. Caller
+  it. Unclean completion and unexpected execution-owner death also transfer a
+  retained lease to the caller while fencing the domain; fenced snapshots keep
+  counting that lease until caller cleanup finishes. Admission refusal during
+  activation is distinct from request/deadline cancellation.
+  Expiry marks it cancelled but retains it until publication cleanup. Caller
   death in this interval fences admission, as publication cleanup is unproven.
 
   This counts hosted workflows, not physical LLM requests. Per-run provider
@@ -303,7 +307,9 @@ defmodule PtcRunner.Kernel.RunAdmission do
           ticket: nil,
           owner: nil,
           cancelled?: false,
-          publication: :none
+          publication: :none,
+          admission_refused?: false,
+          cleanup_uncertain?: false
         }
 
         {:reply, {:ok, {__MODULE__, self(), ref}},
@@ -312,9 +318,16 @@ defmodule PtcRunner.Kernel.RunAdmission do
   end
 
   def handle_call({:retain_publication, ref}, {caller, _}, state) do
+    state = fence_dead_owners(state)
+
     case state.reservations[ref] do
       %{caller: ^caller, owner: nil, ticket: nil, publication: :none} = reservation ->
-        {:reply, :ok, put_reservation(state, ref, %{reservation | publication: :pending})}
+        if state.status == :ready and deadline_live?(reservation.deadline) and
+             Process.alive?(caller) and not reservation.cancelled? do
+          {:reply, :ok, put_reservation(state, ref, %{reservation | publication: :pending})}
+        else
+          {:reply, {:error, :run_admission_unavailable}, refuse_activation(state, ref)}
+        end
 
       _ ->
         {:reply, {:error, :run_admission_unavailable}, state}
@@ -326,7 +339,14 @@ defmodule PtcRunner.Kernel.RunAdmission do
     case state.reservations[ref] do
       %{caller: ^caller, owner: nil, publication: publication} = reservation
       when publication in [:held, :pending] ->
-        reply = if reservation.cancelled?, do: {:error, :call_cancelled}, else: :ok
+        reply =
+          cond do
+            reservation.cleanup_uncertain? -> {:error, :call_cleanup_failed}
+            reservation.admission_refused? -> {:error, :call_admission_refused}
+            reservation.cancelled? -> {:error, :call_cancelled}
+            true -> :ok
+          end
+
         next = drop_reservation(state, ref)
         {:reply, reply, %{next | status: if(clean?, do: next.status, else: :unavailable)}}
 
@@ -353,7 +373,7 @@ defmodule PtcRunner.Kernel.RunAdmission do
           ticket = make_ref()
           {:reply, {:ok, ticket}, put_reservation(state, ref, %{reservation | ticket: ticket})}
         else
-          {:reply, {:error, :run_admission_unavailable}, cancel_reservation(state, ref)}
+          {:reply, {:error, :run_admission_unavailable}, refuse_activation(state, ref)}
         end
 
       _ ->
@@ -373,7 +393,7 @@ defmodule PtcRunner.Kernel.RunAdmission do
           next = put_reservation(state, ref, %{reservation | owner: owner, monitor: nil})
           {:reply, :ok, %{next | owners: Map.put(next.owners, owner, Process.monitor(owner))}}
         else
-          {:reply, {:error, :run_admission_unavailable}, cancel_reservation(state, ref)}
+          {:reply, {:error, :run_admission_unavailable}, refuse_activation(state, ref)}
         end
 
       _ ->
@@ -433,7 +453,7 @@ defmodule PtcRunner.Kernel.RunAdmission do
     if state.owners[owner] == ref do
       {:noreply,
        %{
-         drop_owner_reservation(state, owner)
+         complete_owner_reservation(state, owner, false)
          | owners: Map.delete(state.owners, owner),
            status: :unavailable
        }}
@@ -488,6 +508,18 @@ defmodule PtcRunner.Kernel.RunAdmission do
   defp put_reservation(state, ref, reservation),
     do: %{state | reservations: Map.put(state.reservations, ref, reservation)}
 
+  defp refuse_activation(state, ref) do
+    reservation = state.reservations[ref]
+
+    if reservation.publication == :pending and state.status == :unavailable and
+         deadline_live?(reservation.deadline) and Process.alive?(reservation.caller) and
+         not reservation.cancelled? do
+      put_reservation(state, ref, %{reservation | admission_refused?: true})
+    else
+      cancel_reservation(state, ref)
+    end
+  end
+
   defp cancel_reservation(state, ref) do
     case state.reservations[ref] do
       nil ->
@@ -522,11 +554,12 @@ defmodule PtcRunner.Kernel.RunAdmission do
 
   defp complete_owner_reservation(state, owner, clean?) do
     Enum.reduce(state.reservations, state, fn
-      {ref, %{owner: ^owner, publication: :pending} = reservation}, acc when clean? ->
+      {ref, %{owner: ^owner, publication: :pending} = reservation}, acc ->
         put_reservation(acc, ref, %{
           reservation
           | owner: nil,
             publication: :held,
+            cleanup_uncertain?: reservation.cleanup_uncertain? or not clean?,
             monitor: Process.monitor(reservation.caller)
         })
 
@@ -535,13 +568,6 @@ defmodule PtcRunner.Kernel.RunAdmission do
 
       _, acc ->
         acc
-    end)
-  end
-
-  defp drop_owner_reservation(state, owner) do
-    Enum.reduce(state.reservations, state, fn
-      {ref, %{owner: ^owner}}, acc -> drop_reservation(acc, ref)
-      _, acc -> acc
     end)
   end
 

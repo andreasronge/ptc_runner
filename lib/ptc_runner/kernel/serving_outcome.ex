@@ -14,6 +14,9 @@ defmodule PtcRunner.Kernel.ServingOutcome do
   `write_effects_possible: boolean`. Unknown means the session failed without
   proof of dispatch or its absence. A write declaration with dispatched or
   unknown execution conservatively reports possible writes even on failure.
+  Refusal before execution-owner transfer reports false. Admission loss after
+  activation reports unknown, including when cleanup failure becomes the final
+  code: losing admission never proves that writes were absent.
   No reason, input, path, event, usage, credential or diagnostic is returned.
   Non-success outcomes retain no result value.
 

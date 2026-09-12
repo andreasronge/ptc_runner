@@ -76,8 +76,12 @@ defmodule PtcRunner.Kernel.ServingCall do
   def activate({__MODULE__, template, input, lease, deadline, caller}, hooks)
       when caller == self() do
     case RunAdmission.retain_publication(lease) do
-      :ok -> activate_owned(template, input, lease, deadline, hooks)
-      _ -> outcome(template, expired_code(deadline, :admission_unavailable), false)
+      :ok ->
+        if hook = Map.get(hooks, :after_retention), do: hook.()
+        activate_owned(template, input, lease, deadline, hooks)
+
+      _ ->
+        outcome(template, expired_code(deadline, :admission_unavailable), false)
     end
   end
 
@@ -149,8 +153,15 @@ defmodule PtcRunner.Kernel.ServingCall do
     result =
       try do
         case RunAdmission.activate(lease, prepared, authority) do
-          {:ok, execution} -> collect(template, RunAdmission.await(execution), authority, hooks)
-          {:error, reason} -> failure(template, reason)
+          {:ok, execution} ->
+            if hook = Map.get(hooks, :after_activation), do: hook.(execution)
+            collect(template, RunAdmission.await(execution), authority, hooks)
+
+          {:error, :run_admission_unavailable} ->
+            outcome(template, :admission_unavailable, false)
+
+          {:error, reason} ->
+            failure(template, reason)
         end
       rescue
         _ -> outcome(template, :internal_error, :unknown)
@@ -164,6 +175,12 @@ defmodule PtcRunner.Kernel.ServingCall do
     case RunAdmission.finish_publication(lease, clean?) do
       :ok when clean? ->
         replace_expired(template, result, deadline)
+
+      {:error, :call_admission_refused} when clean? ->
+        replace_expired(template, outcome(template, :admission_unavailable, false), deadline)
+
+      {:error, :call_cleanup_failed} ->
+        outcome(template, :cleanup_failed, ServingOutcome.metadata(result).dispatched)
 
       {:error, :call_cancelled} when clean? ->
         outcome(template, :cancelled, ServingOutcome.metadata(result).dispatched)
@@ -274,7 +291,7 @@ defmodule PtcRunner.Kernel.ServingCall do
   defp publication_failed?(_), do: false
 
   defp failure(template, :run_admission_unavailable),
-    do: outcome(template, :admission_unavailable, false)
+    do: outcome(template, :cleanup_failed, :unknown)
 
   defp failure(template, %{code: :provider_cleanup_failed}),
     do: outcome(template, :cleanup_failed, :unknown)
