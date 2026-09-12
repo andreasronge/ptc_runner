@@ -3,7 +3,10 @@ defmodule PtcRunner.CLIProgressTest do
 
   alias PtcRunner.CLIProgress
   alias PtcRunner.CLIProgress.Format
+  alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandPresentation
+  alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.LiveStatus.Target
 
@@ -72,6 +75,44 @@ defmodule PtcRunner.CLIProgressTest do
     assert Format.interactive(one, 42) =~ "21s left"
 
     assert Format.interactive(Map.put(one, :agents, [%{}, %{}]), 80) =~ "2 agents active"
+  end
+
+  test "terminal formatters render the failure reason" do
+    failed =
+      Map.merge(frame(18_000, 0), %{phase: "failed", outcome_reason: "provider cleanup timed out"})
+
+    assert Format.interactive(failed, 80) =~ "provider cleanup timed out"
+    assert Format.milestone(failed, "failed") =~ "provider cleanup timed out"
+  end
+
+  test "finish renders the sealed diagnostic even when the terminal live frame is delayed" do
+    parent = self()
+
+    pid =
+      CLIProgress.start(%{application: "app.json"},
+        progress_writer: fn bytes -> send(parent, {:written, bytes}) end,
+        progress_columns: fn -> {:error, :enotsup} end
+      )
+
+    assert_receive {:written, _start}
+    send(pid, {:frame, frame(1_000, 1_000)})
+    assert_receive {:written, _running}
+
+    diagnostic = CommandDiagnostic.new!(:arguments, :invalid_arguments)
+    {:ok, run_ref} = CommandRunRef.generate()
+    outcome = CommandOutcome.error(:run, run_ref, diagnostic)
+
+    presentation = %CommandPresentation{
+      stdout: "",
+      stderr: "",
+      exit_status: outcome.exit_status,
+      outcome: outcome,
+      envelope_path: nil
+    }
+
+    assert :ok = CLIProgress.finish(pid, presentation)
+    assert_receive {:written, terminal}
+    assert terminal =~ diagnostic.message
   end
 
   test "formatter counts only canonical LLM requests and preserves exact spend" do

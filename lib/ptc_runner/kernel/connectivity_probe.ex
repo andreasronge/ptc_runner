@@ -275,7 +275,11 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
   defp invoke(callback, selection, context, services, timeout_ms, limits) do
     result =
       BoundedWorker.run(fn -> callback.(selection, context, services) end,
-        timeout_ms: timeout_ms,
+        # The callback receives the occurrence deadline and must stop provider
+        # work at that instant. Keep its owner alive for the separately bounded
+        # cleanup interval so a guardian can cancel and prove drain instead of
+        # being force-killed exactly when the request clock expires.
+        timeout_ms: timeout_ms + provider_cleanup_grace(services, limits),
         max_heap_words: limits.provider_heap_words,
         cancel_with_caller: true
       )
@@ -286,6 +290,13 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
 
       other ->
         BoundedWorker.classify_payload_callback(other)
+    end
+  end
+
+  defp provider_cleanup_grace(services, limits) do
+    case ProviderRuntimeServices.provider_call_admission(services) do
+      {:ok, admission} when is_pid(admission) -> limits.provider_cleanup_timeout_ms
+      _other -> 0
     end
   end
 

@@ -39,13 +39,20 @@
                  :reason :invalid-boolean
                  :column column})))
 
-(defn- typed-cell [column value]
+(defn- column-kind [column]
+  (cond
+    (contains? (integer-columns) column) :integer
+    (contains? (float-columns) column) :float
+    (contains? (boolean-columns) column) :boolean
+    :else :string))
+
+(defn- typed-cell [column kind value]
   (cond
     (nil? value) nil
     (= value "") nil
-    (contains? (integer-columns) column) (parse-number parse-long column value)
-    (contains? (float-columns) column) (parse-number parse-double column value)
-    (contains? (boolean-columns) column) (parse-boolean column value)
+    (= kind :integer) (parse-number parse-long column value)
+    (= kind :float) (parse-number parse-double column value)
+    (= kind :boolean) (parse-boolean column value)
     :else value))
 
 (defn- validate-columns! [columns]
@@ -81,11 +88,13 @@
 
 (defn- project [columns lines]
   (let [position (column-index)
-        selectors (vec (map (fn [c] [(get position c) c]) columns))]
+        selectors (vec (map (fn [c] [(get position c) c (column-kind c)]) columns))]
     (vec (map (fn [line]
                 (let [fields (split line ",")]
                   (vec (map (fn [selector]
-                              (typed-cell (nth selector 1) (get fields (nth selector 0))))
+                              (typed-cell (nth selector 1)
+                                          (nth selector 2)
+                                          (get fields (nth selector 0))))
                             selectors))))
               lines))))
 

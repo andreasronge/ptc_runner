@@ -290,13 +290,25 @@ defmodule PtcRunner.Kernel.ProjectConfigTest do
   } do
     root = Path.join(directory, ".ptc")
 
+    # The default 5s async_stream timeout is scheduling headroom, not part of
+    # the contract under test: four concurrent mkdir/chmod sequences can exceed
+    # it on a machine running the whole suite. `on_timeout: :exit` would then
+    # take the test process down with `exited in: Task.Supervised.stream/1`,
+    # naming neither this test's concurrency nor the timeout. Reporting the
+    # timed-out task as an element instead lets a genuine hang still fail, and
+    # say that it hung.
     results =
       1..4
       |> Task.async_stream(fn _index -> ProjectArtifactRoot.ensure(root) end,
         max_concurrency: 4,
-        ordered: false
+        ordered: false,
+        timeout: 30_000,
+        on_timeout: :kill_task
       )
-      |> Enum.map(fn {:ok, result} -> result end)
+      |> Enum.map(fn
+        {:ok, result} -> result
+        {:exit, reason} -> flunk("concurrent ensure/1 exited: #{inspect(reason)}")
+      end)
 
     assert Enum.all?(results, &(&1 == :ok))
     assert Enum.sort(File.ls!(root)) == ~w(envelopes inspection results traces)

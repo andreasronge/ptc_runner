@@ -247,6 +247,32 @@ defmodule PtcRunner.Kernel.CommandMaterializeTest do
   end
 
   @tag :tmp_dir
+  test "an unwritable --out parent returns a destination error", %{tmp_dir: dir} do
+    manifest = write_application(dir)
+    authored = Path.join(dir, "authored.clj")
+    File.write!(authored, @authored)
+    parent = Path.join(dir, "unwritable-parent")
+    File.mkdir!(parent)
+    File.chmod!(parent, 0o500)
+    on_exit(fn -> File.chmod(parent, 0o700) end)
+
+    assert {:error, outcome} =
+             CommandEngine.dispatch([
+               "materialize",
+               manifest,
+               "--workflow",
+               "--component",
+               "helper",
+               "--out",
+               Path.join(parent, "candidate"),
+               "--source",
+               authored
+             ])
+
+    assert outcome.envelope["error"]["code"] == "invalid_candidate_destination"
+  end
+
+  @tag :tmp_dir
   test "a missing --source-out ancestor is separated from an unusable parent", %{tmp_dir: dir} do
     manifest = write_application(dir)
     missing = Path.join(dir, "missing-parent")
@@ -265,6 +291,28 @@ defmodule PtcRunner.Kernel.CommandMaterializeTest do
     assert outcome.envelope["error"]["phase"] == "publication"
     assert outcome.envelope["error"]["code"] == "source_out_parent_missing"
     refute File.exists?(missing)
+  end
+
+  @tag :tmp_dir
+  test "an unwritable --source-out parent returns a destination error", %{tmp_dir: dir} do
+    manifest = write_application(dir)
+    parent = Path.join(dir, "unwritable-parent")
+    File.mkdir!(parent)
+    File.chmod!(parent, 0o500)
+    on_exit(fn -> File.chmod(parent, 0o700) end)
+
+    assert {:error, outcome} =
+             CommandEngine.dispatch([
+               "materialize",
+               manifest,
+               "--workflow",
+               "--component",
+               "helper",
+               "--source-out",
+               Path.join(parent, "helper.clj")
+             ])
+
+    assert outcome.envelope["error"]["code"] == "source_out_parent_unusable"
   end
 
   @tag :tmp_dir

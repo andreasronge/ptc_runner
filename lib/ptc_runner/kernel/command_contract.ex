@@ -164,7 +164,7 @@ defmodule PtcRunner.Kernel.CommandContract do
             success_envelope("validate", validate_result()),
             run_success_envelope(
               "normal",
-              closed(~w(result_class value), %{
+              closed(~w(result_class), %{
                 "result_class" => %{"const" => "normal"},
                 "value" => %{}
               })
@@ -1544,6 +1544,12 @@ defmodule PtcRunner.Kernel.CommandContract do
          %{"type" => "null"}
        ),
        do: RuntimeLimitDiagnostic.result_limit_message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :result_cleanup, code: :provider_cleanup_failed} = row,
+         %{"type" => "null"}
+       ),
+       do: DiagnosticCatalog.message_schema(row)
 
   defp diagnostic_message_schema(
          %{phase: :execution, code: :invalid_agent_config} = row,

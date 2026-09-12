@@ -480,7 +480,8 @@ defmodule PtcRunner.Kernel.RunConfig do
     end)
   end
 
-  @spec close_provider_session(t()) :: :ok | {:error, :provider_cleanup_failed}
+  @spec close_provider_session(t()) ::
+          :ok | {:error, :provider_cleanup_failed}
   @doc """
   Closes the one provider session and its reverse-order cleanup stack.
 
@@ -492,6 +493,14 @@ defmodule PtcRunner.Kernel.RunConfig do
 
   def close_provider_session(%__MODULE__{provider_session: session}),
     do: ProviderSession.close(session)
+
+  @doc false
+  @spec close_provider_session_detailed(t()) ::
+          :ok | {:error, :provider_cleanup_failed | {:provider_cleanup_failed, map()}}
+  def close_provider_session_detailed(%__MODULE__{provider_session: nil}), do: :ok
+
+  def close_provider_session_detailed(%__MODULE__{provider_session: session}),
+    do: ProviderSession.close_detailed(session)
 
   @doc false
   @spec bind_provider_session(t(), pid(), pid(), ProviderTaskTracker.t()) ::

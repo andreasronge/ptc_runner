@@ -3,7 +3,6 @@ Code.require_file("support/dabstep.exs", __DIR__)
 
 defmodule PtcRunner.Bench.DabstepScaling do
   @moduledoc false
-  alias PtcRunner.Bench.DabstepSupport, as: Bench
   alias PtcRunner.Kernel.{CommandEngine, ManifestRepl, ReplSession}
   @narrow ["ip_country", "eur_amount", "has_fraudulent_dispute"]
   @fold ~S|
@@ -29,21 +28,19 @@ defmodule PtcRunner.Bench.DabstepScaling do
 
     case suite do
       "kernel" ->
-        for {variant, body} <- [{"current", source}, {"prepared", Bench.prepared(source)}] do
-          root = fixture(variant, body <> @fold, nil, headers)
+        root = fixture("current", source <> @fold, nil, headers)
 
-          session(root, fn session ->
-            for mode <- ["page", "scan", "manual_reduce", "fold"] do
-              measure(
-                session,
-                "#{variant}/#{mode}",
-                program(mode, @narrow),
-                if(mode == "page", do: 2847, else: 138_236),
-                samples
-              )
-            end
-          end)
-        end
+        session(root, fn session ->
+          for mode <- ["page", "scan", "manual_reduce", "fold"] do
+            measure(
+              session,
+              "current/#{mode}",
+              program(mode, @narrow),
+              if(mode == "page", do: 2847, else: 138_236),
+              samples
+            )
+          end
+        end)
 
       "scale" ->
         for rows <- if(opts[:rows], do: [opts[:rows]], else: [20_000, 80_000, 320_000]) do
@@ -63,7 +60,7 @@ defmodule PtcRunner.Bench.DabstepScaling do
         end
 
       "replay" ->
-        root = fixture("prepared-replay", Bench.prepared(source), nil, headers)
+        root = fixture("current-replay", source, nil, headers)
 
         for sample <- 1..samples do
           if sample == 2 do
@@ -93,7 +90,7 @@ defmodule PtcRunner.Bench.DabstepScaling do
 
           IO.puts(
             Jason.encode!(%{
-              experiment: "prepared/replay",
+              experiment: "current/replay",
               recorded_model_calls: 11,
               identical_file_replaced: sample == 2,
               sample: sample,
@@ -128,7 +125,7 @@ defmodule PtcRunner.Bench.DabstepScaling do
 
       IO.puts(
         Jason.encode!(%{
-          experiment: "prepared/changed_byte",
+          experiment: "current/changed_byte",
           exit_status: failed.exit_status,
           code: failed.envelope["error"]["code"]
         })

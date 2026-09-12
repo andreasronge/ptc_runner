@@ -2,7 +2,7 @@ defmodule PtcRunnerLauncherTest do
   use ExUnit.Case, async: true
 
   test "locates the executable that implements the public protocol version" do
-    assert PtcRunnerLauncher.protocol_version() == 1
+    assert PtcRunnerLauncher.protocol_version() == 2
     assert {:ok, path} = PtcRunnerLauncher.executable_path()
     assert Path.type(path) == :absolute
     assert File.regular?(path)

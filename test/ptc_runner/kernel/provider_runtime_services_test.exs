@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServicesTest do
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.MCPOAuth.Context, as: OAuthContext
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
+  alias PtcRunner.Kernel.ProviderCallAdmission
   alias PtcRunner.Kernel.ProviderRuntimeServices
 
   test "construction seals services without activating any runtime callback" do
@@ -73,6 +74,22 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServicesTest do
 
     assert {:error, :authorization_context_required} =
              ProviderRuntimeServices.oauth_context(services, Deadline.new(1_000))
+  end
+
+  test "a configured admission domain remains distinguishable when it dies" do
+    assert {:ok, admission} =
+             ProviderCallAdmission.start_link(max_active_calls: 1, max_waiters: 0)
+
+    assert {:ok, services} = ProviderRuntimeServices.new(provider_call_admission: admission)
+    assert {:ok, ^admission} = ProviderRuntimeServices.provider_call_admission(services)
+
+    Process.unlink(admission)
+    Process.exit(admission, :kill)
+    monitor = Process.monitor(admission)
+    assert_receive {:DOWN, ^monitor, :process, ^admission, _reason}
+
+    assert {:error, :provider_admission_unavailable} =
+             ProviderRuntimeServices.provider_call_admission(services)
   end
 
   test "the complete seal and callback results fail closed" do

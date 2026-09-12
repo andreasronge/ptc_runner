@@ -22,6 +22,12 @@ defmodule PtcRunner.Kernel.MCPSource do
   credentials and environment values are never part of those bodies or
   records.
 
+  A failed stdio close retains bounded operator-facing cleanup evidence: the
+  installed provider alias, transport type, launcher finish reason and child
+  exit status, elapsed time against `grace_ms` and the cleanup budget, and a
+  sanitized stderr excerpt. Cleanup-budget expiry also points operators to
+  `limits.provider_cleanup_timeout_ms`.
+
   Streamable HTTP supports JSON and SSE responses to POST requests and rejects
   redirects and remote endpoint changes. It uses a direct Mint HTTP/1 response
   streaming boundary: a completed SSE response, response-size rejection, or
@@ -74,7 +80,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   @max_outbound_header_bytes 32_768
   @max_launcher_bytes 16_777_216
   @max_launcher_symlinks 40
-  @launcher_protocol_version 1
+  @launcher_protocol_version 2
   @header_token ~r/\A[!#$%&'*+\-.^_`|~0-9A-Za-z]+\z/
   @sha256 ~r/\Asha256:[0-9a-f]{64}\z/
   @name ~r/\A[a-z][a-z0-9._-]{0,127}\z/
@@ -123,8 +129,8 @@ defmodule PtcRunner.Kernel.MCPSource do
       `[A-Za-z_][A-Za-z0-9_]*` form. The launcher is limited to 16 MiB. The
       optional absolute `:launcher` path is a trusted custom override.
       Otherwise stdio requires
-      the optional `ptc_runner_launcher ~> 0.1.0` companion dependency. The
-      core owns launcher protocol version 1, copies the canonical launcher into
+      the optional `ptc_runner_launcher ~> 0.2.0` companion dependency. The
+      core owns launcher protocol version 2, copies the canonical launcher into
       a private mode-0700 staging directory, hashes and executes those same
       staged bytes, and removes the staged path after the startup handshake.
       The configured server executable and working-directory hierarchies must
@@ -519,13 +525,15 @@ defmodule PtcRunner.Kernel.MCPSource do
            %{
              capabilities: capabilities,
              snapshot: snapshot,
+             cleanup_context: cleanup_context(installed.transport),
+             cleanup_snapshot: fn -> cleanup_snapshot(transport) end,
              close: fn -> close_transport(transport) end
            }}
 
         {:error, reason} ->
           case close_transport(transport) do
             :ok -> {:error, reason}
-            {:error, :mcp_transport_error} -> {:error, :mcp_transport_error}
+            {:error, _cleanup_reason} -> {:error, :mcp_transport_error}
           end
       end
     end
@@ -690,6 +698,16 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   defp close_transport(%{type: :stdio, handle: %MCPStdioTransport{} = handle}),
     do: MCPStdioTransport.close(handle)
+
+  defp cleanup_context(%{type: :stdio, options: options}),
+    do: %{transport: :stdio, grace_ms: Keyword.get(options, :grace_ms, 250)}
+
+  defp cleanup_context(%{type: :streamable_http}), do: %{transport: :streamable_http}
+
+  defp cleanup_snapshot(%{type: :stdio, handle: handle}),
+    do: MCPStdioTransport.cleanup_snapshot(handle)
+
+  defp cleanup_snapshot(_transport), do: %{}
 
   defp stage_launcher(source, staging) do
     with {:ok, stat} <- File.stat(source),

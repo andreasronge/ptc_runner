@@ -27,4 +27,9 @@ defmodule PtcRunner.Utf8Test do
   test "can sanitize an invalid binary when the caller requires valid UTF-8" do
     assert Utf8.truncate_valid(<<"valid", 255, "suffix">>, 64) == "valid"
   end
+
+  test "sanitizing malformed bytes retains later valid text" do
+    assert Utf8.sanitize(<<"before", 255, "critical cleanup error">>) ==
+             "beforecritical cleanup error"
+  end
 end

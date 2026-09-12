@@ -365,8 +365,10 @@ while <code class="inline">calls</code> increments, and <code class="inline">cap
 model and may incur provider cost; the readiness report's <code class="inline">usage</code> field
 attributes what each probe spent, on the rows a run reports. <code class="inline">--show-model-selectors</code> adds only safe
 selectors; endpoint-bearing <code class="inline">openai-compat:</code> selectors remain hidden. <code class="inline">ptc models</code> reports the same <code class="inline">model_selector</code> field under the same rule, without a
-flag and without reading the application.</p><h3 id="resolve-local-transport-paths">Resolve local transport paths</h3><p>Stdio <code class="inline">cwd</code> and relative command arguments resolve from the host document, not
-from PtcRunner's source checkout and not from the shell's current directory.
+flag and without reading the application.</p><h3 id="resolve-local-transport-paths">Resolve local transport paths</h3><p>Stdio path-shaped <code class="inline">command</code> values, <code class="inline">cwd</code>, and relative command arguments resolve
+from the host document, not from PtcRunner's source checkout and not from the
+shell's current directory. A bare <code class="inline">command</code> such as <code class="inline">node</code> is found on the
+inherited <code class="inline">PATH</code>; an absolute <code class="inline">command</code> is used directly.
 For an application in a separate repository, keep its MCP server bundle in
 that repository (for example <code class="inline">tools/files/server.js</code>) and use a host-relative
 path, or install the server executable at a stable absolute location. A
@@ -445,7 +447,14 @@ selected live installation's <code class="inline">ceilings.request_timeout_ms</c
 request. Every other application-narrowable row can be raised from the manifest
 alone, up to its installed ceiling.</p><p>Four timeouts are host-only: <code class="inline">provider_cleanup_timeout_ms</code>,
 <code class="inline">local_preflight_timeout_ms</code>, <code class="inline">selection_validation_timeout_ms</code>, and
-<code class="inline">doctor_connectivity_timeout_ms</code>. A manifest cannot declare them.</p><p>The generated <a href="/reference/kernel-limits-reference/">Kernel limits reference</a> is the
+<code class="inline">doctor_connectivity_timeout_ms</code>. A manifest cannot declare them.</p><p><code class="inline">live_provider_tasks</code> remains a per-run callback bound; it neither sizes nor
+describes aggregate hosted LLM capacity. An embedding host that shares a live
+provider transport across runs must pass one supervised
+<code class="inline">ProviderCallAdmission</code> owner through all corresponding
+<code class="inline">ProviderRuntimeServices</code>. Command-owned one-shot VMs do not start that domain.
+Replay, workflows that call no provider, direct LLM and embedding calls, and
+callbacks that bypass the installed requester consume no admission slot and
+must be bounded by their caller.</p><p>The generated <a href="/reference/kernel-limits-reference/">Kernel limits reference</a> is the
 complete table of names, meanings, units, scopes, defaults, accepted ranges,
 and identity participation. The host schema is generated from the same
 catalog.</p><h2 id="verify-selected-providers">Verify selected providers</h2><p>Run active local, credential, authorization, and connectivity checks without

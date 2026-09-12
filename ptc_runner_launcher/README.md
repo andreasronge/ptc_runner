@@ -71,7 +71,7 @@ The Elixir API is intentionally small:
 
 ```elixir
 {:ok, path} = PtcRunnerLauncher.executable_path()
-1 = PtcRunnerLauncher.protocol_version()
+2 = PtcRunnerLauncher.protocol_version()
 :ok = PtcRunnerLauncher.publish_directory_noreplace(staging, target)
 ```
 

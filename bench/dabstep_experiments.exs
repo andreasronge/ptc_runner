@@ -2,7 +2,7 @@ Code.require_file("support/dabstep.exs", __DIR__)
 
 defmodule PtcRunner.Bench.DabstepExperiments do
   @moduledoc false
-  import PtcRunner.Bench.DabstepSupport, only: [prepared: 1, measure: 2]
+  import PtcRunner.Bench.DabstepSupport, only: [measure: 2]
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Prelude.Compiler
   @columns ["ip_country", "eur_amount", "has_fraudulent_dispute"]
@@ -19,93 +19,59 @@ defmodule PtcRunner.Bench.DabstepExperiments do
     expected = native(lines, selectors)
     emit(%{fixture: %{rows: length(lines), bytes: byte_size(text), columns: columns}})
 
-    variants = [{"current", source}, {"prepared_types", prepared(source)}]
+    {:ok, prelude} =
+      Compiler.compile(source <> "\n(defn bench-project [columns lines] (project columns lines))")
 
-    variants =
-      if System.get_env("DABSTEP_BENCH_REVERSE") == "1",
-        do: Enum.reverse(variants),
-        else: variants
+    opts = [
+      prelude: prelude,
+      context: %{"text" => text, "columns" => columns},
+      tools: %{"workspace.read" => fn _ -> nil end},
+      max_heap: 5_000_000,
+      timeout: 60_000
+    ]
 
-    paired? = System.get_env("DABSTEP_BENCH_PAIRED") == "1"
+    {:ok, result} =
+      Lisp.run(
+        "(dabstep.payments/bench-project data/columns (butlast (rest (split data/text \"\\n\"))))",
+        opts
+      )
 
-    prepared_variants =
-      for {label, body} <- variants do
-        {:ok, prelude} =
-          Compiler.compile(
-            body <> "\n(defn bench-project [columns lines] (project columns lines))"
-          )
+    ^expected = result.return
 
-        opts = [
-          prelude: prelude,
-          context: %{"text" => text, "columns" => columns},
-          tools: %{"workspace.read" => fn _ -> nil end},
-          max_heap: 5_000_000,
-          timeout: 60_000
-        ]
+    measure("current/project", fn ->
+      checked(
+        "(count (dabstep.payments/bench-project data/columns (butlast (rest (split data/text \"\\n\")))))",
+        opts,
+        length(lines)
+      )
+    end)
 
-        {:ok, result} =
-          Lisp.run(
-            "(dabstep.payments/bench-project data/columns (butlast (rest (split data/text \"\\n\"))))",
-            opts
-          )
+    page = %{
+      status: :ok,
+      value: %{
+        "items" => [%{"text" => text}],
+        "next_cursor" => "benchmark-cursor",
+        "content_hash" => "benchmark-hash"
+      }
+    }
 
-        ^expected = result.return
+    read_opts = Keyword.put(opts, :tools, %{"workspace.read" => fn _ -> page end})
 
-        unless paired? do
-          measure(label <> "/project", fn ->
-            checked(
-              "(count (dabstep.payments/bench-project data/columns (butlast (rest (split data/text \"\\n\")))))",
-              opts,
-              length(lines)
-            )
-          end)
-        end
+    measure("current/read_page_stub", fn ->
+      checked(
+        "(count (get (dabstep.payments/read-page nil data/columns) \"rows\"))",
+        read_opts,
+        length(lines)
+      )
+    end)
 
-        page = %{
-          status: :ok,
-          value: %{
-            "items" => [%{"text" => text}],
-            "next_cursor" => "benchmark-cursor",
-            "content_hash" => "benchmark-hash"
-          }
-        }
+    edge_equivalence(prelude, opts, headers)
+    measure("native/split_project_type", fn -> length(native(lines, selectors)) end)
 
-        read_opts = Keyword.put(opts, :tools, %{"workspace.read" => fn _ -> page end})
-
-        unless paired? do
-          measure(label <> "/read_page_stub", fn ->
-            checked(
-              "(count (get (dabstep.payments/read-page nil data/columns) \"rows\"))",
-              read_opts,
-              length(lines)
-            )
-          end)
-        end
-
-        edge_equivalence(prelude, opts, headers)
-        {label, read_opts}
-      end
-
-    if paired? do
-      for sample <- 0..6,
-          {label, opts} <-
-            if(rem(sample, 2) == 0, do: prepared_variants, else: Enum.reverse(prepared_variants)) do
-        PtcRunner.Bench.DabstepSupport.sample("paired/#{label}/#{length(columns)}", sample, fn ->
-          checked(
-            "(count (get (dabstep.payments/read-page nil data/columns) \"rows\"))",
-            opts,
-            length(lines)
-          )
-        end)
-      end
-    else
-      measure("native/split_project_type", fn -> length(native(lines, selectors)) end)
-
-      unless System.get_env("DABSTEP_BENCH_PROFILE") || System.get_env("DABSTEP_BENCH_WIDE") do
-        namespace_scaling()
-        effect_context()
-        cache_model()
-      end
+    unless System.get_env("DABSTEP_BENCH_PROFILE") || System.get_env("DABSTEP_BENCH_WIDE") do
+      namespace_scaling()
+      effect_context()
+      cache_model()
     end
   end
 
