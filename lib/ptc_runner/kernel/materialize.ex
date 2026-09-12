@@ -438,6 +438,7 @@ defmodule PtcRunner.Kernel.Materialize do
       {:missing, _faulted, _parent} -> :source_out_parent_missing
       {:unsafe_mode, _faulted} -> :source_out_parent_unsafe
       {:foreign_owner, _faulted} -> :source_out_parent_unsafe
+      {:unwritable, _faulted} -> :source_out_parent_unusable
       :none -> :source_out_parent_unusable
     end
   end

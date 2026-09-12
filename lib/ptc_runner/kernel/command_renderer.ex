@@ -155,10 +155,25 @@ defmodule PtcRunner.Kernel.CommandRenderer do
 
   def envelope_failure(run_ref, reason) when is_binary(run_ref) do
     case ArtifactRootDiagnostic.describe(reason) do
-      {:ok, {code, message}} -> "error: envelope/#{code}: #{message} (run_ref: #{run_ref})\n"
+      {:ok, {code, message}} -> artifact_root_failure_line("envelope/#{code}", message, run_ref)
       :error -> unexplained_envelope_failure(run_ref)
     end
   end
+
+  @doc false
+  @spec artifact_root_failure(binary(), term()) :: binary() | nil
+  def artifact_root_failure(run_ref, reason) when is_binary(run_ref) do
+    case ArtifactRootDiagnostic.describe(reason) do
+      {:ok, {_envelope_code, message}} ->
+        artifact_root_failure_line("destination/invalid_destination", message, run_ref)
+
+      :error ->
+        nil
+    end
+  end
+
+  defp artifact_root_failure_line(code, message, run_ref),
+    do: "error: #{code}: #{message} (run_ref: #{run_ref})\n"
 
   defp unexplained_envelope_failure(run_ref),
     do:
@@ -173,6 +188,8 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   end
 
   defp failure_line(diagnostic, run_ref, rejection, opts) do
+    opts = Keyword.put(opts, :artifact_destination_switch, destination_switch(rejection))
+    opts = Keyword.put(opts, :artifact_destination_path, destination_path(rejection))
     {:ok, rendered} = CommandDiagnosticRenderer.render_with_run_ref(diagnostic, run_ref, opts)
 
     "error: " <>
@@ -203,6 +220,14 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   defp filesystem_reason(:enotdir), do: "a parent path is not a directory (enotdir)"
   defp filesystem_reason(:enametoolong), do: "path is too long (enametoolong)"
   defp filesystem_reason(_reason), do: "filesystem destination is unavailable"
+
+  defp destination_switch(%CommandRejection{kind: :destination_exists, destination: switch}),
+    do: switch
+
+  defp destination_switch(_rejection), do: nil
+
+  defp destination_path(%CommandRejection{kind: :destination_exists, local_path: path}), do: path
+  defp destination_path(_rejection), do: nil
 
   defp evaluation_line(%{
          "execution" => %{

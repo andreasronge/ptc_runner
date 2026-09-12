@@ -40,7 +40,6 @@ defmodule PtcRunner.Kernel.CommandEngine do
   alias PtcRunner.Kernel.HostRuntimePayload
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.ModelSelectorDisclosure
-  alias PtcRunner.Kernel.ProjectArtifactRoot
   alias PtcRunner.Kernel.ProjectResolver
   alias PtcRunner.Kernel.ProviderCredentials
   alias PtcRunner.Kernel.PublicationAuthority
@@ -355,17 +354,9 @@ defmodule PtcRunner.Kernel.CommandEngine do
        ) do
     result = dispatch_entry(%{entry | envelope_path: nil}, runtime)
     {_status, outcome} = result
-    paths = CommandEnvelope.destinations(entry.arguments, handle || path, entry.run_ref)
 
     publication =
-      case ProjectArtifactRoot.ensure_for(entry.arguments) do
-        :ok ->
-          CommandEnvelope.publish_all(outcome, paths)
-
-        {:error, _reason} = error ->
-          if handle, do: _ = CommandEnvelope.discard(handle)
-          error
-      end
+      CommandEnvelope.publish_for_project(outcome, entry.arguments, handle || path, entry.run_ref)
 
     case publication do
       :ok ->

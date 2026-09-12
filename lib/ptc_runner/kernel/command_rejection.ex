@@ -23,7 +23,7 @@ defmodule PtcRunner.Kernel.CommandRejection do
     :destination,
     :conflicts
   ]
-  defstruct @enforce_keys
+  defstruct @enforce_keys ++ [local_path: nil]
 
   @type t :: %__MODULE__{
           command: atom(),
@@ -46,7 +46,8 @@ defmodule PtcRunner.Kernel.CommandRejection do
           accepted: [binary()],
           option: binary() | nil,
           destination: binary() | nil,
-          conflicts: [binary()]
+          conflicts: [binary()],
+          local_path: binary() | nil
         }
 
   @doc """
@@ -264,6 +265,27 @@ defmodule PtcRunner.Kernel.CommandRejection do
       option: nil,
       destination: CommandDeclaration.option_switch!(command, frontend, :envelope),
       conflicts: []
+    }
+  end
+
+  @doc "Builds the local presentation context for an existing artifact destination."
+  @spec artifact_destination_exists(
+          :validate | :run,
+          atom(),
+          binary(),
+          CommandDeclaration.frontend()
+        ) :: t()
+  def artifact_destination_exists(command, destination, path, frontend)
+      when command in [:validate, :run] and destination in @destination_keys and is_binary(path) do
+    %__MODULE__{
+      command: command,
+      code: :invalid_arguments,
+      kind: :destination_exists,
+      accepted: [],
+      option: nil,
+      destination: CommandDeclaration.option_switch!(:run, frontend, destination),
+      conflicts: [],
+      local_path: path
     }
   end
 

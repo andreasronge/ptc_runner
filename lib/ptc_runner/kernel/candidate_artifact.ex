@@ -214,6 +214,7 @@ defmodule PtcRunner.Kernel.CandidateArtifact do
       {:missing, _path, _parent} -> :candidate_destination_parent_missing
       {:unsafe_mode, _path} -> :candidate_destination_parent_unsafe
       {:foreign_owner, _path} -> :candidate_destination_parent_unsafe
+      {:unwritable, _path} -> fallback
       :none -> fallback
     end
   end

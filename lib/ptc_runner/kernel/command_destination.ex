@@ -104,7 +104,7 @@ defmodule PtcRunner.Kernel.CommandDestination do
     result =
       with :ok <- ensure_project_artifact_root(preparation),
            :ok <- ensure_private_result_destination(preparation, options) do
-        PublicationAuthority.authorize(
+        PublicationAuthority.authorize_with_context(
           preparation.run_ref,
           Map.to_list(options),
           preparation.prepared_run.effective_event_policy,
@@ -119,6 +119,11 @@ defmodule PtcRunner.Kernel.CommandDestination do
       {:error, {:conflicting_destinations, [first, second]} = reason} ->
         {:error, outcome} = destination_failure(preparation, destination_diagnostic(reason))
         rejection = collision_rejection(frontend, first, second)
+        {:error, outcome, rejection}
+
+      {:error, {:destination_exists, destination, path} = reason} ->
+        {:error, outcome} = destination_failure(preparation, destination_diagnostic(reason))
+        rejection = destination_exists_rejection(preparation, frontend, destination, path)
         {:error, outcome, rejection}
 
       {:error, reason} ->
@@ -215,6 +220,9 @@ defmodule PtcRunner.Kernel.CommandDestination do
             ],
        do: destination_diagnostic(reason)
 
+  defp destination_diagnostic({:destination_exists, _destination, _path}),
+    do: destination_diagnostic(:destination_exists)
+
   defp destination_diagnostic(:destination_exists), do: {:destination, :destination_exists}
 
   defp destination_diagnostic(:private_destination_required),
@@ -262,6 +270,20 @@ defmodule PtcRunner.Kernel.CommandDestination do
       end
 
     CommandRejection.destination_collision(:run, first, second, frontend)
+  end
+
+  defp destination_exists_rejection(_preparation, nil, _destination, _path), do: nil
+
+  defp destination_exists_rejection(preparation, frontend, destination, path) do
+    key = destination_option(preparation.artifact_destinations, destination)
+    CommandRejection.artifact_destination_exists(preparation.command, key, path, frontend)
+  end
+
+  defp destination_option(_destinations, :trace), do: :trace_dir
+  defp destination_option(_destinations, :inspection), do: :inspect
+
+  defp destination_option(destinations, :result) do
+    Enum.find(@result_keys, &Map.has_key?(destinations, &1))
   end
 
   # Commands that publish a result reach this path; `doctor --connect` does not,

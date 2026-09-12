@@ -410,8 +410,10 @@ flag and without reading the application.
 
 ### Resolve local transport paths
 
-Stdio `cwd` and relative command arguments resolve from the host document, not
-from PtcRunner's source checkout and not from the shell's current directory.
+Stdio path-shaped `command` values, `cwd`, and relative command arguments resolve
+from the host document, not from PtcRunner's source checkout and not from the
+shell's current directory. A bare `command` such as `node` is found on the
+inherited `PATH`; an absolute `command` is used directly.
 For an application in a separate repository, keep its MCP server bundle in
 that repository (for example `tools/files/server.js`) and use a host-relative
 path, or install the server executable at a stable absolute location. A

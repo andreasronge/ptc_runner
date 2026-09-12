@@ -117,13 +117,8 @@ defmodule PtcRunner.Kernel.CommandFrontend do
          named_env_file?
        )
        when is_binary(path) do
-    paths = CommandEnvelope.destinations(entry.arguments, handle || path, entry.run_ref)
-
     result =
-      case ProjectArtifactRoot.ensure_for(entry.arguments) do
-        :ok -> CommandEnvelope.publish_all(outcome, paths)
-        {:error, _reason} = error -> cleanup_envelope_handle(handle, error)
-      end
+      CommandEnvelope.publish_for_project(outcome, entry.arguments, handle || path, entry.run_ref)
 
     case result do
       :ok ->
@@ -153,15 +148,30 @@ defmodule PtcRunner.Kernel.CommandFrontend do
   end
 
   defp present(%CommandEntry{} = entry, %CommandOutcome{} = outcome, rejection, named_env_file?) do
-    rendered_presentation(entry, outcome, nil, rejection, named_env_file?)
+    case local_artifact_root_failure(entry, outcome) do
+      nil ->
+        rendered_presentation(entry, outcome, nil, rejection, named_env_file?)
+
+      stderr ->
+        presentation(outcome, nil, "", stderr, outcome.exit_status)
+    end
   end
 
-  defp cleanup_envelope_handle(nil, error), do: error
-
-  defp cleanup_envelope_handle(handle, error) do
-    _ = CommandEnvelope.discard(handle)
-    error
+  defp local_artifact_root_failure(
+         %CommandEntry{run_ref: run_ref, arguments: arguments},
+         %CommandOutcome{
+           envelope: %{
+             "error" => %{"phase" => "destination", "code" => "invalid_destination"}
+           }
+         }
+       ) do
+    case ProjectArtifactRoot.ensure_for(arguments) do
+      {:error, reason} -> CommandRenderer.artifact_root_failure(run_ref, reason)
+      :ok -> nil
+    end
   end
+
+  defp local_artifact_root_failure(_entry, _outcome), do: nil
 
   defp rendered_presentation(entry, outcome, envelope_path, rejection, named_env_file?) do
     render_options = [
