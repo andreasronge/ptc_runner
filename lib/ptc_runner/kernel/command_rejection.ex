@@ -267,6 +267,22 @@ defmodule PtcRunner.Kernel.CommandRejection do
     }
   end
 
+  @doc "Builds the local presentation context for an existing artifact destination."
+  @spec artifact_destination_exists(:validate | :run, atom(), CommandDeclaration.frontend()) ::
+          t()
+  def artifact_destination_exists(command, destination, frontend)
+      when command in [:validate, :run] and destination in @destination_keys do
+    %__MODULE__{
+      command: command,
+      code: :invalid_arguments,
+      kind: :destination_exists,
+      accepted: [],
+      option: nil,
+      destination: CommandDeclaration.option_switch!(:run, frontend, destination),
+      conflicts: []
+    }
+  end
+
   @spec destination_collision(
           CommandDeclaration.command(),
           atom(),

@@ -173,9 +173,15 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   end
 
   defp failure_line(diagnostic, run_ref, rejection, opts) do
+    opts = Keyword.put(opts, :artifact_destination_switch, destination_switch(rejection))
     {:ok, rendered} = CommandDiagnosticRenderer.render_with_run_ref(diagnostic, run_ref, opts)
     "error: " <> rendered <> rejection_suffix(rejection) <> "\n"
   end
+
+  defp destination_switch(%CommandRejection{kind: :destination_exists, destination: switch}),
+    do: switch
+
+  defp destination_switch(_rejection), do: nil
 
   defp evaluation_line(%{
          "execution" => %{

@@ -193,8 +193,9 @@ whose owner is gone is reclaimed automatically if the destination is absent.
 Older reservations without an owner marker are reclaimed only after 60 seconds.
 Live owners, uncertain owner status, and existing destinations are always
 preserved. Cross-host recovery on network filesystems is not supported.
-A `destination/destination_exists` terminal error lists the requested paths
-and a remedy; the command envelope remains path-free.
+A `destination/destination_exists` terminal error identifies the colliding
+switch and resolved path and gives a remedy; the command envelope remains
+path-free.
 
 Atomic publication may reserve owner-only sibling paths named
 `.ptc-private-*` or `.ptc-private-result-*`. They normally disappear at commit

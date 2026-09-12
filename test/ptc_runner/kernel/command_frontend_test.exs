@@ -810,9 +810,13 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
 
       presentation = run_with_output(application, output)
       assert presentation.exit_status == 7
-      assert presentation.stderr =~ "destination/destination_exists"
-      assert presentation.stderr =~ output
-      assert presentation.stderr =~ "another path"
+
+      assert presentation.stderr ==
+               "error: destination/destination_exists: an artifact destination already exists: " <>
+                 "--output #{output} (run_ref: #{presentation.outcome.envelope["run_ref"]}); " <>
+                 "remove it or point --output at " <>
+                 "another path\n"
+
       refute Jason.encode!(presentation.outcome.envelope) =~ output
       assert File.stat!(reservation) == before
       if owner, do: assert(File.read!(Path.join(reservation, "owner")) == owner)

@@ -102,6 +102,25 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
   def authorize(run_ref, opts, event_policy, provider_class)
       when is_binary(run_ref) and is_list(opts) and event_policy in [:normal, :private] and
              provider_class in [:normal, :private_inspection] do
+    case authorize_with_context(run_ref, opts, event_policy, provider_class) do
+      {:error, {:destination_exists, _destination}} -> {:error, :destination_exists}
+      result -> result
+    end
+  end
+
+  def authorize(_run_ref, _opts, _event_policy, _provider_class),
+    do: {:error, :invalid_destination}
+
+  @doc false
+  @spec authorize_with_context(
+          binary(),
+          keyword(),
+          :normal | :private,
+          :normal | :private_inspection
+        ) :: {:ok, t()} | {:error, authorization_error()}
+  def authorize_with_context(run_ref, opts, event_policy, provider_class)
+      when is_binary(run_ref) and is_list(opts) and event_policy in [:normal, :private] and
+             provider_class in [:normal, :private_inspection] do
     with true <- valid_run_ref?(run_ref, true),
          true <- Keyword.keyword?(opts),
          private? <- private_result?(event_policy, provider_class),
@@ -140,7 +159,7 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
     end
   end
 
-  def authorize(_run_ref, _opts, _event_policy, _provider_class),
+  def authorize_with_context(_run_ref, _opts, _event_policy, _provider_class),
     do: {:error, :invalid_destination}
 
   @doc false
@@ -695,9 +714,11 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
   defp tagged_destination({:error, reason}, destination),
     do: {:error, {reason, destination}}
 
-  defp reservation_error(reason, _destination)
-       when reason in [:destination_exists, :recovery_reservation_failed],
-       do: {:error, reason}
+  defp reservation_error(:destination_exists, destination),
+    do: {:error, {:destination_exists, destination}}
+
+  defp reservation_error(:recovery_reservation_failed, _destination),
+    do: {:error, :recovery_reservation_failed}
 
   defp reservation_error(reason, destination), do: {:error, {reason, destination}}
 
