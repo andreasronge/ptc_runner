@@ -400,7 +400,9 @@ failures use their diagnostic catalog status; caught internal failures use
 
 `run`, `validate`, `doctor`, `models`, `init`, `materialize`, `transcript`, and
 `version` accept `--envelope`. `repl`, `viewer`, `docs`, and help do not. A private run
-envelope omits the result value. Installation, packaging, and container
+envelope omits the result value. A normal run envelope also omits it when the
+settled result artifact state is `not_requested`; the successful value still goes
+to stdout. Installation, packaging, and container
 commands live in the [installation documentation](../installation/standalone.md),
 not in this process-contract reference.
 

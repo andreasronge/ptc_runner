@@ -16,7 +16,7 @@ defmodule PtcRunner.Kernel.CommandEnvelope do
           | {:error, :envelope_publication_failed}
           | {:error, {:envelope_destination_parent_unavailable, binary()}}
   def publish(%CommandOutcome{} = outcome, path) when is_binary(path) do
-    with {:ok, encoded} <- DeterministicJSON.encode(CommandOutcome.to_map(outcome)),
+    with {:ok, encoded} <- DeterministicJSON.encode(publication_map(outcome)),
          {:ok, handle} <- reserve(path) do
       publish_handle(handle, encoded)
     else
@@ -33,7 +33,7 @@ defmodule PtcRunner.Kernel.CommandEnvelope do
   end
 
   def publish(%CommandOutcome{} = outcome, %PublicationHandle{kind: :result} = handle) do
-    case DeterministicJSON.encode(CommandOutcome.to_map(outcome)) do
+    case DeterministicJSON.encode(publication_map(outcome)) do
       {:ok, encoded} -> publish_handle(handle, encoded)
       _failure -> discard(handle)
     end
@@ -44,6 +44,21 @@ defmodule PtcRunner.Kernel.CommandEnvelope do
   end
 
   def publish(_outcome, _path), do: {:error, :envelope_publication_failed}
+
+  defp publication_map(%CommandOutcome{} = outcome) do
+    case CommandOutcome.to_map(outcome) do
+      %{
+        "command" => "run",
+        "status" => "ok",
+        "artifact_state" => %{"result" => "not_requested"},
+        "result" => %{"result_class" => "normal"} = result
+      } = envelope ->
+        put_in(envelope, ["result"], Map.delete(result, "value"))
+
+      envelope ->
+        envelope
+    end
+  end
 
   @doc false
   @spec publish_all(CommandOutcome.t(), [destination()]) ::

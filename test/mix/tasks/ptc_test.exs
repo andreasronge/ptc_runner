@@ -219,7 +219,8 @@ defmodule Mix.Tasks.PtcTest do
              "command" => "run",
              "status" => "ok",
              "warnings" => [],
-             "result" => %{"result_class" => "normal", "value" => 1},
+             "artifact_state" => %{"result" => "not_requested"},
+             "result" => %{"result_class" => "normal"},
              "execution" => %{"state" => "finished", "outcome" => "ok"}
            } = envelope
   end

@@ -163,7 +163,7 @@ defmodule PtcRunner.Kernel.CommandContract do
             success_envelope("validate", validate_result()),
             run_success_envelope(
               "normal",
-              closed(~w(result_class value), %{
+              closed(~w(result_class), %{
                 "result_class" => %{"const" => "normal"},
                 "value" => %{}
               })

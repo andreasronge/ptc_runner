@@ -173,7 +173,12 @@ symlinked layout is refused. When a pre-existing directory fails the owner-only
 (0700) check, a run that publishes an envelope names the path and the
 <code class="inline">chmod 700</code> remedy rather than reporting a bare publication failure; the
 conditions for that are in the table below. Artifact files retain the normal
-no-replace and privacy rules.</p><p>The run creates the root and its four children, and nothing above them. A
+no-replace and privacy rules.</p><p><code class="inline">artifacts.result</code> controls both the standalone result artifact and result-value
+retention in command envelopes. When it is <code class="inline">false</code> and no <code class="inline">--output</code> or
+<code class="inline">--private-output</code> override requests a result artifact, persisted project-ledger
+and <code class="inline">--envelope</code> documents keep <code class="inline">result_class</code> but omit <code class="inline">result.value</code>. Normal
+results still print to stdout. An explicit result destination makes the artifact
+state <code class="inline">written</code> and retains the value in the envelope.</p><p>The run creates the root and its four children, and nothing above them. A
 directory above the root is yours, so its mode and ownership are not the
 command's to choose; <code class="inline">artifacts.root</code> may name a path several levels deep, but
 every level above the root must already exist.</p><p>Ancestors are held to a weaker rule than the root itself: each one must be

@@ -25,7 +25,10 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     assert File.regular?(trace)
 
     envelope = Path.join([target, ".ptc", "envelopes", run_ref <> ".json"])
-    assert Jason.decode!(File.read!(envelope))["run_ref"] == run_ref
+    persisted_envelope = Jason.decode!(File.read!(envelope))
+    assert persisted_envelope["run_ref"] == run_ref
+    assert persisted_envelope["artifact_state"]["result"] == "not_requested"
+    refute Map.has_key?(persisted_envelope["result"], "value")
   end
 
   @tag :tmp_dir
@@ -127,8 +130,13 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     run_ref = presentation.outcome.envelope["run_ref"]
     ledger = Path.join([target, ".ptc", "envelopes", run_ref <> ".json"])
     assert File.regular?(ledger)
-    assert Jason.decode!(File.read!(ledger))["run_ref"] == run_ref
-    assert Jason.decode!(File.read!(copy))["run_ref"] == run_ref
+
+    for envelope_path <- [ledger, copy] do
+      envelope = Jason.decode!(File.read!(envelope_path))
+      assert envelope["run_ref"] == run_ref
+      assert envelope["artifact_state"]["result"] == "not_requested"
+      assert envelope["result"] == %{"result_class" => "normal"}
+    end
   end
 
   @tag :tmp_dir
