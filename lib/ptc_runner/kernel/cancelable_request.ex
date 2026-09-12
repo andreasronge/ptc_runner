@@ -126,12 +126,12 @@ defmodule PtcRunner.Kernel.CancelableRequest do
       when owner == self() and is_integer(deadline) do
     Process.unlink(pid)
 
-    case :atomics.get(state, 1) do
+    case :atomics.compare_exchange(state, 1, 1, 4) do
       2 ->
         send(pid, {:cancel_adapter_request, gate, owner})
         await_adapter_drain(pid, monitor, gate, state, deadline, false)
 
-      _predispatch_or_attested_caller ->
+      _cancellation_claimed_or_request_finished ->
         Process.exit(pid, :kill)
         await_down(pid, monitor, deadline)
     end

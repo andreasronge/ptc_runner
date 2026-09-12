@@ -19,8 +19,14 @@ defmodule PtcRunner.Kernel.AdapterCancellationWitness do
   end
 
   defp run_witnessed(operation, guardian, gate, state) do
+    case :atomics.compare_exchange(state, 1, 1, 2) do
+      :ok -> run_registered(operation, guardian, gate, state)
+      _cancellation_claimed -> {:error, :cancelled}
+    end
+  end
+
+  defp run_registered(operation, guardian, gate, state) do
     caller = self()
-    :atomics.put(state, 1, 2)
 
     {worker, monitor} =
       :erlang.spawn_opt(

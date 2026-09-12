@@ -142,6 +142,47 @@ defmodule PtcRunner.Kernel.ProviderCallOwnerTest do
     assert {:ok, %{active: 0, status: :ready}} = ProviderCallAdmission.snapshot(admission)
   end
 
+  test "cancellation resolves atomically against adapter witness registration" do
+    admission = start_supervised!({ProviderCallAdmission, max_active_calls: 1, max_waiters: 0})
+    parent = self()
+
+    for iteration <- 1..100 do
+      guardian =
+        spawn(fn ->
+          ProviderCallOwner.run(
+            admission,
+            fn _, _ ->
+              AdapterCancellationWitness.run(fn ->
+                send(parent, {:racing_transport_started, iteration, self()})
+                receive do: (:held -> :ok)
+              end)
+            end,
+            %{},
+            %{
+              llm_request_deadline_ms: monotonic_deadline(5_000),
+              provider_cleanup_timeout_ms: 1_000
+            }
+          )
+        end)
+
+      request_ref = make_ref()
+      send(guardian, {:cancel_provider_call, self(), request_ref, monotonic_deadline(1_000)})
+
+      assert_receive {:provider_call_drained, ^request_ref, ^guardian, :drained}
+
+      receive do
+        {:racing_transport_started, ^iteration, transport} ->
+          refute Process.alive?(transport)
+      after
+        0 -> :ok
+      end
+
+      assert_eventually(fn ->
+        match?({:ok, %{active: 0, status: :ready}}, ProviderCallAdmission.snapshot(admission))
+      end)
+    end
+  end
+
   test "completes the lease before restoring a requester exception" do
     admission = start_supervised!({ProviderCallAdmission, max_active_calls: 1, max_waiters: 0})
 
