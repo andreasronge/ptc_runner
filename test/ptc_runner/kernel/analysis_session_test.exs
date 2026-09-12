@@ -1125,8 +1125,17 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     session_ref = Process.monitor(resources.session.pid)
     trace_ref = Process.monitor(resources.session_trace.pid)
     snapshot_ref = Process.monitor(resources.snapshot.pid)
-    run_state = :sys.get_state(resources.session.pid).run_state
-    run_state_ref = Process.monitor(run_state.pid)
+    run_state_ref = Process.monitor(resources.run_state.pid)
+
+    # Process each monitor before builder death can trigger another owner's cleanup.
+    for owner <- [
+          resources.session.pid,
+          resources.session_trace.pid,
+          resources.snapshot.pid,
+          resources.run_state.pid
+        ] do
+      :sys.get_state(owner)
+    end
 
     Process.exit(builder, :kill)
 
