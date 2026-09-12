@@ -11,6 +11,10 @@ defmodule PtcRunner.Kernel.MissionInventory do
   `PtcRunner.Kernel.RunConfig` and are identical for normal runs and
   `PtcRunner.Kernel.ReplSession`.
 
+  Reserved mission inspection routes (`runtime-usage`, `runtime-remaining`,
+  `cap-list`, and `cap-describe`) resolve as read effects; missing or
+  undeclared host capability effects resolve conservatively as unknown.
+
   Every bare capability entry carries a frozen `call` form. In the secondary
   model-contract projection, required input fields are expanded into the
   literal argument map, for example `(tool/search {"query" query})`; the
@@ -345,9 +349,17 @@ defmodule PtcRunner.Kernel.MissionInventory do
 
   defp entry_form({:object, pairs}), do: pairs |> Map.new() |> Map.fetch!("form")
 
-  defp resolved_export_effect(export, %{capabilities: capabilities}) do
-    effects = Map.new(capabilities, fn {name, capability} -> {name, capability.effect} end)
-    ExportEffect.resolve(export, effects)
+  @doc false
+  @spec resolved_export_effect(Export.t(), MissionEnvironment.t() | map()) ::
+          :read | :write | :unknown
+  def resolved_export_effect(export, %{capabilities: capabilities}) do
+    effects =
+      Map.new(capabilities, fn {name, capability} ->
+        {name, Map.get(capability, :effect, :unknown)}
+      end)
+
+    implicit = Map.new(Environment.implicit_capabilities(:mission, []), &{&1, :read})
+    ExportEffect.resolve(export, Map.merge(effects, implicit))
   end
 
   @doc false

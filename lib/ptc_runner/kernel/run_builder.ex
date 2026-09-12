@@ -48,6 +48,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   """
 
   alias PtcRunner.Kernel
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.ArtifactPublisher
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.BundleCompiler
@@ -61,6 +62,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.ExecutionOutcome
+  alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.InstallationCatalog
@@ -959,6 +961,27 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
+  @doc false
+  @spec assemble_environments(ApplicationPackage.t(), FrozenBundle.t(), map(), map()) ::
+          {:ok, WorkflowEnvironment.t(), map()} | {:error, term()}
+  def assemble_environments(package, workflow_bundle, mission_bundles, providers) do
+    with {:ok, intern, workflow_catalog} <-
+           environment_catalog(package.workflow_components, workflow_bundle, SourceIntern.new()),
+         {:ok, workflow} <-
+           WorkflowEnvironment.new_for_package(
+             [
+               bundle: workflow_bundle,
+               capabilities: providers.workflow.capabilities,
+               catalog: workflow_catalog,
+               shipped_component_ids: library_component_ids(package.workflow_component_kinds)
+             ],
+             package
+           ),
+         {:ok, missions} <- mission_environments(package, mission_bundles, providers, intern) do
+      {:ok, workflow, missions}
+    end
+  end
+
   defp build_with_providers(
          request,
          {workflow_bundle, mission_bundles},
@@ -971,24 +994,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
     package = request.package
 
     result =
-      with {:ok, intern, workflow_catalog} <-
-             environment_catalog(
-               package.workflow_components,
-               workflow_bundle,
-               SourceIntern.new()
-             ),
-           {:ok, workflow} <-
-             WorkflowEnvironment.new_for_package(
-               [
-                 bundle: workflow_bundle,
-                 capabilities: providers.workflow.capabilities,
-                 catalog: workflow_catalog,
-                 shipped_component_ids: library_component_ids(package.workflow_component_kinds)
-               ],
-               package
-             ),
-           {:ok, missions} <-
-             mission_environments(package, mission_bundles, providers, intern),
+      with {:ok, workflow, missions} <-
+             assemble_environments(package, workflow_bundle, mission_bundles, providers),
            {:ok, publication_authority, sink, inspection_sink} <-
              execution_sinks(request, providers, opts, failure_mode, sink_source),
            :ok <-

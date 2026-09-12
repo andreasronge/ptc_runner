@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.EffectiveApplication do
   this projection.
   """
 
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.RunRequest
@@ -31,33 +32,46 @@ defmodule PtcRunner.Kernel.EffectiveApplication do
           {:ok, %{projection: map(), digest: binary()}} | {:error, :invalid_effective_application}
   @doc "Builds the literal effective projection and its domain-separated digest."
   def build(request, workflow_bundle, mission_bundles, providers, effective_event_policy) do
-    with true <- RunRequest.valid?(request),
+    if RunRequest.valid?(request) do
+      build_package(request.package, workflow_bundle, mission_bundles, providers, %{
+        input_authority_class: request.input.authority,
+        inspection_capture: request.policy.inspection_capture,
+        result_projection: request.policy.result_projection,
+        effective_event_policy: effective_event_policy
+      })
+    else
+      {:error, :invalid_effective_application}
+    end
+  end
+
+  @doc false
+  @spec build_package(
+          ApplicationPackage.t(),
+          FrozenBundle.t(),
+          map(),
+          normalized_providers(),
+          map()
+        ) ::
+          {:ok, %{projection: map(), digest: binary()}} | {:error, :invalid_effective_application}
+  def build_package(package, workflow_bundle, mission_bundles, providers, policy) do
+    with true <- ApplicationPackage.valid?(package),
          true <- FrozenBundle.valid?(workflow_bundle),
-         true <- valid_mission_bundles?(mission_bundles, request.package.missions),
+         true <- valid_mission_bundles?(mission_bundles, package.missions),
          true <- valid_providers?(providers),
-         true <- effective_event_policy in [:normal, :private],
-         projection <-
-           projection(
-             request,
-             workflow_bundle,
-             mission_bundles,
-             providers,
-             effective_event_policy
-           ),
+         true <- policy.effective_event_policy in [:normal, :private],
+         true <- policy.input_authority_class in [:normal, :private],
+         true <- is_boolean(policy.inspection_capture),
+         true <- policy.result_projection in [:native, :json],
+         projection <- projection(package, workflow_bundle, mission_bundles, providers, policy),
          {:ok, encoded} <- TypedCanonicalJSON.encode(projection) do
       {:ok,
-       %{
-         projection: projection,
-         digest: "sha256:" <> TypedCanonicalJSON.sha256(@domain, encoded)
-       }}
+       %{projection: projection, digest: "sha256:" <> TypedCanonicalJSON.sha256(@domain, encoded)}}
     else
       _invalid -> {:error, :invalid_effective_application}
     end
   end
 
-  defp projection(request, workflow_bundle, mission_bundles, providers, effective_event_policy) do
-    package = request.package
-
+  defp projection(package, workflow_bundle, mission_bundles, providers, policy) do
     %{
       "bundle_hashes" => %{
         "workflow" => workflow_bundle.hash,
@@ -83,17 +97,17 @@ defmodule PtcRunner.Kernel.EffectiveApplication do
              }}
           end)
       },
-      "effective_event_policy" => Atom.to_string(effective_event_policy),
+      "effective_event_policy" => Atom.to_string(policy.effective_event_policy),
       "entry" => package.entry,
-      "input_authority_class" => Atom.to_string(request.input.authority),
-      "inspection_capture_enabled" => request.policy.inspection_capture,
+      "input_authority_class" => Atom.to_string(policy.input_authority_class),
+      "inspection_capture_enabled" => policy.inspection_capture,
       "limits" => LimitCatalog.effective_projection(package.limits),
       "providers" => %{
         "workflow" => providers.workflow,
         "mission" => providers.mission
       },
       "ptc_semantic_revision" => package.ptc_semantic_revision,
-      "result_projection" => Atom.to_string(request.policy.result_projection)
+      "result_projection" => Atom.to_string(policy.result_projection)
     }
   end
 
