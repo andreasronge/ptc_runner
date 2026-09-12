@@ -462,7 +462,7 @@ function renderRun(data, { fresh = false, routeGeneration = state.routeGeneratio
       });
     }
   });
-  renderSemanticConversation(container, conversation);
+  renderSemanticConversation(container, conversation, metadata);
 
   if (!fresh) return;
   if (state.activeTab === 'runs') window.scrollTo({ top: 0, behavior: 'auto' });

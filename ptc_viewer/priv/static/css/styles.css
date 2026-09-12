@@ -1898,6 +1898,11 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
 .semantic-turn-body > .kt-turn-out { border-top: 0; }
 .semantic-feedback { border-top: 1px dashed rgba(60, 60, 60, 0.65); }
 .semantic-association-warning { margin: 8px 2px; color: var(--warning); font-size: 10px; }
+.semantic-model-identity {
+  display: flex; flex-wrap: wrap; gap: 5px 14px; margin: 7px 2px;
+  color: var(--muted); font-size: 10px; overflow-wrap: anywhere;
+}
+.semantic-model-identity strong { margin-right: 4px; color: var(--fg); }
 .semantic-token-summary { margin: 7px 2px; color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
 .semantic-raw-turn { margin: 9px 2px 0; border-top: 1px solid var(--border); }
 .semantic-raw-turn > summary { padding: 8px 0 3px; color: var(--muted); cursor: pointer; font-size: 10px; }

@@ -188,11 +188,56 @@ defmodule PtcViewer.SemanticConversationTest do
     assert rendered =~ "check this"
   end
 
-  defp render(directory, conversation) do
+  test "labels the response install alias and its resolved model", %{tmp_dir: directory} do
+    rendered =
+      render(
+        directory,
+        %{
+          "complete?" => true,
+          "streams" => [
+            %{
+              "stream_id" => "stream-1",
+              "turns" => [
+                %{
+                  "turn" => 1,
+                  "assistant" => %{
+                    "role" => "assistant",
+                    "content" => %{
+                      "model" => "deepseek",
+                      "structured_output" => %{"owner" => "Priya"}
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        %{
+          "connector_snapshots" => [
+            %{
+              "declaration" => %{"name" => "deepseek", "source" => "llm"},
+              "acquisition" => %{
+                "source" => "llm",
+                "resolved_model" => "openrouter:nex-agi/nex-n2-pro"
+              }
+            }
+          ]
+        }
+      )
+
+    assert rendered =~ "Install alias"
+    assert rendered =~ "deepseek"
+    assert rendered =~ "Resolved model"
+    assert rendered =~ "openrouter:nex-agi/nex-n2-pro"
+    assert rendered =~ ~s(&quot;alias&quot;: &quot;deepseek&quot;)
+    assert rendered =~ ~s(&quot;model&quot;: &quot;deepseek&quot;)
+  end
+
+  defp render(directory, conversation, metadata \\ %{}) do
     metadata_path = Path.join(directory, "metadata.json")
     turns_path = Path.join(directory, "turns.json")
     conversation_path = Path.join(directory, "conversation.json")
-    File.write!(metadata_path, Jason.encode!(%{}))
+    File.write!(metadata_path, Jason.encode!(metadata))
     File.write!(turns_path, Jason.encode!(%{"items" => []}))
     File.write!(conversation_path, Jason.encode!(conversation))
 

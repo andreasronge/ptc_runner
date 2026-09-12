@@ -1,8 +1,9 @@
 import { html, mount, rawHtml, toMarkup } from './preact.js';
 import { highlightLisp } from './highlight.js';
 import { privateEvidenceAbsence } from './private-evidence.js';
+import { modelResponseIdentity, presentedAssistant } from './model-identity.js';
 
-export function renderSemanticConversation(container, conversation) {
+export function renderSemanticConversation(container, conversation, metadata = {}) {
   const existingHost = container.querySelector('.semantic-conversation-wrapper');
 
   if (!conversation) {
@@ -16,12 +17,12 @@ export function renderSemanticConversation(container, conversation) {
   const host = existingHost || container.appendChild(Object.assign(document.createElement('section'), {
     className: 'semantic-conversation-wrapper'
   }));
-  mount(host, html`<${Conversation} conversation=${conversation} />`);
+  mount(host, html`<${Conversation} conversation=${conversation} metadata=${metadata} />`);
 }
 
-export function renderSemanticConversationMarkup(conversation) {
+export function renderSemanticConversationMarkup(conversation, metadata = {}) {
   if (!conversation) return '';
-  return toMarkup(html`<${Conversation} conversation=${conversation} />`);
+  return toMarkup(html`<${Conversation} conversation=${conversation} metadata=${metadata} />`);
 }
 
 export function modelSessionDomId(streamId) {
@@ -56,7 +57,7 @@ export function streamPresentation(stream) {
   };
 }
 
-function Conversation({ conversation }) {
+function Conversation({ conversation, metadata }) {
   if (!conversation) return null;
 
   const streams = conversation.streams || [];
@@ -96,12 +97,12 @@ function Conversation({ conversation }) {
       ${!unavailable && !streams.length && !incomplete && html`
         <div class="inspection-counts">No model exchanges were captured for this run.</div>`}
       <div class="semantic-streams">
-        ${streams.map(stream => html`<${ModelStream} key=${stream.stream_id} stream=${stream} />`)}
+        ${streams.map(stream => html`<${ModelStream} key=${stream.stream_id} stream=${stream} metadata=${metadata} />`)}
       </div>
     </section>`;
 }
 
-function ModelStream({ stream }) {
+function ModelStream({ stream, metadata }) {
   const presentation = streamPresentation(stream);
   return html`
     <details class="semantic-stream" id=${modelSessionDomId(presentation.streamId)}>
@@ -117,13 +118,13 @@ function ModelStream({ stream }) {
       </summary>
       <div class="semantic-stream-body">
         ${(stream.turns || []).map(turn => html`
-          <${ModelTurn} key=${turn.request_sequence ?? turn.turn} turn=${turn} />`)}
+          <${ModelTurn} key=${turn.request_sequence ?? turn.turn} turn=${turn} metadata=${metadata} />`)}
       </div>
     </details>
   `;
 }
 
-function ModelTurn({ turn }) {
+function ModelTurn({ turn, metadata }) {
   const generated = turn.generated || [];
   const programs = generated.filter(presentableProgram);
   const ambiguousPrograms = generated.length - programs.length;
@@ -146,7 +147,7 @@ function ModelTurn({ turn }) {
             ${promptMessages.map((message, index) => html`
               <${Message} key=${message?.id || index} message=${message} />`)}
           </section>`}
-        <${AssistantOutput} assistant=${turn.assistant} />
+        <${AssistantOutput} assistant=${turn.assistant} metadata=${metadata} />
         ${programs.length > 0 && html`
           <section class="kt-turn-out">
             <div class="kt-turn-label">Generated programs</div>
@@ -203,15 +204,22 @@ function SystemPrompt({ turn }) {
   `;
 }
 
-function AssistantOutput({ assistant }) {
+function AssistantOutput({ assistant, metadata }) {
   if (!assistant) return null;
-  const content = assistant.content;
+  const identity = modelResponseIdentity(assistant, metadata);
+  const content = presentedAssistant(assistant, metadata).content;
   const reasoning = assistant.reasoning;
   if (content == null && reasoning == null) return null;
 
   return html`
     <section class="kt-turn-out">
       <div class="kt-turn-label">Model response</div>
+      ${identity && html`
+        <div class="semantic-model-identity">
+          <span><strong>Install alias</strong> ${identity.alias}</span>
+          ${identity.resolvedModel && html`
+            <span><strong>Resolved model</strong> ${identity.resolvedModel}</span>`}
+        </div>`}
       ${reasoning != null && html`
         <div class="kt-msg kt-msg-reasoning">
           <span class="kt-msg-role">Reasoning</span>

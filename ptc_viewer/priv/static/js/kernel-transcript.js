@@ -19,6 +19,7 @@ import { highlightLisp } from './highlight.js';
 import { privateEvidenceAbsence } from './private-evidence.js';
 import { evaluationPresentation } from './evaluation-evidence.js';
 import { modelSessionDomId } from './semantic-conversation.js';
+import { calledResolvedModels } from './model-identity.js';
 
 const SUCCESS = new Set(['ok', 'continued', 'returned', 'completed', 'success']);
 const FAILURE = new Set([
@@ -205,6 +206,7 @@ function Hero({
 }) {
   const status = metadata.status || (metadata.complete ? 'complete' : 'incomplete');
   const bundle = metadata.workflow_prelude?.hash;
+  const resolvedModels = calledResolvedModels(metadata);
   // A host-supplied display label can replace the cryptic run ID as the title;
   // the canonical ID remains a fact readers can copy and act on.
   const title = displayTitle || metadata.run_id || metadata.name || 'Kernel run';
@@ -214,7 +216,8 @@ function Hero({
     ['Run ID', title !== metadata.run_id ? metadata.run_id : null],
     ['Trace', metadata.trace_id],
     ['Duration', duration(metadata.duration_ms)],
-    ['Model', abbreviate(metadata.model), metadata.model],
+    ['Resolved model', resolvedModels.join(', ')],
+    ['Model label', abbreviate(metadata.model), metadata.model],
     ['Provider', abbreviate(metadata.provider), metadata.provider],
     ['Source', metadata.source],
     ['Bundle', abbreviate(bundle), bundle]

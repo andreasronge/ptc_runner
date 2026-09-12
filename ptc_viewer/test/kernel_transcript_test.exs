@@ -92,6 +92,30 @@ defmodule PtcViewer.KernelTranscriptTest do
     refute rendered =~ ~s(>other/uncaptured</a>)
   end
 
+  test "shows the resolved model instead of presenting the manifest fingerprint as the model", %{
+    tmp_dir: directory
+  } do
+    model_fingerprint = "sha256:" <> String.duplicate("a", 64)
+
+    rendered =
+      render(directory, %{
+        "metadata" => %{
+          "run_id" => "model-identity-run",
+          "model" => model_fingerprint,
+          "llm_usage_by_model" => [
+            %{"resolved_model" => "openrouter:nex-agi/nex-n2-pro", "calls" => 1}
+          ]
+        },
+        "turns" => %{"items" => []}
+      })
+
+    assert rendered =~ "Resolved model"
+    assert rendered =~ "openrouter:nex-agi/nex-n2-pro"
+    assert rendered =~ "Model label"
+    assert rendered =~ "sha256:aaaaaaaaaaaa"
+    refute rendered =~ ">Model</span><span class=\"kt-fact-value\">sha256:"
+  end
+
   test "renders workflow-supplied programs independently of conversation streams", %{
     tmp_dir: directory
   } do
