@@ -276,10 +276,12 @@ defmodule PtcRunner.Kernel.Environment do
 
   defp bundle_requirements(_bundle, _capabilities, _kind, _private_capabilities), do: :ok
 
-  defp implicit_capabilities(:workflow, private_capabilities),
+  @doc false
+  @spec implicit_capabilities(:workflow | :mission, [binary()]) :: [binary()]
+  def implicit_capabilities(:workflow, private_capabilities),
     do: private_capabilities ++ @workflow_implicit
 
-  defp implicit_capabilities(:mission, _private_capabilities),
+  def implicit_capabilities(:mission, _private_capabilities),
     do: ~w(runtime-usage runtime-remaining cap-list cap-describe)
 
   defp workflow_private_capabilities(bundle, authorization) do

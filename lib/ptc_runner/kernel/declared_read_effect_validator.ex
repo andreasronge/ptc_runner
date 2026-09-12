@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.DeclaredReadEffectValidator do
   @moduledoc false
 
   alias PtcRunner.Kernel.ExportEffect
+  alias PtcRunner.Kernel.MissionInventory
 
   @analysis_operations ~w(runs open read counters)
 
@@ -36,6 +37,22 @@ defmodule PtcRunner.Kernel.DeclaredReadEffectValidator do
     validate_with(workflow_bundle, mission_bundles, missions, fn destination, occurrences ->
       prepared_effects(declarations, destination, occurrences)
     end)
+  end
+
+  @doc false
+  @spec validate_assembled(PtcRunner.Kernel.WorkflowEnvironment.t(), map(), map()) ::
+          :ok | {:error, {:declared_read_effect_violation, binary(), :write | :unknown}}
+  def validate_assembled(workflow, missions, workflow_effects) do
+    with :ok <- validate_bundle(workflow.bundle, workflow_effects) do
+      missions
+      |> Enum.sort_by(&elem(&1, 0))
+      |> Enum.reduce_while(:ok, fn {_name, mission}, :ok ->
+        case MissionInventory.validate_declared_read_effects(mission) do
+          :ok -> {:cont, :ok}
+          {:error, _reason} = error -> {:halt, error}
+        end
+      end)
+    end
   end
 
   defp validate_with(workflow_bundle, mission_bundles, missions, effects_for) do
