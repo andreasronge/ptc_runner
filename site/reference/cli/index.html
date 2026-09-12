@@ -570,7 +570,10 @@ semantic error classification, not timestamps, run references, or remaining
 milliseconds.</p><p>One shell-level check can use the stable envelope:</p><pre><code class="console language-console">ptc init kernel-tutorial --example kernel-tutorial
 artifact_dir=&quot;$(mktemp -d)&quot;
 envelope=&quot;$artifact_dir/command-envelope.json&quot;
-ptc run kernel-tutorial/01-orders/ptc.json --envelope &quot;$envelope&quot;
+result=&quot;$artifact_dir/result.json&quot;
+ptc run kernel-tutorial/01-orders/ptc.json \
+  --output &quot;$result&quot; \
+  --envelope &quot;$envelope&quot;
 actual=&quot;$(jq -c '.result.value' &quot;$envelope&quot;)&quot;
 test &quot;$actual&quot; = \
   '{&quot;order_count&quot;:3,&quot;paid_count&quot;:2,&quot;paid_total&quot;:335.75,&quot;pending_ids&quot;:[&quot;A-101&quot;]}'</code></pre><p>Test scripted model responses before a small live-provider boundary. The

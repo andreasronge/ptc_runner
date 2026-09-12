@@ -1013,7 +1013,10 @@ One shell-level check can use the stable envelope:
 ptc init kernel-tutorial --example kernel-tutorial
 artifact_dir="$(mktemp -d)"
 envelope="$artifact_dir/command-envelope.json"
-ptc run kernel-tutorial/01-orders/ptc.json --envelope "$envelope"
+result="$artifact_dir/result.json"
+ptc run kernel-tutorial/01-orders/ptc.json \
+  --output "$result" \
+  --envelope "$envelope"
 actual="$(jq -c '.result.value' "$envelope")"
 test "$actual" = \
   '{"order_count":3,"paid_count":2,"paid_total":335.75,"pending_ids":["A-101"]}'
