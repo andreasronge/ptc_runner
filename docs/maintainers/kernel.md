@@ -127,6 +127,16 @@ execution owner dying without acknowledging cleanup fences that capacity
 domain. It does not restart automatically; drain old work before replacing it.
 Admission-owner death aborts the executions it admitted.
 
+For transport commitment before execution, use
+`PtcRunner.Kernel.RunAdmission.reserve/2`, then `activate/3` or `activate/5`
+and `await/1`; use `cancel/1` or `close/1` when commitment fails. An unused
+reservation creates no execution resources. The admission owner monitors its
+caller until activation atomically transfers the existing slot to the execution
+owner, before dispatch. Absolute monotonic deadlines release unused
+reservations and cancel active execution through owner cleanup. The module
+documentation owns the exact operations and terminal race semantics; snapshots
+are diagnostic only.
+
 The host separately supervises one `ProviderCallAdmission` domain for each
 shared live LLM transport and seals that owner into every
 `ProviderRuntimeServices` value using it. Its active capacity spans concurrent
