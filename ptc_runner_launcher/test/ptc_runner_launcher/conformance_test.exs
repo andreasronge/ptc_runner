@@ -343,15 +343,20 @@ defmodule PtcRunnerLauncher.ConformanceTest do
   @tag :tmp_dir
   test "a timed-out write does not deliver the complete queued request", %{tmp_dir: dir} do
     marker = Path.join(dir, "eof-observed")
-    launcher = open_launcher(["slow-eof", marker], grace_ms: 300)
+    read_ready = Path.join(dir, "read-ready")
+    launcher = open_launcher(["slow-eof", marker, read_ready], grace_ms: 300)
     assert %{stdout: "ready\n"} = collect_until(launcher, &(&1.stdout == "ready\n"))
 
-    assert {:error, :timeout} =
-             MCPStdioLauncher.send_bytes(
-               launcher,
-               :binary.copy(<<0>>, 1_000_000),
-               50
-             )
+    try do
+      assert {:error, :timeout} =
+               MCPStdioLauncher.send_bytes(
+                 launcher,
+                 :binary.copy(<<0>>, 1_000_000),
+                 50
+               )
+    after
+      File.write!(read_ready, "ready")
+    end
 
     assert is_nil(Port.info(launcher.port))
     assert_eventually(fn -> File.exists?(marker) end, 3_000)

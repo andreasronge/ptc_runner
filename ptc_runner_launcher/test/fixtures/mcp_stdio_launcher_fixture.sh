@@ -90,9 +90,12 @@ case "$1" in
 
   slow-eof)
     marker="$2"
+    read_ready="$3"
     trap 'printf term > "$marker"; exit 0' TERM
     printf 'ready\n'
-    /bin/sleep 0.15
+    while [ ! -f "$read_ready" ]; do
+      /bin/sleep 0.01
+    done
     bytes=$(/usr/bin/wc -c)
     printf 'bytes=%s' "$bytes" > "$marker"
     exit 0
