@@ -164,6 +164,10 @@ defmodule PtcRunner.Kernel.CommandDestination do
   defp destination_diagnostic({reason, destination})
        when reason in [
               :destination_unavailable,
+              :eacces,
+              :edquot,
+              :enospc,
+              :erofs,
               :source_unavailable,
               :private_directory_unavailable,
               :private_directory_unsupported,
