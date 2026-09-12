@@ -126,6 +126,13 @@ symlinked layout is refused. When a pre-existing directory fails the owner-only
 conditions for that are in the table below. Artifact files retain the normal
 no-replace and privacy rules.
 
+`artifacts.result` controls both the standalone result artifact and result-value
+retention in command envelopes. When it is `false` and no `--output` or
+`--private-output` override requests a result artifact, persisted project-ledger
+and `--envelope` documents keep `result_class` but omit `result.value`. Normal
+results still print to stdout. An explicit result destination makes the artifact
+state `written` and retains the value in the envelope.
+
 The run creates the root and its four children, and nothing above them. A
 directory above the root is yours, so its mode and ownership are not the
 command's to choose; `artifacts.root` may name a path several levels deep, but

@@ -400,7 +400,9 @@ failures use their diagnostic catalog status; caught internal failures use
 
 `run`, `validate`, `doctor`, `models`, `init`, `materialize`, `transcript`, and
 `version` accept `--envelope`. `repl`, `viewer`, `docs`, and help do not. A private run
-envelope omits the result value. Installation, packaging, and container
+envelope omits the result value. A normal run envelope also omits it when the
+settled result artifact state is `not_requested`; the successful value still goes
+to stdout. Installation, packaging, and container
 commands live in the [installation documentation](../installation/standalone.md),
 not in this process-contract reference.
 
@@ -1011,7 +1013,10 @@ One shell-level check can use the stable envelope:
 ptc init kernel-tutorial --example kernel-tutorial
 artifact_dir="$(mktemp -d)"
 envelope="$artifact_dir/command-envelope.json"
-ptc run kernel-tutorial/01-orders/ptc.json --envelope "$envelope"
+result="$artifact_dir/result.json"
+ptc run kernel-tutorial/01-orders/ptc.json \
+  --output "$result" \
+  --envelope "$envelope"
 actual="$(jq -c '.result.value' "$envelope")"
 test "$actual" = \
   '{"order_count":3,"paid_count":2,"paid_total":335.75,"pending_ids":["A-101"]}'

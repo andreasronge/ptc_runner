@@ -372,6 +372,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
 
     winner_run_ref = winner_presentation.outcome.envelope["run_ref"]
     assert published_envelope["run_ref"] == winner_run_ref
+    assert published_envelope["result"]["value"] == %{"greeting" => "hello world"}
     assert published_result == %{"greeting" => "hello world"}
     assert winner in 1..3
 

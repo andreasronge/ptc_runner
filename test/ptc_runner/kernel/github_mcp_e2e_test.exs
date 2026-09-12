@@ -28,6 +28,7 @@ defmodule PtcRunner.Kernel.GitHubMCPE2ETest do
     paths = write_application(dir, binary)
 
     envelope_path = Path.join(dir, "command-envelope.json")
+    result_path = Path.join(dir, "result.json")
 
     run_output =
       capture_io(fn ->
@@ -40,6 +41,8 @@ defmodule PtcRunner.Kernel.GitHubMCPE2ETest do
           paths.host,
           "--trace-dir",
           Path.dirname(paths.trace),
+          "--output",
+          result_path,
           "--envelope",
           envelope_path
         ])
@@ -47,6 +50,7 @@ defmodule PtcRunner.Kernel.GitHubMCPE2ETest do
 
     envelope = envelope_path |> File.read!() |> Jason.decode!()
     assert Jason.decode!(run_output) == envelope["result"]["value"]
+    assert Jason.decode!(File.read!(result_path)) == envelope["result"]["value"]
     assert envelope["status"] == "ok"
 
     assert %{

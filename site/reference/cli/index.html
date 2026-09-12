@@ -350,7 +350,9 @@ the failed destinations on stderr. Success exits <code class="inline">0</code>; 
 failures use their diagnostic catalog status; caught internal failures use
 <code class="inline">70</code>.</p><p><code class="inline">run</code>, <code class="inline">validate</code>, <code class="inline">doctor</code>, <code class="inline">models</code>, <code class="inline">init</code>, <code class="inline">materialize</code>, <code class="inline">transcript</code>, and
 <code class="inline">version</code> accept <code class="inline">--envelope</code>. <code class="inline">repl</code>, <code class="inline">viewer</code>, <code class="inline">docs</code>, and help do not. A private run
-envelope omits the result value. Installation, packaging, and container
+envelope omits the result value. A normal run envelope also omits it when the
+settled result artifact state is <code class="inline">not_requested</code>; the successful value still goes
+to stdout. Installation, packaging, and container
 commands live in the <a href="/installation/standalone/">installation documentation</a>,
 not in this process-contract reference.</p><h3 id="branch-on-the-exit-status">Branch on the exit status</h3><p>An exit status is a class, not an identity: several diagnostics share one.
 <code class="inline">runtime_limit_exceeded</code>, <code class="inline">run_timeout</code>, <code class="inline">turn_limit_exceeded</code>,
@@ -568,7 +570,10 @@ semantic error classification, not timestamps, run references, or remaining
 milliseconds.</p><p>One shell-level check can use the stable envelope:</p><pre><code class="console language-console">ptc init kernel-tutorial --example kernel-tutorial
 artifact_dir=&quot;$(mktemp -d)&quot;
 envelope=&quot;$artifact_dir/command-envelope.json&quot;
-ptc run kernel-tutorial/01-orders/ptc.json --envelope &quot;$envelope&quot;
+result=&quot;$artifact_dir/result.json&quot;
+ptc run kernel-tutorial/01-orders/ptc.json \
+  --output &quot;$result&quot; \
+  --envelope &quot;$envelope&quot;
 actual=&quot;$(jq -c '.result.value' &quot;$envelope&quot;)&quot;
 test &quot;$actual&quot; = \
   '{&quot;order_count&quot;:3,&quot;paid_count&quot;:2,&quot;paid_total&quot;:335.75,&quot;pending_ids&quot;:[&quot;A-101&quot;]}'</code></pre><p>Test scripted model responses before a small live-provider boundary. The
