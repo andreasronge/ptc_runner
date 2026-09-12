@@ -78,6 +78,62 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
              ProviderRegistry.build(invalid_registry, "single", %{}, context)
   end
 
+  @tag :tmp_dir
+  test "direct builds prove read wrappers over slash-named read capabilities", %{tmp_dir: dir} do
+    File.write!(Path.join(dir, "workflow.clj"), "(ns app) (defn run [x] (return x))")
+
+    File.write!(
+      Path.join(dir, "mission.clj"),
+      """
+      (ns actions)
+      (defn echo {:signature "() -> :any" :effect :read
+                  :requires ["tool:server/echo"]} []
+        nil)
+      """
+    )
+
+    manifest =
+      manifest(dir, [], [provider("custom", %{})])
+      |> then(fn path ->
+        body = Jason.decode!(File.read!(path))
+
+        missions = %{
+          "default" => %{
+            "components" => [%{"id" => "actions", "path" => "mission.clj"}],
+            "providers" => ["custom"]
+          }
+        }
+
+        File.write!(path, Jason.encode!(Map.put(body, "missions", missions)))
+        path
+      end)
+
+    builder =
+      ProviderRegistry.staged(fn %{}, _context ->
+        {:ok, capability} =
+          Capability.new(
+            name: "server/echo",
+            effect: :read,
+            input_schema: @schema,
+            callback: fn _arguments -> {:ok, %{}} end
+          )
+
+        {:ok,
+         %{
+           credential_names: [],
+           capability_effects: %{"server/echo" => :read},
+           preflight: fn ->
+             {:ok, fn %{} -> {:ok, %{capabilities: [capability]}} end}
+           end
+         }}
+      end)
+
+    {:ok, registry} = ProviderRegistry.new(%{"custom" => builder})
+    {:ok, request} = ApplicationPackage.request_directory(manifest, result_projection: :native)
+    assert {:ok, built} = RunBuilder.build(request, registry)
+    assert :ok = RunBuilder.close(built)
+  end
+
   test "registry rejects directory-bearing provider contexts before invoking a builder" do
     parent = self()
 

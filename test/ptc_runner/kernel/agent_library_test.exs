@@ -5542,7 +5542,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     (ns api "Mission API" {:visibility :prompt})
     (defn fetch
       "Fetch through the mission wrapper."
-      {:signature "(query :string) -> :string" :effect :read}
+      {:signature "(query :string) -> :string" :effect :write}
       [query]
       (get (tool/raw-search {"query" query}) :value))
     (def answer "Configured answer." {:type ":int"} 7)

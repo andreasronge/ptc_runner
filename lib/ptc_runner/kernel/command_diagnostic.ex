@@ -38,6 +38,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.ComponentOverrideDiagnostic
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
+  alias PtcRunner.Kernel.DeclaredReadEffectDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.ExplicitFailureDiagnostic
   alias PtcRunner.Kernel.LimitCapacityDiagnostic
@@ -610,6 +611,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          %CommandSource{kind: :application}
        ),
        do: LimitCapacityDiagnostic.valid_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :application, code: :declared_read_effect_invalid},
+         %CommandSource{kind: :application}
+       ),
+       do: DeclaredReadEffectDiagnostic.valid_message?(message)
 
   defp valid_message_source?(
          _message,

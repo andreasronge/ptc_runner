@@ -81,10 +81,7 @@ pinned toolchain (`mise exec --` may be prefixed to the commands below).
 mkdir -p tmp/profiling/followup
 python3 bench/dabstep_mcp.py --capture-page tmp/profiling/followup/page.json
 mix run bench/dabstep_experiments.exs
-DABSTEP_BENCH_REVERSE=1 mix run bench/dabstep_experiments.exs
 DABSTEP_BENCH_WIDE=1 mix run bench/dabstep_experiments.exs
-DABSTEP_BENCH_PAIRED=1 mix run bench/dabstep_experiments.exs
-DABSTEP_BENCH_PAIRED=1 DABSTEP_BENCH_WIDE=1 mix run bench/dabstep_experiments.exs
 DABSTEP_BENCH_PROFILE=1 mix run bench/dabstep_experiments.exs
 mix run bench/dabstep_dispatch.exs
 mix run bench/dabstep_scaling.exs --suite kernel --samples 2
@@ -104,15 +101,14 @@ copies stay under ignored `tmp/profiling/followup/`. No live model calls occur.
 
 The isolated harness checks complete projected-row equality and malformed-cell
 behavior, then measures namespace size and effect-context controls. `WIDE`
-selects all 21 columns; `PAIRED` alternates current/prepared reader variants for
-six measured pairs after a warm-up pair. The normal run also emits an LRU
-hit-count model for three sequential scans; it is not a cache implementation. Allocation
-profiling is separate from timing. The Dispatcher ladder uses the captured
+selects all 21 columns. The normal run also emits an LRU hit-count model for
+three sequential scans; it is not a cache implementation. Allocation profiling
+is separate from timing. The Dispatcher ladder uses the captured
 response, schema controls, event capture and two inspection policies; it is not
-a transport benchmark. `--suite replay` checks the prepared-type variant,
-replaces the temporary CSV with identical bytes before its second replay, and
-verifies rejection after changing an EOF byte, restoring that byte afterward.
-It does not modify the shipped example or its recording.
+a transport benchmark. `--suite replay` checks the current reader, replaces the
+temporary CSV with identical bytes before its second replay, and verifies
+rejection after changing an EOF byte, restoring that byte afterward. It does
+not modify the shipped example or its recording.
 
 The scaling suite streams synthetic files of 20,000, 80,000 and 320,000 rows,
 selects three or all 21 columns, and checks full traversal counts. Each

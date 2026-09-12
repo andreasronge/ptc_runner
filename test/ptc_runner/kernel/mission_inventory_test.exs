@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.Component
+  alias PtcRunner.Kernel.DeclaredReadEffectValidator
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
@@ -11,6 +12,7 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
   alias PtcRunner.Kernel.MissionInventory
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.RunConfig
+  alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.Kernel.WorkflowEnvironment
 
   @expected ~S|{"schema_version":3,"exports":[{"ref":"tools/ping","kind":"function","call":"(tools/ping value)","doc":"Ping.","effect":"unknown","contract":null}],"capabilities":[{"name":"native.read","call":"(tool/native.read arguments)","description":"Read","effect":"read","input_schema":{"additionalProperties":false,"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"},"output_schema":null}],"data":[],"limits":{"evaluation_timeout_ms":30000,"parallel_timeout_ms":60000,"subordinate_source_bytes":131072,"subordinate_source_checks":128,"mission_capability_calls":256,"mission_capability_calls_per_name":128,"capability_argument_bytes":262144,"capability_result_bytes":1000000}}|
@@ -146,7 +148,7 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
     assert Enum.map(model["entries"], & &1["form"]) == ["(visible/shown)"]
   end
 
-  test "authoritative and model projections use the same mission-resolved wrapper effect" do
+  test "rejects a declared read export that directly resolves to write" do
     source = """
     (ns api "API" {:visibility :prompt})
     (defn save {:signature "() -> :any" :effect :read} [] (tool/write {}))
@@ -164,24 +166,16 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
       )
 
     {:ok, mission} = MissionEnvironment.new(bundle: bundle, capabilities: [capability])
-    {:ok, inventory} = MissionInventory.build(mission, Limits.defaults())
 
-    assert [export] = Jason.decode!(inventory.rendered)["exports"]
-    assert export["effect"] == "write"
-
-    model_export =
-      inventory.model_rendered
-      |> Jason.decode!()
-      |> Map.fetch!("entries")
-      |> Enum.find(&(&1["form"] == "(api/save)"))
-
-    assert model_export["effect"] == export["effect"]
+    assert {:error, {:declared_read_effect_violation, "api/save", :write}} =
+             MissionInventory.build(mission, Limits.defaults())
   end
 
-  test "unknown capability effects cannot be weakened by a declared read effect" do
+  test "rejects a declared read export whose transitive capability effect is unknown" do
     source = """
     (ns api "API" {:visibility :prompt})
-    (defn inspect {:signature "() -> :any" :effect :read} [] (tool/opaque {}))
+    (defn- inspect [] (tool/opaque {}))
+    (defn view {:signature "() -> :any" :effect :read} [] (inspect))
     """
 
     {:ok, component} = Component.new(id: "api", source: source)
@@ -196,18 +190,102 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
       )
 
     {:ok, mission} = MissionEnvironment.new(bundle: bundle, capabilities: [capability])
+
+    assert {:error, {:declared_read_effect_violation, "api/view", :unknown}} =
+             MissionInventory.build(mission, Limits.defaults())
+  end
+
+  test "keeps a declared write wrapper conservative over a read capability" do
+    source = """
+    (ns api "API" {:visibility :prompt})
+    (defn fetch {:signature "() -> :any" :effect :write} [] (tool/read {}))
+    """
+
+    {:ok, component} = Component.new(id: "api", source: source)
+    {:ok, bundle} = Kernel.compile_bundle([component])
+
+    {:ok, capability} =
+      Capability.new(
+        name: "read",
+        effect: :read,
+        input_schema: %{"type" => "object"},
+        callback: fn _ -> {:ok, %{}} end
+      )
+
+    {:ok, mission} = MissionEnvironment.new(bundle: bundle, capabilities: [capability])
     {:ok, inventory} = MissionInventory.build(mission, Limits.defaults())
 
-    assert [export] = Jason.decode!(inventory.rendered)["exports"]
-    assert export["effect"] == "unknown"
+    assert [%{"ref" => "api/fetch", "effect" => "write"}] =
+             Jason.decode!(inventory.rendered)["exports"]
 
-    model_export =
-      inventory.model_rendered
-      |> Jason.decode!()
-      |> Map.fetch!("entries")
-      |> Enum.find(&(&1["form"] == "(api/inspect)"))
+    assert %{"effect" => "write"} =
+             inventory.model_rendered
+             |> Jason.decode!()
+             |> Map.fetch!("entries")
+             |> Enum.find(&(&1["form"] == "(api/fetch)"))
+  end
 
-    assert model_export["effect"] == "unknown"
+  test "run configuration rejects a read export in the resolved workflow environment" do
+    source = """
+    (ns api "API" {:visibility :prompt})
+    (defn update {:effect :read} [] (tool/write {}))
+    """
+
+    {:ok, component} = Component.new(id: "api", source: source)
+    {:ok, bundle} = Kernel.compile_bundle([component])
+
+    {:ok, capability} =
+      Capability.new(
+        name: "write",
+        effect: :write,
+        input_schema: %{"type" => "object"},
+        callback: fn _ -> {:ok, %{}} end
+      )
+
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [capability])
+    limits = Limits.defaults()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "workflow-read-promise")
+
+    assert {:error, {:declared_read_effect_violation, "api/update", :write}} =
+             RunConfig.new(
+               workflow_environment: workflow,
+               missions: %{},
+               input: %{},
+               limits: limits,
+               event_sink: sink
+             )
+
+    EventSink.stop(sink)
+  end
+
+  test "inert provider declarations reject read wrappers before capability acquisition" do
+    source = """
+    (ns api "API" {:visibility :prompt})
+    (defn update {:effect :read} [] (tool/remote.write {}))
+    """
+
+    {:ok, component} = Component.new(id: "api", source: source)
+    {:ok, bundle} = Kernel.compile_bundle([component])
+
+    {:ok, rules} =
+      SelectionRules.new(
+        fields: %{},
+        cross_rules: [],
+        named_sets: %{"write" => ["remote.write"]}
+      )
+
+    declarations = [
+      %{
+        name: "remote",
+        destination: :workflow,
+        index: 0,
+        config: %{"allow" => ["remote.write"]},
+        descriptor: %{source: :mcp, selection_rules: rules}
+      }
+    ]
+
+    assert {:error, {:declared_read_effect_violation, "api/update", :write}} =
+             DeclaredReadEffectValidator.validate(bundle, %{}, %{}, declarations)
   end
 
   test "propagates stronger declared effects through nested wrappers" do

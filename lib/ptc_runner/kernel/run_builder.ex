@@ -56,6 +56,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CompileDiagnostic
   alias PtcRunner.Kernel.ComponentCatalog
+  alias PtcRunner.Kernel.DeclaredReadEffectDiagnostic
+  alias PtcRunner.Kernel.DeclaredReadEffectValidator
   alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.ExecutionOutcome
@@ -136,6 +138,26 @@ defmodule PtcRunner.Kernel.RunBuilder do
      CommandDiagnostic.new!(
        :application,
        :limit_capacity_invalid,
+       [source: CommandSource.fixed(:application)] ++ opts
+     )}
+  end
+
+  def environment_failure_diagnostic(
+        {:declared_read_effect_violation, ref, effect},
+        %PreparedRun{},
+        provider_activity
+      )
+      when is_binary(ref) and effect in [:write, :unknown] and is_boolean(provider_activity) do
+    opts =
+      case DeclaredReadEffectDiagnostic.message(ref, effect) do
+        {:ok, message} -> [message: message, provider_activity: provider_activity]
+        :error -> [provider_activity: provider_activity]
+      end
+
+    {:ok,
+     CommandDiagnostic.new!(
+       :application,
+       :declared_read_effect_invalid,
        [source: CommandSource.fixed(:application)] ++ opts
      )}
   end
@@ -708,6 +730,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
     with {:ok, providers} <-
            providers(
              prepared.request.package,
+             {prepared.workflow_bundle, prepared.mission_bundles},
              registry,
              provider_input_class(prepared.request.input.authority),
              opts,
@@ -737,6 +760,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
     with {:ok, providers} <-
            providers(
              prepared.request.package,
+             {prepared.workflow_bundle, prepared.mission_bundles},
              registry,
              provider_input_class(prepared.request.input.authority),
              PublicationAuthority.options(authority),
@@ -854,6 +878,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
            ) do
       case providers(
              request.package,
+             bundles,
              registry,
              provider_input_class(request.input.authority),
              opts,
@@ -1326,16 +1351,23 @@ defmodule PtcRunner.Kernel.RunBuilder do
   # unbounded session and lets the registry resolve credentials synchronously.
   # An active command supplies the sealed pair acquisition plans from, the
   # session it claimed, and the credentials phase-8 step 5 resolved.
-  defp providers(manifest, registry, input_class, opts, acquisition)
+  defp providers(manifest, bundles, registry, input_class, opts, acquisition)
        when input_class in [:normal, :private_inspection] do
     if provider_free?(manifest.providers) do
       {:ok, empty_providers(input_class)}
     else
-      acquire_providers(manifest, registry, input_class, opts, acquisition)
+      acquire_providers(manifest, bundles, registry, input_class, opts, acquisition)
     end
   end
 
-  defp acquire_providers(manifest, registry, input_class, opts, nil) do
+  defp acquire_providers(
+         manifest,
+         {workflow_bundle, mission_bundles},
+         registry,
+         input_class,
+         opts,
+         nil
+       ) do
     with {:ok, session} <- ProviderSession.start(manifest.limits) do
       manifest
       |> ProviderAcquisition.acquire_embedded(
@@ -1344,6 +1376,14 @@ defmodule PtcRunner.Kernel.RunBuilder do
         input_class,
         fn effective_class ->
           preflight_provider_artifacts(manifest, effective_class, opts)
+        end,
+        fn preparations ->
+          DeclaredReadEffectValidator.validate_prepared(
+            workflow_bundle,
+            mission_bundles,
+            manifest.missions,
+            preparations
+          )
         end
       )
       |> close_failed_acquisition(session)
@@ -1356,6 +1396,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   # connectivity narrows the targets.
   defp acquire_providers(
          _manifest,
+         _bundles,
          registry,
          _input_class,
          _opts,
@@ -1368,6 +1409,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   defp acquire_providers(
          _manifest,
+         _bundles,
          registry,
          _input_class,
          _opts,

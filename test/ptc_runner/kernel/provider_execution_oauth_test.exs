@@ -838,7 +838,8 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
   defp reseal_services(services) do
     payload =
       {services.activation, services.credential_resolver, services.provider_application_mode,
-       services.oauth_mode, services.runtime_binding, services.host_payload}
+       services.oauth_mode, services.provider_call_admission, services.runtime_binding,
+       services.host_payload}
 
     %{services | attestation: Attestation.attest(ProviderRuntimeServices, payload)}
   end

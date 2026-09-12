@@ -11,7 +11,8 @@ Individual measurements and provenance are retained in `FOLLOWUP.json`.
 
 1. **Interpreted projection remains the main dataset-processing cost.**
    Preparing column types once per page is a small improvement, not an order
-   of magnitude change. Investigate a generic bounded native projection or
+   of magnitude change; that measured variant is now used by `payments.clj`.
+   Investigate a generic bounded native projection or
    pure-builtin execution path before adding a parsed-page cache.
 2. **Trace sorting had a cheap, measurable fix.** Computing timestamp sort
    keys once per summary reduced the 1,000-run query from 859 to 235 ms. The
@@ -138,7 +139,8 @@ runs were noisier still and did not establish an improvement. The isolated
 page runs, reverse order and allocation profiles provide the stronger evidence
 for the modest type-preparation gain.
 
-The prepared-type variant completed full replays in 90.47 and 89.71 seconds,
+The prepared-type variant, now selected for `payments.clj`, completed full
+replays in 90.47 and 89.71 seconds,
 with all 11 recorded model responses and the same agreed `B. BE` result and
 reviewer caveat. The second run replaced the CSV with identical bytes on a new
 inode. A subsequent EOF-byte mutation was rejected with `explicit_failure`.

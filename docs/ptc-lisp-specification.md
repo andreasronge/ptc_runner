@@ -3675,14 +3675,20 @@ effect, and docstring — so `:visibility` and the separate arity and parameter
 fields are available only from `export-meta`. Neither reports capability
 wiring.
 
-The reported effect is conservative. The authoritative value is the
-mission-resolved effect in the prompt inventory, which combines an export's
-declaration with the effects of the capabilities it reaches; a wrapper declaring
-`:read` over a `:write` capability resolves to `:write`. Introspection cannot
-see installed capability effects, so an export that reaches any capability is
-reported as `:write` when its chain declares `:write` and `:unknown` otherwise.
-It is never reported as `:read`, so no answer here presents an unresolved effect
-as safe.
+The reported effect is conservative. An explicit `:effect :read` is a promise:
+when the bundle is assembled with a workflow or mission capability set, every
+capability the export reaches must resolve to `:read`. Assembly rejects the
+export if a direct or transitive capability resolves to `:write` or `:unknown`.
+A declared `:write` remains conservative and valid over read or write behavior;
+an omitted or explicit `:unknown` declaration retains its conservative meaning.
+
+The authoritative accepted value is the mission-resolved effect in the prompt
+inventory, which combines an export's declaration with the resolved effects of
+the capabilities it reaches. Introspection cannot see installed capability
+effects, so an export that reaches any capability is reported as `:write` when
+its chain declares `:write` and `:unknown` otherwise. It is never reported as
+`:read`, so no answer here presents an unresolved effect as safe. Descriptions
+and docstrings do not participate in effect resolution.
 
 `apropos` performs a case-insensitive literal substring search. For attached
 prelude exports it searches refs and docstrings. For the fixed registry it

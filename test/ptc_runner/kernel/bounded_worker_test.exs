@@ -267,12 +267,18 @@ defmodule PtcRunner.Kernel.BoundedWorkerTest do
           # its monitor under full-suite scheduler pressure and report
           # `:noproc` instead of the cancellation reason being asserted.
           max_heap_words: 100_000,
-          cancel_with_caller: true
+          cancel_with_caller: true,
+          startup_fault_hook: fn worker ->
+            send(test, {:bounded_worker_starting, worker})
+            receive do: (:worker_monitored -> :ok)
+          end
         )
       end)
 
-    assert_receive {:bounded_worker, worker}
+    assert_receive {:bounded_worker_starting, worker}
     worker_ref = Process.monitor(worker)
+    send(caller, :worker_monitored)
+    assert_receive {:bounded_worker, ^worker}
     Process.exit(caller, :kill)
     assert_receive {:DOWN, ^worker_ref, :process, ^worker, :killed}
   end

@@ -141,6 +141,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
                {:ok, built_provider()} | {:error, term()})
   @type prepared :: %{
           credential_names: [binary()],
+          capability_effects: %{optional(binary()) => :read | :write},
           data_class: :normal | :private_inspection,
           accepts_data: [:normal | :private_inspection],
           requires: [atom()],
@@ -283,7 +284,9 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   The preparation callback must be side-effect free. Its returned preflight
   callback may perform only non-secret local checks; the acquire callback is
   the first phase allowed to use resolved credentials or open a provider.
-  Optional `:data_class` and `:accepts_data` fields default to normal-only and
+  Optional `:capability_effects` reports effects proven by pure preparation and
+  defaults to no proven capabilities. Optional `:data_class` and `:accepts_data`
+  fields default to normal-only and
   must exactly match the acquired build. A builder bound to a declared policy
   must also prepare exactly that policy; an installed catalog projects one from
   the sealed descriptor of every builder it selects.
@@ -494,6 +497,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
       |> Map.put_new(:provides, [])
       |> Map.put_new(:workflow_llm?, false)
       |> Map.put_new(:workflow_llm_route, nil)
+      |> Map.put_new(:capability_effects, %{})
 
     if Map.keys(prepared) --
          [
@@ -504,13 +508,15 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
            :requires,
            :provides,
            :workflow_llm?,
-           :workflow_llm_route
+           :workflow_llm_route,
+           :capability_effects
          ] == [] and
          is_boolean(prepared.workflow_llm?) and
          valid_workflow_llm_route?(prepared.workflow_llm?, prepared.workflow_llm_route) and
          valid_data_policy?(prepared.data_class, prepared.accepts_data) and
          length(names) <= 128 and Enum.uniq(names) == names and Enum.all?(names, &valid_name?/1) and
          valid_services?(prepared.requires) and valid_services?(prepared.provides) and
+         valid_capability_effects?(prepared.capability_effects) and
          MapSet.disjoint?(MapSet.new(prepared.requires), MapSet.new(prepared.provides)) do
       {:ok, prepared}
     else
@@ -520,6 +526,15 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   defp normalize_prepared({:error, _reason} = error), do: error
   defp normalize_prepared(_result), do: {:error, :invalid_provider_preparation}
+
+  defp valid_capability_effects?(effects)
+       when is_map(effects) and not is_struct(effects) and map_size(effects) <= 128,
+       do:
+         Enum.all?(effects, fn {name, effect} ->
+           Capability.valid_name?(name) and effect in [:read, :write]
+         end)
+
+  defp valid_capability_effects?(_effects), do: false
 
   defp valid_workflow_llm_route?(false, nil), do: true
 

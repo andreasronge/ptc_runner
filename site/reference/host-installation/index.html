@@ -447,7 +447,14 @@ selected live installation's <code class="inline">ceilings.request_timeout_ms</c
 request. Every other application-narrowable row can be raised from the manifest
 alone, up to its installed ceiling.</p><p>Four timeouts are host-only: <code class="inline">provider_cleanup_timeout_ms</code>,
 <code class="inline">local_preflight_timeout_ms</code>, <code class="inline">selection_validation_timeout_ms</code>, and
-<code class="inline">doctor_connectivity_timeout_ms</code>. A manifest cannot declare them.</p><p>The generated <a href="/reference/kernel-limits-reference/">Kernel limits reference</a> is the
+<code class="inline">doctor_connectivity_timeout_ms</code>. A manifest cannot declare them.</p><p><code class="inline">live_provider_tasks</code> remains a per-run callback bound; it neither sizes nor
+describes aggregate hosted LLM capacity. An embedding host that shares a live
+provider transport across runs must pass one supervised
+<code class="inline">ProviderCallAdmission</code> owner through all corresponding
+<code class="inline">ProviderRuntimeServices</code>. Command-owned one-shot VMs do not start that domain.
+Replay, workflows that call no provider, direct LLM and embedding calls, and
+callbacks that bypass the installed requester consume no admission slot and
+must be bounded by their caller.</p><p>The generated <a href="/reference/kernel-limits-reference/">Kernel limits reference</a> is the
 complete table of names, meanings, units, scopes, defaults, accepted ranges,
 and identity participation. The host schema is generated from the same
 catalog.</p><h2 id="verify-selected-providers">Verify selected providers</h2><p>Run active local, credential, authorization, and connectivity checks without

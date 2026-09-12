@@ -123,6 +123,14 @@ On the measured Apple ARM64 machine, the full recording took about 96 seconds
 and a count-only scan about 19 seconds after runtime optimization. These use
 recorded model responses; live runs also include model latency.
 
+The reader also prepares each requested column's conversion kind once per page
+instead of rediscovering it for every cell. Alternating measurements reduced
+complete page processing by about 4.1% for the three-column workload and 2.5%
+for all 21 columns. A generic row-fold prototype was slower, and a bounded
+page cache was rejected: it would miss throughout a sequential scan unless it
+could retain all 49 pages, while adding authorization and invalidation state.
+Interpreted row projection remains the main processing bottleneck.
+
 ## Verify and correct within the run
 
 The reviewer now proposes its measurements through `agent.core/run-outcome`'s

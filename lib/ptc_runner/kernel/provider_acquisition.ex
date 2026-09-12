@@ -173,20 +173,36 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
           input_class(),
           artifact_preflight()
         ) :: result()
+  def acquire_embedded(package, registry, session, input_class, artifact_preflight),
+    do:
+      acquire_embedded(package, registry, session, input_class, artifact_preflight, fn _ ->
+        :ok
+      end)
+
+  @spec acquire_embedded(
+          ApplicationPackage.t(),
+          ProviderRegistry.t(),
+          ProviderSession.t(),
+          input_class(),
+          artifact_preflight(),
+          ([map()] -> :ok | {:error, term()})
+        ) :: result()
   def acquire_embedded(
         %ApplicationPackage{} = package,
         %ProviderRegistry{} = registry,
         session,
         input_class,
-        artifact_preflight
+        artifact_preflight,
+        preparation_validation
       )
       when input_class in [:normal, :private_inspection] and
-             is_function(artifact_preflight, 1) do
+             is_function(artifact_preflight, 1) and is_function(preparation_validation, 1) do
     max_heap_words = package.limits.provider_heap_words
 
     with :ok <- unbounded_session(session),
          {:ok, preparations} <-
            prepare_providers(package, registry, session, max_heap_words, :all),
+         :ok <- preparation_validation.(preparations),
          :ok <- validate_provider_dependencies(preparations),
          :ok <- validate_workflow_llm_defaults(preparations),
          effective_class <- effective_data_class(input_class, preparations),
@@ -203,8 +219,15 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
     end
   end
 
-  def acquire_embedded(_package, _registry, _session, _input_class, _artifact_preflight),
-    do: {:error, :invalid_provider_acquisition}
+  def acquire_embedded(
+        _package,
+        _registry,
+        _session,
+        _input_class,
+        _artifact_preflight,
+        _preparation_validation
+      ),
+      do: {:error, :invalid_provider_acquisition}
 
   # The answer is a pure read of the caller's sealed handle, so it cannot change
   # while this acquisition runs: asking it once up front is the same answer
@@ -469,6 +492,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
           provides: provider.provides,
           workflow_llm?: provider.workflow_llm?,
           workflow_llm_route: provider.workflow_llm_route,
+          capability_effects: provider.capability_effects,
           registrar: registrar,
           prepared: provider
         }
