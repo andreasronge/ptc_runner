@@ -171,7 +171,7 @@ defmodule PtcRunner.Kernel.ProviderCallOwner do
              handle,
              deadline,
              admission_monitor,
-             cleanup_deadline(context)
+             cleanup_timeout(context)
            ) do
         {:ok, result} ->
           publish_after_completion(lease, result, context)
@@ -283,6 +283,12 @@ defmodule PtcRunner.Kernel.ProviderCallOwner do
        do: System.monotonic_time(:millisecond) + timeout_ms
 
   defp cleanup_deadline(_context), do: System.monotonic_time(:millisecond) + 5_000
+
+  defp cleanup_timeout(%{provider_cleanup_timeout_ms: timeout_ms})
+       when is_integer(timeout_ms) and timeout_ms > 0,
+       do: timeout_ms
+
+  defp cleanup_timeout(_context), do: 5_000
 
   defp cleanup_failed,
     do:

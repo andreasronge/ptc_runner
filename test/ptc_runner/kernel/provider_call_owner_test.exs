@@ -142,5 +142,81 @@ defmodule PtcRunner.Kernel.ProviderCallOwnerTest do
     assert {:ok, %{active: 0, status: :ready}} = ProviderCallAdmission.snapshot(admission)
   end
 
+  test "completes the lease before restoring a requester exception" do
+    admission = start_supervised!({ProviderCallAdmission, max_active_calls: 1, max_waiters: 0})
+
+    assert_raise RuntimeError, "requester failed", fn ->
+      ProviderCallOwner.run(admission, fn _, _ -> raise "requester failed" end, %{}, %{
+        llm_request_deadline_ms: monotonic_deadline(1_000),
+        provider_cleanup_timeout_ms: 100
+      })
+    end
+
+    assert {:ok, %{active: 0, status: :ready}} = ProviderCallAdmission.snapshot(admission)
+  end
+
+  test "cooperative cancellation terminates an attested custom requester caller" do
+    admission = start_supervised!({ProviderCallAdmission, max_active_calls: 1, max_waiters: 0})
+    parent = self()
+
+    guardian =
+      spawn(fn ->
+        ProviderCallOwner.run(
+          admission,
+          fn _, _ ->
+            send(parent, {:custom_requester_started, self()})
+            receive do: (:held -> :ok)
+          end,
+          %{},
+          %{
+            llm_request_deadline_ms: monotonic_deadline(5_000),
+            provider_cleanup_timeout_ms: 1_000
+          }
+        )
+      end)
+
+    assert_receive {:custom_requester_started, requester}
+    requester_ref = Process.monitor(requester)
+    guardian_ref = Process.monitor(guardian)
+    request_ref = make_ref()
+    send(guardian, {:cancel_provider_call, self(), request_ref, monotonic_deadline(1_000)})
+
+    assert_receive {:DOWN, ^requester_ref, :process, ^requester, :killed}
+    assert_receive {:provider_call_drained, ^request_ref, ^guardian, :drained}
+    assert_receive {:DOWN, ^guardian_ref, :process, ^guardian, :normal}
+    assert {:ok, %{active: 0, status: :ready}} = ProviderCallAdmission.snapshot(admission)
+  end
+
+  test "admission loss anchors cleanup when the loss is observed" do
+    admission = start_supervised!({ProviderCallAdmission, max_active_calls: 1, max_waiters: 0})
+    parent = self()
+
+    guardian =
+      Task.async(fn ->
+        ProviderCallOwner.run(
+          admission,
+          fn _, _ ->
+            send(parent, {:requester_started, self()})
+            receive do: (:held -> :ok)
+          end,
+          %{},
+          %{
+            llm_request_deadline_ms: monotonic_deadline(5_000),
+            provider_cleanup_timeout_ms: 10
+          }
+        )
+      end)
+
+    assert_receive {:requester_started, requester}
+    requester_ref = Process.monitor(requester)
+    Process.send_after(self(), :cleanup_interval_elapsed, 20)
+    assert_receive :cleanup_interval_elapsed
+    Process.exit(admission, :kill)
+
+    assert_receive {:DOWN, ^requester_ref, :process, ^requester, :killed}
+
+    assert {:error, %ProviderError{kind: :admission_unavailable}} = Task.await(guardian)
+  end
+
   defp monotonic_deadline(offset), do: System.monotonic_time(:millisecond) + offset
 end

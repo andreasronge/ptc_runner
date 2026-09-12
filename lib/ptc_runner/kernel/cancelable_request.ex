@@ -78,10 +78,10 @@ defmodule PtcRunner.Kernel.CancelableRequest do
         %__MODULE__{owner: owner, pid: pid, monitor: monitor, gate: gate} = handle,
         deadline,
         admission_monitor,
-        cleanup_deadline
+        cleanup_timeout_ms
       )
       when owner == self() and is_integer(deadline) and is_reference(admission_monitor) and
-             is_integer(cleanup_deadline) do
+             is_integer(cleanup_timeout_ms) and cleanup_timeout_ms > 0 do
     timeout = max(deadline - System.monotonic_time(:millisecond), 0)
 
     receive do
@@ -98,6 +98,7 @@ defmodule PtcRunner.Kernel.CancelableRequest do
         {:error, :cancellation_witness_unavailable}
 
       {:DOWN, ^admission_monitor, :process, _admission, _reason} ->
+        cleanup_deadline = System.monotonic_time(:millisecond) + cleanup_timeout_ms
         _ = cancel_and_drain(handle, cleanup_deadline)
         {:error, :provider_admission_unavailable}
 
@@ -125,12 +126,14 @@ defmodule PtcRunner.Kernel.CancelableRequest do
       when owner == self() and is_integer(deadline) do
     Process.unlink(pid)
 
-    if :atomics.get(state, 1) == 0 do
-      Process.exit(pid, :kill)
-      await_down(pid, monitor, deadline)
-    else
-      send(pid, {:cancel_adapter_request, gate, owner})
-      await_adapter_drain(pid, monitor, gate, state, deadline, false)
+    case :atomics.get(state, 1) do
+      2 ->
+        send(pid, {:cancel_adapter_request, gate, owner})
+        await_adapter_drain(pid, monitor, gate, state, deadline, false)
+
+      _predispatch_or_attested_caller ->
+        Process.exit(pid, :kill)
+        await_down(pid, monitor, deadline)
     end
   end
 
@@ -172,6 +175,12 @@ defmodule PtcRunner.Kernel.CancelableRequest do
   end
 
   defp normalize_result({:ok, result}), do: {:ok, result}
+
+  defp normalize_result({__MODULE__, :raised, _exception, _stacktrace} = failure),
+    do: {:ok, failure}
+
+  defp normalize_result({__MODULE__, :caught, _kind, _reason} = failure),
+    do: {:ok, failure}
 
   defp provider_spawn_options do
     max_heap_size = Process.info(self(), :max_heap_size) |> elem(1)
