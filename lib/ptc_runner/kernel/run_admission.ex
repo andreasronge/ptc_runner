@@ -32,6 +32,12 @@ defmodule PtcRunner.Kernel.RunAdmission do
   capacity domain; the host must drain old work before replacing it. Active
   execution owners also monitor admission-owner death and abort their runs.
 
+  ServingTemplate retains a transferred reservation through calling-worker
+  publication. Execution cleanup transfers its capacity back to the monitored
+  caller, without making the slot available; only publication completion releases
+  it. Expiry marks it cancelled but retains it until publication cleanup. Caller
+  death in this interval fences admission, as publication cleanup is unproven.
+
   This counts hosted workflows, not physical LLM requests. Per-run provider
   task limits still apply. Direct adapter calls and executions through other
   entry points bypass this owner; Finch capacity, aggregate physical-attempt
@@ -160,6 +166,19 @@ defmodule PtcRunner.Kernel.RunAdmission do
   def await(_), do: {:error, :execution_session_unavailable}
 
   @doc false
+  @spec reservation_snapshot(reservation()) :: {:ok, snapshot()} | {:error, atom()}
+  def reservation_snapshot({__MODULE__, host, _}), do: snapshot(host)
+
+  @doc false
+  @spec retain_publication(reservation()) :: :ok | {:error, atom()}
+  def retain_publication({__MODULE__, host, ref}), do: call(host, {:retain_publication, ref})
+
+  @doc false
+  @spec finish_publication(reservation(), boolean()) :: :ok | {:error, atom()}
+  def finish_publication({__MODULE__, host, ref}, clean?),
+    do: call(host, {:finish_publication, ref, clean?})
+
+  @doc false
   def transfer(host, ref, ticket, caller), do: call(host, {:transfer, ref, ticket, caller})
 
   @type snapshot :: %{
@@ -283,11 +302,44 @@ defmodule PtcRunner.Kernel.RunAdmission do
           timer: timer,
           ticket: nil,
           owner: nil,
-          cancelled?: false
+          cancelled?: false,
+          publication: :none
         }
 
         {:reply, {:ok, {__MODULE__, self(), ref}},
          %{state | reservations: Map.put(state.reservations, ref, reservation)}}
+    end
+  end
+
+  def handle_call({:retain_publication, ref}, {caller, _}, state) do
+    case state.reservations[ref] do
+      %{caller: ^caller, owner: nil, ticket: nil, publication: :none} = reservation ->
+        {:reply, :ok, put_reservation(state, ref, %{reservation | publication: :pending})}
+
+      _ ->
+        {:reply, {:error, :run_admission_unavailable}, state}
+    end
+  end
+
+  def handle_call({:finish_publication, ref, clean?}, {caller, _}, state)
+      when is_boolean(clean?) do
+    case state.reservations[ref] do
+      %{caller: ^caller, owner: nil, publication: publication} = reservation
+      when publication in [:held, :pending] ->
+        reply = if reservation.cancelled?, do: {:error, :call_cancelled}, else: :ok
+        next = drop_reservation(state, ref)
+        {:reply, reply, %{next | status: if(clean?, do: next.status, else: :unavailable)}}
+
+      %{caller: ^caller, owner: owner} = reservation when is_pid(owner) and not clean? ->
+        next = cancel_reservation(state, ref)
+
+        next =
+          put_reservation(next, ref, %{reservation | publication: :discard, cancelled?: true})
+
+        {:reply, :ok, %{next | status: :unavailable}}
+
+      _ ->
+        {:reply, {:error, :run_admission_unavailable}, state}
     end
   end
 
@@ -297,7 +349,7 @@ defmodule PtcRunner.Kernel.RunAdmission do
     case state.reservations[ref] do
       %{caller: ^caller, owner: nil, ticket: nil} = reservation ->
         if state.status == :ready and deadline_live?(reservation.deadline) and
-             Process.alive?(caller) do
+             Process.alive?(caller) and not reservation.cancelled? do
           ticket = make_ref()
           {:reply, {:ok, ticket}, put_reservation(state, ref, %{reservation | ticket: ticket})}
         else
@@ -315,7 +367,8 @@ defmodule PtcRunner.Kernel.RunAdmission do
     case state.reservations[ref] do
       %{caller: ^caller, owner: nil, ticket: ^ticket} = reservation when is_reference(ticket) ->
         if state.status == :ready and deadline_live?(reservation.deadline) and
-             Process.alive?(caller) and not Map.has_key?(state.owners, owner) do
+             Process.alive?(caller) and not reservation.cancelled? and
+             not Map.has_key?(state.owners, owner) do
           Process.demonitor(reservation.monitor, [:flush])
           next = put_reservation(state, ref, %{reservation | owner: owner, monitor: nil})
           {:reply, :ok, %{next | owners: Map.put(next.owners, owner, Process.monitor(owner))}}
@@ -366,7 +419,7 @@ defmodule PtcRunner.Kernel.RunAdmission do
 
         {:reply, :ok,
          %{
-           drop_owner_reservation(state, owner)
+           complete_owner_reservation(state, owner, clean?)
            | owners: owners,
              status: if(clean?, do: state.status, else: :unavailable)
          }}
@@ -440,6 +493,14 @@ defmodule PtcRunner.Kernel.RunAdmission do
       nil ->
         state
 
+      %{owner: nil, publication: publication} = reservation
+      when publication in [:held, :pending] ->
+        if Process.alive?(reservation.caller) do
+          put_reservation(state, ref, %{reservation | cancelled?: true})
+        else
+          %{drop_reservation(state, ref) | status: :unavailable}
+        end
+
       %{owner: nil} ->
         drop_reservation(state, ref)
 
@@ -457,6 +518,24 @@ defmodule PtcRunner.Kernel.RunAdmission do
     if reservation.monitor, do: Process.demonitor(reservation.monitor, [:flush])
     if reservation.timer, do: Process.cancel_timer(reservation.timer)
     %{state | reservations: reservations}
+  end
+
+  defp complete_owner_reservation(state, owner, clean?) do
+    Enum.reduce(state.reservations, state, fn
+      {ref, %{owner: ^owner, publication: :pending} = reservation}, acc when clean? ->
+        put_reservation(acc, ref, %{
+          reservation
+          | owner: nil,
+            publication: :held,
+            monitor: Process.monitor(reservation.caller)
+        })
+
+      {ref, %{owner: ^owner}}, acc ->
+        drop_reservation(acc, ref)
+
+      _, acc ->
+        acc
+    end)
   end
 
   defp drop_owner_reservation(state, owner) do

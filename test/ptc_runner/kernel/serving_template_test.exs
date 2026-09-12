@@ -7,7 +7,11 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
   alias PtcRunner.Kernel.ExecutionInput
   alias PtcRunner.Kernel.ExecutionPolicy
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.PublicationAuthority
+  alias PtcRunner.Kernel.RunAdmission
   alias PtcRunner.Kernel.RunRequest
+  alias PtcRunner.Kernel.ServingCall
+  alias PtcRunner.Kernel.ServingOutcome
   alias PtcRunner.Kernel.ServingTemplate
   alias PtcRunner.Kernel.ValueContract
 
@@ -226,18 +230,14 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
   end
 
   @tag :tmp_dir
-  test "private events and narrowed limits are frozen without identities", %{tmp_dir: dir} do
+  test "private templates are rejected before serving", %{tmp_dir: dir} do
     path =
       fixture(dir, %{
         "events" => %{"policy" => "private"},
         "limits" => %{"run_duration_ms" => 500}
       })
 
-    assert {:ok, template} = build(path)
-    assert ServingTemplate.policy(template).effective_event_policy == :private
-    assert ServingTemplate.limits(template).run_duration_ms == 500
-    assert template.package.events.run_id == nil
-    assert template.package.events.trace_id == nil
+    assert {:error, :private_result_unservable} = build(path)
 
     assert {:error, :invalid_application} =
              build(fixture(dir, %{"limits" => %{"run_duration_ms" => 9_999_999}}))
@@ -301,6 +301,234 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
 
     assert {:error, :invalid_installed_limits} = ServingTemplate.from_directory(path, %{})
     assert {:error, :invalid_application} = build(path)
+  end
+
+  @tag :tmp_dir
+  test "calls reuse the compiled application after its directory is removed", %{tmp_dir: dir} do
+    assert {:ok, template} = build(fixture(dir))
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 2})
+    File.rm_rf!(dir)
+
+    for answer <- 1..3 do
+      assert {:ok, reservation} = ServingTemplate.reserve(template, %{"answer" => answer}, host)
+      outcome = ServingTemplate.activate(reservation)
+      assert ServingOutcome.code(outcome) == :success
+      assert ServingOutcome.value(outcome) == {:ok, %{"answer" => answer}}
+    end
+
+    outcome = ServingTemplate.call(template, %{"answer" => "invalid"}, host)
+    assert ServingOutcome.code(outcome) == :invalid_input
+
+    assert ServingOutcome.metadata(outcome) == %{
+             dispatched: false,
+             write_effects_possible: false
+           }
+
+    assert {:ok, %{in_use: 0, status: :ready}} = RunAdmission.snapshot(host)
+  end
+
+  @tag :tmp_dir
+  test "publication retains capacity through success, failure and uncertain cleanup", %{
+    tmp_dir: dir
+  } do
+    assert {:ok, template} = build(fixture(dir))
+    parent = self()
+
+    for mode <- [:success, :publication_failed, :cleanup_failed] do
+      {:ok, host} = RunAdmission.start_link(max_concurrent_runs: 1)
+
+      task =
+        Task.async(fn ->
+          {:ok, reservation} = ServingTemplate.reserve(template, %{"answer" => 1}, host)
+
+          hooks = %{
+            before_publication: fn authority ->
+              send(parent, {:publishing, self()})
+              receive do: (:publish -> :ok)
+
+              if mode == :publication_failed,
+                do: PublicationAuthority.abort(authority)
+            end,
+            cleanup: fn authority ->
+              :ok = PublicationAuthority.abort(authority)
+              if mode == :cleanup_failed, do: {:error, :uncertain}, else: :ok
+            end
+          }
+
+          ServingCall.activate(reservation, hooks)
+        end)
+
+      assert_receive {:publishing, worker}
+      assert {:ok, %{in_use: 1}} = RunAdmission.snapshot(host)
+
+      assert ServingOutcome.code(ServingTemplate.call(template, %{"answer" => 2}, host)) == :busy
+
+      send(worker, :publish)
+      result = Task.await(task)
+      assert ServingOutcome.code(result) == mode
+      assert {:ok, %{in_use: 0, status: status}} = RunAdmission.snapshot(host)
+      assert status == if(mode == :cleanup_failed, do: :unavailable, else: :ready)
+      GenServer.stop(host)
+    end
+  end
+
+  @tag :tmp_dir
+  test "unused and foreign reservations cannot dispatch and release capacity", %{tmp_dir: dir} do
+    assert {:ok, template} = build(fixture(dir))
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+    {:ok, reservation} = ServingTemplate.reserve(template, %{"answer" => 1}, host)
+    task = Task.async(fn -> ServingTemplate.activate(reservation) end)
+    assert ServingOutcome.code(Task.await(task)) == :internal_error
+    assert {:ok, %{in_use: 1}} = RunAdmission.snapshot(host)
+    assert :ok = ServingTemplate.close(reservation)
+    assert {:ok, %{in_use: 0}} = RunAdmission.snapshot(host)
+    outcome = ServingTemplate.activate(reservation)
+    assert ServingOutcome.code(outcome) == :admission_unavailable
+    assert ServingOutcome.metadata(outcome).dispatched == false
+  end
+
+  @tag :tmp_dir
+  test "closed refusals never contain input or internal detail", %{tmp_dir: dir} do
+    assert {:ok, template} = build(fixture(dir))
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+
+    for {input, deadline, code} <- [
+          {%{"secret" => "credential"}, :infinity, :invalid_input},
+          {%{"answer" => 1}, System.monotonic_time(:millisecond) - 1, :cancelled},
+          {%{"answer" => 1}, :invalid, :internal_error}
+        ] do
+      result = ServingTemplate.call(template, input, host, deadline)
+      assert ServingOutcome.code(result) == code
+      assert ServingOutcome.value(result) == :error
+      refute inspect(result) =~ "credential"
+      assert ServingOutcome.metadata(result).dispatched == false
+    end
+
+    GenServer.stop(host)
+
+    assert ServingOutcome.code(ServingTemplate.call(template, %{"answer" => 1}, host)) ==
+             :admission_unavailable
+  end
+
+  @tag :tmp_dir
+  test "failing and successful concurrent calls cannot contaminate fresh values", %{tmp_dir: dir} do
+    source =
+      "(ns app) (defn run {:effect :write} [input] (if (= (get input :answer) 0) (return {}) (return input)))"
+
+    assert {:ok, template} = build(fixture(dir, %{}, source))
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 16})
+
+    outcomes =
+      0..15
+      |> Task.async_stream(
+        fn answer ->
+          {answer, ServingTemplate.call(template, %{"answer" => answer}, host)}
+        end,
+        max_concurrency: 16
+      )
+      |> Enum.map(fn {:ok, value} -> value end)
+
+    for {answer, result} <- outcomes do
+      assert ServingOutcome.code(result) ==
+               if(answer == 0, do: :invalid_result, else: :success)
+
+      assert ServingOutcome.metadata(result).write_effects_possible
+
+      if answer > 0,
+        do: assert(ServingOutcome.value(result) == {:ok, %{"answer" => answer}})
+    end
+
+    assert {:ok, %{in_use: 0, status: :ready}} = RunAdmission.snapshot(host)
+  end
+
+  @tag :tmp_dir
+  test "publication deadline shares the reservation deadline and cleanup wins", %{tmp_dir: dir} do
+    assert {:ok, template} = build(fixture(dir))
+
+    for clean? <- [true, false] do
+      {:ok, host} = RunAdmission.start_link(max_concurrent_runs: 1)
+      deadline = System.monotonic_time(:millisecond) + 200
+      {:ok, reservation} = ServingTemplate.reserve(template, %{"answer" => 1}, host, deadline)
+
+      hooks = %{
+        before_publication: fn _ ->
+          Process.send_after(
+            self(),
+            :deadline,
+            max(0, deadline - System.monotonic_time(:millisecond) + 1)
+          )
+
+          receive do: (:deadline -> :ok)
+        end,
+        cleanup: fn authority ->
+          :ok = PublicationAuthority.abort(authority)
+          if clean?, do: :ok, else: {:error, :uncertain}
+        end
+      }
+
+      result = ServingCall.activate(reservation, hooks)
+
+      assert ServingOutcome.code(result) ==
+               if(clean?, do: :cancelled, else: :cleanup_failed)
+
+      assert ServingOutcome.value(result) == :error
+      GenServer.stop(host)
+    end
+  end
+
+  @tag :tmp_dir
+  test "execution failures and oversized results stay closed", %{tmp_dir: dir} do
+    for {source, limits, code} <- [
+          {~s|(ns app) (defn run {:effect :write} [input] (fail {"secret" "must-not-escape"}))|,
+           %{}, :execution_failed},
+          {@source, %{"terminal_result_bytes" => 1}, :invalid_result}
+        ] do
+      assert {:ok, template} = build(fixture(dir, %{"limits" => limits}, source))
+      host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+      result = ServingTemplate.call(template, %{"answer" => 1}, host)
+      assert ServingOutcome.code(result) == code
+      assert ServingOutcome.value(result) == :error
+      refute inspect(result) =~ "must-not-escape"
+      stop_supervised!(RunAdmission)
+    end
+  end
+
+  @tag :tmp_dir
+  test "calling worker death during publication fences its retained lease", %{tmp_dir: dir} do
+    assert {:ok, template} = build(fixture(dir))
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+    parent = self()
+
+    {worker, monitor} =
+      spawn_monitor(fn ->
+        {:ok, reservation} = ServingTemplate.reserve(template, %{"answer" => 1}, host)
+
+        ServingCall.activate(reservation, %{
+          before_publication: fn _ ->
+            send(parent, :publishing)
+            receive do: (:never -> :ok)
+          end
+        })
+      end)
+
+    assert_receive :publishing
+    Process.exit(worker, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}
+    assert {:ok, %{in_use: 0, status: :unavailable}} = RunAdmission.snapshot(host)
+
+    assert ServingOutcome.code(ServingTemplate.call(template, %{"answer" => 1}, host)) ==
+             :admission_unavailable
+  end
+
+  test "cancellation during call preparation holds capacity until worker cleanup" do
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+    {:ok, lease} = RunAdmission.reserve(host, :infinity)
+    :ok = RunAdmission.retain_publication(lease)
+    :ok = RunAdmission.cancel(lease)
+    assert {:ok, %{in_use: 1}} = RunAdmission.snapshot(host)
+    assert {:error, :run_capacity_exhausted} = RunAdmission.reserve(host, :infinity)
+    assert {:error, :call_cancelled} = RunAdmission.finish_publication(lease, true)
+    assert {:ok, %{in_use: 0, status: :ready}} = RunAdmission.snapshot(host)
   end
 
   defp build(path, opts \\ []),
