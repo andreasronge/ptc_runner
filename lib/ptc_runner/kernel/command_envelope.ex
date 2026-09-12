@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.CommandEnvelope do
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.DestinationIdentity
   alias PtcRunner.Kernel.DeterministicJSON
+  alias PtcRunner.Kernel.ProjectArtifactRoot
   alias PtcRunner.Kernel.ProjectConfig
   alias PtcRunner.Kernel.ProjectContext
   alias PtcRunner.Kernel.PublicationHandle
@@ -74,6 +75,41 @@ defmodule PtcRunner.Kernel.CommandEnvelope do
         {destination_path(destination), publish(outcome, destination)}
       end)
 
+    publication_result(results)
+  end
+
+  @doc false
+  @spec publish_for_project(
+          CommandOutcome.t(),
+          CommandArguments.t(),
+          destination() | nil,
+          binary()
+        ) ::
+          :ok | {:partial, [binary()], [{binary(), term()}]} | {:error, term()}
+  def publish_for_project(%CommandOutcome{} = outcome, arguments, envelope_path, run_ref) do
+    paths = destinations(arguments, envelope_path, run_ref)
+
+    case ProjectArtifactRoot.ensure_for(arguments) do
+      :ok ->
+        publish_all(outcome, paths)
+
+      {:error, reason} ->
+        ledger_path = project_ledger_path(arguments, run_ref)
+
+        paths
+        |> Enum.map(fn destination ->
+          result =
+            if ledger_path && same_destination?(ledger_path, destination),
+              do: skipped_ledger(destination, reason),
+              else: publish(outcome, destination)
+
+          {destination_path(destination), result}
+        end)
+        |> publication_result()
+    end
+  end
+
+  defp publication_result(results) do
     published = for {path, :ok} <- results, do: path
     failures = for {path, {:error, reason}} <- results, do: {path, reason}
 
@@ -84,6 +120,13 @@ defmodule PtcRunner.Kernel.CommandEnvelope do
       {published, failures} -> {:partial, published, failures}
     end
   end
+
+  defp skipped_ledger(%PublicationHandle{} = handle, reason) do
+    _ = discard(handle)
+    {:error, reason}
+  end
+
+  defp skipped_ledger(_path, reason), do: {:error, reason}
 
   defp destination_path(%PublicationHandle{} = handle), do: PublicationHandle.path(handle)
   defp destination_path(path), do: path

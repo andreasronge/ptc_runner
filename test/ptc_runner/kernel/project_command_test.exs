@@ -207,6 +207,31 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
   end
 
   @tag :tmp_dir
+  test "an invalid pre-existing artifact root releases its reserved ledger", %{tmp_dir: directory} do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
+    root = Path.join(target, ".ptc")
+    File.mkdir_p!(Path.join(root, "envelopes"))
+    File.chmod!(Path.join(root, "envelopes"), 0o700)
+    File.chmod!(root, 0o755)
+    on_exit(fn -> File.chmod(root, 0o700) end)
+
+    assert {:ok, entry} = CommandEntry.open(["run", project], :standalone)
+    owner = entry.envelope_handle.owner
+    assert Process.alive?(owner)
+
+    presentation =
+      CommandFrontend.present_entry(entry, fn _arguments ->
+        {:ok, CommandRuntime.standalone()}
+      end)
+
+    assert presentation.exit_status == CommandFrontend.envelope_failure_exit_status()
+    refute Process.alive?(owner)
+    assert File.ls!(Path.join(root, "envelopes")) == []
+  end
+
+  @tag :tmp_dir
   test "a permissive artifact child names that directory and the owner-only rule", %{
     tmp_dir: directory
   } do
@@ -253,6 +278,57 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     assert presentation.stderr =~ "mkdir -p '#{missing}'"
     refute presentation.stderr =~ "owner-only (0700)"
     refute File.exists?(missing)
+  end
+
+  @tag :tmp_dir
+  test "an explicit envelope survives an unavailable project ledger", %{tmp_dir: directory} do
+    target = Path.join(directory, "demo")
+    project_path = project_with_artifact_root(target, "missing-artifact-parent/.ptc")
+    explicit = Path.join(directory, "rescue.json")
+
+    presentation =
+      CommandFrontend.execute(
+        ["run", project_path, "--envelope", explicit],
+        :standalone,
+        fn _arguments -> {:ok, CommandRuntime.standalone()} end
+      )
+
+    assert presentation.exit_status == 7
+    assert presentation.envelope_path == explicit
+    assert Jason.decode!(File.read!(explicit)) == presentation.outcome.envelope
+    assert presentation.stderr =~ "destination/invalid_destination"
+    assert presentation.stderr =~ "envelope/destination_parent_unavailable"
+    assert presentation.stderr =~ "missing-artifact-parent"
+  end
+
+  @tag :tmp_dir
+  test "an explicit envelope survives an unavailable artifact root when its ledger is disabled",
+       %{
+         tmp_dir: directory
+       } do
+    target = Path.join(directory, "demo")
+    project_path = project_with_artifact_root(target, "missing-artifact-parent/.ptc")
+    project = project_path |> File.read!() |> Jason.decode!()
+
+    File.write!(
+      project_path,
+      project |> put_in(["artifacts", "envelope"], false) |> Jason.encode!()
+    )
+
+    explicit = Path.join(directory, "rescue.json")
+
+    presentation =
+      CommandFrontend.execute(
+        ["run", project_path, "--envelope", explicit],
+        :standalone,
+        fn _arguments -> {:ok, CommandRuntime.standalone()} end
+      )
+
+    assert presentation.exit_status == 7
+    assert presentation.envelope_path == explicit
+    assert Jason.decode!(File.read!(explicit)) == presentation.outcome.envelope
+    assert presentation.stderr =~ "destination/invalid_destination"
+    refute presentation.stderr =~ "envelope/publication_failed"
   end
 
   # The shallowest missing ancestor is what failed, but creating only it fails

@@ -192,14 +192,18 @@ than only the first. Where a symlink stands in the ancestry the two differ: the
 message names the link's target, because creating the link's own name would
 fail on a path that already exists.</p><p>Every path is printed quoted and escaped, since a symlink target is filesystem
 content rather than something you typed, and a suggested command is offered
-only when its path holds no control characters. These arrive on stderr with
-exit 74, because the envelope that would normally carry a diagnostic is the
-artifact that could not be written.</p><p>That last-resort channel is what carries the directory name, so the table above
-describes a run that publishes an envelope — the <code class="inline">ptc init</code> default, and any
-run given <code class="inline">--envelope</code>. With <code class="inline">artifacts.envelope</code> set to <code class="inline">false</code> the same
-refusals still stop the run before it executes, reported through the ordinary
-destination phase as <code class="inline">destination/invalid_destination</code> at exit 7 without the
-path. <code class="inline">ptc viewer</code> reports the named sentences as
+only when its path holds no control characters. If no envelope destination
+succeeds, these arrive on stderr with exit 74 because the envelope that would
+normally carry a diagnostic is the artifact that could not be written. A
+separately writable <code class="inline">--envelope</code> convenience copy is still attempted; when it
+succeeds, the command retains its original exit status and reports the failed
+project-ledger destination on stderr.</p><p>That last-resort channel is what carries the directory name, so the table above
+describes a run with the project envelope ledger enabled — the <code class="inline">ptc init</code>
+default. With <code class="inline">artifacts.envelope</code> set to <code class="inline">false</code> the same refusals still stop
+the run before it executes, reported through the ordinary destination phase as
+<code class="inline">destination/invalid_destination</code> at exit 7 without the path. A requested
+<code class="inline">--envelope</code> copy carries that diagnostic when its independent destination is
+writable. <code class="inline">ptc viewer</code> reports the named sentences as
 <code class="inline">viewer/artifact_root_unusable</code>.</p><p>The trace filenames are also the canonical directory-discovery contract. Each
 file contains exactly the run ID named by its stem and one trace identity;
 arbitrary aggregate filenames and split histories remain supported only when a

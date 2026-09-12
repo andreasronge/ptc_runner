@@ -164,16 +164,20 @@ fail on a path that already exists.
 
 Every path is printed quoted and escaped, since a symlink target is filesystem
 content rather than something you typed, and a suggested command is offered
-only when its path holds no control characters. These arrive on stderr with
-exit 74, because the envelope that would normally carry a diagnostic is the
-artifact that could not be written.
+only when its path holds no control characters. If no envelope destination
+succeeds, these arrive on stderr with exit 74 because the envelope that would
+normally carry a diagnostic is the artifact that could not be written. A
+separately writable `--envelope` convenience copy is still attempted; when it
+succeeds, the command retains its original exit status and reports the failed
+project-ledger destination on stderr.
 
 That last-resort channel is what carries the directory name, so the table above
-describes a run that publishes an envelope — the `ptc init` default, and any
-run given `--envelope`. With `artifacts.envelope` set to `false` the same
-refusals still stop the run before it executes, reported through the ordinary
-destination phase as `destination/invalid_destination` at exit 7 without the
-path. `ptc viewer` reports the named sentences as
+describes a run with the project envelope ledger enabled — the `ptc init`
+default. With `artifacts.envelope` set to `false` the same refusals still stop
+the run before it executes, reported through the ordinary destination phase as
+`destination/invalid_destination` at exit 7 without the path. A requested
+`--envelope` copy carries that diagnostic when its independent destination is
+writable. `ptc viewer` reports the named sentences as
 `viewer/artifact_root_unusable`.
 
 The trace filenames are also the canonical directory-discovery contract. Each
