@@ -142,6 +142,7 @@ defmodule PtcRunner.Kernel.RunConfig do
              :invalid_run_config
              | :mission_inventory_exceeded
              | :run_started_metadata_exceeded
+             | {:declared_read_effect_violation, binary(), :write | :unknown}
              | {:terminal_payload_capacity_exceeded, pos_integer(), pos_integer()}}
   @doc "Constructs a run configuration and rejects missing or unknown fields."
   def new(opts) when is_list(opts) do
@@ -169,6 +170,7 @@ defmodule PtcRunner.Kernel.RunConfig do
              [],
          %WorkflowEnvironment{} = workflow <- Keyword.get(opts, :workflow_environment),
          true <- WorkflowEnvironment.valid?(workflow),
+         :ok <- MissionInventory.validate_declared_read_effects(workflow),
          true <- JSONValue.map?(Keyword.get(opts, :input)),
          %Limits{} = limits <- Keyword.get(opts, :limits),
          {:ok, missions} <- build_missions(Keyword.get(opts, :missions), limits),
@@ -246,6 +248,7 @@ defmodule PtcRunner.Kernel.RunConfig do
        }}
     else
       {:error, :mission_inventory_exceeded} = error -> error
+      {:error, {:declared_read_effect_violation, _ref, _effect}} = error -> error
       {:error, :run_started_metadata_exceeded} = error -> error
       {:error, {:terminal_payload_capacity_exceeded, _payload, _required}} = error -> error
       _ -> {:error, :invalid_run_config}
@@ -300,6 +303,7 @@ defmodule PtcRunner.Kernel.RunConfig do
          {:ok, inventory} <- MissionInventory.build(environment, limits) do
       retain_mission(name, environment, inventory, acc, inventory_bytes, model_bytes)
     else
+      {:error, {:declared_read_effect_violation, _ref, _effect}} = error -> {:halt, error}
       _invalid -> {:halt, {:error, :invalid_run_config}}
     end
   end

@@ -1493,14 +1493,18 @@ reader-facing documentation only.</p><p><code class="inline">export-meta</code> 
 <code class="inline">doc</code> renders the reader-facing subset — ref, call form, declared contract,
 effect, and docstring — so <code class="inline">:visibility</code> and the separate arity and parameter
 fields are available only from <code class="inline">export-meta</code>. Neither reports capability
-wiring.</p><p>The reported effect is conservative. The authoritative value is the
-mission-resolved effect in the prompt inventory, which combines an export's
-declaration with the effects of the capabilities it reaches; a wrapper declaring
-<code class="inline">:read</code> over a <code class="inline">:write</code> capability resolves to <code class="inline">:write</code>. Introspection cannot
-see installed capability effects, so an export that reaches any capability is
-reported as <code class="inline">:write</code> when its chain declares <code class="inline">:write</code> and <code class="inline">:unknown</code> otherwise.
-It is never reported as <code class="inline">:read</code>, so no answer here presents an unresolved effect
-as safe.</p><p><code class="inline">apropos</code> performs a case-insensitive literal substring search. For attached
+wiring.</p><p>The reported effect is conservative. An explicit <code class="inline">:effect :read</code> is a promise:
+when the bundle is assembled with a workflow or mission capability set, every
+capability the export reaches must resolve to <code class="inline">:read</code>. Assembly rejects the
+export if a direct or transitive capability resolves to <code class="inline">:write</code> or <code class="inline">:unknown</code>.
+A declared <code class="inline">:write</code> remains conservative and valid over read or write behavior;
+an omitted or explicit <code class="inline">:unknown</code> declaration retains its conservative meaning.</p><p>The authoritative accepted value is the mission-resolved effect in the prompt
+inventory, which combines an export's declaration with the resolved effects of
+the capabilities it reaches. Introspection cannot see installed capability
+effects, so an export that reaches any capability is reported as <code class="inline">:write</code> when
+its chain declares <code class="inline">:write</code> and <code class="inline">:unknown</code> otherwise. It is never reported as
+<code class="inline">:read</code>, so no answer here presents an unresolved effect as safe. Descriptions
+and docstrings do not participate in effect resolution.</p><p><code class="inline">apropos</code> performs a case-insensitive literal substring search. For attached
 prelude exports it searches refs and docstrings. For the fixed registry it
 searches canonical names, signatures, descriptions, notes, divergences, and
 sections; aliases present in signatures, including fully qualified Java names,

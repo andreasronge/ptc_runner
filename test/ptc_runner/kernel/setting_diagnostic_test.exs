@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSource
+  alias PtcRunner.Kernel.DeclaredReadEffectDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.EventBudget
   alias PtcRunner.Kernel.ExplicitFailureDiagnostic
@@ -24,6 +25,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
   # message has to land in one list or the other.
   @prose_rows [
     {:application, :contract_invalid},
+    {:application, :declared_read_effect_invalid},
     {:application, :override_invalid},
     {:application, :required_property_missing},
     {:application, :schema_violation},
@@ -48,6 +50,22 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
     {:result_cleanup, :provider_cleanup_failed},
     {:result_cleanup, :result_contract_failed}
   ]
+
+  test "declared read effect diagnostics identify only a bounded export and final effect" do
+    assert {:ok, message} = DeclaredReadEffectDiagnostic.message("customer/fetch", :unknown)
+    assert message =~ "`customer/fetch`"
+    assert message =~ "resolves to unknown"
+    assert DeclaredReadEffectDiagnostic.valid_message?(message)
+
+    refute DeclaredReadEffectDiagnostic.valid_message?(message <> " provider=https://secret")
+    assert {:ok, uppercase} = DeclaredReadEffectDiagnostic.message("CRM/Find!?", :write)
+    assert uppercase =~ "`CRM/Find!?`"
+
+    long_ref = String.duplicate("N", 300) <> "/" <> String.duplicate("f", 300)
+    assert {:ok, fingerprinted} = DeclaredReadEffectDiagnostic.message(long_ref, :write)
+    assert fingerprinted =~ ~r/export `sha256:[0-9a-f]{64}`/
+    assert DeclaredReadEffectDiagnostic.valid_message?(fingerprinted)
+  end
 
   test "model output truncation messages retain tied bindings and reject suffixes" do
     details = %{
