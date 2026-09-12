@@ -1,39 +1,5 @@
 defmodule PtcRunner.Bench.DabstepSupport do
   @moduledoc false
-  def legacy_types(source) do
-    source
-    |> String.replace(
-      """
-      (defn- column-kind [column]
-        (cond
-          (contains? (integer-columns) column) :integer
-          (contains? (float-columns) column) :float
-          (contains? (boolean-columns) column) :boolean
-          :else :string))
-
-      """,
-      ""
-    )
-    |> String.replace("(defn- typed-cell [column kind value]", "(defn- typed-cell [column value]")
-    |> String.replace(
-      "(= kind :integer) (parse-number",
-      "(contains? (integer-columns) column) (parse-number"
-    )
-    |> String.replace(
-      "(= kind :float) (parse-number",
-      "(contains? (float-columns) column) (parse-number"
-    )
-    |> String.replace(
-      "(= kind :boolean) (parse-boolean",
-      "(contains? (boolean-columns) column) (parse-boolean"
-    )
-    |> String.replace("[(get position c) c (column-kind c)]", "[(get position c) c]")
-    |> String.replace(
-      "(typed-cell (nth selector 1)\n                                          (nth selector 2)\n                                          (get",
-      "(typed-cell (nth selector 1) (get"
-    )
-  end
-
   def capability(_event, measures, %{name: name}, table) do
     :ets.update_counter(table, name, [{2, 1}, {3, measures.duration_ms}], {name, 0, 0})
   end
@@ -55,7 +21,7 @@ defmodule PtcRunner.Bench.DabstepSupport do
 
   defp samples(label, fun), do: Enum.each(0..5, &sample(label, &1, fun))
 
-  def sample(label, sample, fun) do
+  defp sample(label, sample, fun) do
     {gc0, words0, _} = :erlang.statistics(:garbage_collection)
     {us, result} = :timer.tc(fun)
     {gc1, words1, _} = :erlang.statistics(:garbage_collection)
