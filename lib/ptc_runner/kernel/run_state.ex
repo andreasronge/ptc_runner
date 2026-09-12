@@ -271,7 +271,7 @@ defmodule PtcRunner.Kernel.RunState do
         # and must report closure rather than exit.
         case safe_call(
                state,
-               {:attach_provider, reservation_id, provider},
+               {:attach_provider, reservation_id, provider, :ordinary},
                {:error, :closed}
              ) do
           :ok ->
@@ -291,6 +291,32 @@ defmodule PtcRunner.Kernel.RunState do
         error
 
       {:error, :provider_down} = error ->
+        error
+    end
+  end
+
+  @doc false
+  @spec attach_provider_guardian(t(), reference(), pid()) ::
+          :ok | {:error, :closed | :provider_down | :unknown_reservation}
+  def attach_provider_guardian(%__MODULE__{} = state, reservation_id, guardian)
+      when is_reference(reservation_id) and is_pid(guardian) do
+    case ProviderTaskTracker.attach_guardian(state.provider_tracker, guardian) do
+      :ok ->
+        case safe_call(
+               state,
+               {:attach_provider, reservation_id, guardian, :guardian},
+               {:error, :closed}
+             ) do
+          :ok ->
+            :ok
+
+          {:error, reason} = error when reason in [:closed, :unknown_reservation] ->
+            Process.exit(guardian, :kill)
+            error
+        end
+
+      {:error, reason} = error when reason in [:closed, :provider_down] ->
+        if reason == :closed, do: Process.exit(guardian, :kill)
         error
     end
   end
@@ -873,10 +899,11 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   def handle_call(
-        {token, {:attach_provider, reservation_id, provider}},
+        {token, {:attach_provider, reservation_id, provider, provider_kind}},
         {caller, _tag},
         %{token: token} = state
-      ) do
+      )
+      when provider_kind in [:ordinary, :guardian] do
     if unavailable?(state) do
       Process.exit(provider, :kill)
       {:reply, {:error, :closed}, settle_reservation(state, reservation_id, :cleanup) |> elem(1)}
@@ -887,6 +914,7 @@ defmodule PtcRunner.Kernel.RunState do
             reservation
             |> Map.put(:provider, provider)
             |> Map.put(:provider_ref, Process.monitor(provider))
+            |> Map.put(:provider_kind, provider_kind)
 
           reservations = Map.put(state.reservations, reservation_id, reservation)
           {:reply, :ok, %{state | reservations: reservations}}
@@ -1654,29 +1682,47 @@ defmodule PtcRunner.Kernel.RunState do
       ),
       do: {:noreply, clear_evaluation(state)}
 
-  def handle_info({:DOWN, ref, :process, pid, _reason}, state) do
+  def handle_info({:DOWN, ref, :process, pid, reason}, state) do
     case reservation_by_caller_ref(state.reservations, ref) do
       {reservation_id, %{caller: ^pid, provider: provider} = reservation} ->
-        if is_pid(provider) do
-          Process.exit(provider, :kill)
+        cond do
+          is_pid(provider) and Map.get(reservation, :provider_kind) == :guardian ->
+            deadline =
+              System.monotonic_time(:millisecond) + state.limits.provider_cleanup_timeout_ms
 
-          reservations =
-            Map.put(state.reservations, reservation_id, %{reservation | caller_ref: nil})
+            tracker = state.provider_tracker
+            spawn(fn -> ProviderTaskTracker.cancel_guardian(tracker, provider, deadline) end)
 
-          {:noreply, %{state | reservations: reservations}}
-        else
-          {_reply, state} = settle_reservation(state, reservation_id, :cleanup)
-          {:noreply, state}
+            reservations =
+              Map.put(state.reservations, reservation_id, %{reservation | caller_ref: nil})
+
+            {:noreply, %{state | reservations: reservations}}
+
+          is_pid(provider) ->
+            Process.exit(provider, :kill)
+
+            reservations =
+              Map.put(state.reservations, reservation_id, %{reservation | caller_ref: nil})
+
+            {:noreply, %{state | reservations: reservations}}
+
+          true ->
+            {_reply, state} = settle_reservation(state, reservation_id, :cleanup)
+            {:noreply, state}
         end
 
       nil ->
         case reservation_by_provider_ref(state.reservations, ref) do
-          {reservation_id, %{caller_ref: nil}} ->
+          {reservation_id, %{caller_ref: nil} = reservation} ->
+            state = maybe_mark_guardian_down(state, reservation, reason)
             {_reply, state} = settle_reservation(state, reservation_id, :cleanup)
             {:noreply, state}
 
           {reservation_id, reservation} ->
             reservation = %{reservation | provider: nil, provider_ref: nil}
+
+            state = maybe_mark_guardian_down(state, reservation, reason)
+
             {:noreply, put_in(state.reservations[reservation_id], reservation)}
 
           nil ->
@@ -1710,6 +1756,18 @@ defmodule PtcRunner.Kernel.RunState do
 
   def handle_info(_message, state), do: {:noreply, state}
 
+  defp maybe_mark_guardian_down(state, reservation, reason) do
+    if Map.get(reservation, :provider_kind) == :guardian and reason != :normal do
+      failure =
+        state.terminal_failure ||
+          %{kind: :provider_cleanup_error, reason: :provider_cleanup_failed}
+
+      admit_from_queue(%{state | closed?: true, terminal_failure: failure})
+    else
+      state
+    end
+  end
+
   defp drop_dead_admission_waiter(state, monitor_ref) do
     case take_admission_waiter(state, monitor_ref) do
       {nil, state} ->
@@ -1725,8 +1783,12 @@ defmodule PtcRunner.Kernel.RunState do
   def terminate(_reason, state) do
     state.reservations
     |> Enum.flat_map(fn
-      {_caller, %{provider: provider}} when is_pid(provider) -> [provider]
-      _reservation -> []
+      {_caller, %{provider: provider, provider_kind: kind}}
+      when is_pid(provider) and kind != :guardian ->
+        [provider]
+
+      _reservation ->
+        []
     end)
     |> Enum.uniq()
     |> kill_and_drain()
@@ -1742,8 +1804,12 @@ defmodule PtcRunner.Kernel.RunState do
     providers =
       state.reservations
       |> Enum.flat_map(fn
-        {_reservation_id, %{provider: provider}} when is_pid(provider) -> [provider]
-        _reservation -> []
+        {_reservation_id, %{provider: provider, provider_kind: kind}}
+        when is_pid(provider) and kind != :guardian ->
+          [provider]
+
+        _reservation ->
+          []
       end)
       |> Enum.uniq()
 
@@ -1827,6 +1893,7 @@ defmodule PtcRunner.Kernel.RunState do
           caller_ref: Process.monitor(caller),
           provider: nil,
           provider_ref: nil,
+          provider_kind: nil,
           dispatched?: false,
           llm: llm_reservation(state, route)
         }
@@ -2768,7 +2835,7 @@ defmodule PtcRunner.Kernel.RunState do
   defp start_state(args) do
     case GenServer.start(__MODULE__, args) do
       {:ok, pid} ->
-        case ProviderTaskTracker.start(pid) do
+        case ProviderTaskTracker.start(pid, elem(args, 0).provider_cleanup_timeout_ms) do
           {:ok, provider_tracker} ->
             token = elem(args, 1)
             {:ok, %__MODULE__{pid: pid, token: token, provider_tracker: provider_tracker}}

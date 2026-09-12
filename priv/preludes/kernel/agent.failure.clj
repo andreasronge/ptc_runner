@@ -22,7 +22,11 @@
        (let [kind (named-token (get error :kind))
              reason (named-token (get error :reason))]
          (or (and (or (= kind "provider-error") (= kind "provider_error"))
-                  (or (= reason "denied")
+                  (or (= reason "admission-unavailable")
+                      (= reason "admission_unavailable")
+                      (= reason "capacity-exhausted")
+                      (= reason "capacity_exhausted")
+                      (= reason "denied")
                       (= reason "not-found")
                       (= reason "not_found")
                       (= reason "unavailable")

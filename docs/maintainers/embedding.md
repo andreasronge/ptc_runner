@@ -145,10 +145,22 @@ best-effort provider behavior are not attestation.
 `%{credential: binary() | nil, cache: boolean()}` map and returns
 `{:ok, requester}` only after preparation and binding succeed, so embedding
 callers must propagate its error tuple before dispatch. The requester is arity
-two: a provider-neutral request plus `%{llm_request_deadline_ms: integer() | nil}`.
-Live Kernel dispatch supplies an integer absolute monotonic deadline. Replay,
-doctor connectivity probes, and embedding callers that invoke the requester
-directly pass `nil`.
+two: a provider-neutral request plus
+`%{llm_request_deadline_ms: integer() | nil}`. Live Kernel dispatch and hosted
+doctor connectivity supply an integer absolute monotonic deadline. Replay and
+embedding callers that invoke the requester directly pass `nil`.
+
+For a shared hosted transport, supervise one `ProviderCallAdmission`, pass it
+as `:provider_call_admission` when constructing `ProviderRuntimeServices`, and
+reuse those services for every concurrent run. The installed live requester
+then holds one aggregate slot from immediately before adapter entry through
+all retries and confirmed drain. The built-in ReqLLM adapter attests this
+cancelable boundary. A custom adapter must implement
+`c:PtcRunner.LLM.cancellation_witness?/0` only when terminating its adapter
+caller also drains every request and pool-checkout owner it created; otherwise
+hosted construction fails without dispatch. Direct adapter calls, embeddings,
+replay, provider-free work, and custom capabilities which bypass the installed
+requester are outside this guarantee.
 
 An adapter may implement `c:PtcRunner.LLM.public_model/1` to attest that its exact
 configured target is safe to publish. Missing, altered, invalid, oversized, or

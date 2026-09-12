@@ -5,6 +5,8 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
 
   import ExUnit.CaptureIO
 
+  alias PtcRunner.Kernel.AdapterCancellationWitness
+  alias PtcRunner.Kernel.CancelableRequest
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.LLM.Invocation
@@ -1085,6 +1087,48 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     refute warnings =~ "deprecated"
   end
 
+  test "cancellation witness returns a held size-one Finch checkout before acknowledging drain" do
+    pool = __MODULE__.CancellationPool
+    start_supervised!({Finch, name: pool, pools: %{default: [size: 1, count: 1]}})
+    parent = self()
+    requests = :atomics.new(1, signed: false)
+
+    server =
+      MCPHTTPFixture.start(fn _request ->
+        case :atomics.add_get(requests, 1, 1) do
+          1 ->
+            send(parent, :held_adapter_transport)
+            receive do: (:never -> {500, [], "unreachable"})
+
+          _ ->
+            {200, [], "ok"}
+        end
+      end)
+
+    on_exit(server.close)
+
+    requester = fn _, _ ->
+      AdapterCancellationWitness.run(fn ->
+        ReqLLMAdapter.generate_text(
+          "openai-compat:#{server.endpoint}|model",
+          [%{role: :user, content: "hi"}],
+          req_http_options: [finch: [name: pool, pool_timeout: 1_000]],
+          receive_timeout: 5_000
+        )
+      end)
+    end
+
+    assert {:ok, handle} = CancelableRequest.start_cancelable(requester, %{}, %{}, self())
+    assert :ok = CancelableRequest.dispatch(handle)
+    assert_receive :held_adapter_transport
+    assert :drained = CancelableRequest.cancel_and_drain(handle, monotonic_deadline(1_000))
+
+    request = Finch.build(:get, server.endpoint)
+
+    assert {:ok, %Finch.Response{status: 200}} =
+             Finch.request(request, pool, pool_timeout: 100, receive_timeout: 1_000)
+  end
+
   test "preserves a namespaced provider output budget", %{test: test} do
     expect_request(test, "Qwen/Qwen3-30B-A3B-Instruct-2507")
 
@@ -1345,4 +1389,6 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     System.delete_env("AWS_REGION")
     Application.put_env(:ptc_runner, :bedrock_region, region)
   end
+
+  defp monotonic_deadline(offset), do: System.monotonic_time(:millisecond) + offset
 end

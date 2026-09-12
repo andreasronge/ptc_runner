@@ -876,6 +876,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
        run_duration_ms: limits.run_duration_ms,
        cleanup_timeout_ms: limits.provider_cleanup_timeout_ms,
        cleanup_deadline: nil,
+       task_cleanup: :ok,
        max_heap_words: limits.provider_heap_words,
        lifecycle_bound?: false,
        provider_tasks: nil,
@@ -1274,8 +1275,13 @@ defmodule PtcRunner.Kernel.ProviderSession do
   # long enough to be terminated instead has that owner kill the same tasks
   # when it observes the session's death.
   defp drain_provider_tasks(state) do
-    :ok = ProviderTaskTracker.drain_provider_tasks(state.provider_tasks)
-    state
+    result =
+      ProviderTaskTracker.drain_provider_tasks(
+        state.provider_tasks,
+        Deadline.expires_at(state.cleanup_deadline)
+      )
+
+    %{state | task_cleanup: normalize_cleanup(result)}
   end
 
   defp open_scope(scope, deadline, state) do
@@ -1448,7 +1454,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
     slots = cleanup_slots(scopes, state.scopes)
 
     {result, state, _remaining_slots} =
-      Enum.reduce(scopes, {:ok, state, slots}, fn
+      Enum.reduce(scopes, {state.task_cleanup, state, slots}, fn
         scope, {result, current, remaining_slots} ->
           case Map.fetch(current.scopes, scope) do
             {:ok, entry} ->

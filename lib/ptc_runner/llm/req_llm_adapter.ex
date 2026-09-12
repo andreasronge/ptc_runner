@@ -33,6 +33,7 @@ if Code.ensure_loaded?(ReqLLM) do
 
     @behaviour PtcRunner.LLM
 
+    alias PtcRunner.Kernel.AdapterCancellationWitness
     alias PtcRunner.Kernel.LLMUsage
     alias PtcRunner.Kernel.ProviderError
     alias PtcRunner.LLM.Invocation
@@ -120,6 +121,11 @@ if Code.ensure_loaded?(ReqLLM) do
     ]
 
     # --- Behaviour Callbacks ---
+
+    @doc false
+    @impl true
+    @spec cancellation_witness?() :: true
+    def cancellation_witness?, do: true
 
     @impl true
     @doc """
@@ -326,7 +332,7 @@ if Code.ensure_loaded?(ReqLLM) do
             {:error, request_deadline_error()}
 
           _remaining ->
-            dispatch_invocation(target, invocation)
+            AdapterCancellationWitness.run(fn -> dispatch_invocation(target, invocation) end)
         end
       else
         {:error, ProviderError.new(:invalid_request, "invalid LLM invocation")}

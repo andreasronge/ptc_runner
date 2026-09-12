@@ -127,10 +127,22 @@ execution owner dying without acknowledging cleanup fences that capacity
 domain. It does not restart automatically; drain old work before replacing it.
 Admission-owner death aborts the executions it admitted.
 
+The host separately supervises one `ProviderCallAdmission` domain for each
+shared live LLM transport and seals that owner into every
+`ProviderRuntimeServices` value using it. Its active capacity spans concurrent
+runs: a tracked guardian claims one slot before adapter entry and retains it
+through sequential retries and confirmed transport drain. Queue saturation is
+healthy and bounded before the admission mailbox; cleanup uncertainty or an
+active guardian's unexplained death fences the temporary domain. Rebuild the
+complete provider runtime before replacing a fenced or dead domain.
+
 This is a bound on executions using that explicit owner. The embedding host
 still bounds inbound requests, preparation and compilation, provisional
-admission processes, and control mailboxes. Physical LLM attempts and connection
-pools have separate limits; this API does not configure or start ReqLLM.
+admission processes, and control mailboxes. Provider-call admission does not
+inspect or configure connection pools. Command-owned VMs, replay,
+provider-free work, direct `PtcRunner.LLM` calls, embeddings, and custom
+capabilities which bypass the installed requester do not consume its slots and
+remain the host's responsibility to bound.
 Publication remains the caller's responsibility after receiving sealed evidence.
 A transport request worker must publish before it exits: returning the sealed
 outcome to a connection process for later publication outlives the claimant.

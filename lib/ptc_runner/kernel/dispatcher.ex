@@ -639,6 +639,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
                     capability.inspection_capture
                   )
                 )
+                |> Map.put(:provider_run_state, state)
 
               {invoke(
                  state,
@@ -1017,7 +1018,12 @@ defmodule PtcRunner.Kernel.Dispatcher do
           end
         end)
 
-      case RunState.attach_provider(state, reservation_id, pid) do
+      attach =
+        if capability.provider_call_guardian,
+          do: RunState.attach_provider_guardian(state, reservation_id, pid),
+          else: RunState.attach_provider(state, reservation_id, pid)
+
+      case attach do
         :ok ->
           case RunState.open_provider_gate(state, reservation_id, pid, go) do
             :ok ->
@@ -1107,8 +1113,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
          post_invocation_failure(provider_exit(reason), environment, capability)}
     after
       timeout_ms ->
-        Process.exit(pid, :kill)
-        await_down(pid, ref)
+        cancel_provider_at_timeout(state, capability, pid, ref)
         timeout_result = await_timeout_result(invocation)
 
         if capability.name == "llm-request", do: record_llm_timeout_evidence(state)
@@ -1119,6 +1124,37 @@ defmodule PtcRunner.Kernel.Dispatcher do
            environment,
            capability
          )}
+    end
+  end
+
+  defp cancel_provider_at_timeout(state, %{provider_call_guardian: true}, pid, ref) do
+    request_ref = make_ref()
+
+    deadline =
+      System.monotonic_time(:millisecond) + state_limits(state).provider_cleanup_timeout_ms
+
+    send(pid, {:cancel_provider_call, self(), request_ref, deadline})
+    await_guardian_down(pid, ref, request_ref, deadline)
+  end
+
+  defp cancel_provider_at_timeout(_state, _capability, pid, ref) do
+    Process.exit(pid, :kill)
+    await_down(pid, ref)
+  end
+
+  defp await_guardian_down(pid, ref, request_ref, deadline) do
+    timeout = max(deadline - System.monotonic_time(:millisecond), 0)
+
+    receive do
+      {:provider_call_drained, ^request_ref, ^pid, _status} ->
+        await_guardian_down(pid, ref, request_ref, deadline)
+
+      {:DOWN, ^ref, :process, ^pid, reason} ->
+        reason
+    after
+      timeout ->
+        Process.exit(pid, :kill)
+        await_down(pid, ref)
     end
   end
 

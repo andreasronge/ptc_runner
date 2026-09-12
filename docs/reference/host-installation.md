@@ -550,6 +550,15 @@ Four timeouts are host-only: `provider_cleanup_timeout_ms`,
 `local_preflight_timeout_ms`, `selection_validation_timeout_ms`, and
 `doctor_connectivity_timeout_ms`. A manifest cannot declare them.
 
+`live_provider_tasks` remains a per-run callback bound; it neither sizes nor
+describes aggregate hosted LLM capacity. An embedding host that shares a live
+provider transport across runs must pass one supervised
+`ProviderCallAdmission` owner through all corresponding
+`ProviderRuntimeServices`. Command-owned one-shot VMs do not start that domain.
+Replay, workflows that call no provider, direct LLM and embedding calls, and
+callbacks that bypass the installed requester consume no admission slot and
+must be bounded by their caller.
+
 The generated [Kernel limits reference](../kernel-limits-reference.md) is the
 complete table of names, meanings, units, scopes, defaults, accepted ranges,
 and identity participation. The host schema is generated from the same

@@ -16,6 +16,8 @@ defmodule PtcRunner.Kernel.LLMFailureCatalog do
   """
 
   @provider_kinds [
+    :admission_unavailable,
+    :capacity_exhausted,
     :denied,
     :not_found,
     :unavailable,
@@ -47,7 +49,9 @@ defmodule PtcRunner.Kernel.LLMFailureCatalog do
   ]
 
   @type provider_kind ::
-          :denied
+          :admission_unavailable
+          | :capacity_exhausted
+          | :denied
           | :not_found
           | :unavailable
           | :invalid_request
