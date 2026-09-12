@@ -12,8 +12,17 @@ defmodule PtcRunner.Kernel.SystemCommand do
   def run(executable, arguments, timeout_ms)
       when is_binary(executable) and is_list(arguments) and is_integer(timeout_ms) and
              timeout_ms > 0 do
+    run(executable, arguments, timeout_ms, [])
+  end
+
+  @doc false
+  @spec run(binary(), [binary()], pos_integer(), [{binary(), binary()}]) ::
+          {:ok, {binary(), non_neg_integer()}} | {:error, error()}
+  def run(executable, arguments, timeout_ms, environment)
+      when is_binary(executable) and is_list(arguments) and is_integer(timeout_ms) and
+             timeout_ms > 0 and is_list(environment) do
     BoundedWorker.run(
-      fn -> System.cmd(executable, arguments, stderr_to_stdout: true) end,
+      fn -> System.cmd(executable, arguments, stderr_to_stdout: true, env: environment) end,
       timeout_ms: timeout_ms,
       max_heap_words: @max_heap_words,
       cancel_with_caller: true

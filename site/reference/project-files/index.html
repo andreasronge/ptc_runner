@@ -219,7 +219,11 @@ and does <strong>not</strong> suppress the project ledger under <code class="inl
 <code class="inline">artifacts.envelope</code> is enabled. The ledger and convenience copy publish
 independently, so a completed run retains its ledger record even when the copy
 cannot be written. Trace, inspection, and result overrides still replace their
-project defaults.</p><p>Mission selection, input, and component-override switches remain
+project defaults.</p><p>The command reserves an explicit <code class="inline">--envelope</code> destination before bootstrap. A
+syntactically valid path that the filesystem cannot reserve is reported as
+<code class="inline">destination/envelope_destination_unavailable</code> at exit 7, with the resolved
+path and a bounded reason such as <code class="inline">eacces</code>, <code class="inline">enospc</code>, <code class="inline">edquot</code>, or <code class="inline">erofs</code>.
+Invalid path syntax remains an argument error at exit 2.</p><p>Mission selection, input, and component-override switches remain
 invocation-only. Mission names stay in the application manifest rather than
 being duplicated as project defaults. An environment file explicitly selected
 by the project or <code class="inline">--env-file</code> is loaded only when inert preparation proves that

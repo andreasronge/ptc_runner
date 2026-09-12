@@ -672,9 +672,44 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
         fn _arguments -> flunk("must not bootstrap") end
       )
 
-    assert presentation.exit_status == 2
-    assert presentation.stderr =~ "arguments/invalid_arguments"
-    assert presentation.stderr =~ "invalid destination: --envelope"
+    assert presentation.exit_status == 7
+    assert presentation.stderr =~ "destination/envelope_destination_unavailable"
+    assert presentation.stderr =~ "--envelope"
+    assert presentation.stderr =~ inspect(copy)
+    assert presentation.stderr =~ "parent directory is missing (enoent)"
+    assert presentation.outcome.envelope["error"]["phase"] == "destination"
+    assert presentation.outcome.envelope["error"]["code"] == "envelope_destination_unavailable"
+    refute File.exists?(copy)
+    refute File.exists?(Path.join(target, ".ptc"))
+  end
+
+  @tag :tmp_dir
+  test "an explicit envelope in a read-only directory reports the filesystem cause", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
+    read_only = Path.join(directory, "read-only")
+    copy = Path.join(read_only, "out.json")
+    File.mkdir!(read_only)
+    File.chmod!(read_only, 0o500)
+    on_exit(fn -> File.chmod(read_only, 0o700) end)
+
+    presentation =
+      CommandFrontend.execute(
+        ["run", project, "--envelope", copy],
+        :standalone,
+        fn _arguments -> flunk("must not bootstrap") end
+      )
+
+    assert presentation.exit_status == 7
+    assert presentation.stderr =~ "destination/envelope_destination_unavailable"
+    assert presentation.stderr =~ "--envelope"
+    assert presentation.stderr =~ inspect(copy)
+    assert presentation.stderr =~ "permission denied (eacces)"
+    assert presentation.outcome.envelope["error"]["phase"] == "destination"
+    assert presentation.outcome.envelope["error"]["code"] == "envelope_destination_unavailable"
     refute File.exists?(copy)
     refute File.exists?(Path.join(target, ".ptc"))
   end

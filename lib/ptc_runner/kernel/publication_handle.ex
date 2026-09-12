@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
 
   @type identity :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
   @type kind :: :trace | :inspection | :result | :recovery
+  @filesystem_destination_failures [:eacces, :edquot, :enospc, :erofs]
 
   @enforce_keys [
     :kind,
@@ -89,13 +90,25 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   def reserve_direct(path, kind, mode, owner)
       when is_binary(path) and kind in [:trace, :inspection, :result, :recovery] and
              is_integer(mode) and mode >= 0 and is_pid(owner) do
+    reserve_direct(path, kind, mode, owner, nil)
+  end
+
+  def reserve_direct(_path, _kind, _mode, _owner), do: {:error, :invalid_destination}
+
+  @doc false
+  @spec reserve_direct(binary(), kind(), non_neg_integer(), pid(), nil | (atom() -> term())) ::
+          {:ok, t()} | {:error, atom()}
+  def reserve_direct(path, kind, mode, owner, fault_hook)
+      when is_binary(path) and kind in [:trace, :inspection, :result, :recovery] and
+             is_integer(mode) and mode >= 0 and is_pid(owner) and
+             (is_nil(fault_hook) or is_function(fault_hook, 1)) do
     with :ok <- valid_path(path),
          {:ok, path} <- PrivateDirectory.anchor(path),
          :ok <- parent_present(path),
          :ok <- PrivateDirectory.preflight(path),
          {:ok, parent, parent_identity} <- parent_identity(path),
          {:error, :enoent} <- File.lstat(path) do
-      reserve_staged(path, kind, mode, parent, parent_identity, owner)
+      reserve_staged(path, kind, mode, parent, parent_identity, owner, false, fault_hook)
     else
       {:ok, _stat} -> {:error, :destination_exists}
       {:error, _reason} = error -> normalize_error(error)
@@ -104,7 +117,8 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     _exception -> {:error, :destination_unavailable}
   end
 
-  def reserve_direct(_path, _kind, _mode, _owner), do: {:error, :invalid_destination}
+  def reserve_direct(_path, _kind, _mode, _owner, _fault_hook),
+    do: {:error, :invalid_destination}
 
   @doc false
   @spec reserve_visible(binary(), kind(), non_neg_integer()) ::
@@ -180,7 +194,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
          {:ok, parent, parent_identity} <- parent_identity(path) do
       case File.lstat(path) do
         {:error, :enoent} ->
-          reserve_staged(path, :trace, mode, parent, parent_identity, owner, true)
+          reserve_staged(path, :trace, mode, parent, parent_identity, owner, true, nil)
 
         {:ok, %File.Stat{type: :regular}} ->
           reserve_append_file(path, :trace, mode, parent, parent_identity, owner, fault_hook)
@@ -856,12 +870,21 @@ defmodule PtcRunner.Kernel.PublicationHandle do
 
   def recovery_reachable?(_handle), do: false
 
-  defp reserve_staged(path, kind, mode, parent, parent_identity, owner, append? \\ false) do
+  defp reserve_staged(
+         path,
+         kind,
+         mode,
+         parent,
+         parent_identity,
+         owner,
+         append?,
+         fault_hook
+       ) do
     reservation =
       if append? do
         fn fun -> with_append_reservation(path, fun) end
       else
-        fn fun -> with_reservation(path, parent_identity, fun) end
+        fn fun -> with_reservation(path, parent_identity, fun, fault_hook) end
       end
 
     reservation.(fn reservation_path, reservation_identity ->
@@ -869,7 +892,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
 
       with :ok <- ensure_target_absent(path),
            :ok <- PrivateDirectory.create(staging_directory),
-           {:ok, device} <- open_exclusive(staging_path) do
+           {:ok, device} <- open_exclusive(staging_path, fault_hook) do
         case staged_handle(
                path,
                kind,
@@ -1121,22 +1144,28 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     :ok
   end
 
-  defp with_reservation(path, parent_identity, fun) do
-    with_reservation_path(reservation_path(path, parent_identity), path, Path.dirname(path), fun)
+  defp with_reservation(path, parent_identity, fun, fault_hook \\ nil) do
+    with_reservation_path(
+      reservation_path(path, parent_identity),
+      path,
+      Path.dirname(path),
+      fun,
+      fault_hook
+    )
   end
 
   defp with_append_reservation(path, fun) do
     case TraceLog.append_reservation_path(path) do
       {:ok, reservation_path} ->
-        with_reservation_path(reservation_path, path, Path.dirname(reservation_path), fun)
+        with_reservation_path(reservation_path, path, Path.dirname(reservation_path), fun, nil)
 
       {:error, _reason} = error ->
         error
     end
   end
 
-  defp with_reservation_path(reservation_path, destination, sync_parent, fun) do
-    case create_reservation(reservation_path, destination, true) do
+  defp with_reservation_path(reservation_path, destination, sync_parent, fun, fault_hook) do
+    case create_reservation(reservation_path, destination, true, fault_hook) do
       {:ok, reservation_path, reservation_identity} ->
         case fun.(reservation_path, reservation_identity) do
           {:ok, _handle} = success ->
@@ -1153,13 +1182,13 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     end
   end
 
-  defp create_reservation(reservation_path, destination, retry?) do
+  defp create_reservation(reservation_path, destination, retry?, fault_hook) do
     case PrivateDirectory.create(reservation_path) do
       :ok ->
-        claim_created_reservation(reservation_path)
+        claim_created_reservation(reservation_path, fault_hook)
 
-      {:error, _reason} ->
-        retry_reservation(reservation_path, destination, retry?)
+      {:error, reason} ->
+        retry_reservation(reservation_path, destination, retry?, reason)
     end
   end
 
@@ -1169,16 +1198,20 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   # reclaimer; the identity guard then keeps its own cleanup from removing the
   # live replacement. An unidentifiable directory is left for that same
   # reclaim rather than removed by pathname.
-  defp claim_created_reservation(path) do
+  defp claim_created_reservation(path, fault_hook) do
     with {:ok, %{type: :directory} = stat} <- File.lstat(path, time: :posix),
          {:ok, identity} <- stat_identity(stat) do
-      case write_reservation_owner(path) do
+      case reservation_owner_fault(fault_hook) do
+        :ok -> write_reservation_owner(path)
+        {:error, reason} -> {:error, reason}
+      end
+      |> case do
         :ok ->
           confirm_reservation_owner(path, identity)
 
-        _unowned ->
+        {:error, reason} ->
           _ = cleanup_open_reservation(path, identity, Path.dirname(path))
-          {:error, :destination_unavailable}
+          {:error, filesystem_destination_failure(reason)}
       end
     else
       _unidentified -> {:error, :destination_unavailable}
@@ -1204,9 +1237,10 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     end
   end
 
-  defp retry_reservation(_path, _destination, false), do: {:error, :destination_exists}
+  defp retry_reservation(_path, _destination, false, _reason),
+    do: {:error, :destination_exists}
 
-  defp retry_reservation(path, destination, true) do
+  defp retry_reservation(path, destination, true, reason) do
     if match?({:ok, _}, File.lstat(path)) do
       # Serialize reclaimers across VMs with the existing same-host OS
       # lock. Re-read under the lock so a delayed reaper cannot remove a
@@ -1214,18 +1248,28 @@ defmodule PtcRunner.Kernel.PublicationHandle do
       # atomically, and the retry is deliberately inside this lock.
       TraceLog.with_append_authority_lock(path <> ".reclaim", fn ->
         case reclaim_reservation(path, destination) do
-          :ok -> create_reservation(path, destination, false)
+          :ok -> create_reservation(path, destination, false, nil)
           _other -> {:error, :destination_exists}
         end
       end)
       |> normalize_reservation_refusal()
     else
-      {:error, :destination_unavailable}
+      {:error, reason}
     end
   end
 
   defp normalize_reservation_refusal({:ok, _path, _identity} = success), do: success
   defp normalize_reservation_refusal(_failure), do: {:error, :destination_exists}
+
+  defp reservation_owner_fault(nil), do: :ok
+
+  defp reservation_owner_fault(fault_hook) when is_function(fault_hook, 1) do
+    case fault_hook.(:reservation_owner) do
+      :ok -> :ok
+      {:error, reason} -> {:error, reason}
+      _other -> {:error, :destination_unavailable}
+    end
+  end
 
   defp write_reservation_owner(path) do
     owner = Path.join(path, "owner")
@@ -1364,13 +1408,36 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     end
   end
 
-  defp open_exclusive(path) do
+  defp open_exclusive(path, fault_hook \\ nil) do
+    case exclusive_open_fault(fault_hook) do
+      :ok -> open_exclusive_file(path)
+      {:error, reason} -> {:error, filesystem_destination_failure(reason)}
+    end
+  end
+
+  defp open_exclusive_file(path) do
     case :file.open(String.to_charlist(path), [:read, :write, :binary, :raw, :exclusive]) do
       {:ok, device} -> {:ok, device}
       {:error, :eexist} -> {:error, :destination_exists}
-      {:error, _reason} -> {:error, :destination_unavailable}
+      {:error, reason} -> {:error, filesystem_destination_failure(reason)}
     end
   end
+
+  defp exclusive_open_fault(nil), do: :ok
+
+  defp exclusive_open_fault(fault_hook) when is_function(fault_hook, 1) do
+    case fault_hook.(:staging_file) do
+      :ok -> :ok
+      {:error, reason} -> {:error, reason}
+      _other -> {:error, :destination_unavailable}
+    end
+  end
+
+  defp filesystem_destination_failure(reason)
+       when reason in @filesystem_destination_failures,
+       do: reason
+
+  defp filesystem_destination_failure(_reason), do: :destination_unavailable
 
   # Decided before the private-directory preflight, which answers for a missing
   # parent with the same reason it uses for every unusable one. `--trace-dir`

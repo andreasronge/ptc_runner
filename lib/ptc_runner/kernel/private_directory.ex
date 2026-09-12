@@ -13,6 +13,10 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
           | :private_directory_parent_unavailable
           | :private_directory_parent_unsafe
           | :private_directory_creation_failed
+          | :eacces
+          | :edquot
+          | :enospc
+          | :erofs
 
   @spec anchor(binary()) :: {:ok, binary()} | {:error, :private_directory_parent_unavailable}
   def anchor(path) when is_binary(path) do
@@ -384,12 +388,28 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
   defp create_unix(executable, path) do
     path = if Path.type(path) == :relative, do: "./" <> path, else: path
 
-    case SystemCommand.run(executable, ["-m", "700", path], @external_command_timeout_ms) do
+    case SystemCommand.run(
+           executable,
+           ["-m", "700", path],
+           @external_command_timeout_ms,
+           [{"LC_ALL", "C"}]
+         ) do
       {:ok, {_output, 0}} -> :ok
-      _failed_or_timed_out -> {:error, :private_directory_creation_failed}
+      {:ok, {output, _status}} -> {:error, creation_failure_reason(output)}
+      {:error, _reason} -> {:error, :private_directory_creation_failed}
     end
   rescue
     _exception -> {:error, :private_directory_creation_failed}
+  end
+
+  defp creation_failure_reason(output) do
+    cond do
+      String.contains?(output, "Permission denied") -> :eacces
+      String.contains?(output, "Disk quota exceeded") -> :edquot
+      String.contains?(output, "No space left on device") -> :enospc
+      String.contains?(output, "Read-only file system") -> :erofs
+      true -> :private_directory_creation_failed
+    end
   end
 
   defp read_authority_uid(executable) do

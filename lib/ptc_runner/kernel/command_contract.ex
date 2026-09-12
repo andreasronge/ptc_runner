@@ -40,6 +40,7 @@ defmodule PtcRunner.Kernel.CommandContract do
     {"doctor", {:doctor, :connect}, :catalog, true},
     {"models", :models, false, false},
     {"materialize", :materialize, false, false},
+    {"transcript", :transcript, false, false},
     {"unknown", :unknown, false, false}
   ]
   @run_ref "^cmd-[0-7][0-9abcdefghjkmnpqrstvwxyz]{25}$(?![\\s\\S])"
@@ -1192,6 +1193,18 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp diagnostic_pair_allowed?(:run_unclassified, :destination, code)
        when code in @destination_codes,
+       do: true
+
+  defp diagnostic_pair_allowed?(mode, :destination, :envelope_destination_unavailable)
+       when mode in [
+              :init,
+              :validate,
+              :models,
+              :doctor,
+              {:doctor, :connect},
+              :materialize,
+              :transcript
+            ],
        do: true
 
   defp diagnostic_pair_allowed?(mode, :bundle, code)

@@ -611,6 +611,62 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
   end
 
   @tag :tmp_dir
+  test "a no-space reservation keeps the artifact-specific destination diagnostic", %{
+    tmp_dir: dir
+  } do
+    application = application!(dir, "no-space-result")
+    real_id = System.find_executable("id")
+    fake_bin = Path.join(dir, "bin")
+    original_path = System.get_env("PATH")
+
+    assert is_binary(real_id)
+    File.mkdir!(fake_bin)
+    File.ln_s!(real_id, Path.join(fake_bin, "id"))
+
+    fake_mkdir = Path.join(fake_bin, "mkdir")
+
+    File.write!(
+      fake_mkdir,
+      "#!/bin/sh\nprintf '%s\\n' 'mkdir: destination: No space left on device' >&2\nexit 1\n"
+    )
+
+    File.chmod!(fake_mkdir, 0o700)
+    on_exit(fn -> restore_env("PATH", original_path) end)
+
+    assert {:ok, preparation} =
+             CommandEngine.prepare([
+               "run",
+               application,
+               "--output",
+               Path.join(dir, "result.json")
+             ])
+
+    System.put_env("PATH", fake_bin)
+
+    assert {:error, outcome} = CommandEngine.preflight(preparation)
+    assert outcome.envelope["error"]["phase"] == "destination"
+    assert outcome.envelope["error"]["code"] == "result_destination_unavailable"
+    assert outcome.envelope["error"]["provider_activity"] == false
+    refute Jason.encode!(outcome.envelope) =~ dir
+  end
+
+  @tag :tmp_dir
+  test "a no-space owner-marker failure survives reservation directory creation", %{tmp_dir: dir} do
+    destination = Path.join(dir, "result.json")
+
+    fault_hook = fn
+      :reservation_owner -> {:error, :enospc}
+      _stage -> :ok
+    end
+
+    assert {:error, :enospc} =
+             PublicationHandle.reserve_direct(destination, :result, 0o600, self(), fault_hook)
+
+    assert File.lstat(destination) == {:error, :enoent}
+    assert File.ls!(dir) == []
+  end
+
+  @tag :tmp_dir
   test "artifact destination collisions are conflicting arguments", %{tmp_dir: dir} do
     application = application!(dir, "artifact-destination-collision")
     destination = Path.join(dir, "shared.ptcins")
