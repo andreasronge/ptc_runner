@@ -20,8 +20,10 @@ defmodule PtcRunner.Kernel.HostInstallation do
   Hosted provider admission requires request-specific cancellation evidence.
   Built-in Google Vertex installations and connectivity probes are rejected
   when admission is configured: ReqLLM's shared OAuth cache cannot attest an
-  individual request's checkout return. Command-owned installations without
-  admission remain available.
+  individual request's checkout return. Rejection reports
+  `:provider_admission_unavailable` as a local runtime readiness failure, without
+  dispatching a provider probe. Command-owned installations without admission
+  remain available.
   Native trace acquisition
   exports its opaque frozen handle only to a selected inspection source, so
   private artifacts validate against the exact already-captured canonical
@@ -237,8 +239,15 @@ defmodule PtcRunner.Kernel.HostInstallation do
             admission
           )
         else
-          {:error, :invalid_provider_runtime_services} = error -> error
-          _ -> {:error, :llm_connectivity_unavailable}
+          {:error, reason} = error
+          when reason in [:invalid_provider_runtime_services, :provider_admission_unavailable] ->
+            error
+
+          false ->
+            {:error, :provider_admission_unavailable}
+
+          _ ->
+            {:error, :llm_connectivity_unavailable}
         end
       end
     )
@@ -1548,6 +1557,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
          accepts_data: installation.accepts_data
        }}
     else
+      false -> {:error, :provider_admission_unavailable}
       _reason -> {:error, :invalid_llm_provider}
     end
   rescue

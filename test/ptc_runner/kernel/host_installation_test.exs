@@ -1237,8 +1237,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert {:ok, hosted_registry} = InstallationCatalog.runtime_registry(catalog, services)
     hosted_context = context(dir, :workflow)
 
-    assert {:error, :invalid_llm_provider} =
-             ProviderRegistry.build(hosted_registry, "vertex", %{}, hosted_context)
+    construction = ProviderRegistry.build(hosted_registry, "vertex", %{}, hosted_context)
 
     assert {:ok, %{active: 0, status: :ready}} = ProviderCallAdmission.snapshot(admission)
     descriptor = catalog.descriptors["vertex"]
@@ -1248,12 +1247,12 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
     probe_context = Map.put(hosted_context, :credentials, %{"key" => "test-key"})
 
-    assert {:error, :llm_connectivity_unavailable} =
-             catalog.implementations["vertex"].connectivity_probe.(
-               selection,
-               probe_context,
-               services
-             )
+    readiness =
+      catalog.implementations["vertex"].connectivity_probe.(selection, probe_context, services)
+
+    assert {construction, readiness} ==
+             {{:error, :provider_admission_unavailable},
+              {:error, :provider_admission_unavailable}}
 
     assert {:ok, %{active: 0, status: :ready}} = ProviderCallAdmission.snapshot(admission)
     InstallationCatalog.close(catalog)

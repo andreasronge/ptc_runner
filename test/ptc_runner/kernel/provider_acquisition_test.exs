@@ -235,6 +235,22 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionTest do
     assert {:error, :mcp_timeout} = acquire_embedded(embedded)
   end
 
+  test "unavailable admission preserves hosted construction readiness at the command boundary" do
+    context = fixture(failing: "leaf", failing_reason: :provider_admission_unavailable)
+    assert {:error, %CommandDiagnostic{} = diagnostic} = acquire(context, [workflow(1)])
+    assert diagnostic.phase == :local_preflight
+    assert diagnostic.code == :provider_admission_unavailable
+    refute diagnostic.retryable
+    assert diagnostic.subject.name == "leaf"
+    assert diagnostic.subject.operation == :local
+    refute_received {:acquired, "leaf"}
+
+    embedded =
+      fixture(failing: "leaf", failing_reason: :provider_admission_unavailable, embedding: true)
+
+    assert {:error, :provider_admission_unavailable} = acquire_embedded(embedded)
+  end
+
   test "an active session cannot take the embedding entry at all" do
     # The embedding entry is told apart from `acquire/6` by its session carrying
     # no operation deadline, and it must ask before any callback. An active

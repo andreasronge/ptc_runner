@@ -44,6 +44,9 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
   #   * `:active_preflight` / `:connectivity_unavailable` —
   #     `llm_connectivity_unavailable` or a normalized non-authentication LLM
   #     provider failure
+  #   * `:local_preflight` / `:provider_admission_unavailable` — hosted admission
+  #     cannot support or admit the installed requester. A pre-dispatch refusal
+  #     retains earlier activity without asserting provider connectivity failure.
   #   * `:local_preflight` / `:model_contract_unsupported` — the sealed
   #     `ModelContractPricingCause` produced only from the adapter's exact,
   #     payload-free uncataloged-pricing sentinel.
@@ -221,6 +224,13 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
         :timed_out ->
           {:error, timeout_diagnostic(true)}
 
+        {:error, :provider_admission_unavailable} ->
+          {:error, admission_diagnostic(occurrence, provider_activity)}
+
+        {:error, %ProviderError{kind: :admission_unavailable} = error} ->
+          activity = provider_activity or error.dispatch_provenance != :not_dispatched
+          {:error, admission_diagnostic(occurrence, activity)}
+
         {:error, reason} ->
           descriptor = Map.get(catalog.descriptors, occurrence.name)
           {:error, diagnostic(reason, occurrence, descriptor)}
@@ -298,6 +308,19 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
       {:ok, admission} when is_pid(admission) -> limits.provider_cleanup_timeout_ms
       _other -> 0
     end
+  end
+
+  # Admission refusal answers for the local hosted runtime, not endpoint
+  # reachability. A refused probe adds no dispatch evidence to earlier work.
+  defp admission_diagnostic(occurrence, provider_activity) do
+    diagnostic =
+      AcquisitionReason.diagnostic(:provider_admission_unavailable, %{
+        provider: occurrence.name,
+        destination: occurrence.destination,
+        index: occurrence.index
+      })
+
+    %{diagnostic | provider_activity: provider_activity}
   end
 
   defp diagnostic(%ModelContractPricingCause{} = reason, occurrence, _descriptor),

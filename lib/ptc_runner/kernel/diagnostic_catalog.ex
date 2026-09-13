@@ -190,6 +190,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:local_preflight, :fixtures_unreadable, 4, false, "provider fixtures could not be read"},
     {:local_preflight, :adapter_unavailable, 4, false,
      "a required provider adapter is unavailable"},
+    {:local_preflight, :provider_admission_unavailable, 4, false,
+     "hosted provider admission is unavailable"},
     {:local_preflight, :model_contract_unsupported, 4, false,
      "the selected model cannot honor its installed model contract"},
     {:local_preflight, :launcher_unavailable, 4, false,
