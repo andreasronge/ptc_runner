@@ -182,6 +182,28 @@ they are reported through the ordinary destination phase as
 carries that diagnostic when its independent destination is writable.
 `ptc viewer` reports the named sentences as `viewer/artifact_root_unusable`.
 
+On `ptc run` admission, automatic cleanup considers hidden
+`.ptc-private-<12 lowercase hex digits>` artifact staging directories only under
+your configured `artifacts.root` and its fixed `envelopes`, `inspection`,
+`results`, and `traces` children. New staging directories record their owning
+process in an owner-only `owner` file. Cleanup uses the same-host reservation
+policy: only a proven dead owner permits deletion; live owners, permission
+failures, malformed or unreadable markers, and unknown liveness are preserved.
+Markerless directories are eligible only when their modification time is more
+than 60 seconds old. Ownership across hosts on a network filesystem is outside
+this policy.
+
+Each admission reads at most 256 directory entries across those five locations,
+including unrelated entries, and considers at most 16 staging candidates. Each
+candidate reads at most five additional entries and deletes at most the two
+fixed regular files (`owner` and `artifact`) and their directory. Extra or
+nested contents are preserved; cleanup never recursively scans them. Excess
+candidates remain for later admissions. Symlinks, changed identities,
+published artifacts, unrelated entries, and outside-root output parents are
+preserved. Reservation directories remain destination-driven and are never
+part of this sweep. Cleanup is best effort and does not create an artifact
+root when all project artifact defaults are disabled.
+
 The trace filenames are also the canonical directory-discovery contract. Each
 file contains exactly the run ID named by its stem and one trace identity;
 arbitrary aggregate filenames and split histories remain supported only when a

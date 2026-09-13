@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.ProjectArtifactRoot do
   @moduledoc false
 
+  alias PtcRunner.Kernel.ArtifactStagingSweep
   alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.ProjectContext
@@ -28,11 +29,15 @@ defmodule PtcRunner.Kernel.ProjectArtifactRoot do
          derived,
          MapSet.new([:trace_dir, :inspect, :result, :envelope_ledger])
        ),
-       do: :ok,
-       else: ensure(root)
+       do: ArtifactStagingSweep.sweep(root),
+       else: ensure_and_sweep(root)
   end
 
   def ensure_for(%CommandArguments{}), do: :ok
+
+  defp ensure_and_sweep(root) do
+    with :ok <- ensure(root), do: ArtifactStagingSweep.sweep(root)
+  end
 
   @spec ensure(binary()) :: :ok | {:error, ensure_error()}
   def ensure(root) when is_binary(root) do
@@ -141,8 +146,8 @@ defmodule PtcRunner.Kernel.ProjectArtifactRoot do
   end
 
   defp validate(root) do
-    with {:ok, names} <- File.ls(root),
-         :ok <- complete_children(root, names),
+    with {:ok, %{type: :directory}} <- File.lstat(root),
+         :ok <- complete_children(root),
          :ok <- require_owner_directory(root),
          :ok <- require_owner_children(root) do
       :ok
@@ -152,8 +157,8 @@ defmodule PtcRunner.Kernel.ProjectArtifactRoot do
     end
   end
 
-  defp complete_children(root, names) do
-    if Enum.sort(names) == @children,
+  defp complete_children(root) do
+    if Enum.all?(@children, &match?({:ok, _}, File.lstat(Path.join(root, &1)))),
       do: :ok,
       else: {:error, {:project_artifact_root_incomplete, root}}
   end

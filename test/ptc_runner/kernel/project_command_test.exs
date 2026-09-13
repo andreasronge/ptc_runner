@@ -8,6 +8,289 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
   alias PtcRunner.Kernel.CommandParser
   alias PtcRunner.Kernel.CommandPreparation
   alias PtcRunner.Kernel.CommandRuntime
+  alias PtcRunner.Kernel.PrivateDirectory
+  alias PtcRunner.Kernel.TraceLog
+  alias PtcRunner.TestSupport.Eventually
+
+  @tag :tmp_dir
+  test "run admission reclaims interrupted staging with a dead owner", %{tmp_dir: directory} do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project])
+    staging = Path.join([target, ".ptc", "traces", ".ptc-private-012345abcdef"])
+    File.mkdir!(staging)
+    File.chmod!(staging, 0o700)
+    File.write!(Path.join(staging, "artifact"), "interrupted trace")
+    File.write!(Path.join(staging, "owner"), "2147483647")
+    File.chmod!(Path.join(staging, "owner"), 0o600)
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project])
+    refute File.exists?(staging)
+  end
+
+  @tag :tmp_dir
+  test "admission preserves live, uncertain, unrelated and outside-root staging",
+       %{tmp_dir: directory} do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project])
+    root = Path.join(target, ".ptc")
+
+    cases = [
+      live: System.pid(),
+      fresh: nil,
+      malformed: "not-a-pid",
+      uncertain: "2147483648",
+      unreadable: "2147483647"
+    ]
+
+    paths =
+      for {{kind, pid}, index} <- Enum.with_index(cases) do
+        path =
+          Path.join([root, "traces", ".ptc-private-" <> String.pad_leading("#{index}", 12, "0")])
+
+        File.mkdir!(path)
+        File.chmod!(path, 0o700)
+        File.write!(Path.join(path, "artifact"), "keep")
+
+        if pid do
+          File.write!(Path.join(path, "owner"), pid)
+          File.chmod!(Path.join(path, "owner"), if(kind == :unreadable, do: 0, else: 0o600))
+        end
+
+        path
+      end
+
+    unrelated = Path.join(root, "unrelated")
+    File.write!(unrelated, "keep")
+    outside = Path.join(directory, ".ptc-private-ffffffffffff")
+    File.mkdir!(outside)
+    File.chmod!(outside, 0o700)
+    File.write!(Path.join(outside, "owner"), "2147483647")
+    reservation = Path.join([root, "traces", ".unrelated.ptc-reservation"])
+    File.mkdir!(reservation)
+    File.write!(Path.join(reservation, "owner"), "2147483647")
+    old = Path.join([root, "results", ".ptc-private-aaaaaaaaaaaa"])
+    File.mkdir!(old)
+    File.chmod!(old, 0o700)
+    File.write!(Path.join(old, "artifact"), "old")
+    File.touch!(old, System.os_time(:second) - 61)
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project])
+    refute File.exists?(old)
+    for path <- paths ++ [outside, reservation], do: assert(File.dir?(path))
+    assert File.read!(unrelated) == "keep"
+  end
+
+  @tag :tmp_dir
+  test "admission bounds staging cleanup and never descends into contents", %{tmp_dir: directory} do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project])
+    parent = Path.join([target, ".ptc", "traces"])
+
+    paths =
+      for index <- 1..20 do
+        path = Path.join(parent, ".ptc-private-" <> String.pad_leading("#{index}", 12, "0"))
+        File.mkdir!(path)
+        File.chmod!(path, 0o700)
+        File.write!(Path.join(path, "owner"), "2147483647")
+        File.chmod!(Path.join(path, "owner"), 0o600)
+        File.write!(Path.join(path, "artifact"), "stale")
+        path
+      end
+
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project])
+    assert Enum.count(paths, &File.dir?/1) >= 4
+    assert Enum.count(paths, &File.dir?/1) < 20
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project])
+    refute Enum.any?(paths, &File.dir?/1)
+    path = hd(paths)
+    File.mkdir!(path)
+    File.chmod!(path, 0o700)
+    File.write!(Path.join(path, "owner"), "2147483647")
+    File.chmod!(Path.join(path, "owner"), 0o600)
+    File.mkdir!(Path.join(path, "artifact"))
+    File.write!(Path.join([path, "artifact", "keep"]), "nested")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project])
+    assert File.read!(Path.join([path, "artifact", "keep"])) == "nested"
+  end
+
+  @tag :tmp_dir
+  test "the inspection budget includes unrelated entries in the configured root", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
+    document = Jason.decode!(File.read!(project))
+    File.write!(project, Jason.encode!(put_in(document, ["artifacts", "root"], "custom")))
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project])
+    root = Path.join(target, "custom")
+    for index <- 1..300, do: File.write!(Path.join(root, "unrelated-#{index}"), "keep")
+    staging = Path.join([root, "traces", ".ptc-private-aaaaaaaaaaaa"])
+    File.mkdir!(staging)
+    File.chmod!(staging, 0o700)
+    File.write!(Path.join(staging, "owner"), "2147483647")
+    File.chmod!(Path.join(staging, "owner"), 0o600)
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project])
+    assert File.dir?(staging)
+    for index <- 1..300, do: File.rm!(Path.join(root, "unrelated-#{index}"))
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project])
+    refute File.exists?(staging)
+  end
+
+  @tag :tmp_dir
+  test "root staging follows the grace policy and symlink staging is preserved", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project])
+    root = Path.join(target, ".ptc")
+    old = Path.join(root, ".ptc-private-aaaaaaaaaaaa")
+    File.mkdir!(old)
+    File.chmod!(old, 0o700)
+    File.touch!(old, System.os_time(:second) - 61)
+    outside = Path.join(directory, "outside")
+    File.mkdir!(outside)
+    File.chmod!(outside, 0o700)
+    File.write!(Path.join(outside, "owner"), "2147483647")
+    File.write!(Path.join(outside, "artifact"), "keep")
+    link = Path.join([root, "traces", ".ptc-private-bbbbbbbbbbbb"])
+    File.ln_s!(outside, link)
+    marker_link = Path.join([root, "results", ".ptc-private-cccccccccccc"])
+    File.mkdir!(marker_link)
+    File.chmod!(marker_link, 0o700)
+    File.ln_s!(Path.join(outside, "owner"), Path.join(marker_link, "owner"))
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project])
+    refute File.exists?(old)
+    assert {:ok, %{type: :symlink}} = File.lstat(link)
+    assert File.read!(Path.join(outside, "artifact")) == "keep"
+    assert File.dir?(marker_link)
+  end
+
+  @tag :tmp_dir
+  test "concurrent admissions preserve a live replacement of stale staging", %{tmp_dir: directory} do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project])
+    staging = Path.join([target, ".ptc", "traces", ".ptc-private-aaaaaaaaaaaa"])
+    File.mkdir!(staging)
+    File.chmod!(staging, 0o700)
+    File.write!(Path.join(staging, "owner"), "2147483647")
+    File.chmod!(Path.join(staging, "owner"), 0o600)
+    parent = self()
+
+    lock =
+      Task.async(fn ->
+        TraceLog.with_append_authority_lock(
+          PrivateDirectory.staging_lock_path(staging),
+          fn ->
+            send(parent, :locked)
+
+            receive do
+              :release -> :ok
+            end
+          end
+        )
+      end)
+
+    assert_receive :locked, 5_000
+
+    tasks =
+      for _ <- 1..2 do
+        Task.async(fn ->
+          send(parent, :admitting)
+          CommandEngine.dispatch(["run", project])
+        end)
+      end
+
+    for _ <- tasks, do: assert_receive(:admitting, 5_000)
+    File.rename!(staging, staging <> "-original")
+    File.mkdir!(staging)
+    File.chmod!(staging, 0o700)
+    File.write!(Path.join(staging, "owner"), System.pid())
+    File.chmod!(Path.join(staging, "owner"), 0o600)
+    File.write!(Path.join(staging, "artifact"), "live replacement")
+    send(lock.pid, :release)
+    assert Task.await(lock, 10_000) == :ok
+    for task <- tasks, do: assert({:ok, %CommandOutcome{}} = Task.await(task, 30_000))
+    assert File.read!(Path.join(staging, "artifact")) == "live replacement"
+    assert File.read!(Path.join(staging, "owner")) == System.pid()
+  end
+
+  @tag :tmp_dir
+  @tag :nightly
+  test "a VM killed during ptc run leaves staging reclaimed by the next admission", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
+    child = Path.join(directory, "interrupted.exs")
+    envelope = Path.join([target, ".ptc", "envelopes", "interrupted.json"])
+    staged = Path.join([target, ".ptc", "envelopes", ".ptc-private-*", "artifact"])
+
+    File.write!(child, """
+    {:ok, _apps} = Application.ensure_all_started(:ptc_runner)
+    presentation = PtcRunner.Kernel.CommandFrontend.execute(
+      ["run", #{inspect(project)}, "--envelope", #{inspect(envelope)}],
+      :standalone, fn _arguments ->
+        IO.puts("STAGING_READY")
+        receive do
+          :never -> {:ok, PtcRunner.Kernel.CommandRuntime.standalone()}
+        end
+      end)
+    IO.puts("EARLY_EXIT: " <> Integer.to_string(presentation.exit_status))
+    """)
+
+    port =
+      Port.open(
+        {:spawn_executable, System.find_executable("elixir")},
+        [
+          :binary,
+          :exit_status,
+          {:line, 1024},
+          {:args, Enum.flat_map(:code.get_path(), &["-pa", List.to_string(&1)]) ++ [child]}
+        ]
+      )
+
+    monitor = :erlang.monitor(:port, port)
+    {:os_pid, pid} = Port.info(port, :os_pid)
+
+    on_exit(fn ->
+      if Port.info(port), do: Port.close(port)
+    end)
+
+    Eventually.assert_eventually(fn ->
+      receive do
+        {^port, {:data, {:eol, "STAGING_READY"}}} -> true
+        {^port, {:data, {:eol, "EARLY_EXIT: " <> status}}} -> flunk("admission failed: #{status}")
+        {^port, {:data, _other}} -> false
+        {^port, {:exit_status, status}} -> flunk("child exited early: #{status}")
+      after
+        0 -> false
+      end
+    end)
+
+    [artifact] = Path.wildcard(staged, match_dot: true)
+    staging = Path.dirname(artifact)
+    assert File.read!(Path.join(staging, "owner")) == Integer.to_string(pid)
+    assert Bitwise.band(File.stat!(Path.join(staging, "owner")).mode, 0o777) == 0o600
+    assert {_, 0} = System.cmd(System.find_executable("kill"), ["-KILL", Integer.to_string(pid)])
+    assert_receive {:DOWN, ^monitor, :port, ^port, _reason}, 10_000
+    assert File.dir?(staging)
+    refute File.exists?(envelope)
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project])
+    refute File.exists?(staging)
+
+    assert Path.wildcard(Path.join([target, ".ptc", "*", ".ptc-private-*"]), match_dot: true) ==
+             []
+  end
 
   @tag :tmp_dir
   test "an initialized project runs through its single project document", %{tmp_dir: directory} do
