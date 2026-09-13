@@ -4,9 +4,10 @@ defmodule PtcRunner.Kernel.ProviderPlan do
   alias PtcRunner.Kernel.EffectiveApplication
   alias PtcRunner.Kernel.LimitConfiguration
   alias PtcRunner.Kernel.ProviderDescriptor
+  alias PtcRunner.Kernel.ServingRequest
 
   @spec derive(
-          PtcRunner.Kernel.RunRequest.t(),
+          PtcRunner.Kernel.RunRequest.t() | ServingRequest.t(),
           PtcRunner.Kernel.FrozenBundle.t(),
           %{binary() => PtcRunner.Kernel.FrozenBundle.t() | nil},
           [map()]
@@ -54,7 +55,7 @@ defmodule PtcRunner.Kernel.ProviderPlan do
   end
 
   @doc false
-  @spec derive_policy(PtcRunner.Kernel.RunRequest.t(), [map()]) ::
+  @spec derive_policy(PtcRunner.Kernel.RunRequest.t() | ServingRequest.t(), [map()]) ::
           {:ok,
            %{
              effective_data_class: :normal | :private_inspection,
@@ -109,7 +110,10 @@ defmodule PtcRunner.Kernel.ProviderPlan do
   end
 
   defp effective_data_class(request, declarations) do
-    input_class = if request.input.authority == :private, do: :private_inspection, else: :normal
+    input_class =
+      if ServingRequest.input_authority(request) == :private,
+        do: :private_inspection,
+        else: :normal
 
     Enum.reduce(declarations, input_class, fn declaration, current ->
       strictest_data_class(current, declaration.descriptor.data_class)
@@ -139,9 +143,10 @@ defmodule PtcRunner.Kernel.ProviderPlan do
   end
 
   defp effective_flow(request, effective_data_class) do
-    if request.input.authority == :private or effective_data_class == :private_inspection,
-      do: :private,
-      else: :normal
+    if ServingRequest.input_authority(request) == :private or
+         effective_data_class == :private_inspection,
+       do: :private,
+       else: :normal
   end
 
   defp effective_event_policy(request, effective_flow) do
@@ -166,7 +171,7 @@ defmodule PtcRunner.Kernel.ProviderPlan do
         workflow: workflow_bundle.hash,
         missions: Map.new(mission_bundles, fn {name, bundle} -> {name, bundle && bundle.hash} end)
       },
-      input_authority_class: request.input.authority,
+      input_authority_class: ServingRequest.input_authority(request),
       limits: request.package.limits,
       effective_data_class: effective_data_class,
       effective_flow: effective_flow,

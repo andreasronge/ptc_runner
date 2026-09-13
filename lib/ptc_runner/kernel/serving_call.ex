@@ -10,11 +10,8 @@ defmodule PtcRunner.Kernel.ServingCall do
   alias PtcRunner.Kernel.ExecutionInput
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.ExecutionPolicy
-  alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.OwnerFailure
   alias PtcRunner.Kernel.PreparedRun
-  alias PtcRunner.Kernel.ProviderActivity
-  alias PtcRunner.Kernel.ProviderPlan
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunAdmission
   alias PtcRunner.Kernel.RunRequest
@@ -119,9 +116,6 @@ defmodule PtcRunner.Kernel.ServingCall do
   end
 
   defp prepare(template, input) do
-    bundle = template.workflow.bundle
-    bundles = Map.new(template.missions, fn {name, mission} -> {name, mission.bundle} end)
-
     with {:ok, input} <- ExecutionInput.new(input, :normal, template.package.contracts.input),
          {:ok, policy} <-
            ExecutionPolicy.new(
@@ -131,21 +125,8 @@ defmodule PtcRunner.Kernel.ServingCall do
              inspection_capture: false,
              event_policy: :normal
            ),
-         {:ok, request} <- RunRequest.new(template.package, input, policy),
-         {:ok, catalog} <-
-           InstallationCatalog.new(%{}, installed_limits: template.package.installed_limits),
-         {:ok, metadata} <- ProviderPlan.derive(request, bundle, bundles, []) do
-      ProviderActivity.start_owned(fn activity ->
-        PreparedRun.new(
-          request,
-          bundle,
-          bundles,
-          "(#{template.package.entry} data/input)",
-          activity,
-          catalog,
-          Map.merge(metadata, %{provider_declarations: [], installation_config_digests: %{}})
-        )
-      end)
+         {:ok, request} <- RunRequest.new(template.package, input, policy) do
+      ServingTemplate.prepare_call(template, request)
     end
   end
 

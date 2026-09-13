@@ -202,6 +202,28 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
     end
   end
 
+  @doc false
+  @spec begin_serving_operation(
+          ProviderSession.t(),
+          PreparedRun.t(),
+          InstallationCatalog.t(),
+          ProviderRuntimeServices.t(),
+          Deadline.t()
+        ) :: {:ok, ProviderSession.t()} | {:error, term()}
+  def begin_serving_operation(session, prepared, catalog, services, deadline) do
+    if PreparedRun.active_valid?(prepared) and InstallationCatalog.valid?(catalog) and
+         prepared.catalog_attestation == catalog.attestation and
+         ProviderRuntimeServices.bound_to?(services, catalog.runtime_binding) and
+         ProviderSession.bound_to_operation?(session, prepared.attestation) do
+      case ProviderSession.begin_serving_operation(session, deadline) do
+        {:ok, session} -> validate_open_session(session, prepared, catalog, services, :all)
+        _failure -> reject_begin_run(session, prepared)
+      end
+    else
+      reject_begin_run(session, prepared)
+    end
+  end
+
   defp do_begin_run(session, prepared, catalog, services, operation, target) do
     case ProviderSession.begin_operation(session, operation) do
       {:ok, session} ->

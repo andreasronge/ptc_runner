@@ -27,7 +27,10 @@ defmodule PtcRunner.Kernel.RunConfig do
   each with distinct hashes and byte counts. Hosts cannot supply mutable
   inventory text.
 
-  `provider_session` is the single owner-backed provider cleanup boundary.
+  `provider_session` is the owner-backed provider cleanup boundary, or a
+  non-owning borrowed value. A borrowed value supplies the absolute
+  admission-owned deadline through ProviderSession.execution_deadline/1;
+  both close functions are no-ops and binding registers only the call's tracker.
   Its optional absolute `run_deadline` is derived from that sealed session so
   active preflight and later Kernel execution consume one budget rather than
   anchoring independent durations.
@@ -127,7 +130,7 @@ defmodule PtcRunner.Kernel.RunConfig do
           result_projection: :native | :json,
           inspection_sink: InspectionSink.t() | nil,
           inspection_sink_owner: pid() | nil,
-          provider_session: ProviderSession.t() | nil,
+          provider_session: ProviderSession.t() | ProviderSession.Borrowed.t() | nil,
           connector_snapshots: [map()],
           provider_warnings: [CommandWarning.t()],
           session_profile: map() | nil,
@@ -508,6 +511,14 @@ defmodule PtcRunner.Kernel.RunConfig do
   def bind_provider_session(%__MODULE__{provider_session: nil}, owner, run_state, _tracker)
       when is_pid(owner) and is_pid(run_state),
       do: :ok
+
+  def bind_provider_session(
+        %__MODULE__{provider_session: %ProviderSession.Borrowed{} = borrowed},
+        owner,
+        run_state,
+        tracker
+      ),
+      do: ProviderSession.bind_borrowed(borrowed, owner, run_state, tracker)
 
   def bind_provider_session(%__MODULE__{provider_session: session}, owner, run_state, tracker)
       when is_pid(owner) and is_pid(run_state),

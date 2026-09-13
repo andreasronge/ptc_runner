@@ -91,6 +91,16 @@ defmodule PtcRunner.Kernel.RunAdmission do
   def activate(reservation, prepared, authority),
     do: activate_execution(reservation, prepared, authority, nil)
 
+  @doc "Activates a reservation with a retained runtime borrow."
+  @spec activate(
+          reservation(),
+          PreparedRun.t(),
+          PublicationAuthority.t(),
+          ProviderExecution.Retained.t()
+        ) :: {:ok, execution()} | {:error, term()}
+  def activate(reservation, prepared, authority, %ProviderExecution.Retained{} = retained),
+    do: activate_execution(reservation, prepared, authority, retained)
+
   @doc "Activates with the preparation's bound catalog and host-owned provider services."
   @spec activate(
           reservation(),

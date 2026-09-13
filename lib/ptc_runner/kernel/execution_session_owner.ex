@@ -46,7 +46,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           PreparedRun.t(),
           PublicationAuthority.t(),
           pid(),
-          ProviderExecution.t() | nil,
+          ProviderExecution.t() | ProviderExecution.Retained.t() | nil,
           (binary() -> term()) | nil,
           :run | :connect
         ) ::
@@ -64,7 +64,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           PreparedRun.t(),
           PublicationAuthority.t(),
           pid(),
-          ProviderExecution.t() | nil,
+          ProviderExecution.t() | ProviderExecution.Retained.t() | nil,
           (binary() -> term()) | nil,
           :run | :connect,
           Target.t() | nil
@@ -77,7 +77,8 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
              | :invalid_provider_execution}
   def start(prepared, authority, caller, provider_execution, notifier, operation, live_status)
       when is_pid(caller) and operation in [:run, :connect] do
-    with :ok <-
+    with :ok <- retained_caller(provider_execution, caller),
+         :ok <-
            admissible(
              prepared,
              authority,
@@ -121,7 +122,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           PreparedRun.t(),
           PublicationAuthority.t(),
           pid(),
-          ProviderExecution.t() | nil
+          ProviderExecution.t() | ProviderExecution.Retained.t() | nil
         ) ::
           {:ok, t()} | {:error, term()}
   def start_admitted(host, prepared, authority, caller, execution) do
@@ -141,7 +142,8 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   end
 
   defp start_with_admission(host, admission_request, prepared, authority, caller, execution) do
-    with :ok <- admissible(prepared, authority, execution, nil, :run, nil) do
+    with :ok <- retained_caller(execution, caller),
+         :ok <- admissible(prepared, authority, execution, nil, :run, nil) do
       token = make_ref()
 
       case GenServer.start(
@@ -179,12 +181,20 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
   # Every refusal here is decided before `init/1` consumes the prepared run, so
   # a rejected start leaves that preparation reusable.
+  defp retained_caller(%ProviderExecution.Retained{borrow: %{caller: caller}}, caller), do: :ok
+
+  defp retained_caller(%ProviderExecution.Retained{}, _caller),
+    do: {:error, :invalid_provider_execution}
+
+  defp retained_caller(_execution, _caller), do: :ok
+
   defp admissible(prepared, authority, provider_execution, notifier, operation, live_status) do
     cond do
       not live_status?(live_status) ->
         {:error, :invalid_prepared_run}
 
-      not PreparedRun.valid?(prepared) ->
+      not match?(%PreparedRun{request: %PtcRunner.Kernel.RunRequest{}}, prepared) or
+          not PreparedRun.valid?(prepared) ->
         {:error, :invalid_prepared_run}
 
       not PublicationAuthority.authorized?(authority) ->
@@ -588,6 +598,50 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     end
   end
 
+  defp execute_providers(
+         prepared,
+         {authority, lease},
+         sinks,
+         %ProviderExecution.Retained{} = retained,
+         _notifier,
+         _tracker,
+         _owner,
+         :run
+       ) do
+    with {:ok, built} <-
+           RunBuilder.build_borrowed_owned(
+             prepared,
+             retained.borrow.registry,
+             authority,
+             sinks,
+             retained.borrow
+           ) do
+      RunBuilder.execute_built_claimed(Map.put(built, :publication_lease, lease), lease)
+    end
+  end
+
+  defp execute_providers(
+         prepared,
+         publication,
+         sinks,
+         execution,
+         notifier,
+         tracker,
+         owner,
+         operation
+       ),
+       do:
+         ProviderExecution.execute(
+           prepared,
+           publication,
+           sinks,
+           execution,
+           notifier,
+           tracker,
+           owner,
+           operation
+         )
+
   defp open_provider_execution(
          initial,
          authority,
@@ -613,7 +667,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
             execution_result =
               LiveStatus.with_target(initial.live_status, fn ->
-                ProviderExecution.execute(
+                execute_providers(
                   initial.prepared,
                   {authority, initial.lease},
                   opened_sinks,

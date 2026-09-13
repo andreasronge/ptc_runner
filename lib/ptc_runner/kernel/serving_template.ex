@@ -1,21 +1,26 @@
 defmodule PtcRunner.Kernel.ServingTemplate do
   @moduledoc """
-  Compile-once, provider-free application template for transport-neutral hosting.
+  Compile-once application template for transport-neutral hosting.
 
   `from_directory(manifest_path, installed_limits, opts \\\\ [])` returns
   `{:ok, template}` or `{:error, build_code}`. `installed_limits` is a complete
-  valid `PtcRunner.Kernel.Limits` value. The only option is
+  valid `PtcRunner.Kernel.Limits` value. Options are
+  `providers: %InstallationCatalog{}` for provider-bearing packages and
   `:expected_application_content_digest`, a `sha256:<64 lowercase hex>` pin.
   Unknown or duplicate options, and malformed pins, fail before acquisition.
   The pin compares content only, never effective identity.
 
   Construction captures the directory closure once, compiles its workflow and
-  mission bundles and object value contracts once, and assembles the complete
-  runnable environment before validating effects. Exactly one callable workflow
+  mission bundles and object value contracts once, and validates declared effects.
+  Provider-free construction also assembles the complete runnable environment.
+  Exactly one callable workflow
   entry is required. Its declaration must be `read` or `write`. Declared read
   requires the complete grant resolved by `PtcRunner.Kernel.EntryEffect` to be
   read; declared write remains write even with unknown grant components.
-  Manifest-owned event IDs and any selected providers are rejected.
+  Manifest-owned event IDs are rejected. Selected providers require the explicit
+  `:providers` catalog, valid and bound to the supplied installed limits; otherwise
+  construction refuses with `:provider_runtime_required` or
+  `:invalid_installation_catalog`. Provider-free packages ignore this option.
 
   The required manifest input declaration is shape-validated, but its referenced
   file is never opened and its value is never contract-validated. Ordinary
@@ -49,7 +54,7 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   `call(template, json_object, admission_pid, deadline \\\\ :infinity)` reserves
   and activates immediately; use it when no transport commitment is needed.
   The host starts RunAdmission under its supervisor and bounds inbound workers.
-  No providers, HTTP dependencies or artifact destinations are involved.
+  These call helpers currently accept provider-free templates only.
 
   ## Safe metadata
 
@@ -59,7 +64,8 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   deterministically. `effect/1` returns the validated `:read` or `:write`.
   `application_content_digest/1`, `effective_application_digest/1`, and all
   values of `installation_config_digests/1` use qualified SHA-256. The latter
-  map is empty for this provider-free surface. `limits/1` returns the resolved
+  map contains the real selected installation identities, and is empty without
+  providers. `limits/1` returns the resolved
   effective limits; `policy/1` returns the frozen non-owning hosting rules.
 
   ## Limits and deadlines
@@ -85,12 +91,20 @@ defmodule PtcRunner.Kernel.ServingTemplate do
 
   ## Ownership and close
 
-  Templates are opaque, immutable, process-independent values concurrently
-  shareable across processes. They retain no selected `ExecutionInput`,
-  `ExecutionPolicy`, provider activity, sink, publication authority, run or trace
-  identity, PID, reference, callback, or file handle. Acquisition closes its
-  temporary document source on success and failure. Its resource-free placeholder
-  input is discarded. No `PreparedRun` or one-shot owner is created.
+  Templates are opaque, immutable values concurrently shareable across processes.
+  Provider-bearing construction retains the sealed catalog, frozen policy and
+  complete inert preparation metadata, including selection scope references.
+  Its temporary ProviderActivity is closed before construction returns. No
+  selected input, acquired capability, sink or execution owner is retained.
+  Provider-bearing templates cache bundles without assembled environments;
+  actual capabilities are required by environment validation, so assembly occurs
+  when a borrowed run is built. The coordinator validates declared effects
+  during construction. Catalog implementations remain internal, excluded from
+  inspection and the safe metadata API. Acquisition closes its temporary
+  document source on success and failure and discards its placeholder input.
+  `prepare_call/2` seals a real RunRequest from cached bundles and complete
+  metadata without recompilation or provider callbacks. ProviderRuntime owns
+  acquisition; ServingCall currently supports only provider-free templates.
   `close(template)` returns `:ok` and is an idempotent no-op: it releases no owned
   resource and does not invalidate other copies. Drop all copies to reclaim memory.
 
@@ -99,7 +113,8 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   Errors contain only one atom, with no paths, payloads or private reasons:
   `:invalid_options`, `:invalid_installed_limits`, `:invalid_application`,
   `:contracts_required`, `:entry_invalid`, `:manifest_identity_forbidden`,
-  `:provider_runtime_required`, `:private_result_unservable`, `:application_content_digest_mismatch`,
+  `:provider_runtime_required`, `:invalid_installation_catalog`,
+  `:private_result_unservable`, `:application_content_digest_mismatch`,
   `:compilation_failed`, `:environment_invalid`, `:effect_declaration_required`,
   `:declared_read_effect_violation`, or `:internal_error`.
   Acquisition failures, including invalid contracts/declarations or document
@@ -110,25 +125,37 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   """
 
   alias PtcRunner.Kernel.ApplicationPackage
+  alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.BundleCompiler
+  alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.DeclaredReadEffectValidator
   alias PtcRunner.Kernel.EffectiveApplication
   alias PtcRunner.Kernel.EntryEffect
+  alias PtcRunner.Kernel.ExecutionPolicy
+  alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.InstallationConfigDigest
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.PreparedRun
+  alias PtcRunner.Kernel.ProviderActivity
+  alias PtcRunner.Kernel.ProviderPlan
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.ServingCall
   alias PtcRunner.Kernel.ServingOutcome
+  alias PtcRunner.Kernel.ServingRequest
   alias PtcRunner.Kernel.ValueContract
 
   @enforce_keys [:package, :workflow, :missions, :effect, :effective_digest, :policy]
-  defstruct @enforce_keys
+  @derive {Inspect, only: [:effect, :effective_digest, :policy]}
+  defstruct @enforce_keys ++ [retained: nil, installation_digests: %{}]
 
   @typedoc "An immutable compiled application with no owned execution resources."
   @opaque t :: %__MODULE__{
             package: ApplicationPackage.t(),
-            workflow: PtcRunner.Kernel.WorkflowEnvironment.t(),
+            workflow:
+              PtcRunner.Kernel.WorkflowEnvironment.t()
+              | %{bundle: PtcRunner.Kernel.FrozenBundle.t()},
             missions: map(),
             effect: :read | :write,
             effective_digest: binary(),
@@ -146,6 +173,7 @@ defmodule PtcRunner.Kernel.ServingTemplate do
           | :entry_invalid
           | :manifest_identity_forbidden
           | :private_result_unservable
+          | :invalid_installation_catalog
           | :provider_runtime_required
           | :application_content_digest_mismatch
           | :compilation_failed
@@ -154,14 +182,14 @@ defmodule PtcRunner.Kernel.ServingTemplate do
           | :declared_read_effect_violation
           | :internal_error
 
-  @doc "Acquires and compiles one immutable provider-free directory template."
+  @doc "Acquires and compiles one immutable directory template without selected input."
   @spec from_directory(binary(), Limits.t(), keyword()) :: {:ok, t()} | {:error, build_code()}
   def from_directory(path, installed_limits, opts \\ []) do
     with :ok <- options(opts),
          true <- Limits.valid?(installed_limits),
          {:ok, package} <- acquire(path, installed_limits),
          :ok <- package_rules(package, opts) do
-      construct(package)
+      construct(package, opts)
     else
       false -> {:error, :invalid_installed_limits}
       {:error, _code} = error -> error
@@ -195,7 +223,7 @@ defmodule PtcRunner.Kernel.ServingTemplate do
 
   @doc "Returns selected installation configuration digests (empty without providers)."
   @spec installation_config_digests(t()) :: %{binary() => binary()}
-  def installation_config_digests(%__MODULE__{}), do: %{}
+  def installation_config_digests(%__MODULE__{installation_digests: digests}), do: digests
 
   @doc "Returns effective limits resolved against installed ceilings."
   @spec limits(t()) :: Limits.t()
@@ -233,7 +261,8 @@ defmodule PtcRunner.Kernel.ServingTemplate do
 
   defp options(opts) when is_list(opts) do
     if Keyword.keyword?(opts) and
-         Keyword.keys(opts) in [[], [:expected_application_content_digest]] and
+         Keyword.keys(opts) -- [:providers, :expected_application_content_digest] == [] and
+         length(opts) == MapSet.size(MapSet.new(Keyword.keys(opts))) and
          (not Keyword.has_key?(opts, :expected_application_content_digest) or
             InstallationConfigDigest.valid_digest?(opts[:expected_application_content_digest])),
        do: :ok,
@@ -251,7 +280,7 @@ defmodule PtcRunner.Kernel.ServingTemplate do
 
   defp package_rules(package, opts) do
     cond do
-      package.providers.workflow != [] or package.providers.mission != [] ->
+      provider_bearing?(package) and not Keyword.has_key?(opts, :providers) ->
         {:error, :provider_runtime_required}
 
       package.events.policy == :private ->
@@ -274,7 +303,16 @@ defmodule PtcRunner.Kernel.ServingTemplate do
     end
   end
 
-  defp construct(package) do
+  defp construct(package, opts) do
+    if provider_bearing?(package),
+      do: construct_retained(package, opts[:providers]),
+      else: construct_free(package)
+  end
+
+  defp provider_bearing?(package),
+    do: package.providers.workflow != [] or package.providers.mission != []
+
+  defp construct_free(package) do
     deadline = System.monotonic_time(:millisecond) + 5_000
 
     with {:ok, bundle} <- compile(package.workflow_components, deadline),
@@ -312,6 +350,179 @@ defmodule PtcRunner.Kernel.ServingTemplate do
       {:error, _code} = error -> error
     end
   end
+
+  @doc "Seals a per-call run from cached bundles and the complete prepared metadata."
+  @spec prepare_call(t(), RunRequest.t()) :: {:ok, PreparedRun.t()} | {:error, term()}
+  def prepare_call(%__MODULE__{} = template, %RunRequest{} = request) do
+    if RunRequest.valid?(request) and request.package == template.package and
+         request.input.authority == :normal and request.policy.result_projection == :json and
+         not request.policy.inspection_capture and request.policy.event_policy == :normal do
+      with {:ok, retained} <- retained_metadata(template, request) do
+        seal_call(template, request, retained)
+      end
+    else
+      {:error, :invalid_run_request}
+    end
+  end
+
+  def prepare_call(_template, _request), do: {:error, :invalid_run_request}
+
+  defp seal_call(template, request, retained) do
+    ProviderActivity.start_owned(fn activity ->
+      PreparedRun.new(
+        request,
+        template.workflow.bundle,
+        Map.new(template.missions, fn {name, mission} -> {name, mission.bundle} end),
+        "(#{template.package.entry} data/input)",
+        activity,
+        retained.catalog,
+        retained.metadata
+      )
+    end)
+  end
+
+  @doc false
+  @spec provider_plan(t()) :: {:ok, map()} | {:error, :provider_runtime_required}
+  def provider_plan(%__MODULE__{retained: nil}), do: {:error, :provider_runtime_required}
+
+  def provider_plan(%__MODULE__{retained: %{reader: reader, attestation: attestation}} = template) do
+    if Attestation.valid?(
+         __MODULE__,
+         {template.package, template.installation_digests, template.effective_digest, reader},
+         attestation
+       ) do
+      {:ok,
+       Map.merge(reader.(), %{
+         workflow_bundle: template.workflow.bundle,
+         mission_bundles:
+           Map.new(template.missions, fn {name, mission} -> {name, mission.bundle} end),
+         entry_source: "(#{template.package.entry} data/input)"
+       })}
+    else
+      {:error, :provider_runtime_required}
+    end
+  end
+
+  def provider_plan(_template), do: {:error, :provider_runtime_required}
+
+  defp retain(package, digests, effective_digest, state) do
+    reader = fn -> state end
+
+    %{
+      reader: reader,
+      attestation: Attestation.attest(__MODULE__, {package, digests, effective_digest, reader})
+    }
+  end
+
+  defp retained_metadata(%__MODULE__{retained: retained} = template, _request)
+       when not is_nil(retained),
+       do: provider_plan(template)
+
+  defp retained_metadata(template, request) do
+    with {:ok, catalog} <-
+           InstallationCatalog.new(%{}, installed_limits: template.package.installed_limits),
+         {:ok, metadata} <-
+           ProviderPlan.derive(
+             request,
+             template.workflow.bundle,
+             Map.new(template.missions, fn {name, mission} -> {name, mission.bundle} end),
+             []
+           ) do
+      {:ok,
+       %{
+         catalog: catalog,
+         metadata:
+           Map.merge(metadata, %{provider_declarations: [], installation_config_digests: %{}})
+       }}
+    end
+  end
+
+  defp construct_retained(package, catalog) do
+    if InstallationCatalog.valid?(catalog) and
+         catalog.installed_limits == package.installed_limits do
+      with {:ok, policy} <-
+             ExecutionPolicy.new(event_policy: package.events.policy, result_projection: :json),
+           {:ok, request} <- ServingRequest.new(package, policy),
+           {:ok, prepared} <- RunCoordinator.prepare(request, catalog) do
+        try do
+          metadata =
+            Map.take(prepared, [
+              :provider_declarations,
+              :installation_config_digests,
+              :effective_data_class,
+              :effective_flow,
+              :effective_event_policy,
+              :effective_application_projection,
+              :effective_application_digest,
+              :post_selection_context
+            ])
+
+          entry = Enum.find(prepared.workflow_bundle.prelude.exports, &(&1.ref == package.entry))
+
+          if entry.declared_effect in [:read, :write] do
+            {:ok,
+             %__MODULE__{
+               package: package,
+               workflow: %{bundle: prepared.workflow_bundle},
+               missions:
+                 Map.new(prepared.mission_bundles, fn {name, bundle} ->
+                   {name, %{bundle: bundle}}
+                 end),
+               effect: entry.declared_effect,
+               effective_digest: prepared.effective_application_digest,
+               policy: %{
+                 input_authority_class: :normal,
+                 inspection_capture: false,
+                 result_projection: :json,
+                 effective_event_policy: :normal,
+                 publication: :artifact_free,
+                 deadline: :absolute_from_reservation
+               },
+               installation_digests: prepared.installation_config_digests,
+               retained:
+                 retain(
+                   package,
+                   prepared.installation_config_digests,
+                   prepared.effective_application_digest,
+                   %{catalog: catalog, metadata: metadata, request: request}
+                 )
+             }}
+          else
+            {:error, :effect_declaration_required}
+          end
+        after
+          PreparedRun.close(prepared)
+        end
+      else
+        {:error, %CommandDiagnostic{} = diagnostic} ->
+          {:error, preparation_build_code(diagnostic)}
+
+        {:error, :private_result_unservable} = error ->
+          error
+
+        _invalid ->
+          {:error, :internal_error}
+      end
+    else
+      {:error, :invalid_installation_catalog}
+    end
+  end
+
+  defp preparation_build_code(%CommandDiagnostic{code: :declared_read_effect_invalid}),
+    do: :declared_read_effect_violation
+
+  defp preparation_build_code(%CommandDiagnostic{code: code})
+       when code in [:entry_invalid, :mission_undeclared], do: :entry_invalid
+
+  defp preparation_build_code(%CommandDiagnostic{code: :mission_capability_ungranted}),
+    do: :environment_invalid
+
+  defp preparation_build_code(%CommandDiagnostic{phase: :bundle}), do: :compilation_failed
+
+  defp preparation_build_code(%CommandDiagnostic{phase: :provider_declaration}),
+    do: :invalid_application
+
+  defp preparation_build_code(_diagnostic), do: :internal_error
 
   defp compile(components, deadline) do
     case BundleCompiler.compile(components, deadline) do

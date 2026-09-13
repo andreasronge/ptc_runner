@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.EffectiveApplication do
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.RunRequest
+  alias PtcRunner.Kernel.ServingRequest
   alias PtcRunner.Kernel.TypedCanonicalJSON
 
   @domain <<"ptc.effective-application.v3", 0>>
@@ -23,7 +24,7 @@ defmodule PtcRunner.Kernel.EffectiveApplication do
         }
 
   @spec build(
-          RunRequest.t(),
+          RunRequest.t() | ServingRequest.t(),
           FrozenBundle.t(),
           %{binary() => FrozenBundle.t() | nil},
           normalized_providers(),
@@ -32,9 +33,9 @@ defmodule PtcRunner.Kernel.EffectiveApplication do
           {:ok, %{projection: map(), digest: binary()}} | {:error, :invalid_effective_application}
   @doc "Builds the literal effective projection and its domain-separated digest."
   def build(request, workflow_bundle, mission_bundles, providers, effective_event_policy) do
-    if RunRequest.valid?(request) do
+    if ServingRequest.request_valid?(request) do
       build_package(request.package, workflow_bundle, mission_bundles, providers, %{
-        input_authority_class: request.input.authority,
+        input_authority_class: ServingRequest.input_authority(request),
         inspection_capture: request.policy.inspection_capture,
         result_projection: request.policy.result_projection,
         effective_event_policy: effective_event_policy

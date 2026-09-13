@@ -62,6 +62,23 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
           | {:error, term()}
           | {:unregistered_provider_close, term(), ProviderRegistry.close()}
 
+  @doc false
+  @spec close_failed(term(), ProviderSession.t()) :: term()
+  def close_failed({:ok, _providers} = success, _session), do: success
+
+  def close_failed({:unregistered_provider_close, reason, close}, session) do
+    acquisition_cleanup_result(
+      {:error, reason},
+      ProviderSession.close_with_unregistered(session, close)
+    )
+  end
+
+  def close_failed({:error, _reason} = error, session),
+    do: acquisition_cleanup_result(error, ProviderSession.close(session))
+
+  defp acquisition_cleanup_result(original, :ok), do: original
+  defp acquisition_cleanup_result(_original, {:error, _reason} = cleanup), do: cleanup
+
   @doc """
   Acquires the sealed acquisition targets of one prepared run, and nothing else.
 
@@ -557,6 +574,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
       workflow: %{capabilities: []},
       mission: %{capabilities: []},
       snapshots: [],
+      snapshot_sites: [],
       warnings: [],
       exports: %{},
       data_class: effective_class
@@ -655,6 +673,18 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
             ]
           })
           |> Map.update!(:snapshots, &maybe_append(&1, built.snapshot))
+          |> Map.update!(
+            :snapshot_sites,
+            &[
+              %{
+                destination: provider.destination,
+                name: provider.provider,
+                acquisition_identity_hash:
+                  built.snapshot && Map.get(built.snapshot, "acquisition_identity_hash")
+              }
+              | &1
+            ]
+          )
           |> Map.update!(:warnings, &(&1 ++ built.warnings))
           |> Map.update!(:exports, &merge_provider_exports(&1, provider.provider, built.exports))
 

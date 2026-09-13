@@ -19,6 +19,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
   alias PtcRunner.Kernel.ProviderPlan
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SelectionRules
+  alias PtcRunner.Kernel.ServingRequest
   alias PtcRunner.Lisp.Prelude
 
   @enforce_keys [
@@ -41,7 +42,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
   @field_keys Enum.sort([:__struct__, :attestation | @enforce_keys])
 
   @type t :: %__MODULE__{
-          request: RunRequest.t(),
+          request: RunRequest.t() | ServingRequest.t(),
           workflow_bundle: FrozenBundle.t(),
           mission_bundles: %{binary() => FrozenBundle.t() | nil},
           entry_source: binary(),
@@ -59,7 +60,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
         }
 
   @spec new(
-          RunRequest.t(),
+          RunRequest.t() | ServingRequest.t(),
           FrozenBundle.t(),
           %{binary() => FrozenBundle.t() | nil},
           binary(),
@@ -76,7 +77,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
         catalog,
         metadata
       ) do
-    if RunRequest.valid?(request) and
+    if ServingRequest.request_valid?(request) and
          InstallationCatalog.valid?(catalog) and
          bundle_matches?(workflow_bundle, request.package.workflow_components) and
          mission_bundles_matches?(mission_bundles, request.package.missions) and
@@ -154,7 +155,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
 
   defp sealed_valid?(%__MODULE__{attestation: attestation} = prepared) do
     Enum.sort(Map.keys(prepared)) == @field_keys and
-      RunRequest.valid?(prepared.request) and
+      ServingRequest.request_valid?(prepared.request) and
       bundle_matches?(
         prepared.workflow_bundle,
         prepared.request.package.workflow_components
@@ -525,7 +526,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
 
   defp post_selection_context_valid?(request, workflow_bundle, mission_bundles, metadata) do
     expected_flow =
-      if request.input.authority == :private or
+      if ServingRequest.input_authority(request) == :private or
            metadata.effective_data_class == :private_inspection,
          do: :private,
          else: :normal
@@ -542,7 +543,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
         workflow: workflow_bundle.hash,
         missions: mission_bundle_hashes(mission_bundles)
       },
-      input_authority_class: request.input.authority,
+      input_authority_class: ServingRequest.input_authority(request),
       limits: request.package.limits,
       effective_data_class: metadata.effective_data_class,
       effective_flow: expected_flow,
@@ -588,7 +589,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
             workflow: workflow_bundle.hash,
             missions: mission_bundle_hashes(mission_bundles)
           },
-          input_authority_class: request.input.authority,
+          input_authority_class: ServingRequest.input_authority(request),
           destination: declaration.destination,
           index: declaration.index,
           limits: request.package.limits
