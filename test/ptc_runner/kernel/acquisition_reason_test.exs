@@ -82,6 +82,13 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
     end
   end
 
+  test "remote mutation conflict remains a closed non-retryable policy diagnostic" do
+    diagnostic = AcquisitionReason.diagnostic(:mcp_tool_effect_conflict, @occurrence)
+    assert diagnostic.code == :provider_policy_changed
+    refute diagnostic.retryable
+    assert diagnostic.message == "the selected provider policy changed during acquisition"
+  end
+
   test "authorization loss during acquisition gives frontend-specific guidance" do
     diagnostic = AcquisitionReason.diagnostic(:mcp_authorization_required, @occurrence)
 

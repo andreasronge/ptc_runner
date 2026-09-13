@@ -3,6 +3,12 @@
 marker=$1
 mode=${2:-serve}
 seen_ids=" "
+tool_annotations=''
+case "$mode" in
+  effect-mutation) tool_annotations='"annotations":{"readOnlyHint":false},' ;;
+  effect-destructive) tool_annotations='"annotations":{"destructiveHint":true},' ;;
+  effect-read) tool_annotations='"annotations":{"readOnlyHint":true},' ;;
+esac
 
 if [ "$mode" = "stderr-warn" ]; then
   printf '%s\n' "stdio-fixture: write_text_file will refuse every call." >&2
@@ -111,9 +117,9 @@ do
     *'"method":"tools/list"'*)
       printf '%s:%s\n' "$id" 'tools/list' >> "$marker"
       if [ "$mode" = "structured-padded" ] || [ "$mode" = "structured-padded-dense" ]; then
-        printf '{"jsonrpc":"2.0","id":%s,"result":{"resultType":"complete","tools":[{"name":"structured","description":"Return one structured value.","inputSchema":{"type":"object","properties":{"query":{"type":"string","x-mcp-header":"Query"}},"required":["query"]},"outputSchema":{"type":"object","properties":{"value":{"type":"integer"},"padding":{"type":"array","items":{"type":"string"}}},"required":["value"]}}],"nextCursor":"page-2","ttlMs":0,"cacheScope":"private"}}\n' "$id"
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"resultType":"complete","tools":[{"name":"structured",%s"description":"Return one structured value.","inputSchema":{"type":"object","properties":{"query":{"type":"string","x-mcp-header":"Query"}},"required":["query"]},"outputSchema":{"type":"object","properties":{"value":{"type":"integer"},"padding":{"type":"array","items":{"type":"string"}}},"required":["value"]}}],"nextCursor":"page-2","ttlMs":0,"cacheScope":"private"}}\n' "$id" "$tool_annotations"
       else
-        printf '{"jsonrpc":"2.0","id":%s,"result":{"resultType":"complete","tools":[{"name":"structured","description":"Return one structured value.","inputSchema":{"type":"object","properties":{"query":{"type":"string","x-mcp-header":"Query"}},"required":["query"]},"outputSchema":{"type":"object","properties":{"value":{"type":"integer"}},"required":["value"]}}],"nextCursor":"page-2","ttlMs":0,"cacheScope":"private"}}\n' "$id"
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"resultType":"complete","tools":[{"name":"structured",%s"description":"Return one structured value.","inputSchema":{"type":"object","properties":{"query":{"type":"string","x-mcp-header":"Query"}},"required":["query"]},"outputSchema":{"type":"object","properties":{"value":{"type":"integer"}},"required":["value"]}}],"nextCursor":"page-2","ttlMs":0,"cacheScope":"private"}}\n' "$id" "$tool_annotations"
       fi
       ;;
     *'"method":"tools/call"'*'"name":"structured"'*)

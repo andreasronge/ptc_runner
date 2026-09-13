@@ -1239,6 +1239,60 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
+  test "remote mutation hints veto only selected host reads on both transports", %{tmp_dir: dir} do
+    for {hint, mode} <- [
+          {%{"readOnlyHint" => false}, "effect-mutation"},
+          {%{"destructiveHint" => true}, "effect-destructive"},
+          {%{"readOnlyHint" => true}, "effect-read"},
+          {:absent, "serve"}
+        ],
+        transport <- [:streamable_http, :stdio],
+        {effect, allow} <- [
+          {:read, ~w(remote.structured)},
+          {:write, ~w(remote.structured)},
+          {:read, ~w(remote.text)}
+        ] do
+      marker = Path.join(dir, "#{transport}-#{mode}-#{effect}-#{hd(allow)}")
+      tools = mappings_with_effect("structured", effect)
+
+      registry =
+        case transport do
+          :streamable_http ->
+            fixture = fixture(self(), tool_annotations: hint)
+            on_exit(fixture.close)
+            registry(fixture.endpoint, tools: tools)
+
+          :stdio ->
+            stdio_registry(dir, marker, mode, tools: tools)
+        end
+
+      result =
+        dir
+        |> manifest(allow)
+        |> directory_request(registry)
+        |> RunLifecycle.build()
+
+      conflict? =
+        effect == :read and allow == ~w(remote.structured) and
+          mode in ["effect-mutation", "effect-destructive"]
+
+      if conflict? do
+        assert {:error, :mcp_tool_effect_conflict} = result
+      else
+        assert {:ok, built} = result
+        capability = built.config.missions["default"].environment.capabilities[hd(allow)]
+        assert capability.effect == if(allow == ~w(remote.structured), do: effect, else: :read)
+      end
+
+      if transport == :stdio do
+        refute File.read!(marker) =~ "tools/call"
+      else
+        refute_receive {:mcp_request, "tools/call", _headers}
+      end
+    end
+  end
+
+  @tag :tmp_dir
   test "tolerates spec-standard extra tool fields and SDK annotation keys", %{tmp_dir: dir} do
     parent = self()
     fixture = fixture(parent, spec_extras?: true)
@@ -3562,6 +3616,13 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         )
       else
         base
+      end
+
+    base =
+      case Keyword.fetch(opts, :tool_annotations) do
+        {:ok, :absent} -> Map.delete(base, "annotations")
+        {:ok, annotations} -> Map.put(base, "annotations", annotations)
+        :error -> base
       end
 
     case Keyword.fetch(opts, :execution) do
