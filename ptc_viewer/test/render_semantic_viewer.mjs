@@ -14,5 +14,5 @@ const conversation = readJson(conversationPath);
 
 process.stdout.write(
   renderKernelTranscriptMarkup({ metadata, turns }) +
-    renderSemanticConversationMarkup(conversation)
+    renderSemanticConversationMarkup(conversation, metadata)
 );

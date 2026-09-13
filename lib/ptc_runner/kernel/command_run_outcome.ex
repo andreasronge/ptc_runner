@@ -913,7 +913,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
              "llm_budget" => llm_budget,
              "llm_spend" => llm_spend
            }
-           |> Map.merge(llm_usage_projection(terminal_batch)),
+           |> Map.merge(LLMUsageSummary.terminal_projection(terminal_batch)),
          true <-
            Enum.all?(values, fn
              {_key, value} when is_map(value) ->
@@ -943,24 +943,6 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   end
 
   defp usage_projection(_usage, _terminal_batch), do: {:error, :invalid_usage}
-
-  defp llm_usage_projection({:ok, events}) do
-    case LLMUsageSummary.terminal(events) do
-      {:ok, summary} -> Map.put(summary, "llm_usage_state", "available")
-      {:error, :invalid_event_batch} -> unavailable_llm_usage()
-    end
-  end
-
-  defp llm_usage_projection(_terminal_batch), do: unavailable_llm_usage()
-
-  defp unavailable_llm_usage do
-    %{
-      "llm_usage_state" => "unavailable",
-      "llm_usage" => nil,
-      "llm_usage_by_model" => nil,
-      "unattributed_model_calls" => nil
-    }
-  end
 
   defp warnings_projection({:ok, events}) when is_list(events) do
     warnings =

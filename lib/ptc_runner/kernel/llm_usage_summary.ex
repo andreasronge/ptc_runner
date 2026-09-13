@@ -43,6 +43,27 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
 
   def terminal(_events), do: {:error, :invalid_event_batch}
 
+  @doc """
+  Projects reconciled terminal accounting with an explicit availability state.
+  Incomplete or invalid event batches never imply that no model was called.
+  """
+  @spec terminal_projection(term()) :: map()
+  def terminal_projection({:ok, events}) do
+    case terminal(events) do
+      {:ok, summary} -> Map.put(summary, "llm_usage_state", "available")
+      {:error, :invalid_event_batch} -> terminal_projection(:unavailable)
+    end
+  end
+
+  def terminal_projection(_batch) do
+    %{
+      "llm_usage_state" => "unavailable",
+      "llm_usage" => nil,
+      "llm_usage_by_model" => nil,
+      "unattributed_model_calls" => nil
+    }
+  end
+
   @spec summarize([map()], [map()] | nil) :: summary()
   def summarize(events, attribution_events \\ nil) when is_list(events) do
     attribution_events = attribution_events || events

@@ -6,9 +6,18 @@ local inspection surface, not a general remote administration service.
 ## What it shows
 
 The **Runs** tab lists the project's captured traces read-only. A run page shows
-turns, tool calls, and effective prelude components. When the project records
-`artifacts.inspection` and grants `viewer.private`, it also shows generated
-programs, prelude sources, and model exchanges.
+turns, tool calls, effective prelude components, and called models attributed
+through the backend's validated terminal LLM reconciliation, including unmatched
+request starts. Incomplete or accounting-relevant dropped events are labelled
+as unavailable accounting. Configured but unused aliases
+do not appear as called models. Calls without attributable identity are not
+guessed into model identities. The separate
+model-label field is the manifest label fingerprint, not a record of which model
+served the run. When the project records `artifacts.inspection` and grants
+`viewer.private`, it also shows generated programs, prelude sources, and model
+exchanges. Each model response identifies its install alias and, when the
+adapter attested one, its configured resolved model. This configuration evidence
+is separate from the header’s accounting of observed calls.
 
 When the project enables `viewer.repl`, a run page can open a bounded analysis
 REPL over an immutable capture of the selected run. The **Live** tab shows runs

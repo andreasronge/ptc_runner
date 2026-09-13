@@ -92,6 +92,75 @@ defmodule PtcViewer.KernelTranscriptTest do
     refute rendered =~ ~s(>other/uncaptured</a>)
   end
 
+  test "shows the resolved model instead of presenting the manifest fingerprint as the model", %{
+    tmp_dir: directory
+  } do
+    model_fingerprint = "sha256:" <> String.duplicate("a", 64)
+
+    rendered =
+      render(directory, %{
+        "metadata" => %{
+          "run_id" => "model-identity-run",
+          "model" => model_fingerprint,
+          "llm_usage_by_model" => [
+            %{"resolved_model" => "openrouter:nex-agi/nex-n2-pro", "calls" => 1}
+          ],
+          "connector_snapshots" => [
+            %{
+              "declaration" => %{"name" => "deepseek", "source" => "llm"},
+              "acquisition" => %{
+                "source" => "llm",
+                "resolved_model" => "openrouter:nex-agi/nex-n2-pro"
+              }
+            }
+          ]
+        },
+        "turns" => %{"items" => []}
+      })
+
+    assert rendered =~ "Called model"
+    assert rendered =~ "openrouter:nex-agi/nex-n2-pro"
+    assert rendered =~ "Model label"
+    assert rendered =~ "sha256:aaaaaaaaaaaa"
+    refute rendered =~ ">Model</span><span class=\"kt-fact-value\">sha256:"
+  end
+
+  test "does not present configured but unused models as called", %{tmp_dir: directory} do
+    rendered =
+      render(directory, %{
+        "metadata" => %{
+          "run_id" => "multi-alias",
+          "connector_snapshots" => [
+            %{"acquisition" => %{"resolved_model" => "openrouter:vendor/unused"}}
+          ],
+          "llm_usage_by_model" => [
+            %{"resolved_model" => "openrouter:vendor/called", "calls" => 1}
+          ]
+        },
+        "turns" => %{"items" => []}
+      })
+
+    assert rendered =~ "Called model"
+    assert rendered =~ "openrouter:vendor/called"
+    refute rendered =~ "openrouter:vendor/unused"
+  end
+
+  test "shows unavailable model accounting without implying no calls", %{tmp_dir: directory} do
+    rendered =
+      render(directory, %{
+        "metadata" => %{
+          "run_id" => "missing-accounting",
+          "llm_usage_state" => "unavailable",
+          "llm_usage_by_model" => nil
+        },
+        "turns" => %{"items" => []}
+      })
+
+    assert rendered =~ "Model accounting"
+    assert rendered =~ "Unavailable"
+    refute rendered =~ "Called model"
+  end
+
   test "renders workflow-supplied programs independently of conversation streams", %{
     tmp_dir: directory
   } do

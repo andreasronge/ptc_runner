@@ -188,11 +188,155 @@ defmodule PtcViewer.SemanticConversationTest do
     assert rendered =~ "check this"
   end
 
-  defp render(directory, conversation) do
+  test "labels the response install alias and its resolved model", %{tmp_dir: directory} do
+    rendered =
+      render(
+        directory,
+        %{
+          "complete?" => true,
+          "streams" => [
+            %{
+              "stream_id" => "stream-1",
+              "turns" => [
+                %{
+                  "turn" => 1,
+                  "response" => %{
+                    "value" => %{
+                      "content" => "ordinary answer",
+                      "model" => "deepseek"
+                    }
+                  },
+                  "assistant" => %{
+                    "role" => "assistant",
+                    "content" => "ordinary answer"
+                  }
+                },
+                %{
+                  "turn" => 2,
+                  "response" => %{
+                    "value" => %{
+                      "content" => nil,
+                      "model" => "deepseek",
+                      "tool_calls" => [%{"id" => "call-1", "args" => %{}}]
+                    }
+                  },
+                  "assistant" => %{
+                    "role" => "assistant",
+                    "content" => nil,
+                    "tool_calls" => [%{"id" => "call-1", "args" => %{}}]
+                  }
+                },
+                %{
+                  "turn" => 3,
+                  "response" => %{
+                    "value" => %{
+                      "model" => "deepseek",
+                      "structured_output" => %{"owner" => "Priya"}
+                    }
+                  },
+                  "assistant" => %{
+                    "role" => "assistant",
+                    "content" => %{
+                      "model" => "deepseek",
+                      "structured_output" => %{"owner" => "Priya"}
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        %{
+          "connector_snapshots" => [
+            %{
+              "declaration" => %{"name" => "deepseek", "source" => "llm"},
+              "acquisition" => %{
+                "source" => "llm",
+                "resolved_model" => "openrouter:nex-agi/nex-n2-pro"
+              }
+            }
+          ]
+        }
+      )
+
+    assert rendered =~ "Install alias"
+    assert rendered =~ "deepseek"
+    assert rendered =~ "Configured model"
+    assert rendered =~ "openrouter:nex-agi/nex-n2-pro"
+    assert rendered =~ "ordinary answer"
+    assert length(Regex.scan(~r/<strong>Install alias<\/strong> deepseek/, rendered)) == 3
+    assert rendered =~ ~s(&quot;alias&quot;: &quot;deepseek&quot;)
+    assert rendered =~ ~s(&quot;model&quot;: &quot;deepseek&quot;)
+  end
+
+  test "preserves model-authored JSON fields that match the install alias", %{tmp_dir: directory} do
+    content = %{"model" => "deepseek", "answer" => "authored"}
+
+    rendered =
+      render(directory, %{
+        "streams" => [
+          %{
+            "turns" => [
+              %{
+                "response" => %{"value" => %{"model" => "deepseek", "content" => content}},
+                "assistant" => %{"role" => "assistant", "content" => content}
+              }
+            ]
+          }
+        ]
+      })
+
+    assert length(Regex.scan(~r/&quot;model&quot;: &quot;deepseek&quot;/, rendered)) == 2
+    refute rendered =~ "&quot;alias&quot;:"
+  end
+
+  test "labels routed error envelope model as an install alias", %{tmp_dir: directory} do
+    response = %{
+      "status" => "error",
+      "model" => "deepseek",
+      "kind" => "timeout",
+      "reason" => "provider_timeout",
+      "retryable?" => true
+    }
+
+    rendered =
+      render(
+        directory,
+        %{
+          "streams" => [
+            %{
+              "turns" => [
+                %{
+                  "response" => response,
+                  "assistant" => %{"role" => "assistant", "content" => response}
+                }
+              ]
+            }
+          ]
+        },
+        %{
+          "connector_snapshots" => [
+            %{
+              "declaration" => %{"source" => "llm", "name" => "deepseek"},
+              "acquisition" => %{"resolved_model" => "openrouter:vendor/called"}
+            }
+          ]
+        }
+      )
+
+    assert rendered =~ "Install alias"
+    assert rendered =~ "Configured model"
+    assert rendered =~ "openrouter:vendor/called"
+    assert rendered =~ "&quot;alias&quot;: &quot;deepseek&quot;"
+    assert length(Regex.scan(~r/&quot;model&quot;: &quot;deepseek&quot;/, rendered)) == 1
+    assert rendered =~ "provider_timeout"
+  end
+
+  defp render(directory, conversation, metadata \\ %{}) do
     metadata_path = Path.join(directory, "metadata.json")
     turns_path = Path.join(directory, "turns.json")
     conversation_path = Path.join(directory, "conversation.json")
-    File.write!(metadata_path, Jason.encode!(%{}))
+    File.write!(metadata_path, Jason.encode!(metadata))
     File.write!(turns_path, Jason.encode!(%{"items" => []}))
     File.write!(conversation_path, Jason.encode!(conversation))
 
