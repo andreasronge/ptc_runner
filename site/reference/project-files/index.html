@@ -271,8 +271,15 @@ their process values.</p><p>Direct manifest invocation remains the low-level for
 browser-opening preference, REPL setting, and private-data authorization. Trace
 and correlated inspection directories are captured before the listener starts;
 HTTP requests select only a run ID and never a filesystem path. Revoking
-<code class="inline">viewer.private</code> takes effect on the next request and drops held private
-evidence. Turning the grant on, and discovering runs that finished after
+<code class="inline">viewer.private</code> takes effect on the next request and drops the Viewer's held
+private evidence. This grant controls the Viewer only; it does not restrict
+<code class="inline">ptc transcript</code> or <code class="inline">ptc repl --profile private-run-analysis-v2</code>, which can
+still read the inspection artifact with their own explicit private authorization.
+To stop future inspection capture, set <code class="inline">artifacts.inspection: false</code>; to remove
+existing inspection evidence, delete the <code class="inline">.ptcins</code> files under
+<code class="inline">artifacts.root/inspection/</code> and any copies or exported private transcripts.
+This does not remove other retained data: review <code class="inline">.ptc/envelopes/</code>, result
+artifacts, captured stdout, and backups separately.</p><p>Turning the grant on, and discovering runs that finished after
 startup, require Refresh on the Runs list. Other project fields stay boot-read.
 Browser opening
 is a bounded convenience, and additionally requires an attached terminal:

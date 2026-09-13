@@ -25,6 +25,14 @@ Nothing here is queryable until a run writes a trace. A canonical trace alone
 answers the public `activity` collection; every other collection additionally
 needs the private inspection artifact, which a run only writes when asked.
 
+The `.ptcins` inspection artifact is unencrypted length-framed JSON with a
+versioned header and footer. Mode `0600` restricts filesystem access; it does
+not encrypt the prompts, responses, or other private payloads, and copies such
+as backups or CI uploads carry that same cleartext evidence. The
+`viewer.private` grant controls only Viewer access; see
+[project configuration](../reference/project-files.md#viewer) for revocation
+and evidence removal.
+
 Both destinations must already exist: `--trace-dir` names an existing
 directory, and `--inspect` names a file inside one.
 
