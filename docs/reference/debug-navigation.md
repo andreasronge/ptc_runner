@@ -44,8 +44,10 @@ A workflow's own `fail` value never reaches the public trace as prose. An
 unrecognized `fail` kind is retained only as a one-way fingerprint on
 `run-stopped`; that taxonomy is separate from the capability-stopped class.
 
-A **private inspection artifact** is an explicit `0600` host development
-authority. It adds the frozen component sources, the exact generated programs,
+A **private inspection artifact** is an explicit host development capture
+restricted to mode `0600`. It is unencrypted length-framed JSON: the mode
+restricts filesystem access, while copies retain the cleartext private payloads.
+It adds the frozen component sources, the exact generated programs,
 capability arguments and results, model exchanges, prints, and detailed
 failures. Raised capability callbacks can include their bounded exception
 message and formatted stacktrace here, but never in the correlated trace.

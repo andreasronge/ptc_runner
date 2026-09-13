@@ -119,8 +119,10 @@ generated source.</p><p>A failed capability attempt records its closed envelope 
 on the <code class="inline">capability-stopped</code> event. An unrecognized envelope atom is retained
 only as a one-way fingerprint.</p><p>A workflow's own <code class="inline">fail</code> value never reaches the public trace as prose. An
 unrecognized <code class="inline">fail</code> kind is retained only as a one-way fingerprint on
-<code class="inline">run-stopped</code>; that taxonomy is separate from the capability-stopped class.</p><p>A <strong>private inspection artifact</strong> is an explicit <code class="inline">0600</code> host development
-authority. It adds the frozen component sources, the exact generated programs,
+<code class="inline">run-stopped</code>; that taxonomy is separate from the capability-stopped class.</p><p>A <strong>private inspection artifact</strong> is an explicit host development capture
+restricted to mode <code class="inline">0600</code>. It is unencrypted length-framed JSON: the mode
+restricts filesystem access, while copies retain the cleartext private payloads.
+It adds the frozen component sources, the exact generated programs,
 capability arguments and results, model exchanges, prints, and detailed
 failures. Raised capability callbacks can include their bounded exception
 message and formatted stacktrace here, but never in the correlated trace.
