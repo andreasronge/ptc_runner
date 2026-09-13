@@ -332,10 +332,7 @@ if Code.ensure_loaded?(ReqLLM) do
             {:error, request_deadline_error()}
 
           _remaining ->
-            AdapterCancellationWitness.run(
-              fn -> dispatch_invocation(target, invocation) end,
-              cancellation_delegates(target)
-            )
+            AdapterCancellationWitness.run(fn -> dispatch_invocation(target, invocation) end)
         end
       else
         {:error, ProviderError.new(:invalid_request, "invalid LLM invocation")}
@@ -345,13 +342,13 @@ if Code.ensure_loaded?(ReqLLM) do
     def call(_target, _invocation),
       do: {:error, ProviderError.new(:invalid_request, "invalid LLM invocation")}
 
-    defp cancellation_delegates(target) do
-      # Vertex's shared OAuth owner survives the temporary GenServer.call monitor.
-      # Declare it before dispatch so post-reply checkouts remain part of drain.
-      if model_provider(target.model) == :google_vertex or
-           match?("google_vertex:" <> _, target.selector),
-         do: [ReqLLM.Providers.GoogleVertex.TokenCache],
-         else: []
+    @doc false
+    @spec cancellation_route_supported?(ReqLLMPreparedModel.t()) :: boolean()
+    def cancellation_route_supported?(%ReqLLMPreparedModel{} = target) do
+      # Vertex's shared OAuth cache has no request-specific cancellation or
+      # checkout-return evidence. Hosted admission must reject before dispatch.
+      model_provider(target.model) != :google_vertex and
+        not match?("google_vertex:" <> _, target.selector)
     end
 
     # --- Public API ---
