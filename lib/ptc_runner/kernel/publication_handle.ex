@@ -20,6 +20,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     :device,
     :mode,
     :staging_directory,
+    :staging_identity,
     :staging_path,
     :visible?,
     :append?,
@@ -40,6 +41,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
           device: :file.io_device(),
           mode: non_neg_integer(),
           staging_directory: binary() | nil,
+          staging_identity: identity() | nil,
           staging_path: binary(),
           visible?: boolean(),
           append?: boolean(),
@@ -891,15 +893,15 @@ defmodule PtcRunner.Kernel.PublicationHandle do
       {staging_directory, staging_path} = PrivateDirectory.temporary_sibling(path, "artifact")
 
       with :ok <- ensure_target_absent(path),
-           :ok <- PrivateDirectory.create(staging_directory),
-           {:ok, device} <- open_exclusive(staging_path, fault_hook) do
+           {:ok, device, staging_identity} <-
+             create_open_staging(staging_directory, staging_path, fault_hook) do
         case staged_handle(
                path,
                kind,
                mode,
                {parent, parent_identity},
                {reservation_path, reservation_identity},
-               {staging_directory, staging_path, device},
+               {staging_directory, staging_identity, staging_path, device},
                owner,
                append?
              ) do
@@ -907,13 +909,9 @@ defmodule PtcRunner.Kernel.PublicationHandle do
             success
 
           {:error, _reason} = error ->
-            cleanup_open_staging(device, staging_directory, staging_path)
+            cleanup_open_staging(device, staging_directory, staging_identity, staging_path)
             error
         end
-      else
-        {:error, reason} ->
-          _ = remove_directory_if_empty(staging_directory)
-          {:error, reason}
       end
     end)
   end
@@ -924,7 +922,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
          mode,
          {parent, parent_identity},
          {reservation_path, reservation_identity},
-         {staging_directory, staging_path, device},
+         {staging_directory, staging_identity, staging_path, device},
          owner,
          append?
        ) do
@@ -945,6 +943,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
          device: device,
          mode: mode,
          staging_directory: staging_directory,
+         staging_identity: staging_identity,
          staging_path: staging_path,
          visible?: false,
          append?: append?,
@@ -1013,6 +1012,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
          device: device,
          mode: mode,
          staging_directory: nil,
+         staging_identity: nil,
          staging_path: path,
          visible?: true,
          append?: false,
@@ -1118,6 +1118,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
          device: device,
          mode: mode,
          staging_directory: nil,
+         staging_identity: nil,
          staging_path: path,
          visible?: true,
          append?: true,
@@ -1131,9 +1132,36 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     end
   end
 
-  defp cleanup_open_staging(device, directory, path) do
+  # Serialize staging creation/marker installation with admission reclaimers.
+  # A creator paused past the markerless grace cannot install a live marker
+  # between a sweeper's stale check and deletion.
+  defp create_open_staging(directory, path, fault_hook) do
+    case TraceLog.with_append_authority_lock(PrivateDirectory.staging_lock_path(directory), fn ->
+           create_locked_staging(directory, path, fault_hook)
+         end) do
+      {:ok, _device, _identity} = success -> success
+      {:error, reason} -> {:error, filesystem_destination_failure(reason)}
+      _unavailable -> {:error, :destination_unavailable}
+    end
+  end
+
+  defp create_locked_staging(directory, path, fault_hook) do
+    with :ok <- PrivateDirectory.create(directory),
+         {:ok, _path, identity} <- claim_created_directory(directory, nil) do
+      case open_exclusive(path, fault_hook) do
+        {:ok, device} ->
+          {:ok, device, identity}
+
+        {:error, reason} ->
+          _ = cleanup_open_reservation(directory, identity, Path.dirname(directory))
+          {:error, reason}
+      end
+    end
+  end
+
+  defp cleanup_open_staging(device, directory, identity, path) do
     cleanup_open_file(device, path)
-    _ = remove_directory_if_empty(directory)
+    _ = cleanup_open_reservation(directory, identity, Path.dirname(directory))
     :ok
   end
 
@@ -1185,7 +1213,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   defp create_reservation(reservation_path, destination, retry?, fault_hook) do
     case PrivateDirectory.create(reservation_path) do
       :ok ->
-        claim_created_reservation(reservation_path, fault_hook)
+        claim_created_directory(reservation_path, fault_hook)
 
       {:error, reason} ->
         retry_reservation(reservation_path, destination, retry?, reason)
@@ -1198,7 +1226,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   # reclaimer; the identity guard then keeps its own cleanup from removing the
   # live replacement. An unidentifiable directory is left for that same
   # reclaim rather than removed by pathname.
-  defp claim_created_reservation(path, fault_hook) do
+  defp claim_created_directory(path, fault_hook) do
     with {:ok, %{type: :directory} = stat} <- File.lstat(path, time: :posix),
          {:ok, identity} <- stat_identity(stat) do
       case reservation_owner_fault(fault_hook) do
@@ -1207,7 +1235,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
       end
       |> case do
         :ok ->
-          confirm_reservation_owner(path, identity)
+          confirm_directory_owner(path, identity)
 
         {:error, reason} ->
           _ = cleanup_open_reservation(path, identity, Path.dirname(path))
@@ -1224,7 +1252,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   # keep the reservation only while it is still the directory this process
   # made; the replacement stays its own creator's to remove. Past this point
   # the live marker keeps a reclaimer away.
-  defp confirm_reservation_owner(path, identity) do
+  defp confirm_directory_owner(path, identity) do
     case File.lstat(path, time: :posix) do
       {:ok, %{type: :directory} = stat} ->
         case same_identity(stat, identity) do
@@ -1272,10 +1300,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   end
 
   defp write_reservation_owner(path) do
-    owner = Path.join(path, "owner")
-
-    with :ok <- File.write(owner, System.pid(), [:exclusive]),
-         do: File.chmod(owner, 0o600)
+    PrivateDirectory.write_owner(path)
   end
 
   defp reclaim_reservation(path, destination) do
@@ -1294,23 +1319,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     end
   end
 
-  defp stale_reservation?(path, stat) do
-    owner = Path.join(path, "owner")
-
-    case File.lstat(owner) do
-      {:ok, %{type: :regular, size: size}} when size <= 10 ->
-        case File.read(owner) do
-          {:ok, pid} -> PrivateDirectory.owner_dead?(pid)
-          _unreadable -> false
-        end
-
-      {:error, :enoent} ->
-        System.os_time(:second) - stat.mtime > 60
-
-      _invalid ->
-        false
-    end
-  end
+  defp stale_reservation?(path, stat), do: PrivateDirectory.stale_owner?(path, stat)
 
   defp remove_reservation_directory(path) do
     case File.rm(Path.join(path, "owner")) do
@@ -1398,14 +1407,6 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     end
 
     :ok
-  end
-
-  defp remove_directory_if_empty(directory) do
-    case File.rmdir(directory) do
-      :ok -> :ok
-      {:error, :enoent} -> :ok
-      {:error, _reason} -> {:error, :publication_cleanup_failed}
-    end
   end
 
   defp open_exclusive(path, fault_hook \\ nil) do
@@ -1564,8 +1565,21 @@ defmodule PtcRunner.Kernel.PublicationHandle do
 
   defp remove_staging_directory(%__MODULE__{staging_directory: nil}), do: :ok
 
-  defp remove_staging_directory(%__MODULE__{staging_directory: directory}) do
-    case File.rmdir(directory) do
+  defp remove_staging_directory(%__MODULE__{
+         staging_directory: directory,
+         staging_identity: identity
+       }) do
+    with {:ok, stat} <- File.lstat(directory),
+         :ok <- same_identity(stat, identity) do
+      remove_owned_staging(directory)
+    else
+      {:error, :enoent} -> :ok
+      _changed -> {:error, :publication_cleanup_failed}
+    end
+  end
+
+  defp remove_owned_staging(directory) do
+    case remove_reservation_directory(directory) do
       :ok -> :ok
       {:error, :enoent} -> :ok
       {:error, _reason} -> {:error, :publication_cleanup_failed}

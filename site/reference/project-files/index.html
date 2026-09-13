@@ -204,7 +204,37 @@ before it executes and its sentences still name the path, rule, and remedy;
 they are reported through the ordinary destination phase as
 <code class="inline">destination/invalid_destination</code> at exit 7. A requested <code class="inline">--envelope</code> copy
 carries that diagnostic when its independent destination is writable.
-<code class="inline">ptc viewer</code> reports the named sentences as <code class="inline">viewer/artifact_root_unusable</code>.</p><p>The trace filenames are also the canonical directory-discovery contract. Each
+<code class="inline">ptc viewer</code> reports the named sentences as <code class="inline">viewer/artifact_root_unusable</code>.</p><p>Before <code class="inline">ptc run</code> bootstraps its runtime, automatic cleanup considers hidden
+<code class="inline">.ptc-private-&lt;12 lowercase hex digits&gt;</code> artifact staging directories only under
+your configured <code class="inline">artifacts.root</code> and its fixed <code class="inline">envelopes</code>, <code class="inline">inspection</code>,
+<code class="inline">results</code>, and <code class="inline">traces</code> children. New staging directories record their owning
+process in an owner-only <code class="inline">owner</code> file. Cleanup uses the same-host reservation
+policy: only a proven dead owner permits deletion; live owners, permission
+failures, malformed or unreadable markers, and unknown liveness are preserved.
+Markerless directories are eligible only when their modification time is more
+than 60 seconds old. Ownership across hosts on a network filesystem is outside
+this policy.</p><p>The optional launcher companion (0.2.1 or later) supplies the bounded
+filesystem operations. When it is unavailable, admission skips the staging
+sweep without enumeration or deletion; destination-driven reservation recovery
+continues independently. Each admission with the helper inspects at most 256
+directory entries across those five locations, including unrelated entries, and considers at most 16 staging candidates. The
+launcher replays the consumed prefix using only <code class="inline">readdir</code>; that skip opens,
+stats, reads markers from, and deletes none of those entries and is outside
+the inspection and deletion budget. Each
+candidate reads at most five additional entries and deletes at most the two
+fixed regular files (<code class="inline">owner</code> and <code class="inline">artifact</code>) and their directory. Extra or
+nested contents are preserved; cleanup never recursively scans them. Excess
+candidates remain for later admissions. The budgets reserve work for every
+location, and each parent keeps a bounded owner-only
+<code class="inline">.ptc-artifact-staging.cursor</code> progress file under its admission lock. Later
+admissions resume past preserved candidates and unrelated entries rather than
+repeatedly starting at the first entry. Deletions can shift the consumed prefix;
+the cursor wraps at directory exhaustion to revisit entries shifted behind it.
+Symlinks, changed identities,
+published artifacts, unrelated entries, and outside-root output parents are
+preserved. Reservation directories remain destination-driven and are never
+part of this sweep. Cleanup is best effort and does not create an artifact
+root when all project artifact defaults are disabled.</p><p>The trace filenames are also the canonical directory-discovery contract. Each
 file contains exactly the run ID named by its stem and one trace identity;
 arbitrary aggregate filenames and split histories remain supported only when a
 caller explicitly selects one file, not when Viewer or run analysis discovers a

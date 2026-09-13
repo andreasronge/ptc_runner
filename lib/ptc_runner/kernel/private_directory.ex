@@ -340,6 +340,74 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
   def create(_path), do: {:error, :private_directory_creation_failed}
 
   @doc false
+  @spec staging_lock_path(binary()) :: binary()
+  def staging_lock_path(staging),
+    do: Path.join(Path.dirname(staging), ".ptc-artifact-staging.reclaim")
+
+  @doc false
+  @spec write_owner(binary()) :: :ok | {:error, term()}
+  def write_owner(path) do
+    owner = Path.join(path, "owner")
+    with :ok <- File.write(owner, System.pid(), [:exclusive]), do: File.chmod(owner, 0o600)
+  end
+
+  @doc false
+  @spec owner_marker(binary()) :: {:ok, binary()} | :missing | :unknown
+  def owner_marker(path) do
+    owner = Path.join(path, "owner")
+
+    case File.lstat(owner) do
+      {:ok, %{type: :regular, size: size, mode: mode} = expected}
+      when size <= 10 and
+             Bitwise.band(mode, 0o400) != 0 ->
+        launcher = Module.concat(["PtcRunnerLauncher"])
+
+        result =
+          if Code.ensure_loaded?(launcher) and
+               function_exported?(launcher, :read_owner_bounded, 1),
+             do: launcher.read_owner_bounded(path),
+             else: read_owner_without_launcher(owner, expected)
+
+        case result do
+          {:ok, pid} -> {:ok, pid}
+          _unreadable -> :unknown
+        end
+
+      {:error, :enoent} ->
+        :missing
+
+      _invalid ->
+        :unknown
+    end
+  end
+
+  # Reservation recovery also serves hosts that do not load native support.
+  # Bound both the read size and command lifetime, including a replaced FIFO.
+  defp read_owner_without_launcher(owner, expected) do
+    with executable when is_binary(executable) <- System.find_executable("head"),
+         {:ok, {pid, 0}} <-
+           SystemCommand.run(executable, ["-c", "11", owner], @external_command_timeout_ms),
+         true <- byte_size(pid) <= 10,
+         {:ok, current} <- File.lstat(owner),
+         true <- current.size == byte_size(pid),
+         true <- Map.delete(current, :atime) == Map.delete(expected, :atime) do
+      {:ok, pid}
+    else
+      _unreadable -> {:error, :owner_unavailable}
+    end
+  end
+
+  @doc false
+  @spec stale_owner?(binary(), File.Stat.t()) :: boolean()
+  def stale_owner?(path, stat), do: stale_marker?(owner_marker(path), stat)
+
+  @doc false
+  @spec stale_marker?({:ok, binary()} | :missing | :unknown, File.Stat.t()) :: boolean()
+  def stale_marker?({:ok, pid}, _stat), do: owner_dead?(pid)
+  def stale_marker?(:missing, stat), do: System.os_time(:second) - stat.mtime > 60
+  def stale_marker?(:unknown, _stat), do: false
+
+  @doc false
   @spec owner_dead?(binary()) :: boolean()
   def owner_dead?(pid) do
     with true <- Regex.match?(~r/\A[1-9][0-9]{0,9}\z/, pid),
