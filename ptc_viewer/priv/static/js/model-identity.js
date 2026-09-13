@@ -6,7 +6,7 @@ export function calledResolvedModels(metadata) {
 }
 
 export function modelResponseIdentity(turn, metadata) {
-  const alias = turn?.response?.value?.model;
+  const alias = responseEnvelope(turn)?.model;
   if (typeof alias !== 'string' || alias === '') return null;
 
   const connectors = Array.isArray(metadata?.connector_snapshots) ? metadata.connector_snapshots : [];
@@ -26,7 +26,7 @@ export function presentedAssistant(turn, metadata) {
   const identity = modelResponseIdentity(turn, metadata);
   // ConversationMessage uses the envelope itself only when no content or
   // tool_calls field exists. Otherwise the content belongs to the model.
-  const value = turn?.response?.value;
+  const value = responseEnvelope(turn);
   if (!value || Object.hasOwn(value, 'content') || Object.hasOwn(value, 'tool_calls')) return assistant;
   if (!identity || !assistant?.content || typeof assistant.content !== 'object' ||
       Array.isArray(assistant.content) || assistant.content.model !== identity.alias) return assistant;
@@ -36,4 +36,9 @@ export function presentedAssistant(turn, metadata) {
   content.alias = identity.alias;
   if (identity.resolvedModel) content.configured_resolved_model = identity.resolvedModel;
   return { ...assistant, content };
+}
+
+function responseEnvelope(turn) {
+  const response = turn?.response;
+  return response?.status === 'error' ? response : response?.value;
 }

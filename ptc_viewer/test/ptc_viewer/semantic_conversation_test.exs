@@ -290,6 +290,48 @@ defmodule PtcViewer.SemanticConversationTest do
     refute rendered =~ "&quot;alias&quot;:"
   end
 
+  test "labels routed error envelope model as an install alias", %{tmp_dir: directory} do
+    response = %{
+      "status" => "error",
+      "model" => "deepseek",
+      "kind" => "timeout",
+      "reason" => "provider_timeout",
+      "retryable?" => true
+    }
+
+    rendered =
+      render(
+        directory,
+        %{
+          "streams" => [
+            %{
+              "turns" => [
+                %{
+                  "response" => response,
+                  "assistant" => %{"role" => "assistant", "content" => response}
+                }
+              ]
+            }
+          ]
+        },
+        %{
+          "connector_snapshots" => [
+            %{
+              "declaration" => %{"source" => "llm", "name" => "deepseek"},
+              "acquisition" => %{"resolved_model" => "openrouter:vendor/called"}
+            }
+          ]
+        }
+      )
+
+    assert rendered =~ "Install alias"
+    assert rendered =~ "Configured model"
+    assert rendered =~ "openrouter:vendor/called"
+    assert rendered =~ "&quot;alias&quot;: &quot;deepseek&quot;"
+    assert length(Regex.scan(~r/&quot;model&quot;: &quot;deepseek&quot;/, rendered)) == 1
+    assert rendered =~ "provider_timeout"
+  end
+
   defp render(directory, conversation, metadata \\ %{}) do
     metadata_path = Path.join(directory, "metadata.json")
     turns_path = Path.join(directory, "turns.json")
