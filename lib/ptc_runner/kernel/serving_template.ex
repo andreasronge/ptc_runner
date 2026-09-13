@@ -104,7 +104,9 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   `:declared_read_effect_violation`, or `:internal_error`.
   Acquisition failures, including invalid contracts/declarations or document
   bounds, collapse to `:invalid_application`. Compiler failures collapse to
-  `:compilation_failed`. Unexpected construction exceptions become `:internal_error`.
+  `:compilation_failed`. Assembled-environment failures (including missing required
+  capabilities) become `:environment_invalid`. Effective-identity failures and
+  unexpected construction exceptions, throws or exits become `:internal_error`.
   """
 
   alias PtcRunner.Kernel.ApplicationPackage

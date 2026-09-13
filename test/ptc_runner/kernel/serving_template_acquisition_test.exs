@@ -18,28 +18,8 @@ defmodule PtcRunner.Kernel.ServingTemplateAcquisitionTest do
   test "construction acquires and compiles once and closes the source before sharing", %{
     tmp_dir: dir
   } do
-    source = "(ns app) (defn run {:effect :read} [x] (return x))"
     schema = %{"type" => "object", "additionalProperties" => false}
-    path = Path.join(dir, "app.json")
-    File.write!(Path.join(dir, "app.clj"), source)
-    File.write!(Path.join(dir, "schema.json"), Jason.encode!(schema))
-
-    File.write!(
-      path,
-      Jason.encode!(%{
-        "version" => 1,
-        "workflow" => %{
-          "components" => [%{"id" => "app", "path" => "app.clj"}],
-          "entry" => "app/run"
-        },
-        "missions" => %{"same" => %{"components" => [%{"id" => "app", "path" => "app.clj"}]}},
-        "input" => %{"path" => "never-opened.json"},
-        "contracts" => %{
-          "input_schema" => %{"path" => "schema.json"},
-          "result_schema" => %{"path" => "schema.json"}
-        }
-      })
-    )
+    path = fixture(dir)
 
     patterns = [
       {ApplicationPackage, :acquire_directory, 2},
@@ -138,6 +118,140 @@ defmodule PtcRunner.Kernel.ServingTemplateAcquisitionTest do
              |> Enum.to_list(),
              &(&1 == {:ok, true})
            )
+  end
+
+  @tag :tmp_dir
+  test "remaining closed build failures release acquisition without dispatch", %{tmp_dir: dir} do
+    patterns = [
+      {ApplicationSource, :close, 1},
+      {PtcRunner.Kernel.ExecutionSessionOwner, :start, :_},
+      {PtcRunner.Kernel.ExecutionSessionOwner, :start_reserved, :_},
+      {PtcRunner.Kernel.Dispatcher, :dispatch, :_},
+      {PtcRunner.Kernel.EventSink, :start, :_},
+      {ExecutionInput, :new, 3},
+      {ExecutionPolicy, :new, 1},
+      {PublicationAuthority, :new, 1}
+    ]
+
+    Enum.each(patterns, fn {module, _, _} = pattern ->
+      Code.ensure_loaded!(module)
+      :erlang.trace_pattern(pattern, true, [:local])
+    end)
+
+    on_exit(fn -> Enum.each(patterns, &:erlang.trace_pattern(&1, false, [:local])) end)
+
+    private = "private-path-payload-credential"
+
+    path =
+      fixture(
+        dir,
+        ~s|(ns app) (defn run {:effect :read :requires ["tool:#{private}"]} [x] (return x))|
+      )
+
+    assert_closed_build(path, :environment_invalid)
+
+    path = fixture(dir)
+    module = PtcRunner.Kernel.EffectiveApplication
+    {^module, original, filename} = :code.get_object_code(module)
+
+    # Replace only the identity builder's module in this serial case. The public
+    # constructor still performs real acquisition, compilation and assembly.
+    # Restore the original BEAM even when an assertion fails; no production hook.
+    for fault <- [:error, :throw, :exit, :identity_error] do
+      expression =
+        if fault == :identity_error do
+          {:tuple, 1, [{:atom, 1, :error}, {:atom, 1, :invalid_effective_application}]}
+        else
+          {:call, 1, {:remote, 1, {:atom, 1, :erlang}, {:atom, 1, fault}},
+           [erl_literal({private, path, %{credential: private}})]}
+        end
+
+      forms = [
+        {:attribute, 1, :module, module},
+        {:attribute, 1, :export, [build_package: 5]},
+        {:function, 1, :build_package, 5,
+         [{:clause, 1, List.duplicate({:var, 1, :_}, 5), [], [expression]}]}
+      ]
+
+      {:ok, ^module, injected} = :compile.forms(forms, [:binary])
+
+      try do
+        :code.purge(module)
+        assert {:module, ^module} = :code.load_binary(module, filename, injected)
+        assert_closed_build(path, :internal_error)
+      after
+        :code.purge(module)
+        {:module, ^module} = :code.load_binary(module, filename, original)
+        :code.purge(module)
+      end
+    end
+
+    assert {:ok, _template} = ServingTemplate.from_directory(path, Limits.installed_defaults())
+  end
+
+  defp erl_literal(value), do: :erl_parse.abstract(value)
+
+  defp assert_closed_build(path, code) do
+    parent = self()
+
+    {pid, monitor} =
+      spawn_monitor(fn ->
+        receive do: (:build -> :ok)
+
+        send(
+          parent,
+          {:failed_build, ServingTemplate.from_directory(path, Limits.installed_defaults())}
+        )
+
+        receive do: (:stop -> :ok)
+      end)
+
+    on_exit(fn -> if Process.alive?(pid), do: Process.exit(pid, :kill) end)
+    :erlang.trace(pid, true, [:call, :set_on_spawn, {:tracer, parent}])
+    send(pid, :build)
+    assert_receive {:failed_build, {:error, ^code}}, 10_000
+    delivered = :erlang.trace_delivered(:all)
+    assert_receive {:trace_delivered, :all, ^delivered}
+    calls = traced_calls(:all, [])
+
+    assert [{ApplicationSource, :close, [source]}] =
+             Enum.filter(calls, &match?({ApplicationSource, :close, _}, &1))
+
+    refute Process.alive?(source.pid)
+    # Omit-input acquisition creates only its resource-free empty placeholder.
+    assert calls == [
+             {ApplicationSource, :close, [source]},
+             {ExecutionInput, :new, [%{}, :normal, nil]}
+           ]
+
+    send(pid, :stop)
+    assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}
+  end
+
+  defp fixture(dir, source \\ "(ns app) (defn run {:effect :read} [x] (return x))") do
+    schema = %{"type" => "object", "additionalProperties" => false}
+    path = Path.join(dir, "app.json")
+    File.write!(Path.join(dir, "app.clj"), source)
+    File.write!(Path.join(dir, "schema.json"), Jason.encode!(schema))
+
+    File.write!(
+      path,
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [%{"id" => "app", "path" => "app.clj"}],
+          "entry" => "app/run"
+        },
+        "missions" => %{"same" => %{"components" => [%{"id" => "app", "path" => "app.clj"}]}},
+        "input" => %{"path" => "never-opened.json"},
+        "contracts" => %{
+          "input_schema" => %{"path" => "schema.json"},
+          "result_schema" => %{"path" => "schema.json"}
+        }
+      })
+    )
+
+    path
   end
 
   defp traced_calls(pid, calls) do
