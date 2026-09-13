@@ -105,6 +105,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
 
     with {:ok, arguments} <- anchor_entry_paths(arguments),
          {:ok, arguments} <- anchor_one_shot_destinations(arguments, destinations, frontend) do
+      :ok = ProjectArtifactRoot.sweep_for(arguments)
       finish_envelope(arguments, destinations, run_ref, frontend, diagnostic)
     else
       {:error, %CommandRejection{} = rejection} ->

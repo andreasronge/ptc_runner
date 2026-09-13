@@ -13,13 +13,22 @@ defmodule PtcRunner.Kernel.ArtifactStagingSweep do
     with {:ok, uid} <- PrivateDirectory.preflight_owner(Path.join(root, "unused")),
          {:ok, root_stat} <- directory(root, uid) do
       Enum.reduce_while(
-        [root | Enum.map(@children, &Path.join(root, &1))],
+        Enum.with_index([root | Enum.map(@children, &Path.join(root, &1))]),
         {@entries, @candidates},
-        fn parent, {entries, candidates} ->
+        fn {parent, index}, {entries, candidates} ->
           if entries == 0 or candidates == 0 do
             {:halt, {entries, candidates}}
           else
-            {:cont, inspect_parent(parent, root, root_stat, uid, entries, candidates)}
+            parents = 5 - index
+            entry_quota = div(entries + parents - 1, parents)
+            candidate_quota = div(candidates + parents - 1, parents)
+
+            {left_entries, left_candidates} =
+              inspect_parent(parent, root, root_stat, uid, entry_quota, candidate_quota)
+
+            {:cont,
+             {entries - entry_quota + left_entries,
+              candidates - candidate_quota + left_candidates}}
           end
         end
       )
@@ -48,7 +57,7 @@ defmodule PtcRunner.Kernel.ArtifactStagingSweep do
 
   defp inspect_locked_parent(parent, root, root_stat, uid, entries, candidates) do
     with {:ok, parent_stat} <- directory(parent, uid),
-         {:ok, names, inspected} <- list(parent, entries) do
+         {:ok, names, inspected} <- list(parent, entries, candidates) do
       remaining =
         Enum.reduce_while(names, candidates, fn name, budget ->
           cond do
@@ -118,11 +127,11 @@ defmodule PtcRunner.Kernel.ArtifactStagingSweep do
     end
   end
 
-  defp list(path, limit) do
+  defp list(path, limit, candidates) do
     launcher = Module.concat(["PtcRunnerLauncher"])
 
-    if Code.ensure_loaded?(launcher) and function_exported?(launcher, :list_directory_bounded, 2),
-      do: launcher.list_directory_bounded(path, limit),
+    if Code.ensure_loaded?(launcher) and function_exported?(launcher, :list_directory_bounded, 3),
+      do: launcher.list_directory_bounded(path, limit, candidates),
       else: {:error, :unavailable}
   end
 end

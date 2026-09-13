@@ -182,7 +182,7 @@ they are reported through the ordinary destination phase as
 carries that diagnostic when its independent destination is writable.
 `ptc viewer` reports the named sentences as `viewer/artifact_root_unusable`.
 
-On `ptc run` admission, automatic cleanup considers hidden
+Before `ptc run` bootstraps its runtime, automatic cleanup considers hidden
 `.ptc-private-<12 lowercase hex digits>` artifact staging directories only under
 your configured `artifacts.root` and its fixed `envelopes`, `inspection`,
 `results`, and `traces` children. New staging directories record their owning
@@ -198,7 +198,11 @@ including unrelated entries, and considers at most 16 staging candidates. Each
 candidate reads at most five additional entries and deletes at most the two
 fixed regular files (`owner` and `artifact`) and their directory. Extra or
 nested contents are preserved; cleanup never recursively scans them. Excess
-candidates remain for later admissions. Symlinks, changed identities,
+candidates remain for later admissions. The budgets reserve work for every
+location, and each parent keeps a bounded owner-only
+`.ptc-artifact-staging.cursor` progress file under its admission lock. Later
+admissions resume past preserved candidates and unrelated entries rather than
+repeatedly starting at the first entry. Symlinks, changed identities,
 published artifacts, unrelated entries, and outside-root output parents are
 preserved. Reservation directories remain destination-driven and are never
 part of this sweep. Cleanup is best effort and does not create an artifact

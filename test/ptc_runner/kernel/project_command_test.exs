@@ -29,6 +29,28 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
   end
 
   @tag :tmp_dir
+  test "stale staging is reclaimed before the runtime bootstrap starts", %{tmp_dir: directory} do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project])
+    staging = Path.join([target, ".ptc", "traces", ".ptc-private-012345abcdef"])
+    File.mkdir!(staging)
+    File.chmod!(staging, 0o700)
+    File.write!(Path.join(staging, "owner"), "2147483647")
+    File.chmod!(Path.join(staging, "owner"), 0o600)
+
+    parent = self()
+
+    CommandFrontend.execute(["run", project], :standalone, fn _arguments ->
+      send(parent, {:staging_at_bootstrap, File.exists?(staging)})
+      {:error, :command_bootstrap_failed}
+    end)
+
+    assert_receive {:staging_at_bootstrap, false}
+  end
+
+  @tag :tmp_dir
   test "admission preserves live, uncertain, unrelated and outside-root staging",
        %{tmp_dir: directory} do
     target = Path.join(directory, "demo")
@@ -135,10 +157,62 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     File.write!(Path.join(staging, "owner"), "2147483647")
     File.chmod!(Path.join(staging, "owner"), 0o600)
     assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project])
-    assert File.dir?(staging)
-    for index <- 1..300, do: File.rm!(Path.join(root, "unrelated-#{index}"))
-    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project])
     refute File.exists?(staging)
+    for index <- 1..300, do: assert(File.read!(Path.join(root, "unrelated-#{index}")) == "keep")
+    root_staging = Path.join(root, ".ptc-private-bbbbbbbbbbbb")
+    File.mkdir!(root_staging)
+    File.chmod!(root_staging, 0o700)
+    File.write!(Path.join(root_staging, "owner"), "2147483647")
+    File.chmod!(Path.join(root_staging, "owner"), 0o600)
+
+    for _ <- 1..10 do
+      CommandFrontend.execute(["run", project], :standalone, fn _arguments ->
+        {:error, :command_bootstrap_failed}
+      end)
+    end
+
+    refute File.exists?(root_staging)
+  end
+
+  @tag :tmp_dir
+  test "later admissions progress past large ledgers and preserved candidates", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project])
+    root = Path.join(target, ".ptc")
+
+    for index <- 1..280,
+        do: File.write!(Path.join([root, "envelopes", "existing-#{index}.json"]), "keep")
+
+    paths =
+      for index <- 1..20 do
+        path =
+          Path.join([root, "traces", ".ptc-private-" <> String.pad_leading("#{index}", 12, "0")])
+
+        File.mkdir!(path)
+        File.chmod!(path, 0o700)
+
+        File.write!(
+          Path.join(path, "owner"),
+          if(index <= 16, do: System.pid(), else: "2147483647")
+        )
+
+        File.chmod!(Path.join(path, "owner"), 0o600)
+        path
+      end
+
+    for _ <- 1..20 do
+      CommandFrontend.execute(["run", project], :standalone, fn _arguments ->
+        {:error, :command_bootstrap_failed}
+      end)
+    end
+
+    for path <- Enum.take(paths, 16), do: assert(File.dir?(path))
+    for path <- Enum.drop(paths, 16), do: refute(File.exists?(path))
+    assert File.read!(Path.join([root, "envelopes", "existing-1.json"])) == "keep"
   end
 
   @tag :tmp_dir

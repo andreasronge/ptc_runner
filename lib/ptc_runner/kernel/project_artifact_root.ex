@@ -29,15 +29,21 @@ defmodule PtcRunner.Kernel.ProjectArtifactRoot do
          derived,
          MapSet.new([:trace_dir, :inspect, :result, :envelope_ledger])
        ),
-       do: ArtifactStagingSweep.sweep(root),
-       else: ensure_and_sweep(root)
+       do: :ok,
+       else: ensure(root)
   end
 
   def ensure_for(%CommandArguments{}), do: :ok
 
-  defp ensure_and_sweep(root) do
-    with :ok <- ensure(root), do: ArtifactStagingSweep.sweep(root)
-  end
+  @doc false
+  @spec sweep_for(CommandArguments.t()) :: :ok
+  def sweep_for(%CommandArguments{
+        command: :run,
+        project: %ProjectContext{config: %{artifact_root: root}}
+      })
+      when is_binary(root), do: ArtifactStagingSweep.sweep(root)
+
+  def sweep_for(%CommandArguments{}), do: :ok
 
   @spec ensure(binary()) :: :ok | {:error, ensure_error()}
   def ensure(root) when is_binary(root) do
