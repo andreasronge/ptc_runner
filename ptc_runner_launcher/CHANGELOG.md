@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1] - 2026-09-13
+
+### Added
+
+- Bounded artifact staging admission enumeration with persistent scan progress,
+  owner-marker reads, and identity-guarded stale staging deletion.
+
 ## [0.2.0] - 2026-09-11
 
 ### Changed
@@ -37,3 +44,5 @@
 
 [0.2.0]: https://github.com/andreasronge/ptc_runner/releases/tag/ptc_runner_launcher-v0.2.0
 [0.1.0]: https://github.com/andreasronge/ptc_runner/releases/tag/ptc_runner_launcher-v0.1.0
+
+[0.2.1]: https://github.com/andreasronge/ptc_runner/releases/tag/ptc_runner_launcher-v0.2.1

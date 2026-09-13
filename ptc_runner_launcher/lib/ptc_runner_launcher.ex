@@ -88,6 +88,75 @@ defmodule PtcRunnerLauncher do
   def publish_directory_noreplace(_staging, _target),
     do: {:error, :publication_failed}
 
+  # Internal artifact admission primitive; not an inventory API.
+  @doc false
+  @spec list_directory_bounded(binary(), pos_integer(), pos_integer()) ::
+          {:ok, [binary()], non_neg_integer()} | {:error, :directory_unavailable}
+  def list_directory_bounded(path, limit, candidates)
+      when limit in 1..256 and candidates in 1..16 do
+    with {:ok, executable} <- executable_path(),
+         {:ok, {output, 0}} <-
+           PtcRunnerLauncher.Command.run(
+             executable,
+             [
+               "--list-directory-bounded",
+               path,
+               Integer.to_string(limit),
+               Integer.to_string(candidates)
+             ],
+             @publish_timeout_ms
+           ) do
+      parts = :binary.split(output, <<0>>, [:global])
+      {count, names} = List.pop_at(parts, -1)
+      {:ok, names, String.to_integer(count)}
+    else
+      _unavailable -> {:error, :directory_unavailable}
+    end
+  end
+
+  @doc false
+  @spec read_owner_bounded(binary()) :: {:ok, binary()} | {:error, :owner_unavailable}
+  def read_owner_bounded(path) do
+    with {:ok, executable} <- executable_path(),
+         {:ok, {pid, 0}} <-
+           PtcRunnerLauncher.Command.run(
+             executable,
+             ["--read-owner-bounded", path],
+             @publish_timeout_ms
+           ) do
+      {:ok, pid}
+    else
+      _unknown -> {:error, :owner_unavailable}
+    end
+  end
+
+  # The native helper retains no-follow directory descriptors, verifies the
+  # marker and identities, and reads at most five entries/deletes three paths.
+  @doc false
+  @spec remove_staging_bounded(binary(), File.Stat.t(), File.Stat.t(), binary()) ::
+          :ok | {:error, :staging_preserved}
+  def remove_staging_bounded(path, parent, staging, owner) do
+    with {:ok, executable} <- executable_path(),
+         {:ok, {"", 0}} <-
+           PtcRunnerLauncher.Command.run(
+             executable,
+             [
+               "--remove-staging-bounded",
+               path,
+               Integer.to_string(parent.major_device),
+               Integer.to_string(parent.inode),
+               Integer.to_string(staging.major_device),
+               Integer.to_string(staging.inode),
+               owner
+             ],
+             @publish_timeout_ms
+           ) do
+      :ok
+    else
+      _preserved -> {:error, :staging_preserved}
+    end
+  end
+
   defp supported_platform do
     case :os.type() do
       {:unix, platform} when platform in [:darwin, :linux] -> :ok

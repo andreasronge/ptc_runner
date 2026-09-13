@@ -1,5 +1,5 @@
 %{
-  version: "0.2.0",
+  version: "0.2.1",
   tag_prefix: "ptc_runner_launcher-v",
   macos_deployment_target: "15.0",
   precompiled_targets: %{
