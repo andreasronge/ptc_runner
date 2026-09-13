@@ -130,7 +130,7 @@ defmodule PtcRunner.Kernel.MCPSource do
       `[A-Za-z_][A-Za-z0-9_]*` form. The launcher is limited to 16 MiB. The
       optional absolute `:launcher` path is a trusted custom override.
       Otherwise stdio requires
-      the `ptc_runner_launcher ~> 0.2.1` companion dependency. The
+      the optional `ptc_runner_launcher ~> 0.2.0` companion dependency. The
       core owns launcher protocol version 2, copies the canonical launcher into
       a private mode-0700 staging directory, hashes and executes those same
       staged bytes, and removes the staged path after the startup handshake.

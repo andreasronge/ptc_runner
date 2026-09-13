@@ -105,7 +105,7 @@ without explicit user confirmation.
 
 ## Releasing `ptc_runner_launcher`
 
-The launcher companion has an independent version in
+The optional launcher companion has an independent version in
 `ptc_runner_launcher/release_config.exs` and uses
 `ptc_runner_launcher-vX.Y.Z` tags. From a clean commit on `main`, run the root
 `mix precommit` quality gate and `FORCE_FULL_PRE_PUSH=1 .githooks/pre-push`.

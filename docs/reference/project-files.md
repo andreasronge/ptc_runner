@@ -193,10 +193,11 @@ Markerless directories are eligible only when their modification time is more
 than 60 seconds old. Ownership across hosts on a network filesystem is outside
 this policy.
 
-The launcher companion is a required package dependency for these bounded
-filesystem operations. Each admission inspects at most 256 directory entries
-across those five locations,
-including unrelated entries, and considers at most 16 staging candidates. The
+The optional launcher companion (0.2.1 or later) supplies the bounded
+filesystem operations. When it is unavailable, admission skips the staging
+sweep without enumeration or deletion; destination-driven reservation recovery
+continues independently. Each admission with the helper inspects at most 256
+directory entries across those five locations, including unrelated entries, and considers at most 16 staging candidates. The
 launcher replays the consumed prefix using only `readdir`; that skip opens,
 stats, reads markers from, and deletes none of those entries and is outside
 the inspection and deletion budget. Each

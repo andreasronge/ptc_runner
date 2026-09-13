@@ -10,6 +10,19 @@ defmodule PtcRunner.Kernel.ArtifactStagingSweep do
 
   @spec sweep(binary()) :: :ok
   def sweep(root) do
+    launcher = Module.concat(["PtcRunnerLauncher"])
+
+    with true <- Code.ensure_loaded?(launcher),
+         true <- function_exported?(launcher, :list_directory_bounded, 3),
+         true <- function_exported?(launcher, :remove_staging_bounded, 4),
+         {:ok, _executable} <- launcher.executable_path() do
+      sweep_available(root)
+    else
+      _unavailable -> :ok
+    end
+  end
+
+  defp sweep_available(root) do
     with {:ok, uid} <- PrivateDirectory.preflight_owner(Path.join(root, "unused")),
          {:ok, root_stat} <- directory(root, uid) do
       Enum.reduce_while(

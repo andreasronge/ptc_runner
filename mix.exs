@@ -233,16 +233,15 @@ defmodule PtcRunner.MixProject do
 
   # Development, tests, and a release built from this checkout exercise the
   # companion beside it. Ordinary production tasks retain package metadata's
-  # compatible Hex requirement. Artifact admission needs native bounded
-  # filesystem operations even for HTTP-only consumers; package builds never
-  # see a path dependency.
+  # compatible optional Hex requirement, so HTTP-only consumers are not forced
+  # to install native support and `mix hex.build` never sees a path dependency.
   defp launcher_dep do
     launcher_path = Path.expand("ptc_runner_launcher", __DIR__)
 
     if local_launcher_checkout?(launcher_path) do
-      {:ptc_runner_launcher, "~> 0.2.1", path: "ptc_runner_launcher"}
+      {:ptc_runner_launcher, "~> 0.2.0", path: "ptc_runner_launcher", optional: true}
     else
-      {:ptc_runner_launcher, "~> 0.2.1"}
+      {:ptc_runner_launcher, "~> 0.2.0", optional: true}
     end
   end
 

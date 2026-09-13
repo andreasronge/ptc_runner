@@ -44,7 +44,9 @@ defmodule PtcRunner.Kernel.PrivateDirectoryTest do
     refute File.exists?(envelope)
   end
 
-  test "run recovers output reservations without the launcher companion", %{tmp_dir: directory} do
+  test "run skips staging cleanup and recovers reservations without the launcher companion", %{
+    tmp_dir: directory
+  } do
     launcher = :code.which(PtcRunnerLauncher) |> List.to_string() |> Path.dirname()
     assert :code.del_path(String.to_charlist(launcher))
     :code.purge(PtcRunnerLauncher)
@@ -59,6 +61,34 @@ defmodule PtcRunner.Kernel.PrivateDirectoryTest do
         "application",
         CommandEngineFixtures.valid_manifest()
       )
+
+    root = Path.join(directory, ".ptc")
+    staging = Path.join(root, ".ptc-private-012345abcdef")
+    File.mkdir!(root)
+    File.chmod!(root, 0o700)
+    File.mkdir!(staging)
+    File.chmod!(staging, 0o700)
+    File.write!(Path.join(staging, "owner"), "2147483647")
+    File.chmod!(Path.join(staging, "owner"), 0o600)
+    File.write!(Path.join(staging, "artifact"), "interrupted")
+
+    project = Path.join(directory, "ptc-project.json")
+
+    File.write!(
+      project,
+      Jason.encode!(%{
+        "kind" => "ptc-project",
+        "version" => 1,
+        "application" => %{"path" => Path.relative_to(manifest, directory)},
+        "artifacts" => %{
+          "root" => ".ptc",
+          "trace" => false,
+          "inspection" => false,
+          "result" => false,
+          "envelope" => false
+        }
+      })
+    )
 
     for {name, owner, expected} <- [
           {"dead", "2147483647", 0},
@@ -82,12 +112,15 @@ defmodule PtcRunner.Kernel.PrivateDirectoryTest do
       File.touch!(Path.join(reservation, "owner"), System.os_time(:second) - 120)
 
       presentation =
-        CommandFrontend.execute(["run", manifest, "--output", output], :standalone, fn _ ->
+        CommandFrontend.execute(["run", project, "--output", output], :standalone, fn _ ->
           {:ok, CommandRuntime.standalone()}
         end)
 
       assert presentation.exit_status == expected
       assert File.exists?(reservation) == (expected == 7)
+      assert File.read!(Path.join(staging, "artifact")) == "interrupted"
+      assert Enum.sort(File.ls!(staging)) == ["artifact", "owner"]
+      assert File.ls!(root) == [Path.basename(staging)]
     end
   end
 
