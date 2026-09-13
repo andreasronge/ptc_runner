@@ -42,6 +42,67 @@ defmodule PtcRunnerLauncherTest do
     assert File.dir?(symlink_collision)
   end
 
+  @tag :tmp_dir
+  test "bounded staging removal preserves replacements, changed markers and symlinks", %{
+    tmp_dir: directory
+  } do
+    File.chmod!(directory, 0o700)
+    staging = private_directory!(directory, "staging")
+    File.rm!(Path.join(staging, "value"))
+    File.write!(Path.join(staging, "artifact"), "stale")
+    File.write!(Path.join(staging, "owner"), "2147483647")
+    File.chmod!(Path.join(staging, "owner"), 0o600)
+    parent_stat = File.stat!(directory)
+    stat = File.stat!(staging)
+    File.write!(Path.join(staging, "owner"), System.pid())
+
+    assert {:error, :staging_preserved} =
+             PtcRunnerLauncher.remove_staging_bounded(staging, parent_stat, stat, "2147483647")
+
+    assert File.read!(Path.join(staging, "artifact")) == "stale"
+    File.rename!(staging, staging <> "-original")
+    replacement = private_directory!(directory, "staging")
+
+    assert {:error, :staging_preserved} =
+             PtcRunnerLauncher.remove_staging_bounded(staging, parent_stat, stat, "2147483647")
+
+    assert File.read!(Path.join(replacement, "value")) == "staging"
+    File.rename!(replacement, replacement <> "-replacement")
+    File.ln_s!(staging <> "-original", staging)
+
+    assert {:error, :directory_unavailable} =
+             PtcRunnerLauncher.list_directory_bounded(staging, 5, 16)
+
+    assert {:error, :staging_preserved} =
+             PtcRunnerLauncher.remove_staging_bounded(staging, parent_stat, stat, "2147483647")
+
+    assert {:ok, %{type: :symlink}} = File.lstat(staging)
+    ancestor = Path.join(directory, "linked-parent")
+    File.ln_s!(directory, ancestor)
+    redirected = Path.join(ancestor, "staging-original")
+
+    assert {:error, :directory_unavailable} =
+             PtcRunnerLauncher.list_directory_bounded(redirected, 5, 16)
+
+    assert {:error, :staging_preserved} =
+             PtcRunnerLauncher.remove_staging_bounded(redirected, parent_stat, stat, "2147483647")
+  end
+
+  @tag :tmp_dir
+  test "bounded directory enumeration caps physical entries and preserves filename framing", %{
+    tmp_dir: directory
+  } do
+    File.chmod!(directory, 0o700)
+    for index <- 1..300, do: File.write!(Path.join(directory, "entry-#{index}"), "")
+    File.write!(Path.join(directory, "line\nbreak"), "")
+    assert {:ok, first, 256} = PtcRunnerLauncher.list_directory_bounded(directory, 256, 16)
+    assert length(first) <= 256
+    assert {:ok, second, count} = PtcRunnerLauncher.list_directory_bounded(directory, 256, 16)
+    assert "line\nbreak" in (first ++ second)
+    assert count < 256
+    assert length(Enum.uniq(first ++ second)) == 302
+  end
+
   test "precommit cannot be scoped to a partial test suite" do
     precommit = Mix.Project.config() |> Keyword.fetch!(:aliases) |> Keyword.fetch!(:precommit)
 

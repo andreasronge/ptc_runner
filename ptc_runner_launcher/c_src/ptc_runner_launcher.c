@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
@@ -97,6 +98,201 @@ struct sha256_context {
 };
 
 static volatile sig_atomic_t launcher_signal = 0;
+
+static int open_directory_nofollow(const char *path);
+
+/* Persist a bounded directory cookie under the caller's fixed parent lock.
+ * Each admission reserves work for every artifact kind and resumes this scan,
+ * including when earlier candidates remain live. Never walk to find the cookie. */
+static int staging_name(const char *name) {
+  const char *prefix = ".ptc-private-";
+  if (strlen(name) != strlen(prefix) + 12 || strncmp(name, prefix, strlen(prefix))) return 0;
+  for (const char *p = name + strlen(prefix); *p; p++)
+    if (!((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f'))) return 0;
+  return 1;
+}
+
+static int list_directory_bounded(const char *path, const char *limit_text,
+                                  const char *candidates_text) {
+  char *end;
+  unsigned long limit = strtoul(limit_text, &end, 10);
+  if (*end || limit == 0 || limit > 256) return 75;
+  unsigned long candidates = strtoul(candidates_text, &end, 10);
+  if (*end || candidates == 0 || candidates > 16) return 75;
+  int fd = open_directory_nofollow(path);
+  if (fd < 0) return 75;
+  struct stat parent;
+  if (fstat(fd, &parent) || parent.st_uid != geteuid() || (parent.st_mode & 0777) != 0700) {
+    close(fd); return 75;
+  }
+  int state = openat(fd, ".ptc-artifact-staging.cursor",
+                     O_RDWR | O_CREAT | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC, 0600);
+  struct stat stat;
+  if (state < 0 || fstat(state, &stat) || !S_ISREG(stat.st_mode) ||
+      stat.st_uid != geteuid() || (stat.st_mode & 0777) != 0600 ||
+      stat.st_nlink != 1 || stat.st_size > 31) {
+    if (state >= 0) close(state);
+    close(fd); return 75;
+  }
+  char text[32] = {0};
+  ssize_t length = pread(state, text, 31, 0);
+  errno = 0;
+  long cookie = length > 0 ? strtol(text, &end, 10) : 0;
+  if (length < 0 || cookie < 0 || (length > 0 && (*end || errno == ERANGE))) {
+    close(state); close(fd); return 75;
+  }
+  DIR *dir = fdopendir(fd);
+  if (!dir) { close(state); close(fd); return 75; }
+  /* The cursor is the number of entries already consumed, not a telldir
+   * cookie: a cookie is only meaningful inside the DIR that produced it, so a
+   * fresh helper process cannot seek by one on every platform. Re-reading that
+   * many entries is bounded by the directory size. */
+  unsigned long count = 0, found = 0, skipped = 0;
+  struct dirent *entry;
+  int failed = 0;
+  bool exhausted = false;
+  while (skipped < (unsigned long)cookie) {
+    errno = 0;
+    entry = readdir(dir);
+    if (!entry) { failed = errno; exhausted = true; break; }
+    skipped++;
+  }
+  while (!exhausted && count < limit && found < candidates) {
+    errno = 0;
+    entry = readdir(dir);
+    if (!entry) { failed = errno; exhausted = true; break; }
+    count++;
+    if (strcmp(entry->d_name, ".") && strcmp(entry->d_name, "..")) {
+      fwrite(entry->d_name, 1, strlen(entry->d_name) + 1, stdout);
+      found += staging_name(entry->d_name);
+    }
+  }
+  cookie = exhausted ? 0 : (long)(skipped + count);
+  int size = snprintf(text, sizeof(text), "%ld", cookie);
+  if (pwrite(state, text, (size_t)size, 0) != size || ftruncate(state, size)) failed = 1;
+  close(state);
+  closedir(dir);
+  printf("%lu", count);
+  return failed ? 75 : 0;
+}
+
+/* Open every ancestor without following symlinks, then operate relative to
+ * retained descriptors so a pathname replacement cannot redirect leaf deletion. */
+static int open_directory_nofollow(const char *path) {
+  if (path[0] != '/') return -1;
+  char *copy = strdup(path);
+  if (!copy) return -1;
+  int fd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  char *save = NULL;
+  for (char *part = strtok_r(copy, "/", &save); part && fd >= 0;
+       part = strtok_r(NULL, "/", &save)) {
+    if (!strcmp(part, ".") || !strcmp(part, "..")) { close(fd); fd = -1; break; }
+    int next = openat(fd, part, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    close(fd);
+    fd = next;
+  }
+  free(copy);
+  return fd;
+}
+
+static int read_owner_bounded(const char *path) {
+  /* Reservations may live below an explicitly resolved ancestor symlink.
+   * Keep that existing policy while refusing directory/marker leaf links. */
+  int directory = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  if (directory < 0) return 75;
+  int fd = openat(directory, "owner", O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
+  close(directory);
+  if (fd < 0) return 75;
+  struct stat st;
+  char pid[11];
+  int result = 75;
+  if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && (st.st_mode & 0400) && st.st_size <= 10) {
+    ssize_t length = read(fd, pid, sizeof(pid));
+    if (length >= 0 && length <= 10) {
+      fwrite(pid, 1, (size_t)length, stdout);
+      result = 0;
+    }
+  }
+  close(fd);
+  return result;
+}
+
+static bool expected_directory(int fd, const char *device, const char *inode) {
+  struct stat st;
+  return fstat(fd, &st) == 0 && S_ISDIR(st.st_mode) && st.st_uid == geteuid() &&
+    (st.st_mode & 0777) == 0700 &&
+    (uintmax_t)st.st_dev == strtoull(device, NULL, 10) &&
+    (uintmax_t)st.st_ino == strtoull(inode, NULL, 10);
+}
+
+static int remove_staging_bounded(char **args) {
+  char *copy = strdup(args[0]);
+  if (!copy) return 75;
+  char *leaf = strrchr(copy, '/');
+  if (!leaf || leaf == copy) { free(copy); return 75; }
+  *leaf++ = '\0';
+  int parent = open_directory_nofollow(copy);
+  if (parent < 0 || !expected_directory(parent, args[1], args[2])) {
+    if (parent >= 0) close(parent);
+    free(copy); return 75;
+  }
+  int fd = openat(parent, leaf, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  if (fd < 0 || !expected_directory(fd, args[3], args[4])) {
+    if (fd >= 0) close(fd);
+    close(parent); free(copy); return 75;
+  }
+  int result = 75;
+  DIR *dir = fdopendir(dup(fd));
+  if (!dir) goto done;
+  struct dirent *entry;
+  unsigned count = 0;
+  bool valid = true;
+  errno = 0;
+  while (count < 5 && (entry = readdir(dir)) != NULL) {
+    count++;
+    if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
+    if (strcmp(entry->d_name, "owner") && strcmp(entry->d_name, "artifact")) {
+      valid = false; break;
+    }
+    struct stat st;
+    if (fstatat(fd, entry->d_name, &st, AT_SYMLINK_NOFOLLOW) != 0 || !S_ISREG(st.st_mode)) {
+      valid = false; break;
+    }
+  }
+  if (errno || count == 5) valid = false;
+  closedir(dir);
+  if (!valid) goto done;
+  /* Verify the exact marker observed before the caller's stale-owner check.
+   * A delayed creator that has since installed a live marker is preserved. */
+  int owner = openat(fd, "owner", O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
+  if (!strcmp(args[5], "-")) {
+    if (owner >= 0) { close(owner); goto done; }
+    if (errno != ENOENT) goto done;
+    struct stat st;
+    if (fstat(fd, &st) != 0 || time(NULL) - st.st_mtime <= 60) goto done;
+  } else {
+    if (owner < 0) goto done;
+    struct stat st;
+    char pid[11];
+    ssize_t length = read(owner, pid, sizeof(pid));
+    bool matches = fstat(owner, &st) == 0 && S_ISREG(st.st_mode) &&
+      (st.st_mode & 0400) && length >= 0 &&
+      (size_t)length == strlen(args[5]) && !memcmp(pid, args[5], (size_t)length);
+    close(owner);
+    if (!matches) goto done;
+  }
+  if (unlinkat(fd, "artifact", 0) != 0 && errno != ENOENT) goto done;
+  if (unlinkat(fd, "owner", 0) != 0 && errno != ENOENT) goto done;
+  struct stat current;
+  if (fstatat(parent, leaf, &current, AT_SYMLINK_NOFOLLOW) == 0 &&
+      S_ISDIR(current.st_mode) && (uintmax_t)current.st_dev == strtoull(args[3], NULL, 10) &&
+      (uintmax_t)current.st_ino == strtoull(args[4], NULL, 10)) {
+    result = unlinkat(parent, leaf, AT_REMOVEDIR) == 0 ? 0 : 75;
+  }
+done:
+  close(fd); close(parent); free(copy);
+  return result;
+}
 
 static int publish_directory_noreplace(const char *staging,
                                        const char *target) {
@@ -1779,6 +1975,13 @@ static int supervise(const struct launcher_config *config, pid_t child_pid,
 }
 
 int main(int argc, char **argv) {
+  if (argc == 3 && strcmp(argv[1], "--read-owner-bounded") == 0)
+    return read_owner_bounded(argv[2]);
+  if (argc == 8 && strcmp(argv[1], "--remove-staging-bounded") == 0)
+    return remove_staging_bounded(argv + 2);
+  if (argc == 5 && strcmp(argv[1], "--list-directory-bounded") == 0)
+    return list_directory_bounded(argv[2], argv[3], argv[4]);
+
   struct launcher_config config;
   int child_stdin[2] = {-1, -1};
   int child_stdout[2] = {-1, -1};
