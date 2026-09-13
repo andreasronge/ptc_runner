@@ -634,6 +634,124 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
     end
   end
 
+  @tag :tmp_dir
+  test "queued reservation expiry takes precedence over admission refusal", %{tmp_dir: dir} do
+    assert {:ok, template} = build(fixture(dir))
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+    :sys.suspend(host)
+    deadline = System.monotonic_time(:millisecond) + 500
+    parent = self()
+
+    task =
+      Task.async(fn ->
+        send(parent, :reserving)
+        ServingTemplate.reserve(template, %{"answer" => 1}, host, deadline)
+      end)
+
+    assert_receive :reserving
+    await_reservation_message(host, deadline)
+
+    Process.send_after(
+      self(),
+      :expired,
+      max(0, deadline - System.monotonic_time(:millisecond) + 1)
+    )
+
+    assert_receive :expired, 1000
+    :sys.resume(host)
+    result = Task.await(task)
+    assert ServingOutcome.code(result) == :cancelled
+    assert ServingOutcome.metadata(result).dispatched == false
+    assert {:ok, %{in_use: 0, status: :ready}} = RunAdmission.snapshot(host)
+  end
+
+  @tag :tmp_dir
+  test "caller finishing before admission sees owner death still drains the lease", %{
+    tmp_dir: dir
+  } do
+    source = "(ns app) (defn run {:effect :write} [input] (loop [n 0] (recur (inc n))))"
+    assert {:ok, template} = build(fixture(dir, %{}, source))
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+    parent = self()
+
+    {caller, monitor} =
+      spawn_monitor(fn ->
+        {:ok, reservation} = ServingTemplate.reserve(template, %{"answer" => 1}, host)
+
+        hooks = %{
+          after_activation: fn {RunAdmission, _, session} ->
+            owner = ExecutionSessionOwner.pid(session)
+            state = :sys.get_state(owner)
+            activity = state.prepared.provider_activity.owner
+            activity_ref = Process.monitor(activity)
+            :sys.suspend(host)
+            Process.exit(owner, :kill)
+
+            receive do
+              {:DOWN, ^activity_ref, :process, ^activity, _} -> :ok
+            after
+              2000 -> flunk("activity did not close after owner death")
+            end
+          end,
+          cleanup: fn authority ->
+            result = PublicationAuthority.abort(authority)
+            send(parent, {:cleanup_finished, self()})
+            result
+          end
+        }
+
+        result = ServingCall.activate(reservation, hooks)
+        send(parent, {:returned, result})
+        receive do: (:stop -> :ok)
+      end)
+
+    on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
+    assert_receive {:cleanup_finished, ^caller}, 5000
+    await_finish_message(host, System.monotonic_time(:millisecond) + 2000)
+    {:messages, messages} = Process.info(host, :messages)
+
+    {finishes, rest} =
+      Enum.split_with(messages, &match?({:"$gen_call", _, {:finish_publication, _, true}}, &1))
+
+    :sys.replace_state(host, fn state ->
+      for _ <- messages do
+        receive do: (_ -> :ok)
+      end
+
+      Enum.each(finishes ++ rest, &send(host, &1))
+      state
+    end)
+
+    :sys.resume(host)
+    assert_receive {:returned, result}, 5000
+    assert ServingOutcome.code(result) == :cleanup_failed
+    assert Process.alive?(caller)
+    assert {:ok, %{in_use: 0, status: :unavailable}} = RunAdmission.snapshot(host)
+    send(caller, :stop)
+    assert_receive {:DOWN, ^monitor, :process, ^caller, :normal}
+  end
+
+  defp await_reservation_message(host, deadline) do
+    await_message(host, deadline, fn message ->
+      match?({:"$gen_call", _, {:reserve, _}}, message)
+    end)
+  end
+
+  defp await_finish_message(host, deadline) do
+    await_message(host, deadline, fn message ->
+      match?({:"$gen_call", _, {:finish_publication, _, true}}, message)
+    end)
+  end
+
+  defp await_message(host, deadline, predicate) do
+    {:messages, messages} = Process.info(host, :messages)
+
+    unless Enum.any?(messages, predicate) do
+      assert System.monotonic_time(:millisecond) < deadline
+      await_message(host, deadline, predicate)
+    end
+  end
+
   defp await_dispatch(sink, deadline) do
     events = EventSink.events(sink)
 

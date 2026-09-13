@@ -58,7 +58,7 @@ defmodule PtcRunner.Kernel.ServingCall do
         case RunAdmission.reserve(admission, deadline) do
           {:ok, lease} -> {:ok, {__MODULE__, template, input, lease, deadline, self()}}
           {:error, :run_capacity_exhausted} -> outcome(template, :busy, false)
-          _ -> outcome(template, :admission_unavailable, false)
+          _ -> outcome(template, expired_code(deadline, :admission_unavailable), false)
         end
     end
   end

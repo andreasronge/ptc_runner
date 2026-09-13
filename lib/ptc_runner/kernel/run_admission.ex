@@ -336,6 +336,8 @@ defmodule PtcRunner.Kernel.RunAdmission do
 
   def handle_call({:finish_publication, ref, clean?}, {caller, _}, state)
       when is_boolean(clean?) do
+    state = reap_dead_reservation_owner(state, ref)
+
     case state.reservations[ref] do
       %{caller: ^caller, owner: nil, publication: publication} = reservation
       when publication in [:held, :pending] ->
@@ -430,19 +432,10 @@ defmodule PtcRunner.Kernel.RunAdmission do
   end
 
   def handle_call({:complete, clean?}, {owner, _}, state) when is_boolean(clean?) do
-    case Map.pop(state.owners, owner) do
-      {nil, _} ->
-        {:reply, {:error, :run_admission_unavailable}, state}
-
-      {ref, owners} ->
-        Process.demonitor(ref, [:flush])
-
-        {:reply, :ok,
-         %{
-           complete_owner_reservation(state, owner, clean?)
-           | owners: owners,
-             status: if(clean?, do: state.status, else: :unavailable)
-         }}
+    if Map.has_key?(state.owners, owner) do
+      {:reply, :ok, settle_owner(state, owner, clean?)}
+    else
+      {:reply, {:error, :run_admission_unavailable}, state}
     end
   end
 
@@ -451,12 +444,7 @@ defmodule PtcRunner.Kernel.RunAdmission do
   @impl true
   def handle_info({:DOWN, ref, :process, owner, _}, state) do
     if state.owners[owner] == ref do
-      {:noreply,
-       %{
-         complete_owner_reservation(state, owner, false)
-         | owners: Map.delete(state.owners, owner),
-           status: :unavailable
-       }}
+      {:noreply, settle_owner(state, owner, false)}
     else
       next =
         Enum.reduce(state.reservations, state, fn
@@ -550,6 +538,29 @@ defmodule PtcRunner.Kernel.RunAdmission do
     if reservation.monitor, do: Process.demonitor(reservation.monitor, [:flush])
     if reservation.timer, do: Process.cancel_timer(reservation.timer)
     %{state | reservations: reservations}
+  end
+
+  defp reap_dead_reservation_owner(state, ref) do
+    case state.reservations[ref] do
+      %{owner: owner} when is_pid(owner) ->
+        if Map.has_key?(state.owners, owner) and not Process.alive?(owner),
+          do: settle_owner(state, owner, false),
+          else: state
+
+      _ ->
+        state
+    end
+  end
+
+  defp settle_owner(state, owner, clean?) do
+    Process.demonitor(Map.fetch!(state.owners, owner), [:flush])
+    next = complete_owner_reservation(state, owner, clean?)
+
+    %{
+      next
+      | owners: Map.delete(next.owners, owner),
+        status: if(clean?, do: next.status, else: :unavailable)
+    }
   end
 
   defp complete_owner_reservation(state, owner, clean?) do
