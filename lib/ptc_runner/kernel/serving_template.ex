@@ -20,7 +20,36 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   The required manifest input declaration is shape-validated, but its referenced
   file is never opened and its value is never contract-validated. Ordinary
   command acquisition still requires and validates selected input. Per-call
-  execution is a separate API; this constructor never dispatches execution.
+  input is supplied to `reserve/4`; this constructor never dispatches execution.
+
+  ## Calls
+
+  `reserve(template, json_object, admission_pid, deadline \\\\ :infinity)` returns
+  `{:ok, reservation}` or a `ServingOutcome`. Input is a complete
+  JSON object, validated before admission. `deadline` is an absolute monotonic
+  millisecond integer. Invalid deadlines return `:internal_error`; expired
+  deadlines return `:cancelled`. No input/policy seal, identity, activity,
+  authority, sink or execution owner is created by a reservation.
+
+  After the transport commits its response, the same reserving worker calls
+  `activate(reservation)` and receives one closed ServingOutcome. Activation
+  is single-use, creates fresh one-shot resources, and performs sealed outcome
+  opening and artifact-free publication in that worker. Capacity remains held
+  through publication and authority cleanup. Caller death cancels execution;
+  death during publication fences admission because cleanup is uncertain.
+  Deadlines remain active through publication, which cannot publish a successful
+  outcome after expiry. Cleanup uncertainty outranks cancellation and fences
+  admission. See ServingOutcome for exhaustive codes, metadata and precedence.
+
+  `close(reservation)` returns `:ok` or `{:error, :run_admission_unavailable}`.
+  Call it if response commitment fails: unused capacity is released without
+  dispatch. Closed/expired/foreign/reused reservations cannot activate; closed
+  reservations return `:admission_unavailable` (expired ones `:cancelled`).
+  Active cancellation requests stop execution and does not undo possible writes.
+  `call(template, json_object, admission_pid, deadline \\\\ :infinity)` reserves
+  and activates immediately; use it when no transport commitment is needed.
+  The host starts RunAdmission under its supervisor and bounds inbound workers.
+  No providers, HTTP dependencies or artifact destinations are involved.
 
   ## Safe metadata
 
@@ -47,9 +76,10 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   at reservation as the minimum of the caller deadline and reservation time plus
   `limits.run_duration_ms`. Admission, activation, execution and publication
   share that deadline; it is never reset at activation. No absolute timestamp is
-  stored in the template. This rule is consumed by the later call integration.
+  stored in the template.
 
-  Event policy is the manifest's `:normal` or `:private`, input authority is
+  Private event policy is rejected with `:private_result_unservable`; event
+  policy for accepted templates and input authority are
   normal, result projection is JSON, inspection capture is disabled, and
   publication is artifact-free. None of these choices is a per-call override.
 
@@ -69,7 +99,7 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   Errors contain only one atom, with no paths, payloads or private reasons:
   `:invalid_options`, `:invalid_installed_limits`, `:invalid_application`,
   `:contracts_required`, `:entry_invalid`, `:manifest_identity_forbidden`,
-  `:provider_runtime_required`, `:application_content_digest_mismatch`,
+  `:provider_runtime_required`, `:private_result_unservable`, `:application_content_digest_mismatch`,
   `:compilation_failed`, `:environment_invalid`, `:effect_declaration_required`,
   `:declared_read_effect_violation`, or `:internal_error`.
   Acquisition failures, including invalid contracts/declarations or document
@@ -86,6 +116,8 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.ServingCall
+  alias PtcRunner.Kernel.ServingOutcome
   alias PtcRunner.Kernel.ValueContract
 
   @enforce_keys [:package, :workflow, :missions, :effect, :effective_digest, :policy]
@@ -100,6 +132,9 @@ defmodule PtcRunner.Kernel.ServingTemplate do
             effective_digest: binary(),
             policy: map()
           }
+  @typedoc "Single-use capacity reservation owned by its calling worker."
+  @type reservation :: ServingCall.reservation()
+
   @typedoc "Closed construction failures containing no private detail."
   @type build_code ::
           :invalid_options
@@ -108,6 +143,7 @@ defmodule PtcRunner.Kernel.ServingTemplate do
           | :contracts_required
           | :entry_invalid
           | :manifest_identity_forbidden
+          | :private_result_unservable
           | :provider_runtime_required
           | :application_content_digest_mismatch
           | :compilation_failed
@@ -167,9 +203,31 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   @spec policy(t()) :: map()
   def policy(%__MODULE__{policy: policy}), do: policy
 
+  @doc "Reserves a validated complete JSON input without creating execution resources."
+  @spec reserve(t(), term(), pid(), integer() | :infinity) ::
+          {:ok, reservation()} | ServingOutcome.t()
+  def reserve(template, input, admission, deadline \\ :infinity),
+    do: ServingCall.reserve(template, input, admission, deadline)
+
+  @doc "Activates after transport commitment and finishes publication in this calling worker."
+  @spec activate(reservation()) ::
+          ServingOutcome.t()
+  def activate(reservation), do: ServingCall.activate(reservation)
+
+  @doc "Reserves and activates immediately for transports that need no commitment handshake."
+  @spec call(t(), term(), pid(), integer() | :infinity) :: ServingOutcome.t()
+  def call(template, input, admission, deadline \\ :infinity) do
+    case reserve(template, input, admission, deadline) do
+      {:ok, reservation} -> activate(reservation)
+      outcome -> outcome
+    end
+  end
+
   @doc "Closes a resource-free template; an idempotent no-op that leaves copies usable."
-  @spec close(t()) :: :ok
+  @spec close(t() | reservation()) ::
+          :ok | {:error, :run_admission_unavailable}
   def close(%__MODULE__{}), do: :ok
+  def close(reservation), do: ServingCall.close(reservation)
 
   defp options(opts) when is_list(opts) do
     if Keyword.keyword?(opts) and
@@ -193,6 +251,9 @@ defmodule PtcRunner.Kernel.ServingTemplate do
     cond do
       package.providers.workflow != [] or package.providers.mission != [] ->
         {:error, :provider_runtime_required}
+
+      package.events.policy == :private ->
+        {:error, :private_result_unservable}
 
       package.events.run_id != nil or package.events.trace_id != nil ->
         {:error, :manifest_identity_forbidden}
