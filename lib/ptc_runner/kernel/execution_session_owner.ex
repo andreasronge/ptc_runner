@@ -19,7 +19,9 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.ProviderExecutionResources
   alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.ProviderRuntime
   alias PtcRunner.Kernel.ProviderSession
+  alias PtcRunner.Kernel.ProviderTaskTracker
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunAdmission
   alias PtcRunner.Kernel.RunBuilder
@@ -306,6 +308,8 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       prepared: prepared,
       registry: nil,
       provider_session: nil,
+      borrowed: nil,
+      borrowed_tracker: nil,
       oauth_memory: nil,
       oauth_listener: nil,
       built: nil,
@@ -413,6 +417,15 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     end
   end
 
+  def handle_call(
+        {token, {:borrowed_tracker, tracker}},
+        {worker, _},
+        %{token: token, worker_pid: worker, borrowed: borrow} = state
+      )
+      when not is_nil(borrow) do
+    {:reply, :ok, %{state | borrowed_tracker: {tracker, Process.monitor(tracker.pid)}}}
+  end
+
   def handle_call({_token, :await}, _from, state),
     do: {:reply, {:error, :execution_session_unavailable}, state}
 
@@ -489,6 +502,13 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
      |> forget_resource(:authority)}
   end
 
+  def handle_info(
+        {:DOWN, ref, :process, _pid, reason},
+        %{borrowed_tracker: {_tracker, ref}} = state
+      ) do
+    {:noreply, tracker_completed(state, reason)}
+  end
+
   def handle_info({:DOWN, ref, :process, host, _}, %{admission: {host, ref}} = state),
     do: {:stop, :run_admission_unavailable, abort(state)}
 
@@ -502,6 +522,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
   def terminate(reason, state) do
     state = abort(state)
+    if state.borrowed, do: ProviderRuntime.release_borrow(state.borrowed)
 
     if state.admission do
       {host, _} = state.admission
@@ -605,7 +626,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
          %ProviderExecution.Retained{} = retained,
          _notifier,
          _tracker,
-         _owner,
+         {owner, token},
          :run
        ) do
     with {:ok, built} <-
@@ -616,7 +637,11 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
              sinks,
              retained.borrow
            ) do
-      RunBuilder.execute_built_claimed(Map.put(built, :publication_lease, lease), lease)
+      observer = fn tracker ->
+        GenServer.call(owner, {token, {:borrowed_tracker, tracker}}, :infinity)
+      end
+
+      RunBuilder.execute_built_claimed(Map.put(built, :publication_lease, lease), lease, observer)
     end
   end
 
@@ -627,7 +652,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
          execution,
          notifier,
          tracker,
-         owner,
+         {owner, _token},
          operation
        ),
        do:
@@ -652,6 +677,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
        ) do
     owner = self()
     token = initial.token
+    {initial, held} = hold_borrow(initial, provider_execution)
 
     {worker_pid, worker_ref} =
       spawn_monitor(fn ->
@@ -667,16 +693,18 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
             execution_result =
               LiveStatus.with_target(initial.live_status, fn ->
-                execute_providers(
-                  initial.prepared,
-                  {authority, initial.lease},
-                  opened_sinks,
-                  provider_execution,
-                  notifier,
-                  tracker,
-                  owner,
-                  operation
-                )
+                with :ok <- held do
+                  execute_providers(
+                    initial.prepared,
+                    {authority, initial.lease},
+                    opened_sinks,
+                    provider_execution,
+                    notifier,
+                    tracker,
+                    {owner, token},
+                    operation
+                  )
+                end
               end)
 
             send(owner, {token, :execution_result, self(), execution_result})
@@ -734,18 +762,20 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     {:reply, result, %{state | handoff_waiting?: true}}
   end
 
-  defp abort(state),
-    do:
-      release(state, [
-        :worker,
-        :session,
-        :listener,
-        :registry,
-        :memory,
-        :sinks,
-        :prepared,
-        :authority
-      ])
+  defp abort(state) do
+    state
+    |> release([:worker])
+    |> await_borrowed_tracker()
+    |> release([
+      :session,
+      :listener,
+      :registry,
+      :memory,
+      :sinks,
+      :prepared,
+      :authority
+    ])
+  end
 
   defp release_worker(%{worker_pid: worker_pid, worker_ref: worker_ref} = state) do
     Process.exit(worker_pid, :kill)
@@ -785,7 +815,33 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   defp finalize_aborted_sinks(state), do: release(state, [:sinks])
 
   defp close_owned_inputs(state),
-    do: release(state, [:session, :listener, :registry, :memory, :prepared])
+    do:
+      release(await_borrowed_tracker(state), [:session, :listener, :registry, :memory, :prepared])
+
+  defp hold_borrow(state, %ProviderExecution.Retained{borrow: borrow}) do
+    case ProviderRuntime.hold_borrow(borrow) do
+      :ok -> {%{state | borrowed: borrow}, :ok}
+      error -> {state, error}
+    end
+  end
+
+  defp hold_borrow(state, _execution), do: {state, :ok}
+
+  defp await_borrowed_tracker(%{borrowed_tracker: nil} = state), do: state
+
+  defp await_borrowed_tracker(%{borrowed_tracker: {tracker, ref}} = state) do
+    result = ProviderTaskTracker.drain_provider_tasks(tracker)
+
+    receive do
+      {:DOWN, ^ref, :process, _pid, reason} ->
+        tracker_completed(%{state | cleanup: merge_cleanup(state.cleanup, result)}, reason)
+    end
+  end
+
+  defp tracker_completed(state, :normal), do: %{state | borrowed_tracker: nil}
+
+  defp tracker_completed(state, _reason),
+    do: %{state | borrowed_tracker: nil, cleanup: {:error, :provider_cleanup_failed}}
 
   defp maybe_abort_authority(state, {:ok, _result}), do: state
   defp maybe_abort_authority(state, _result), do: abort_authority(state)

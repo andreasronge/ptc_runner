@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeTest do
     ExecutionInput,
     ExecutionOutcome,
     ExecutionPolicy,
+    ExecutionSessionOwner,
     HostConfig,
     HostInstallation,
     InstallationCatalog,
@@ -26,6 +27,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeTest do
     ProviderRuntimeServices,
     ProviderSession,
     ProviderSnapshot,
+    ProviderTaskTracker,
     PublicationAuthority,
     RunAdmission,
     RunBuilder,
@@ -222,6 +224,28 @@ defmodule PtcRunner.Kernel.ProviderRuntimeTest do
              ProviderRuntime.borrow(runtime, System.monotonic_time(:millisecond) + 10_000)
 
     assert :ok = ProviderRuntime.return(borrow)
+    assert :atomics.get(counts, 2) == 1
+    GenServer.stop(runtime)
+  end
+
+  @tag :tmp_dir
+  test "far-future drain deadlines remain pending when the timer is rechecked", %{tmp_dir: dir} do
+    {template, _catalog, services, pins, counts} = fixture(dir)
+
+    {:ok, runtime} =
+      ProviderRuntime.start_link(template: template, services: services, pins: pins)
+
+    deadline = System.monotonic_time(:millisecond) + 4_294_967_296
+    {:ok, borrow} = ProviderRuntime.borrow(runtime, deadline)
+    drain = Task.async(fn -> ProviderRuntime.drain(runtime, deadline) end)
+    assert Task.yield(drain, 20) == nil
+    assert ProviderRuntime.status(runtime) == :draining
+    send(runtime, :drain_deadline)
+    assert ProviderRuntime.status(runtime) == :draining
+    assert Task.yield(drain, 20) == nil
+    assert :atomics.get(counts, 2) == 0
+    assert :ok = ProviderRuntime.return(borrow)
+    assert :ok = Task.await(drain)
     assert :atomics.get(counts, 2) == 1
     GenServer.stop(runtime)
   end
@@ -566,6 +590,110 @@ defmodule PtcRunner.Kernel.ProviderRuntimeTest do
     assert :atomics.get(counts, 1) == 0
   end
 
+  @tag :tmp_dir
+  test "cancelled callers and dead execution workers retain admission and borrows until guardians drain",
+       %{
+         tmp_dir: dir
+       } do
+    parent = self()
+
+    for mode <- [:cancel, :caller_death, :worker_death] do
+      {template, catalog, services, pins, counts} =
+        fixture(dir,
+          source_code:
+            ~s|(ns app) (defn run {:effect :write :requires ["tool:llm-request"]} [input] (do (tool/llm-request {}) (return input)))|,
+          callback: fn _ ->
+            send(parent, {:provider_started, self()})
+            receive do: (:finish -> {:ok, %{}})
+          end
+        )
+
+      {:ok, runtime} =
+        ProviderRuntime.start_link(template: template, services: services, pins: pins)
+
+      {:ok, execution} = ProviderExecution.new(catalog, services, [])
+      {:ok, host} = RunAdmission.start_link(max_concurrent_runs: 1)
+      deadline = System.monotonic_time(:millisecond) + 10_000
+
+      {caller, caller_ref} =
+        spawn_monitor(fn ->
+          {:ok, borrow} = ProviderRuntime.borrow(runtime, deadline)
+          {:ok, prepared} = call_preparation(template)
+
+          retained = %ProviderExecution.Retained{
+            execution: execution,
+            borrow: borrow,
+            plan_identity: borrow.plan_identity
+          }
+
+          {:ok, reservation} = RunAdmission.reserve(host, deadline)
+          {:ok, active} = RunAdmission.activate(reservation, prepared, authority(), retained)
+          send(parent, {:activated, reservation, borrow, elem(active, 2)})
+
+          receive do
+            :cancel ->
+              RunAdmission.cancel(reservation)
+              ProviderRuntime.return(borrow)
+
+            :await ->
+              :ok
+          end
+
+          RunAdmission.await(active)
+          ProviderRuntime.return(borrow)
+          receive do: (:finish -> :ok)
+        end)
+
+      assert_receive {:activated, _reservation, borrow, owner}
+      owner_ref = Process.monitor(ExecutionSessionOwner.pid(owner))
+      assert_receive {:provider_started, provider}
+      provider_ref = Process.monitor(provider)
+      [tracker] = :sys.get_state(borrow.session.session.pid).borrowed_tasks |> Map.values()
+
+      {guardian, guardian_ref} =
+        spawn_monitor(fn ->
+          receive do
+            {:cancel_provider_call, tracker_pid, ref, _deadline} ->
+              send(parent, :guardian_draining)
+              receive do: (:finish -> :ok)
+              send(tracker_pid, {:provider_call_drained, ref, self(), :uncertain})
+          end
+        end)
+
+      :ok = ProviderTaskTracker.attach_guardian(tracker, guardian)
+
+      case mode do
+        :cancel ->
+          send(caller, :cancel)
+
+        :caller_death ->
+          Process.exit(caller, :kill)
+
+        :worker_death ->
+          worker = :sys.get_state(ExecutionSessionOwner.pid(owner)).worker_pid
+          Process.exit(worker, :kill)
+          send(caller, :await)
+      end
+
+      assert_receive :guardian_draining
+      assert_receive {:DOWN, ^provider_ref, :process, ^provider, _}
+      assert {:ok, %{in_use: 1}} = RunAdmission.snapshot(host)
+      drain = Task.async(fn -> ProviderRuntime.drain(runtime, deadline) end)
+      assert Task.yield(drain, 20) == nil
+      assert :atomics.get(counts, 2) == 0
+      send(guardian, :finish)
+      assert_receive {:DOWN, ^guardian_ref, :process, ^guardian, :normal}
+      assert :ok = Task.await(drain)
+      assert_receive {:DOWN, ^owner_ref, :process, _, :normal}
+      assert :atomics.get(counts, 2) == 1
+      if mode != :caller_death, do: send(caller, :finish)
+      assert_receive {:DOWN, ^caller_ref, :process, ^caller, _}
+      assert {:ok, %{in_use: 0, status: :unavailable}} = RunAdmission.snapshot(host)
+      GenServer.stop(host)
+      GenServer.stop(runtime)
+    end
+  end
+
   defp call_preparation(template) do
     with {:ok, input} <-
            ExecutionInput.new(%{}, :normal, template.package.contracts.input),
@@ -623,10 +751,11 @@ defmodule PtcRunner.Kernel.ProviderRuntimeTest do
           tariff: nil,
           bound: fn _, _ -> {:ok, %{total_tokens: 100, cost: nil}} end
         },
-        callback: fn _ ->
-          :atomics.add(counts, 3, 1)
-          {:ok, %{}}
-        end
+        callback:
+          Keyword.get(opts, :callback, fn _ ->
+            :atomics.add(counts, 3, 1)
+            {:ok, %{}}
+          end)
       )
 
     {:ok, snapshot} =

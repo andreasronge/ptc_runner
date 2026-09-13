@@ -13,7 +13,10 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   closes the resources; it never becomes ready. Borrowing takes an absolute
   monotonic admission deadline, creates a caller-monitored non-owning token,
   and shares only capabilities. Return the token after execution; caller exit
-  also returns it. Draining refuses new borrows, waits until the supplied
+  also returns it. An executing borrow remains counted against its execution
+  owner until per-call task cleanup settles, including cancellation and caller
+  death. A return during execution cannot release it early. Draining refuses
+  new borrows, waits until the supplied
   absolute deadline, and closes the session once even if borrows remain. It
   reports their count as `{:error, {:outstanding_borrows, count}}`.
 
@@ -79,6 +82,10 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   @spec release_borrow(Borrow.t()) :: :ok | {:error, atom()}
   def release_borrow(%Borrow{} = borrow),
     do: safe_call(borrow.runtime, {:release, borrow}, {:error, :provider_runtime_lost})
+
+  @doc false
+  def hold_borrow(%Borrow{} = borrow),
+    do: safe_call(borrow.runtime, {:hold, borrow}, {:error, :provider_runtime_lost})
 
   @spec drain(pid(), integer()) :: :ok | {:error, term()}
   def drain(runtime, deadline) when is_integer(deadline),
@@ -288,7 +295,7 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
               Attestation.attest(Borrow, Map.delete(Map.from_struct(borrow), :attestation))
         }
 
-        {:reply, {:ok, borrow}, put_in(state.borrows[monitor], caller)}
+        {:reply, {:ok, borrow}, put_in(state.borrows[monitor], %{caller: caller, owner: nil})}
 
       _lost ->
         {:reply, {:error, :provider_runtime_lost},
@@ -300,51 +307,98 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
     do: {:reply, {:error, :provider_runtime_unavailable}, state}
 
   def handle_call({:return, %Borrow{caller: caller} = borrow}, {caller, _tag}, state) do
-    release(borrow, state)
+    release(borrow, state, caller)
   end
 
-  def handle_call({:release, borrow}, _from, state), do: release(borrow, state)
+  def handle_call({:release, borrow}, from, state), do: release(borrow, state, elem(from, 0))
 
-  def handle_call({:drain, _deadline}, _from, %{opened: nil} = state), do: {:reply, :ok, state}
-
-  def handle_call({:drain, deadline}, from, %{draining: nil} = state) do
-    timer =
-      Process.send_after(
-        self(),
-        :drain_deadline,
-        max(deadline - System.monotonic_time(:millisecond), 0)
-      )
-
-    {:noreply, maybe_finish(%{state | status: :draining, draining: {from, timer}})}
-  end
-
-  def handle_call({:drain, _deadline}, _from, state),
-    do: {:reply, {:error, :provider_runtime_unavailable}, state}
-
-  defp release(borrow, state) do
-    if Attestation.valid?(
-         Borrow,
-         Map.delete(Map.from_struct(borrow), :attestation),
-         borrow.attestation
-       ) and borrow.runtime == self() do
-      Process.demonitor(borrow.monitor, [:flush])
-      {:reply, :ok, maybe_finish(%{state | borrows: Map.delete(state.borrows, borrow.monitor)})}
+  def handle_call({:hold, borrow}, {owner, _}, state) do
+    if valid_token?(borrow) and match?(%{owner: nil}, state.borrows[borrow.monitor]) do
+      entry = %{caller: borrow.caller, owner: {owner, Process.monitor(owner)}}
+      {:reply, :ok, put_in(state.borrows[borrow.monitor], entry)}
     else
       {:reply, {:error, :invalid_provider_runtime}, state}
     end
   end
 
+  def handle_call({:drain, _deadline}, _from, %{opened: nil} = state), do: {:reply, :ok, state}
+
+  def handle_call({:drain, deadline}, from, %{draining: nil} = state) do
+    timer = drain_timer(deadline)
+
+    {:noreply, maybe_finish(%{state | status: :draining, draining: {from, timer, deadline}})}
+  end
+
+  def handle_call({:drain, _deadline}, _from, state),
+    do: {:reply, {:error, :provider_runtime_unavailable}, state}
+
+  defp valid_token?(borrow) do
+    Attestation.valid?(
+      Borrow,
+      Map.delete(Map.from_struct(borrow), :attestation),
+      borrow.attestation
+    ) and borrow.runtime == self()
+  end
+
+  defp release(borrow, state, caller) do
+    if valid_token?(borrow) do
+      case state.borrows[borrow.monitor] do
+        %{owner: {owner, _}} when owner != caller -> {:reply, :ok, state}
+        _ -> {:reply, :ok, maybe_finish(remove_borrow(state, borrow.monitor))}
+      end
+    else
+      {:reply, {:error, :invalid_provider_runtime}, state}
+    end
+  end
+
+  defp remove_borrow(state, monitor) do
+    Process.demonitor(monitor, [:flush])
+
+    case state.borrows[monitor] do
+      %{owner: {_pid, ref}} -> Process.demonitor(ref, [:flush])
+      _ -> :ok
+    end
+
+    %{state | borrows: Map.delete(state.borrows, monitor)}
+  end
+
   @impl true
   def handle_info({:DOWN, monitor, :process, _pid, _reason}, state) do
-    if monitor in state.monitors do
-      {:noreply, %{state | status: {:not_ready, :provider_runtime_lost}}}
-    else
-      {:noreply, maybe_finish(%{state | borrows: Map.delete(state.borrows, monitor)})}
+    cond do
+      monitor in state.monitors ->
+        {:noreply, %{state | status: {:not_ready, :provider_runtime_lost}}}
+
+      match?(%{owner: nil}, state.borrows[monitor]) ->
+        {:noreply, maybe_finish(remove_borrow(state, monitor))}
+
+      true ->
+        owned =
+          Enum.find(state.borrows, fn {_key, entry} ->
+            match?({_owner, ^monitor}, entry.owner)
+          end)
+
+        case owned do
+          {key, _} -> {:noreply, maybe_finish(remove_borrow(state, key))}
+          nil -> {:noreply, state}
+        end
     end
   end
 
   def handle_info(:drain_deadline, %{draining: nil} = state), do: {:noreply, state}
-  def handle_info(:drain_deadline, state), do: {:noreply, finish(state)}
+
+  def handle_info(:drain_deadline, %{draining: {from, timer, deadline}} = state) do
+    if Deadline.expired?(Deadline.from_expires_at(deadline)) do
+      {:noreply, finish(state)}
+    else
+      Process.cancel_timer(timer)
+      {:noreply, %{state | draining: {from, drain_timer(deadline), deadline}}}
+    end
+  end
+
+  defp drain_timer(deadline) do
+    delay = deadline |> Deadline.from_expires_at() |> Deadline.remaining() |> min(4_294_967_295)
+    Process.send_after(self(), :drain_deadline, delay)
+  end
 
   defp maybe_finish(%{draining: draining, borrows: borrows} = state)
        when not is_nil(draining) and map_size(borrows) == 0, do: finish(state)
@@ -352,7 +406,7 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   defp maybe_finish(state), do: state
 
   defp finish(state) do
-    {from, timer} = state.draining
+    {from, timer, _deadline} = state.draining
     Process.cancel_timer(timer)
     Enum.each(state.monitors, &Process.demonitor(&1, [:flush]))
     result = cleanup(state.opened)

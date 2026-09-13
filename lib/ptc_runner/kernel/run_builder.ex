@@ -1657,16 +1657,27 @@ defmodule PtcRunner.Kernel.RunBuilder do
   @doc false
   @spec execute_built_claimed(map(), PublicationAuthority.lease()) ::
           {:ok, ExecutionOutcome.t()} | {:error, term()}
+  @spec execute_built_claimed(
+          map(),
+          PublicationAuthority.lease(),
+          (PtcRunner.Kernel.ProviderTaskTracker.t() -> :ok) | nil
+        ) ::
+          {:ok, ExecutionOutcome.t()} | {:error, term()}
+  def execute_built_claimed(built, lease, observer \\ nil)
+
   def execute_built_claimed(
         %{
           entry_source: entry_source,
           config: %RunConfig{} = config,
           publication_authority: authority
         } = built,
-        lease
+        lease,
+        observer
       )
-      when is_binary(entry_source) do
+      when is_binary(entry_source) and (is_nil(observer) or is_function(observer, 1)) do
     if valid_built_binding?(built) and PublicationAuthority.lease_valid?(authority, lease) do
+      config = %{config | provider_cleanup_observer: observer}
+
       try do
         {result, terminal_batch} = Kernel.run_and_events(entry_source, config)
 
@@ -1687,7 +1698,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
-  def execute_built_claimed(_built, _lease), do: {:error, :invalid_execution_outcome}
+  def execute_built_claimed(_built, _lease, _observer), do: {:error, :invalid_execution_outcome}
 
   @doc false
   @spec publish_execution_report(ExecutionOutcome.t(), PublicationAuthority.t(), map()) ::
