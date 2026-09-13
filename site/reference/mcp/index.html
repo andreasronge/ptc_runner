@@ -221,7 +221,8 @@ if remote annotations explicitly set <code class="inline">readOnlyHint: false</c
 <code class="inline">tools/call</code>, including a snapshot identity call. Missing annotations and
 <code class="inline">readOnlyHint: true</code> are accepted for host reads, but remote hints never grant
 read authority or weaken a host-write mapping. Contradictory hints on
-unselected catalog tools do not block acquisition. Refusal exposes no
+unselected catalog tools do not block acquisition. A configured snapshot
+identity tool participates even when omitted from <code class="inline">config.allow</code>. Refusal exposes no
 endpoint, remote description, arguments, credentials, or annotation content.</p><p><code class="inline">model_visible</code> on a host mapping is the default
 for model context, not a ceiling: a selecting manifest may still list that
 name in <code class="inline">config.model_visible</code>. Visibility never grants or denies call

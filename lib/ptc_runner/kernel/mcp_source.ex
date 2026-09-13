@@ -210,7 +210,8 @@ defmodule PtcRunner.Kernel.MCPSource do
   discovery with `:mcp_tool_effect_conflict` when remote annotations explicitly
   set `readOnlyHint` to false or `destructiveHint` to true. Missing annotations
   are accepted; remote hints never grant reads or weaken installed writes.
-  This consistency check precedes any snapshot identity tool call.
+  This consistency check includes the configured snapshot identity tool even
+  when it is absent from the selected public names, and precedes any tool call.
   An advertised object output schema accepts only schema-valid
   `structuredContent` accompanied by exact text blocks (which are validated
   and discarded). Text and embedded text-resource blocks may carry standard
@@ -1137,6 +1138,7 @@ defmodule PtcRunner.Kernel.MCPSource do
     mapping = Map.fetch!(installed.tools, upstream)
 
     with tool when is_map(tool) <- discovered[upstream],
+         :ok <- validate_tool_effect(mapping.effect, tool),
          {:ok, contract} <- MCPProtocol.selected_tool(tool),
          {:ok, capability, _snapshot_tool} <-
            assemble_capability(transport, upstream, mapping, contract, selected),
@@ -1146,6 +1148,7 @@ defmodule PtcRunner.Kernel.MCPSource do
          true <- hash =~ @sha256 do
       {:ok, hash}
     else
+      {:error, :mcp_tool_effect_conflict} = error -> error
       _reason -> {:error, :mcp_invalid_snapshot_identity}
     end
   end

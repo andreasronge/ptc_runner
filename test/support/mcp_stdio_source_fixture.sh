@@ -4,9 +4,12 @@ marker=$1
 mode=${2:-serve}
 seen_ids=" "
 tool_annotations=''
+structured_required='"query"'
 case "$mode" in
   effect-mutation) tool_annotations='"annotations":{"readOnlyHint":false},' ;;
   effect-destructive) tool_annotations='"annotations":{"destructiveHint":true},' ;;
+  identity-mutation) tool_annotations='"annotations":{"readOnlyHint":false},'; structured_required='' ;;
+  identity-destructive) tool_annotations='"annotations":{"destructiveHint":true},'; structured_required='' ;;
   effect-read) tool_annotations='"annotations":{"readOnlyHint":true},' ;;
 esac
 
@@ -117,13 +120,16 @@ do
     *'"method":"tools/list"'*)
       printf '%s:%s\n' "$id" 'tools/list' >> "$marker"
       if [ "$mode" = "structured-padded" ] || [ "$mode" = "structured-padded-dense" ]; then
-        printf '{"jsonrpc":"2.0","id":%s,"result":{"resultType":"complete","tools":[{"name":"structured",%s"description":"Return one structured value.","inputSchema":{"type":"object","properties":{"query":{"type":"string","x-mcp-header":"Query"}},"required":["query"]},"outputSchema":{"type":"object","properties":{"value":{"type":"integer"},"padding":{"type":"array","items":{"type":"string"}}},"required":["value"]}}],"nextCursor":"page-2","ttlMs":0,"cacheScope":"private"}}\n' "$id" "$tool_annotations"
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"resultType":"complete","tools":[{"name":"structured",%s"description":"Return one structured value.","inputSchema":{"type":"object","properties":{"query":{"type":"string","x-mcp-header":"Query"}},"required":[%s]},"outputSchema":{"type":"object","properties":{"value":{"type":"integer"},"padding":{"type":"array","items":{"type":"string"}}},"required":["value"]}}],"nextCursor":"page-2","ttlMs":0,"cacheScope":"private"}}\n' "$id" "$tool_annotations" "$structured_required"
       else
-        printf '{"jsonrpc":"2.0","id":%s,"result":{"resultType":"complete","tools":[{"name":"structured",%s"description":"Return one structured value.","inputSchema":{"type":"object","properties":{"query":{"type":"string","x-mcp-header":"Query"}},"required":["query"]},"outputSchema":{"type":"object","properties":{"value":{"type":"integer"}},"required":["value"]}}],"nextCursor":"page-2","ttlMs":0,"cacheScope":"private"}}\n' "$id" "$tool_annotations"
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"resultType":"complete","tools":[{"name":"structured",%s"description":"Return one structured value.","inputSchema":{"type":"object","properties":{"query":{"type":"string","x-mcp-header":"Query"}},"required":[%s]},"outputSchema":{"type":"object","properties":{"value":{"type":"integer"}},"required":["value"]}}],"nextCursor":"page-2","ttlMs":0,"cacheScope":"private"}}\n' "$id" "$tool_annotations" "$structured_required"
       fi
       ;;
     *'"method":"tools/call"'*'"name":"structured"'*)
-      case "$line" in *'"query":"x"'*) ;; *) exit 65 ;; esac
+      case "$mode" in
+        identity-*) ;;
+        *) case "$line" in *'"query":"x"'*) ;; *) exit 65 ;; esac ;;
+      esac
       printf '%s:%s\n' "$id" 'tools/call' >> "$marker"
       if [ "$mode" = "exit-before-response" ]; then
         exit 0

@@ -1293,6 +1293,41 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
+  test "snapshot identity mutation hints veto acquisition even outside allow", %{tmp_dir: dir} do
+    for {hint, mode} <- [
+          {%{"readOnlyHint" => false}, "identity-mutation"},
+          {%{"destructiveHint" => true}, "identity-destructive"}
+        ],
+        transport <- [:streamable_http, :stdio] do
+      marker = Path.join(dir, "#{transport}-#{mode}")
+      identity = %{tool: "structured", field: "value"}
+
+      registry =
+        case transport do
+          :streamable_http ->
+            fixture = fixture(self(), tool_annotations: hint, identity_input?: true)
+            on_exit(fixture.close)
+            registry(fixture.endpoint, snapshot_identity: identity)
+
+          :stdio ->
+            stdio_registry(dir, marker, mode, snapshot_identity: identity)
+        end
+
+      assert {:error, :mcp_tool_effect_conflict} =
+               dir
+               |> manifest(~w(remote.text))
+               |> directory_request(registry)
+               |> RunLifecycle.build()
+
+      if transport == :stdio do
+        refute File.read!(marker) =~ "tools/call"
+      else
+        refute_receive {:mcp_request, "tools/call", _headers}
+      end
+    end
+  end
+
+  @tag :tmp_dir
   test "tolerates spec-standard extra tool fields and SDK annotation keys", %{tmp_dir: dir} do
     parent = self()
     fixture = fixture(parent, spec_extras?: true)
@@ -2994,7 +3029,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         tools: Keyword.get(opts, :tools, mappings()),
         timeout_ms: Keyword.get(opts, :timeout_ms, 2_000),
         max_result_bytes: Keyword.get(opts, :max_result_bytes, 64_000),
-        max_pages: Keyword.get(opts, :max_pages, 16)
+        max_pages: Keyword.get(opts, :max_pages, 16),
+        snapshot_identity: Keyword.get(opts, :snapshot_identity)
       )
 
     {:ok, registry} = ProviderRegistry.new(%{"fixture-mcp" => builder})
@@ -3112,6 +3148,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         transport: {:stdio, stdio_transport_options(marker, mode)},
         tools: Keyword.get(opts, :tools, mappings()),
         timeout_ms: 5_000,
+        snapshot_identity: Keyword.get(opts, :snapshot_identity),
         max_result_bytes: Keyword.get(opts, :max_result_bytes, 64_000)
       )
 
@@ -3577,6 +3614,9 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   defp tool(name, opts) when name in ["structured", "structured-v2"] do
     input =
       cond do
+        opts[:identity_input?] ->
+          Map.put(@input_schema, "required", [])
+
         opts[:invalid_schema?] ->
           Map.put(@input_schema, "$ref", "remote")
 
