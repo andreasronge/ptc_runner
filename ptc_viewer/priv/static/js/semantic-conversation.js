@@ -219,7 +219,7 @@ function AssistantOutput({ turn, metadata }) {
         <div class="semantic-model-identity">
           <span><strong>Install alias</strong> ${identity.alias}</span>
           ${identity.resolvedModel && html`
-            <span><strong>Resolved model</strong> ${identity.resolvedModel}</span>`}
+            <span><strong>Configured model</strong> ${identity.resolvedModel}</span>`}
         </div>`}
       ${reasoning != null && html`
         <div class="kt-msg kt-msg-reasoning">

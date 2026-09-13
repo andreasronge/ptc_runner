@@ -102,6 +102,9 @@ defmodule PtcViewer.KernelTranscriptTest do
         "metadata" => %{
           "run_id" => "model-identity-run",
           "model" => model_fingerprint,
+          "llm_usage_by_model" => [
+            %{"resolved_model" => "openrouter:nex-agi/nex-n2-pro", "calls" => 1}
+          ],
           "connector_snapshots" => [
             %{
               "declaration" => %{"name" => "deepseek", "source" => "llm"},
@@ -115,11 +118,31 @@ defmodule PtcViewer.KernelTranscriptTest do
         "turns" => %{"items" => []}
       })
 
-    assert rendered =~ "Resolved model"
+    assert rendered =~ "Called model"
     assert rendered =~ "openrouter:nex-agi/nex-n2-pro"
     assert rendered =~ "Model label"
     assert rendered =~ "sha256:aaaaaaaaaaaa"
     refute rendered =~ ">Model</span><span class=\"kt-fact-value\">sha256:"
+  end
+
+  test "does not present configured but unused models as called", %{tmp_dir: directory} do
+    rendered =
+      render(directory, %{
+        "metadata" => %{
+          "run_id" => "multi-alias",
+          "connector_snapshots" => [
+            %{"acquisition" => %{"resolved_model" => "openrouter:vendor/unused"}}
+          ],
+          "llm_usage_by_model" => [
+            %{"resolved_model" => "openrouter:vendor/called", "calls" => 1}
+          ]
+        },
+        "turns" => %{"items" => []}
+      })
+
+    assert rendered =~ "Called model"
+    assert rendered =~ "openrouter:vendor/called"
+    refute rendered =~ "openrouter:vendor/unused"
   end
 
   test "renders workflow-supplied programs independently of conversation streams", %{

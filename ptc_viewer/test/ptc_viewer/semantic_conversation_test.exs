@@ -261,7 +261,7 @@ defmodule PtcViewer.SemanticConversationTest do
 
     assert rendered =~ "Install alias"
     assert rendered =~ "deepseek"
-    assert rendered =~ "Resolved model"
+    assert rendered =~ "Configured model"
     assert rendered =~ "openrouter:nex-agi/nex-n2-pro"
     assert rendered =~ "ordinary answer"
     assert length(Regex.scan(~r/<strong>Install alias<\/strong> deepseek/, rendered)) == 3

@@ -1468,6 +1468,27 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     "sha256:" <> Base.encode16(:crypto.hash(:sha256, encoded), case: :lower)
   end
 
+  test "run metadata attributes called models without including unused LLM aliases" do
+    called = TestHelpers.llm_snapshot("writer", "stable-v1", "openrouter:vendor/called")
+    unused = TestHelpers.llm_snapshot("reviewer", "review-v2", "openrouter:vendor/unused")
+    events = llm_counter_run("one-alias", [called, unused], "ok", %{"input" => 3})
+
+    assert {:ok, run} =
+             TraceLog.query_loaded(
+               events,
+               "models",
+               :get_run,
+               %{"run_id" => "one-alias"},
+               100_000,
+               :sanitized
+             )
+
+    assert Enum.map(run["llm_usage_by_model"], & &1["resolved_model"]) ==
+             ["openrouter:vendor/called"]
+
+    assert run["unattributed_model_calls"] == 0
+  end
+
   defp llm_counter_run(
          run_id,
          snapshot_or_snapshots,

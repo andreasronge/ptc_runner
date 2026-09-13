@@ -1,12 +1,8 @@
-export function attestedResolvedModels(metadata) {
-  const models = [];
-  const connectors = Array.isArray(metadata?.connector_snapshots) ? metadata.connector_snapshots : [];
-  for (const connector of connectors) {
-    const acquisition = connector?.acquisition;
-    if (typeof acquisition?.resolved_model !== 'string' || acquisition.resolved_model === '') continue;
-    if (!models.includes(acquisition.resolved_model)) models.push(acquisition.resolved_model);
-  }
-  return models;
+export function calledResolvedModels(metadata) {
+  const rows = Array.isArray(metadata?.llm_usage_by_model) ? metadata.llm_usage_by_model : [];
+  return [...new Set(rows
+    .filter(row => row?.calls > 0 && typeof row?.resolved_model === 'string' && row.resolved_model !== '')
+    .map(row => row.resolved_model))];
 }
 
 export function modelResponseIdentity(turn, metadata) {
@@ -34,6 +30,6 @@ export function presentedAssistant(turn, metadata) {
   const content = { ...assistant.content };
   delete content.model;
   content.alias = identity.alias;
-  if (identity.resolvedModel) content.resolved_model = identity.resolvedModel;
+  if (identity.resolvedModel) content.configured_resolved_model = identity.resolvedModel;
   return { ...assistant, content };
 }
