@@ -43,8 +43,9 @@ defmodule PtcRunner.Kernel.MCPSource do
   stdio. Both transports support schema-valid structured object results with
   exact text or embedded text-resource companions. Unstructured results expose
   ordered text plus bounded embedded text resources; binary resources and
-  other content block types remain unsupported. The source ignores server
-  effect annotations and rejects manifest-supplied effects, connection details,
+  other content block types remain unsupported. The source rejects selected
+  host-read mappings contradicted by explicit remote mutation hints and rejects
+  manifest-supplied effects, connection details,
   and credential configuration.
   """
 
@@ -192,7 +193,8 @@ defmodule PtcRunner.Kernel.MCPSource do
   `:mcp_protocol_error`, `:mcp_discovery_method_unsupported`,
   `:mcp_protocol_version_unsupported`, `:mcp_remote_error`,
   `:mcp_response_exceeded`, `:mcp_catalog_exceeded`, `:mcp_invalid_catalog`,
-  `:mcp_invalid_tool_schema`, `:mcp_capability_negotiation_error`,
+  `:mcp_invalid_tool_schema`, `:mcp_tool_effect_conflict`,
+  `:mcp_capability_negotiation_error`,
   `:mcp_authorization_required`,
   `:mcp_input_required_refused`, `:mcp_unsupported_result`,
   `{:mcp_mapped_tool_missing, declared_name}`, or `:mcp_invalid_snapshot_identity`.
@@ -204,7 +206,12 @@ defmodule PtcRunner.Kernel.MCPSource do
   ## Frozen result and snapshot contracts
 
   Discovery produces ordinary `PtcRunner.Kernel.Capability` values whose
-  effects come only from the installed mapping.
+  effects come only from the installed mapping. Selected read mappings fail
+  discovery with `:mcp_tool_effect_conflict` when remote annotations explicitly
+  set `readOnlyHint` to false or `destructiveHint` to true. Missing annotations
+  are accepted; remote hints never grant reads or weaken installed writes.
+  This consistency check includes the configured snapshot identity tool even
+  when it is absent from the selected public names, and precedes any tool call.
   An advertised object output schema accepts only schema-valid
   `structuredContent` accompanied by exact text blocks (which are validated
   and discarded). Text and embedded text-resource blocks may carry standard
@@ -998,14 +1005,19 @@ defmodule PtcRunner.Kernel.MCPSource do
     do: {:error, {:mcp_mapped_tool_missing, upstream}}
 
   defp capability(transport, upstream, mapping, tool, selected) do
-    case MCPProtocol.selected_tool(tool) do
-      {:ok, contract} ->
-        assemble_capability(transport, upstream, mapping, contract, selected)
-
-      {:error, _reason} = error ->
-        error
+    with :ok <- validate_tool_effect(mapping.effect, tool),
+         {:ok, contract} <- MCPProtocol.selected_tool(tool) do
+      assemble_capability(transport, upstream, mapping, contract, selected)
     end
   end
+
+  defp validate_tool_effect(:read, %{"annotations" => annotations}) when is_map(annotations) do
+    if annotations["readOnlyHint"] === false or annotations["destructiveHint"] === true,
+      do: {:error, :mcp_tool_effect_conflict},
+      else: :ok
+  end
+
+  defp validate_tool_effect(_effect, _tool), do: :ok
 
   defp assemble_capability(transport, upstream, mapping, contract, selected) do
     with {:ok, capability} <-
@@ -1126,6 +1138,7 @@ defmodule PtcRunner.Kernel.MCPSource do
     mapping = Map.fetch!(installed.tools, upstream)
 
     with tool when is_map(tool) <- discovered[upstream],
+         :ok <- validate_tool_effect(mapping.effect, tool),
          {:ok, contract} <- MCPProtocol.selected_tool(tool),
          {:ok, capability, _snapshot_tool} <-
            assemble_capability(transport, upstream, mapping, contract, selected),
@@ -1135,6 +1148,7 @@ defmodule PtcRunner.Kernel.MCPSource do
          true <- hash =~ @sha256 do
       {:ok, hash}
     else
+      {:error, :mcp_tool_effect_conflict} = error -> error
       _reason -> {:error, :mcp_invalid_snapshot_identity}
     end
   end

@@ -207,7 +207,18 @@ capability name exposed by PtcRunner. Change `installation_revision` whenever
 the transport, mapping, effect, snapshot policy, or server behavior changes.
 
 The required `effect` declaration in `ptc-host.json` is authoritative; server
-annotations cannot change it. `model_visible` on a host mapping is the default
+annotations cannot change it. During discovery, a selected host-read mapping
+is rejected with the closed, non-retryable reason `mcp_tool_effect_conflict`
+if remote annotations explicitly set `readOnlyHint: false` or
+`destructiveHint: true`. This fail-closed consistency check runs before any
+`tools/call`, including a snapshot identity call. Missing annotations and
+`readOnlyHint: true` are accepted for host reads, but remote hints never grant
+read authority or weaken a host-write mapping. Contradictory hints on
+unselected catalog tools do not block acquisition. A configured snapshot
+identity tool participates even when omitted from `config.allow`. Refusal exposes no
+endpoint, remote description, arguments, credentials, or annotation content.
+
+`model_visible` on a host mapping is the default
 for model context, not a ceiling: a selecting manifest may still list that
 name in `config.model_visible`. Visibility never grants or denies call
 authority or runtime documentation. `error_feedback: "bounded"` may expose up to 1,024 bytes of

@@ -218,7 +218,11 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
     do: acquisition_diagnostic(:provider_protocol_error, occurrence)
 
   def diagnostic(reason, occurrence)
-      when reason in [:provider_declaration_mismatch, :provider_data_policy_changed],
+      when reason in [
+             :provider_declaration_mismatch,
+             :provider_data_policy_changed,
+             :mcp_tool_effect_conflict
+           ],
       do: acquisition_diagnostic(:provider_policy_changed, occurrence)
 
   def diagnostic(:mcp_authentication_failed, occurrence),
