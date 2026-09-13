@@ -1471,7 +1471,17 @@ defmodule PtcRunner.Kernel.TraceLogTest do
   test "run metadata attributes called models without including unused LLM aliases" do
     called = TestHelpers.llm_snapshot("writer", "stable-v1", "openrouter:vendor/called")
     unused = TestHelpers.llm_snapshot("reviewer", "review-v2", "openrouter:vendor/unused")
-    events = llm_counter_run("one-alias", [called, unused], "ok", %{"input" => 3})
+    [first, stop, last] = llm_counter_run("one-alias", [called, unused], "ok", %{"input" => 3})
+
+    start = %{
+      stop
+      | "type" => "capability-started",
+        "data" =>
+          Map.drop(stop["data"], ["status", "usage"]) |> Map.put("capability_id", "call-1")
+    }
+
+    stop = %{stop | "sequence" => 3, "data" => Map.put(stop["data"], "capability_id", "call-1")}
+    events = [first, start, stop, %{last | "sequence" => 4}]
 
     assert {:ok, run} =
              TraceLog.query_loaded(
@@ -1487,6 +1497,47 @@ defmodule PtcRunner.Kernel.TraceLogTest do
              ["openrouter:vendor/called"]
 
     assert run["unattributed_model_calls"] == 0
+    assert run["llm_usage_state"] == "available"
+
+    unmatched = [first, start, %{last | "sequence" => 3}]
+
+    assert {:ok, pending} =
+             TraceLog.query_loaded(
+               unmatched,
+               "models",
+               :get_run,
+               %{"run_id" => "one-alias"},
+               100_000,
+               :sanitized
+             )
+
+    assert pending["llm_usage_state"] == "available"
+    assert hd(pending["llm_usage_by_model"])["resolved_model"] == "openrouter:vendor/called"
+
+    dropped = %{
+      stop
+      | "type" => "events-dropped",
+        "data" => %{"counts" => %{"capability-stopped" => 1}}
+    }
+
+    for unavailable <- [
+          [first, stop, %{last | "sequence" => 4}],
+          [first, start, dropped, %{last | "sequence" => 4}],
+          [first, start]
+        ] do
+      assert {:ok, missing} =
+               TraceLog.query_loaded(
+                 unavailable,
+                 "models",
+                 :get_run,
+                 %{"run_id" => "one-alias"},
+                 100_000,
+                 :sanitized
+               )
+
+      assert missing["llm_usage_state"] == "unavailable"
+      assert missing["llm_usage_by_model"] == nil
+    end
   end
 
   defp llm_counter_run(

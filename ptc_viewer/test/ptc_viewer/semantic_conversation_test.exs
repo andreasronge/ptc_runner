@@ -269,6 +269,27 @@ defmodule PtcViewer.SemanticConversationTest do
     assert rendered =~ ~s(&quot;model&quot;: &quot;deepseek&quot;)
   end
 
+  test "preserves model-authored JSON fields that match the install alias", %{tmp_dir: directory} do
+    content = %{"model" => "deepseek", "answer" => "authored"}
+
+    rendered =
+      render(directory, %{
+        "streams" => [
+          %{
+            "turns" => [
+              %{
+                "response" => %{"value" => %{"model" => "deepseek", "content" => content}},
+                "assistant" => %{"role" => "assistant", "content" => content}
+              }
+            ]
+          }
+        ]
+      })
+
+    assert length(Regex.scan(~r/&quot;model&quot;: &quot;deepseek&quot;/, rendered)) == 2
+    refute rendered =~ "&quot;alias&quot;:"
+  end
+
   defp render(directory, conversation, metadata \\ %{}) do
     metadata_path = Path.join(directory, "metadata.json")
     turns_path = Path.join(directory, "turns.json")

@@ -145,6 +145,22 @@ defmodule PtcViewer.KernelTranscriptTest do
     refute rendered =~ "openrouter:vendor/unused"
   end
 
+  test "shows unavailable model accounting without implying no calls", %{tmp_dir: directory} do
+    rendered =
+      render(directory, %{
+        "metadata" => %{
+          "run_id" => "missing-accounting",
+          "llm_usage_state" => "unavailable",
+          "llm_usage_by_model" => nil
+        },
+        "turns" => %{"items" => []}
+      })
+
+    assert rendered =~ "Model accounting"
+    assert rendered =~ "Unavailable"
+    refute rendered =~ "Called model"
+  end
+
   test "renders workflow-supplied programs independently of conversation streams", %{
     tmp_dir: directory
   } do

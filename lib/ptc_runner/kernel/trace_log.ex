@@ -2906,7 +2906,7 @@ defmodule PtcRunner.Kernel.TraceLog do
       "schema_version" => 2,
       "source" => Atom.to_string(source_kind)
     }
-    |> Map.merge(LLMUsageSummary.summarize(events))
+    |> Map.merge(LLMUsageSummary.terminal_projection({:ok, events}))
   end
 
   defp terminal_llm_budget(stopped) do

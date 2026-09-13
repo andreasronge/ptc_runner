@@ -7,7 +7,9 @@ local inspection surface, not a general remote administration service.
 
 The **Runs** tab lists the project's captured traces read-only. A run page shows
 turns, tool calls, effective prelude components, and called models attributed
-through the backend's validated LLM accounting. Configured but unused aliases
+through the backend's validated terminal LLM reconciliation, including unmatched
+request starts. Incomplete or accounting-relevant dropped events are labelled
+as unavailable accounting. Configured but unused aliases
 do not appear as called models. Calls without attributable identity are not
 guessed into model identities. The separate
 model-label field is the manifest label fingerprint, not a record of which model

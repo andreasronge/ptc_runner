@@ -217,6 +217,7 @@ function Hero({
     ['Trace', metadata.trace_id],
     ['Duration', duration(metadata.duration_ms)],
     ['Called model', resolvedModels.join(', ')],
+    ['Model accounting', metadata.llm_usage_state === 'unavailable' ? 'Unavailable' : null],
     ['Model label', abbreviate(metadata.model), metadata.model],
     ['Provider', abbreviate(metadata.provider), metadata.provider],
     ['Source', metadata.source],
