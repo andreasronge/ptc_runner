@@ -11,22 +11,25 @@ defmodule PtcRunner.Kernel.AdapterCancellationWitness do
   end
 
   @spec run((-> term())) :: term()
-  def run(operation) when is_function(operation, 0) do
+  @spec run((-> term()), [atom()]) :: term()
+  def run(operation, delegate_names \\ [])
+      when is_function(operation, 0) and is_list(delegate_names) do
     case Process.get(@key) do
-      {guardian, gate, state} -> run_witnessed(operation, guardian, gate, state)
+      {guardian, gate, state} -> run_witnessed(operation, guardian, gate, state, delegate_names)
       nil -> operation.()
     end
   end
 
-  defp run_witnessed(operation, guardian, gate, state) do
+  defp run_witnessed(operation, guardian, gate, state, delegate_names) do
     case :atomics.compare_exchange(state, 1, 1, 2) do
-      :ok -> run_registered(operation, guardian, gate, state)
+      :ok -> run_registered(operation, guardian, gate, state, delegate_names)
       _cancellation_claimed -> {:error, :cancelled}
     end
   end
 
-  defp run_registered(operation, guardian, gate, state) do
+  defp run_registered(operation, guardian, gate, state, delegate_names) do
     caller = self()
+    declared = Enum.map(delegate_names, &{:registered_delegate, &1, Process.whereis(&1)})
 
     {worker, monitor} =
       :erlang.spawn_opt(
@@ -35,7 +38,8 @@ defmodule PtcRunner.Kernel.AdapterCancellationWitness do
 
           send(
             caller,
-            {:adapter_request_result, gate, self(), result, checkout_obligations(self())}
+            {:adapter_request_result, gate, self(), result,
+             checkout_obligations(self(), declared)}
           )
         end,
         provider_spawn_options()
@@ -54,13 +58,13 @@ defmodule PtcRunner.Kernel.AdapterCancellationWitness do
         end
 
       {:cancel_adapter_request, ^gate, ^guardian, deadline} ->
-        obligations = suspend_checkout_obligations(worker)
+        obligations = suspend_checkout_obligations(worker, declared)
         Process.unlink(worker)
         Process.exit(worker, :kill)
 
         receive do
           {:DOWN, ^monitor, :process, ^worker, _reason} ->
-            obligations = completed_checkout_obligations(gate, worker) ++ obligations
+            obligations = completed_checkout_obligations(gate, worker) ++ obligations ++ declared
             await_checkout_return(Enum.uniq(obligations), guardian, gate, deadline)
             send(guardian, {:adapter_request_drained, gate, self()})
             {:error, :cancelled}
@@ -71,16 +75,21 @@ defmodule PtcRunner.Kernel.AdapterCancellationWitness do
   # Finch HTTP/1 checkin and client-DOWN reclamation are asynchronous in
   # NimblePool. Freeze the worker before inspecting both monitor directions:
   # queued clients monitor the pool; checked-out clients are monitored by it.
-  defp suspend_checkout_obligations(worker) do
+  defp suspend_checkout_obligations(worker, declared) do
     :erlang.suspend_process(worker)
-    checkout_obligations(worker)
+    checkout_obligations(worker, declared)
   rescue
     ArgumentError -> []
   end
 
-  defp checkout_obligations(worker) do
+  defp checkout_obligations(worker, declared \\ []) do
     {pools, delegates} = checkout_owners(worker)
     direct = Enum.map(pools, &{:pool, &1, worker})
+
+    delegates =
+      Enum.reject(delegates, fn owner ->
+        Enum.any?(declared, fn {:registered_delegate, _name, pid} -> pid == owner end)
+      end)
 
     delegated =
       Enum.flat_map(delegates, fn owner ->
@@ -101,7 +110,7 @@ defmodule PtcRunner.Kernel.AdapterCancellationWitness do
         end
       end)
 
-    direct ++ delegated
+    direct ++ delegated ++ declared
   end
 
   defp checkout_owners(owner) do
@@ -137,6 +146,9 @@ defmodule PtcRunner.Kernel.AdapterCancellationWitness do
     case checkout_status(obligation, timeout) do
       :returned ->
         await_checkout_return(rest, guardian, gate, deadline)
+
+      {:returned, retained_checkouts} ->
+        await_checkout_return(Enum.uniq(retained_checkouts ++ rest), guardian, gate, deadline)
 
       :unproven ->
         abandon_witness(guardian)
@@ -191,14 +203,40 @@ defmodule PtcRunner.Kernel.AdapterCancellationWitness do
     end
   end
 
+  defp checkout_status({:registered_delegate, name, owner}, timeout) do
+    # Replacement cannot erase old capacity beneath a surviving invocation.
+    if is_pid(owner) and Process.whereis(name) == owner do
+      status = checkout_status({:delegate, owner}, timeout)
+
+      if Process.whereis(name) == owner and Process.alive?(owner),
+        do: status,
+        else: :unproven
+    else
+      :unproven
+    end
+  end
+
   defp checkout_status({:delegate, owner}, timeout) do
     # A suspended shared owner can service system messages while ordinary calls
     # remain queued. Only a running owner provides the callback-completion barrier.
     case owner_response(owner, fn -> :sys.get_status(owner, timeout) end) do
-      {:ok, {:status, ^owner, _module, [_dictionary, :running | _rest]}} -> :returned
-      {:ok, {:status, ^owner, _module, [_dictionary, :suspended | _rest]}} -> :pending
-      {:ok, _unsupported} -> :unproven
-      status -> status
+      {:ok, {:status, ^owner, _module, [_dictionary, :running | _rest]}} ->
+        # The callback may have retried or redirected after our first snapshot.
+        # Its final asynchronous checkin still needs positive return evidence.
+        {:returned, checkout_obligations(owner)}
+
+      {:ok, {:status, ^owner, _module, [_dictionary, :suspended | _rest]}} ->
+        :pending
+
+      {:ok, _unsupported} ->
+        :unproven
+
+      :returned ->
+        # A dead delegate cannot reveal any later asynchronous checkouts.
+        :unproven
+
+      status ->
+        status
     end
   end
 

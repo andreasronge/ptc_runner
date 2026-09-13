@@ -1260,6 +1260,168 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     end
   end
 
+  test "Vertex adapter cancellation retains a post-reply token checkout", %{test: test} do
+    pool = __MODULE__.VertexPostReplyPool
+
+    start_supervised!(
+      {Finch, name: pool, pools: %{default: [size: 1, count: 1, start_pool_metrics?: true]}}
+    )
+
+    parent = self()
+    credentials = %{"client_email" => "post-reply@example.invalid"}
+
+    server =
+      MCPHTTPFixture.start(fn _ ->
+        send(parent, {:post_reply_token_http, self()})
+        receive do: (:release_token -> {200, [], "token"})
+      end)
+
+    on_exit(server.close)
+
+    spawn(fn ->
+      result =
+        TokenCache.get_or_refresh({:service_account, credentials},
+          token_fetcher: fn _, _ ->
+            {:ok, _} = Finch.request(Finch.build(:get, server.endpoint), pool)
+            {:ok, "test-token"}
+          end
+        )
+
+      send(parent, {:token_cached, result})
+    end)
+
+    assert_receive {:post_reply_token_http, http_worker}
+
+    assert {:ok, [%{pid: pool_pid, available_connections: 0, in_use_connections: 1}]} =
+             Finch.get_pool_status(pool, server.endpoint)
+
+    :ok = :sys.suspend(pool_pid)
+
+    try do
+      send(http_worker, :release_token)
+      assert_receive {:token_cached, {:ok, "test-token"}}
+      Req.Test.set_req_test_to_shared()
+      on_exit(fn -> Req.Test.set_req_test_to_private() end)
+
+      Req.Test.stub(test, fn _conn ->
+        send(parent, :vertex_model_transport)
+        receive do: (:never -> raise "unreachable")
+      end)
+
+      model =
+        LLMDB.Model.new!(%{
+          id: "gemini-test-model",
+          provider: :google_vertex,
+          limits: %{output: 4_096, context: 8_192}
+        })
+
+      target = %ReqLLMPreparedModel{
+        selector: "google_vertex:gemini-test-model",
+        model: model,
+        exact_options: %{},
+        request_options: %{
+          provider_options: [
+            service_account_json: credentials,
+            project_id: "test-project",
+            region: "global"
+          ],
+          req_http_options: [plug: {Req.Test, test}]
+        }
+      }
+
+      {:ok, invocation} =
+        Invocation.new(%{messages: [%{role: :user, content: "hi"}]}, false, nil, nil)
+
+      requester = fn _, _ -> ReqLLMAdapter.call(target, invocation) end
+      assert {:ok, handle} = CancelableRequest.start_cancelable(requester, %{}, %{}, self())
+      assert :ok = CancelableRequest.dispatch(handle)
+      assert_receive :vertex_model_transport, 1_000
+      assert :uncertain = CancelableRequest.cancel_and_drain(handle, monotonic_deadline(100))
+
+      assert {:ok, [%{available_connections: 0, in_use_connections: 1}]} =
+               Finch.get_pool_status(pool, server.endpoint)
+    after
+      :sys.resume(pool_pid)
+      :sys.get_state(pool_pid)
+    end
+  end
+
+  test "delegated token refresh retains a later checkout after its callback returns" do
+    pool = __MODULE__.VertexSequentialPool
+
+    start_supervised!(
+      {Finch, name: pool, pools: %{default: [size: 1, count: 1, start_pool_metrics?: true]}}
+    )
+
+    parent = self()
+
+    servers =
+      for phase <- [:first, :second], into: %{} do
+        {phase,
+         MCPHTTPFixture.start(fn _ ->
+           send(parent, {:sequential_token_http, phase, self()})
+           receive do: (:release_token -> {200, [], "token"})
+         end)}
+      end
+
+    on_exit(fn -> Enum.each(servers, fn {_, server} -> server.close.() end) end)
+
+    token_fetcher = fn _, _ ->
+      for phase <- [:first, :second] do
+        {:ok, _} = Finch.request(Finch.build(:get, servers[phase].endpoint), pool)
+      end
+
+      {:ok, "test-token"}
+    end
+
+    requester = fn _, _ ->
+      AdapterCancellationWitness.run(fn ->
+        send(parent, {:sequential_adapter_worker, self()})
+
+        TokenCache.get_or_refresh(
+          {:service_account, %{"client_email" => "sequential@example.invalid"}},
+          token_fetcher: token_fetcher
+        )
+      end)
+    end
+
+    guardian =
+      spawn(fn ->
+        {:ok, handle} = CancelableRequest.start_cancelable(requester, %{}, %{}, self())
+        :ok = CancelableRequest.dispatch(handle)
+
+        receive do
+          :cancel ->
+            send(
+              parent,
+              {:sequential_drain,
+               CancelableRequest.cancel_and_drain(handle, monotonic_deadline(500))}
+            )
+        end
+      end)
+
+    assert_receive {:sequential_adapter_worker, worker}
+    assert_receive {:sequential_token_http, :first, first_http}
+    monitor = Process.monitor(worker)
+    send(guardian, :cancel)
+    assert_receive {:DOWN, ^monitor, :process, ^worker, _reason}
+    send(first_http, :release_token)
+    assert_receive {:sequential_token_http, :second, second_http}
+    assert {:ok, [%{pid: pool_pid}]} = Finch.get_pool_status(pool, servers.second.endpoint)
+    :ok = :sys.suspend(pool_pid)
+
+    try do
+      send(second_http, :release_token)
+      assert_receive {:sequential_drain, :uncertain}, 1_000
+
+      assert {:ok, [%{available_connections: 0, in_use_connections: 1}]} =
+               Finch.get_pool_status(pool, servers.second.endpoint)
+    after
+      :sys.resume(pool_pid)
+      :sys.get_state(pool_pid)
+    end
+  end
+
   test "preserves a namespaced provider output budget", %{test: test} do
     expect_request(test, "Qwen/Qwen3-30B-A3B-Instruct-2507")
 
