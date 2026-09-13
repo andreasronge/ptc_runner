@@ -1087,46 +1087,86 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     refute warnings =~ "deprecated"
   end
 
-  test "cancellation witness returns a held size-one Finch checkout before acknowledging drain" do
-    pool = __MODULE__.CancellationPool
-    start_supervised!({Finch, name: pool, pools: %{default: [size: 1, count: 1]}})
-    parent = self()
-    requests = :atomics.new(1, signed: false)
+  for transport <- [:adapter, :finch], pool_state <- [:ready, :suspended] do
+    @transport transport
+    @pool_state pool_state
 
-    server =
-      MCPHTTPFixture.start(fn _request ->
-        case :atomics.add_get(requests, 1, 1) do
-          1 ->
-            send(parent, :held_adapter_transport)
-            receive do: (:never -> {500, [], "unreachable"})
+    test "cancellation witness waits for #{transport} checkout reclamation with a #{pool_state} pool" do
+      pool = __MODULE__.CancellationPool
 
-          _ ->
-            {200, [], "ok"}
-        end
-      end)
+      start_supervised!(
+        {Finch, name: pool, pools: %{default: [size: 1, count: 1, start_pool_metrics?: true]}}
+      )
 
-    on_exit(server.close)
+      parent = self()
+      requests = :atomics.new(1, signed: false)
 
-    requester = fn _, _ ->
-      AdapterCancellationWitness.run(fn ->
-        ReqLLMAdapter.generate_text(
-          "openai-compat:#{server.endpoint}|model",
-          [%{role: :user, content: "hi"}],
-          req_http_options: [finch: [name: pool, pool_timeout: 1_000]],
-          receive_timeout: 5_000
-        )
-      end)
+      server =
+        MCPHTTPFixture.start(fn _request ->
+          case :atomics.add_get(requests, 1, 1) do
+            1 ->
+              send(parent, :held_adapter_transport)
+              receive do: (:never -> {500, [], "unreachable"})
+
+            _ ->
+              {200, [], "ok"}
+          end
+        end)
+
+      on_exit(server.close)
+
+      requester = fn _, _ ->
+        AdapterCancellationWitness.run(fn ->
+          case @transport do
+            :adapter ->
+              ReqLLMAdapter.generate_text(
+                "openai-compat:#{server.endpoint}|model",
+                [%{role: :user, content: "hi"}],
+                req_http_options: [finch: [name: pool, pool_timeout: 1_000]],
+                receive_timeout: 5_000
+              )
+
+            :finch ->
+              Finch.request(Finch.build(:get, server.endpoint), pool, receive_timeout: 5_000)
+          end
+        end)
+      end
+
+      assert {:ok, handle} = CancelableRequest.start_cancelable(requester, %{}, %{}, self())
+      assert :ok = CancelableRequest.dispatch(handle)
+      assert_receive :held_adapter_transport
+
+      assert {:ok, [%{pid: pool_pid, available_connections: 0, in_use_connections: 1}]} =
+               Finch.get_pool_status(pool, server.endpoint)
+
+      case @pool_state do
+        :ready ->
+          assert :drained = CancelableRequest.cancel_and_drain(handle, monotonic_deadline(1_000))
+
+        :suspended ->
+          :ok = :sys.suspend(pool_pid)
+
+          try do
+            assert :uncertain =
+                     CancelableRequest.cancel_and_drain(handle, monotonic_deadline(100))
+
+            assert {:ok, [%{available_connections: 0, in_use_connections: 1}]} =
+                     Finch.get_pool_status(pool, server.endpoint)
+          after
+            :sys.resume(pool_pid)
+          end
+
+          assert_receive {:adapter_request_drained, _, _}, 1_000
+      end
+
+      assert {:ok, [%{available_connections: 1, in_use_connections: 0}]} =
+               Finch.get_pool_status(pool, server.endpoint)
+
+      request = Finch.build(:get, server.endpoint)
+
+      assert {:ok, %Finch.Response{status: 200}} =
+               Finch.request(request, pool, pool_timeout: 100, receive_timeout: 1_000)
     end
-
-    assert {:ok, handle} = CancelableRequest.start_cancelable(requester, %{}, %{}, self())
-    assert :ok = CancelableRequest.dispatch(handle)
-    assert_receive :held_adapter_transport
-    assert :drained = CancelableRequest.cancel_and_drain(handle, monotonic_deadline(1_000))
-
-    request = Finch.build(:get, server.endpoint)
-
-    assert {:ok, %Finch.Response{status: 200}} =
-             Finch.request(request, pool, pool_timeout: 100, receive_timeout: 1_000)
   end
 
   test "preserves a namespaced provider output budget", %{test: test} do
