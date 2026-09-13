@@ -17,6 +17,13 @@ defmodule PtcRunner.Kernel.HostInstallation do
   validation and optional public-identity attestation likewise precede
   credential access. Callback construction, provider-application readiness,
   and the adapter all receive the exact captured model value.
+  Hosted provider admission requires request-specific cancellation evidence.
+  Built-in Google Vertex installations and connectivity probes are rejected
+  when admission is configured: ReqLLM's shared OAuth cache cannot attest an
+  individual request's checkout return. Rejection reports
+  `:provider_admission_unavailable` as a local runtime readiness failure, without
+  dispatching a provider probe. Command-owned installations without admission
+  remain available.
   Native trace acquisition
   exports its opaque frozen handle only to a selected inspection source, so
   private artifacts validate against the exact already-captured canonical
@@ -70,6 +77,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   alias PtcRunner.Kernel.RunAnalysisCapability
   alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.Kernel.TraceSnapshot
+  alias PtcRunner.LLM.ReqLLMAdapter
   alias PtcRunner.LLM.Requirements
 
   @inherited_compatibility_environment ~w(HOME LOGNAME PATH SHELL TERM USER)
@@ -225,14 +233,21 @@ defmodule PtcRunner.Kernel.HostInstallation do
                  {:connectivity_probe, name, selection, context}
                ),
              {:ok, admission} <- ProviderRuntimeServices.provider_call_admission(services),
-             true <- cancellation_witness_supported?(probe.adapter, admission) do
+             true <- cancellation_witness_supported?(probe.prepared_model, admission) do
           run_llm_connectivity_probe(
             probe,
             admission
           )
         else
-          {:error, :invalid_provider_runtime_services} = error -> error
-          _ -> {:error, :llm_connectivity_unavailable}
+          {:error, reason} = error
+          when reason in [:invalid_provider_runtime_services, :provider_admission_unavailable] ->
+            error
+
+          false ->
+            {:error, :provider_admission_unavailable}
+
+          _ ->
+            {:error, :llm_connectivity_unavailable}
         end
       end
     )
@@ -1492,7 +1507,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
              cache: installation.cache
            }),
          provider_call_admission = Map.get(context, :provider_call_admission),
-         true <- cancellation_witness_supported?(adapter, provider_call_admission),
+         true <- cancellation_witness_supported?(prepared_model, provider_call_admission),
          provider_cleanup_timeout_ms = get_in(context, [:limits, :provider_cleanup_timeout_ms]),
          {:ok, capability} <-
            LLMCapability.new(
@@ -1542,6 +1557,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
          accepts_data: installation.accepts_data
        }}
     else
+      false -> {:error, :provider_admission_unavailable}
       _reason -> {:error, :invalid_llm_provider}
     end
   rescue
@@ -1589,8 +1605,14 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp cancellation_witness_supported?(_adapter, nil), do: true
 
-  defp cancellation_witness_supported?(adapter, admission) when not is_nil(admission),
-    do: function_exported?(adapter, :cancellation_witness?, 0) and adapter.cancellation_witness?()
+  # Elixir infers the built-in module even through a variable in this branch.
+  # Dynamic application keeps optional adapters out of no-optional-deps builds.
+  defp cancellation_witness_supported?(%{adapter: adapter, target: target}, admission)
+       when not is_nil(admission) do
+    # credo:disable-for-lines:2 Credo.Check.Refactor.Apply
+    function_exported?(adapter, :cancellation_witness?, 0) and adapter.cancellation_witness?() and
+      (adapter != ReqLLMAdapter or apply(adapter, :cancellation_route_supported?, [target]))
+  end
 
   # The core no longer starts an adapter's backing application on a host's
   # behalf; a run admits it through ProviderApplicationGate. An embedding host

@@ -65,6 +65,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   alias PtcRunner.Kernel.HostRuntimePayload
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.ProviderCallAdmission
   alias PtcRunner.Kernel.ProviderCallbackBoundary
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderRegistry
@@ -1180,6 +1181,81 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert request.output_limit_bindings == [:application_limit]
     refute inspect(built.snapshot) =~ "max_tokens"
     refute inspect(built.snapshot) =~ "exact_options"
+  end
+
+  @tag :tmp_dir
+  test "hosted Vertex admission rejects unattestable token ownership without dispatch", %{
+    tmp_dir: dir
+  } do
+    LLMSupport.admit_provider_application!()
+    previous_adapter = Application.get_env(:ptc_runner, :llm_adapter)
+    previous_vertex = Application.fetch_env(:req_llm, :google_vertex)
+    Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.LLM.ReqLLMAdapter)
+
+    Application.put_env(:req_llm, :google_vertex,
+      project_id: "test-project",
+      access_token: "test-token",
+      region: "global"
+    )
+
+    on_exit(fn ->
+      restore_env(:llm_adapter, previous_adapter)
+
+      case previous_vertex do
+        {:ok, value} -> Application.put_env(:req_llm, :google_vertex, value)
+        :error -> Application.delete_env(:req_llm, :google_vertex)
+      end
+    end)
+
+    host =
+      load_host(dir, %{
+        "credentials" => %{"key" => %{"literal" => "test-key"}},
+        "install" => %{
+          "vertex" => %{
+            "source" => "llm",
+            "model" => "google_vertex:gemini-test-model",
+            "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
+            "credential" => "key",
+            "installation_revision" => "vertex-v1",
+            "params" => %{"max_tokens" => 100}
+          }
+        }
+      })
+
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, registry} = HostInstallation.runtime_registry(host, catalog)
+
+    assert {:ok, %{capabilities: [_]}} =
+             ProviderRegistry.build(registry, "vertex", %{}, context(dir, :workflow))
+
+    admission = start_supervised!({ProviderCallAdmission, max_active_calls: 2, max_waiters: 0})
+
+    assert {:ok, services} =
+             HostInstallation.runtime_services(host, provider_call_admission: admission)
+
+    assert {:ok, hosted_registry} = InstallationCatalog.runtime_registry(catalog, services)
+    hosted_context = context(dir, :workflow)
+
+    construction = ProviderRegistry.build(hosted_registry, "vertex", %{}, hosted_context)
+
+    assert {:ok, %{active: 0, status: :ready}} = ProviderCallAdmission.snapshot(admission)
+    descriptor = catalog.descriptors["vertex"]
+
+    assert {:ok, selection} =
+             SelectionRules.normalize(descriptor.selection_rules, %{}, hosted_context.limits)
+
+    probe_context = Map.put(hosted_context, :credentials, %{"key" => "test-key"})
+
+    readiness =
+      catalog.implementations["vertex"].connectivity_probe.(selection, probe_context, services)
+
+    assert {construction, readiness} ==
+             {{:error, :provider_admission_unavailable},
+              {:error, :provider_admission_unavailable}}
+
+    assert {:ok, %{active: 0, status: :ready}} = ProviderCallAdmission.snapshot(admission)
+    InstallationCatalog.close(catalog)
   end
 
   @tag :tmp_dir

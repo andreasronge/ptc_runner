@@ -258,6 +258,9 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   def diagnostic(reason, occurrence) when reason in @launcher_reasons,
     do: subject_diagnostic(:local_preflight, :launcher_unavailable, :local, occurrence)
 
+  def diagnostic(:provider_admission_unavailable, occurrence),
+    do: subject_diagnostic(:local_preflight, :provider_admission_unavailable, :local, occurrence)
+
   def diagnostic(reason, occurrence) when reason in @adapter_reasons,
     do: subject_diagnostic(:local_preflight, :adapter_unavailable, :local, occurrence)
 

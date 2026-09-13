@@ -128,7 +128,7 @@ defmodule PtcRunner.Kernel.CancelableRequest do
 
     case :atomics.compare_exchange(state, 1, 1, 4) do
       2 ->
-        send(pid, {:cancel_adapter_request, gate, owner})
+        send(pid, {:cancel_adapter_request, gate, owner, deadline})
         await_adapter_drain(pid, monitor, gate, state, deadline, false)
 
       _cancellation_claimed_or_request_finished ->

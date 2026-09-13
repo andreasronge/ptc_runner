@@ -13,8 +13,10 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
   alias PtcRunner.LLM.ReqLLMAdapter
   alias PtcRunner.LLM.ReqLLMPreparedModel
   alias PtcRunner.LLM.Requirements
+  alias PtcRunner.TestSupport.Eventually
   alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.TestSupport.MCPHTTPFixture
+  alias PtcRunner.TestSupport.TLSFixture
   alias ReqLLM.Error.API.Timeout, as: ReqLLMTimeout
 
   setup do
@@ -1087,46 +1089,213 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     refute warnings =~ "deprecated"
   end
 
-  test "cancellation witness returns a held size-one Finch checkout before acknowledging drain" do
-    pool = __MODULE__.CancellationPool
-    start_supervised!({Finch, name: pool, pools: %{default: [size: 1, count: 1]}})
-    parent = self()
-    requests = :atomics.new(1, signed: false)
+  for transport <- [:adapter, :finch], pool_state <- [:ready, :suspended] do
+    @transport transport
+    @pool_state pool_state
 
-    server =
-      MCPHTTPFixture.start(fn _request ->
-        case :atomics.add_get(requests, 1, 1) do
-          1 ->
-            send(parent, :held_adapter_transport)
-            receive do: (:never -> {500, [], "unreachable"})
+    test "cancellation witness waits for #{transport} checkout reclamation with a #{pool_state} pool" do
+      pool = __MODULE__.CancellationPool
 
-          _ ->
-            {200, [], "ok"}
-        end
-      end)
+      start_supervised!(
+        {Finch, name: pool, pools: %{default: [size: 1, count: 1, start_pool_metrics?: true]}}
+      )
 
+      parent = self()
+      requests = :atomics.new(1, signed: false)
+
+      server =
+        MCPHTTPFixture.start(fn _request ->
+          case :atomics.add_get(requests, 1, 1) do
+            1 ->
+              send(parent, :held_adapter_transport)
+              receive do: (:never -> {500, [], "unreachable"})
+
+            _ ->
+              {200, [], "ok"}
+          end
+        end)
+
+      on_exit(server.close)
+
+      requester = fn _, _ ->
+        AdapterCancellationWitness.run(fn ->
+          case @transport do
+            :adapter ->
+              ReqLLMAdapter.generate_text(
+                "openai-compat:#{server.endpoint}|model",
+                [%{role: :user, content: "hi"}],
+                req_http_options: [finch: [name: pool, pool_timeout: 1_000]],
+                receive_timeout: 5_000
+              )
+
+            :finch ->
+              Finch.request(Finch.build(:get, server.endpoint), pool, receive_timeout: 5_000)
+          end
+        end)
+      end
+
+      assert {:ok, handle} = CancelableRequest.start_cancelable(requester, %{}, %{}, self())
+      requester_monitor = Process.monitor(handle.pid)
+      assert :ok = CancelableRequest.dispatch(handle)
+      assert_receive :held_adapter_transport
+
+      assert {:ok, [%{pid: pool_pid, available_connections: 0, in_use_connections: 1}]} =
+               Finch.get_pool_status(pool, server.endpoint)
+
+      case @pool_state do
+        :ready ->
+          assert :drained = CancelableRequest.cancel_and_drain(handle, monotonic_deadline(1_000))
+
+        :suspended ->
+          :ok = :sys.suspend(pool_pid)
+
+          try do
+            assert :uncertain =
+                     CancelableRequest.cancel_and_drain(handle, monotonic_deadline(100))
+
+            assert {:ok, [%{available_connections: 0, in_use_connections: 1}]} =
+                     Finch.get_pool_status(pool, server.endpoint)
+
+            assert_receive {:DOWN, ^requester_monitor, :process, pid, :killed}, 1_000
+            assert pid == handle.pid
+          after
+            :sys.resume(pool_pid)
+          end
+
+          :sys.get_state(pool_pid)
+      end
+
+      assert {:ok, [%{available_connections: 1, in_use_connections: 0}]} =
+               Finch.get_pool_status(pool, server.endpoint)
+
+      request = Finch.build(:get, server.endpoint)
+
+      assert {:ok, %Finch.Response{status: 200}} =
+               Finch.request(request, pool, pool_timeout: 100, receive_timeout: 1_000)
+    end
+  end
+
+  test "cancellation cannot attest a checkout still queued in a suspended pool" do
+    pool = __MODULE__.QueuedCancellationPool
+
+    start_supervised!(
+      {Finch, name: pool, pools: %{default: [size: 1, count: 1, start_pool_metrics?: true]}}
+    )
+
+    server = MCPHTTPFixture.start(fn _request -> {200, [], "ok"} end)
     on_exit(server.close)
+    request = Finch.build(:get, server.endpoint)
+    assert {:ok, _} = Finch.request(request, pool)
+    assert {:ok, [%{pid: pool_pid}]} = Finch.get_pool_status(pool, server.endpoint)
+    :sys.get_state(pool_pid)
+    :sys.suspend(pool_pid)
+    parent = self()
 
     requester = fn _, _ ->
       AdapterCancellationWitness.run(fn ->
-        ReqLLMAdapter.generate_text(
-          "openai-compat:#{server.endpoint}|model",
-          [%{role: :user, content: "hi"}],
-          req_http_options: [finch: [name: pool, pool_timeout: 1_000]],
-          receive_timeout: 5_000
-        )
+        send(parent, {:queued_worker, self()})
+        Finch.request(request, pool)
       end)
     end
 
-    assert {:ok, handle} = CancelableRequest.start_cancelable(requester, %{}, %{}, self())
-    assert :ok = CancelableRequest.dispatch(handle)
-    assert_receive :held_adapter_transport
-    assert :drained = CancelableRequest.cancel_and_drain(handle, monotonic_deadline(1_000))
+    try do
+      assert {:ok, handle} = CancelableRequest.start_cancelable(requester, %{}, %{}, self())
+      assert :ok = CancelableRequest.dispatch(handle)
+      assert_receive {:queued_worker, worker}
 
-    request = Finch.build(:get, server.endpoint)
+      Eventually.assert_eventually(fn ->
+        {:messages, messages} = Process.info(pool_pid, :messages)
 
-    assert {:ok, %Finch.Response{status: 200}} =
-             Finch.request(request, pool, pool_timeout: 100, receive_timeout: 1_000)
+        Enum.any?(messages, fn
+          {:"$gen_call", {^worker, _ref}, {:checkout, _command, _deadline}} -> true
+          _ -> false
+        end)
+      end)
+
+      assert :uncertain = CancelableRequest.cancel_and_drain(handle, monotonic_deadline(100))
+
+      assert {:ok, [%{available_connections: 1, in_use_connections: 0}]} =
+               Finch.get_pool_status(pool, server.endpoint)
+    after
+      :sys.resume(pool_pid)
+    end
+  end
+
+  for tls_pool_state <- [:ready, :suspended] do
+    @tls_pool_state tls_pool_state
+    test "HTTPS cancellation reclaims a #{@tls_pool_state} pool and its TLS connection" do
+      pool = __MODULE__.TLSCancellationPool
+
+      start_supervised!(
+        {Finch,
+         name: pool,
+         pools: %{
+           default: [
+             size: 1,
+             count: 1,
+             protocols: [:http1],
+             start_pool_metrics?: true,
+             conn_opts: [transport_opts: [verify: :verify_none]]
+           ]
+         }}
+      )
+
+      {listener, port} = TLSFixture.listen()
+      on_exit(fn -> :ssl.close(listener) end)
+      parent = self()
+
+      server =
+        Task.async(fn ->
+          {:ok, socket} = TLSFixture.accept(listener, 5_000)
+          {:ok, _request} = :ssl.recv(socket, 0, 5_000)
+          send(parent, :held_tls_transport)
+          receive do: (:release -> :ssl.close(socket))
+        end)
+
+      on_exit(fn -> send(server.pid, :release) end)
+      endpoint = "https://localhost:#{port}/"
+
+      requester = fn _, _ ->
+        AdapterCancellationWitness.run(fn ->
+          Finch.request(Finch.build(:get, endpoint), pool, receive_timeout: 5_000)
+        end)
+      end
+
+      assert {:ok, handle} = CancelableRequest.start_cancelable(requester, %{}, %{}, self())
+      requester_monitor = Process.monitor(handle.pid)
+      assert :ok = CancelableRequest.dispatch(handle)
+      assert_receive :held_tls_transport, 1_000
+
+      assert {:ok, [%{pid: pool_pid, available_connections: 0, in_use_connections: 1}]} =
+               Finch.get_pool_status(pool, endpoint)
+
+      case @tls_pool_state do
+        :ready ->
+          assert :drained = CancelableRequest.cancel_and_drain(handle, monotonic_deadline(1_000))
+
+        :suspended ->
+          :sys.suspend(pool_pid)
+
+          try do
+            assert :uncertain =
+                     CancelableRequest.cancel_and_drain(handle, monotonic_deadline(100))
+
+            assert {:ok, [%{available_connections: 0, in_use_connections: 1}]} =
+                     Finch.get_pool_status(pool, endpoint)
+
+            assert_receive {:DOWN, ^requester_monitor, :process, _pid, :killed}, 1_000
+          after
+            :sys.resume(pool_pid)
+            :sys.get_state(pool_pid)
+          end
+      end
+
+      assert {:ok, [%{available_connections: 1, in_use_connections: 0}]} =
+               Finch.get_pool_status(pool, endpoint)
+
+      send(server.pid, :release)
+      Task.await(server, 1_000)
+    end
   end
 
   test "preserves a namespaced provider output budget", %{test: test} do

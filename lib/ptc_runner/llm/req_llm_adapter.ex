@@ -342,6 +342,15 @@ if Code.ensure_loaded?(ReqLLM) do
     def call(_target, _invocation),
       do: {:error, ProviderError.new(:invalid_request, "invalid LLM invocation")}
 
+    @doc false
+    @spec cancellation_route_supported?(ReqLLMPreparedModel.t()) :: boolean()
+    def cancellation_route_supported?(%ReqLLMPreparedModel{} = target) do
+      # Vertex's shared OAuth cache has no request-specific cancellation or
+      # checkout-return evidence. Hosted admission must reject before dispatch.
+      model_provider(target.model) != :google_vertex and
+        not match?("google_vertex:" <> _, target.selector)
+    end
+
     # --- Public API ---
 
     @doc """

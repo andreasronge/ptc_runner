@@ -805,6 +805,55 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
            )
   end
 
+  test "unavailable admission reports local runtime readiness without claiming provider dispatch" do
+    refusals = [
+      {:provider_admission_unavailable, false},
+      {ProviderError.new(:admission_unavailable, "unavailable",
+         dispatch_provenance: :not_dispatched
+       ), false},
+      {ProviderError.new(:admission_unavailable, "unavailable",
+         dispatch_provenance: :possibly_dispatched
+       ), true}
+    ]
+
+    for {reason, dispatched?} <- refusals do
+      %{prepared: prepared, catalog: catalog, services: services} =
+        fixture(%{
+          "unready" => [
+            destination: :workflow,
+            connectivity_mode: :probe,
+            probe: {:error, reason}
+          ]
+        })
+
+      for earlier_activity <- [false, true] do
+        assert {:error, %CommandDiagnostic{} = diagnostic} =
+                 ConnectivityProbe.run(
+                   prepared,
+                   catalog,
+                   services,
+                   Deadline.new(5_000),
+                   %{},
+                   earlier_activity
+                 )
+
+        assert diagnostic.phase == :local_preflight
+        assert diagnostic.code == :provider_admission_unavailable
+        refute diagnostic.retryable
+        assert diagnostic.provider_activity == (earlier_activity or dispatched?)
+        assert diagnostic.subject.name == "unready"
+        assert diagnostic.subject.operation == :local
+        assert CommandDiagnostic.valid?(diagnostic)
+
+        assert CommandContract.diagnostic_allowed?(
+                 {:doctor, :connect},
+                 diagnostic.phase,
+                 diagnostic.code
+               )
+      end
+    end
+  end
+
   test "a custom authentication-shaped failure remains connectivity" do
     %{prepared: prepared, execution: execution} =
       fixture(%{
