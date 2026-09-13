@@ -53,8 +53,8 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
        }),
        do: []
 
-  defp message_option({:manifest_schema_invalid, %SchemaViolation{rule: rule}}) do
-    case SchemaViolationDiagnostic.message(:application, rule) do
+  defp message_option({:manifest_schema_invalid, %SchemaViolation{} = violation}) do
+    case SchemaViolationDiagnostic.application_message(violation) do
       {:ok, message} -> [message: message]
       :error -> []
     end

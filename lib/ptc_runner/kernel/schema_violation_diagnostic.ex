@@ -2,11 +2,12 @@ defmodule PtcRunner.Kernel.SchemaViolationDiagnostic do
   @moduledoc """
   Closed messages for hand-authored document schema violations.
 
-  Messages name only the document role and a bounded rule projected by
+  Messages name the document role, a bounded rule, and schema-owned vocabulary projected by
   `PtcRunner.Kernel.SchemaViolation`. Rejected values, caller-authored keys,
   installation aliases, and filesystem names never cross this boundary.
   """
 
+  alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.SchemaViolation
 
   @roles %{
@@ -108,6 +109,49 @@ defmodule PtcRunner.Kernel.SchemaViolationDiagnostic do
     end
   end
 
+  @doc "Renders an application violation with only its schema-owned vocabulary."
+  @spec application_message(SchemaViolation.t()) :: {:ok, binary()} | :error
+  def application_message(%SchemaViolation{rule: rule, context: context}) do
+    with {:ok, base} <- message(:application, rule) do
+      {:ok, base <> vocabulary_suffix(rule, context)}
+    end
+  end
+
+  defp vocabulary_suffix(:enum, %{"enum" => values}) when is_list(values),
+    do: "; allowed: " <> Enum.map_join(values, ", ", &schema_literal/1)
+
+  defp vocabulary_suffix(:const, %{"const" => value}),
+    do: "; expected: " <> schema_literal(value)
+
+  defp vocabulary_suffix(:unknown_property, %{"closed" => true, "properties" => properties}),
+    do: "; allowed: " <> (properties |> Map.keys() |> Enum.sort() |> Enum.join(", "))
+
+  defp vocabulary_suffix(_rule, _context), do: ""
+
+  defp schema_literal(value) when is_binary(value), do: value
+  defp schema_literal(value), do: Jason.encode!(value)
+
+  defp schema_messages(node, rules) when is_map(node) do
+    context = Map.put(node, "closed", Map.get(node, "additionalProperties") == false)
+
+    direct =
+      Enum.flat_map(rules, fn rule ->
+        suffix = vocabulary_suffix(rule, context)
+
+        case message(:application, rule) do
+          {:ok, base} when suffix != "" -> [base <> suffix]
+          _other -> []
+        end
+      end)
+
+    direct ++ Enum.flat_map(Map.values(node), &schema_messages(&1, rules))
+  end
+
+  defp schema_messages(nodes, rules) when is_list(nodes),
+    do: Enum.flat_map(nodes, &schema_messages(&1, rules))
+
+  defp schema_messages(_node, _rules), do: []
+
   @doc false
   @spec valid_message?(atom(), [SchemaViolation.rule()], term()) :: boolean()
   def valid_message?(role, rules, message) when is_list(rules) and is_binary(message),
@@ -117,7 +161,14 @@ defmodule PtcRunner.Kernel.SchemaViolationDiagnostic do
 
   @doc false
   @spec messages(atom(), [SchemaViolation.rule()]) :: [binary()]
-  def messages(role, rules), do: rules |> Enum.flat_map(&message_list(role, &1)) |> Enum.sort()
+  def messages(role, rules) do
+    vocabulary =
+      if role == :application,
+        do: schema_messages(Manifest.schema(), rules),
+        else: []
+
+    (Enum.flat_map(rules, &message_list(role, &1)) ++ vocabulary) |> Enum.uniq() |> Enum.sort()
+  end
 
   @doc false
   @spec message_schema(atom(), [SchemaViolation.rule()], binary()) :: map()

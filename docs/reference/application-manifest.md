@@ -17,7 +17,10 @@ The message also names the bounded JSON Schema rule (`type`, `pattern`,
 `maximum`, `required`, or another supported rule) without copying the rejected
 value or an unknown caller-authored key. Paths through named maps use `*` for
 the caller-selected name, and an unknown property stops at its schema-owned
-parent.
+parent. Enum failures list the allowed values, constant failures name the
+expected constant, and unknown-property failures list the property names the
+container permits. These messages contain only schema-owned information; the
+envelope keeps `subject` null and `notes` empty.
 
 New manifests from `ptc init` identify the hosted schema with
 `"$schema": "https://ptc-runner.dev/schemas/ptc-application-manifest.schema.json"`.

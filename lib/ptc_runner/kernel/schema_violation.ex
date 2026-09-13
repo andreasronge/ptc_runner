@@ -4,7 +4,7 @@ defmodule PtcRunner.Kernel.SchemaViolation do
 
   Validator errors may retain the rejected document, caller-authored property
   names, schema internals, and every rejected branch of a tagged union. This
-  projection keeps only a closed rule atom and a path explained by the schema
+  projection keeps a closed rule atom, schema-owned vocabulary, and a path explained by the schema
   that rejected the document. Missing required properties may extend the
   validator's parent path only when the schema authorizes the missing name;
   unknown properties never retain their caller-authored key.
@@ -47,7 +47,7 @@ defmodule PtcRunner.Kernel.SchemaViolation do
   ]
 
   @enforce_keys [:rule, :path]
-  defstruct @enforce_keys
+  defstruct @enforce_keys ++ [context: nil]
 
   @type rule ::
           :const
@@ -72,7 +72,7 @@ defmodule PtcRunner.Kernel.SchemaViolation do
           | :unique_items
           | :unknown_property
 
-  @type t :: %__MODULE__{rule: rule(), path: [CommandPath.segment()]}
+  @type t :: %__MODULE__{rule: rule(), path: [CommandPath.segment()], context: map() | nil}
   @type unavailable_reason :: :timeout | :cancelled | :heap_exceeded | :worker_failed
 
   @doc "Projects one JSV error list through the schema that rejected it."
@@ -255,7 +255,8 @@ defmodule PtcRunner.Kernel.SchemaViolation do
       %{
         rule: rule,
         path: SchemaPath.explained_prefix(raw_path, schema),
-        raw_path: raw_path
+        raw_path: raw_path,
+        context: schema_context(error, schema, rule)
       }
     ]
   end
@@ -274,13 +275,45 @@ defmodule PtcRunner.Kernel.SchemaViolation do
   defp best_candidate([]), do: new(:schema, [])
 
   defp best_candidate(candidates) do
-    %{rule: rule, path: path} =
+    %{rule: rule, path: path, context: context} =
       Enum.min_by(candidates, fn violation ->
         {-length(violation.path), rule_priority(violation.rule), violation.path}
       end)
 
-    new(rule, path)
+    %{new(rule, path) | context: context}
   end
+
+  # Follow the validator's schema location, not the rejected document or its
+  # keys. This preserves the selected oneOf branch's vocabulary.
+  defp schema_context(%{schema_path: reverse_path}, schema, rule)
+       when is_list(reverse_path) and rule in [:enum, :const, :unknown_property] do
+    reverse_path
+    |> Enum.reverse()
+    |> Enum.drop(1)
+    |> Enum.flat_map(fn
+      {keyword, key} -> [Atom.to_string(keyword), key]
+      keyword when is_atom(keyword) -> [Atom.to_string(keyword)]
+      segment -> [segment]
+    end)
+    |> Enum.reduce(schema, fn
+      index, node when is_integer(index) and is_list(node) -> Enum.at(node, index)
+      key, node when is_map(node) -> Map.get(node, key)
+      _segment, _node -> nil
+    end)
+    |> schema_vocabulary()
+  end
+
+  defp schema_context(_error, _schema, _rule), do: nil
+
+  defp schema_vocabulary(node) when is_map(node) do
+    Map.take(node, ["enum", "const", "properties"])
+    |> Map.put("closed", Map.get(node, "additionalProperties") == false)
+    |> Map.update("properties", %{}, fn properties ->
+      Map.new(properties, fn {key, _schema} -> {key, %{}} end)
+    end)
+  end
+
+  defp schema_vocabulary(_node), do: nil
 
   defp rule(:additionalProperties, args) when is_list(args) do
     if Keyword.get(args, :boolean_schema_false, false), do: :unknown_property, else: nil
