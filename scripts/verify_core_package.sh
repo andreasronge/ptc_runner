@@ -35,7 +35,7 @@ elixir -e '
     Map.new(launcher) == %{
       <<"app">> => <<"ptc_runner_launcher">>,
       <<"name">> => <<"ptc_runner_launcher">>,
-      <<"optional">> => true,
+      <<"optional">> => false,
       <<"repository">> => <<"hexpm">>,
       <<"requirement">> => <<"~> 0.2.1">>
     }
@@ -106,9 +106,7 @@ for mix_env in dev test; do
         |> Keyword.fetch!(:deps)
         |> Enum.find(&(elem(&1, 0) == :ptc_runner_launcher))
 
-      {:ptc_runner_launcher, "~> 0.2.1", options} = dependency
-      true = options[:optional]
-      false = Keyword.has_key?(options, :path)
+      {:ptc_runner_launcher, "~> 0.2.1"} = dependency
 
       llm_http =
         PtcRunner.MixProject.project()
@@ -147,8 +145,8 @@ if [[ -d "$active_build_lib/ptc_llm_http" ]]; then
   exit 1
 fi
 
-# `ptc_viewer` is excluded for the same reason as the two companions: this
-# compile is the only place that proves the packaged source builds without the
+# `ptc_viewer` is excluded: this compile proves the packaged source builds
+# with its required launcher dependency and without the
 # optional Viewer. `verify_standalone_release.sh` leaves a compiled
 # `_build/prod/lib/ptc_viewer` behind, so linking everything would make the
 # check pass on every run after the first while still failing in a fresh
@@ -156,7 +154,7 @@ fi
 for dependency in "$active_build_lib"/*; do
   name="$(basename "$dependency")"
 
-  if [[ "$name" != "ptc_runner" && "$name" != "ptc_runner_launcher" && "$name" != "ptc_viewer" ]]; then
+  if [[ "$name" != "ptc_runner" && "$name" != "ptc_viewer" ]]; then
     ln -s "$dependency" "$package_tmp_dir/build/lib/$name"
   fi
 done

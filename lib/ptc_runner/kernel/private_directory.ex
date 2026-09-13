@@ -357,7 +357,7 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
     owner = Path.join(path, "owner")
 
     case File.lstat(owner) do
-      {:ok, %{type: :regular, size: size, mode: mode}}
+      {:ok, %{type: :regular, size: size, mode: mode} = expected}
       when size <= 10 and
              Bitwise.band(mode, 0o400) != 0 ->
         launcher = Module.concat(["PtcRunnerLauncher"])
@@ -366,7 +366,7 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
           if Code.ensure_loaded?(launcher) and
                function_exported?(launcher, :read_owner_bounded, 1),
              do: launcher.read_owner_bounded(path),
-             else: {:error, :owner_unavailable}
+             else: read_owner_without_launcher(owner, expected)
 
         case result do
           {:ok, pid} -> {:ok, pid}
@@ -378,6 +378,22 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
 
       _invalid ->
         :unknown
+    end
+  end
+
+  # Reservation recovery also serves hosts that do not load native support.
+  # Bound both the read size and command lifetime, including a replaced FIFO.
+  defp read_owner_without_launcher(owner, expected) do
+    with executable when is_binary(executable) <- System.find_executable("head"),
+         {:ok, {pid, 0}} <-
+           SystemCommand.run(executable, ["-c", "11", owner], @external_command_timeout_ms),
+         true <- byte_size(pid) <= 10,
+         {:ok, current} <- File.lstat(owner),
+         true <- current.size == byte_size(pid),
+         true <- Map.delete(current, :atime) == Map.delete(expected, :atime) do
+      {:ok, pid}
+    else
+      _unreadable -> {:error, :owner_unavailable}
     end
   end
 

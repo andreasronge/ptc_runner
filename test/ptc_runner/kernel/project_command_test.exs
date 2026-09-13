@@ -126,7 +126,15 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project])
     assert Enum.count(paths, &File.dir?/1) >= 4
     assert Enum.count(paths, &File.dir?/1) < 20
-    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project])
+    # Deletion changes the consumed prefix; the portable count cursor may
+    # wrap before reaching entries shifted behind it.
+    Enum.reduce_while(1..10, Enum.count(paths, &File.dir?/1), fn _, before ->
+      assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project])
+      remaining = Enum.count(paths, &File.dir?/1)
+      assert (before - remaining) in 0..16
+      if remaining == 0, do: {:halt, 0}, else: {:cont, remaining}
+    end)
+
     refute Enum.any?(paths, &File.dir?/1)
     path = hd(paths)
     File.mkdir!(path)

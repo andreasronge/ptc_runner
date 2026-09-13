@@ -193,8 +193,13 @@ Markerless directories are eligible only when their modification time is more
 than 60 seconds old. Ownership across hosts on a network filesystem is outside
 this policy.
 
-Each admission reads at most 256 directory entries across those five locations,
-including unrelated entries, and considers at most 16 staging candidates. Each
+The launcher companion is a required package dependency for these bounded
+filesystem operations. Each admission inspects at most 256 directory entries
+across those five locations,
+including unrelated entries, and considers at most 16 staging candidates. The
+launcher replays the consumed prefix using only `readdir`; that skip opens,
+stats, reads markers from, and deletes none of those entries and is outside
+the inspection and deletion budget. Each
 candidate reads at most five additional entries and deletes at most the two
 fixed regular files (`owner` and `artifact`) and their directory. Extra or
 nested contents are preserved; cleanup never recursively scans them. Excess
@@ -202,7 +207,9 @@ candidates remain for later admissions. The budgets reserve work for every
 location, and each parent keeps a bounded owner-only
 `.ptc-artifact-staging.cursor` progress file under its admission lock. Later
 admissions resume past preserved candidates and unrelated entries rather than
-repeatedly starting at the first entry. Symlinks, changed identities,
+repeatedly starting at the first entry. Deletions can shift the consumed prefix;
+the cursor wraps at directory exhaustion to revisit entries shifted behind it.
+Symlinks, changed identities,
 published artifacts, unrelated entries, and outside-root output parents are
 preserved. Reservation directories remain destination-driven and are never
 part of this sweep. Cleanup is best effort and does not create an artifact
