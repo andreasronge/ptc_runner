@@ -87,9 +87,14 @@ mission REPL entries and `ProviderExecution.execute/*` and `open_repl/*` match
 anything else. A serving-prepared run is consumable only by the `:serve`
 operation below.
 
-`ServingTemplate.from_directory/3` compiles provider-bearing packages when
-built for a runtime: it seals the serving request, prepares it through the
-coordinator, and retains the provider-inert parts of the `PreparedRun`
+`ServingTemplate.from_directory/3` compiles provider-bearing packages only
+with the explicit option `providers: %InstallationCatalog{}`; without it the
+existing `:provider_runtime_required` refusal stands, and a provider-free
+package ignores the option. The catalog must be sealed and its installed
+limits must equal the `installed_limits` argument, else construction refuses
+with `:invalid_installation_catalog`. With it, construction seals the serving
+request, prepares it through the coordinator with that catalog, and retains
+the sealed catalog and the provider-inert parts of the `PreparedRun`
 (bundles, declarations projection, `installation_config_digests`,
 `effective_application_digest`, `catalog_attestation`) as template metadata.
 The `ProviderActivity` marker is consumed and closed during construction; the
@@ -130,8 +135,7 @@ A supervised process the host starts per provider-bearing template:
 
 ```
 ProviderRuntime.start_link(
-  template: ServingTemplate.t(),
-  catalog: InstallationCatalog.t(),
+  template: ServingTemplate.t(),   # built with providers: catalog; retains it
   services: ProviderRuntimeServices.t(),
   pins: %{installation_config_pins: map(), provider_snapshot_pins: map()} | :discover
 )
