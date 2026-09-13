@@ -166,10 +166,13 @@ references.
 Public functions:
 
 - `status/1`: `:ready`, `{:not_ready, code}`, or `:draining`.
-- `borrow/1`: while ready, returns `{:ok, %Borrow{}}`, a monitored,
-  caller-bound token carrying the plan identity and the shared capabilities.
-  A borrow is released by `return/1` or by the caller's exit; the runtime
-  counts outstanding borrows.
+- `borrow/2`: given the absolute admission-owned execution deadline, while
+  ready it calls `ProviderSession.borrow/2` with that deadline and returns
+  `{:ok, %Borrow{}}`: a monitored, caller-bound token carrying the
+  `%ProviderSession.Borrowed{}` (which holds the deadline), the plan identity
+  and the shared capabilities. A borrow is released by `return/1` or by the
+  caller's exit; the runtime counts outstanding borrows. Nothing else carries
+  a deadline.
 - `drain/2`: refuses new borrows, waits for outstanding ones up to the given
   deadline, then closes the session once with `ProviderSession.close/1`;
   borrows still outstanding at the deadline are reported and the session is
@@ -204,7 +207,8 @@ many short runs against one session, so:
   `%RunBuilder.Retained{borrow: Borrow.t()}`. `acquire_providers/6` with it
   returns the borrowed capabilities and never opens a session.
 - Add `RunBuilder.build_borrowed_owned/5` taking the per-call `PreparedRun`,
-  registry, publication authority, opened sinks and the borrow. It runs the
+  registry, publication authority, opened sinks and the `%Borrow{}`, whose
+  borrowed session it stores in `RunConfig.provider_session`. It runs the
   same validations as `build_active_owned/*`, refuses with
   `:provider_runtime_mismatch` unless the per-call prepared run's plan
   identity equals the borrow's, and then assembles through the existing
