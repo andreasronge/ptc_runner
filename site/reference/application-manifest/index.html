@@ -112,7 +112,10 @@ The message also names the bounded JSON Schema rule (<code class="inline">type</
 <code class="inline">maximum</code>, <code class="inline">required</code>, or another supported rule) without copying the rejected
 value or an unknown caller-authored key. Paths through named maps use <code class="inline">*</code> for
 the caller-selected name, and an unknown property stops at its schema-owned
-parent.</p><p>New manifests from <code class="inline">ptc init</code> identify the hosted schema with
+parent. Enum failures list the allowed values, constant failures name the
+expected constant, and unknown-property failures list the property names the
+container permits. These messages contain only schema-owned information; the
+envelope keeps <code class="inline">subject</code> null and <code class="inline">notes</code> empty.</p><p>New manifests from <code class="inline">ptc init</code> identify the hosted schema with
 <code class="inline">&quot;$schema&quot;: &quot;https://ptc-runner.dev/schemas/ptc-application-manifest.schema.json&quot;</code>.
 Some VS Code installations require a one-time URI trust approval for
 <code class="inline">https://ptc-runner.dev</code> before loading it; that approval concerns the hosted

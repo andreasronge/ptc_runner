@@ -815,6 +815,52 @@ defmodule Mix.Tasks.PtcTest do
     end
   end
 
+  @tag :tmp_dir
+  test "validate explains schema-owned choices without exposing caller data", %{tmp_dir: dir} do
+    path = write_manifest(dir, %{})
+    base = path |> File.read!() |> Jason.decode!()
+    project = Path.join(dir, "ptc-project.json")
+
+    File.write!(
+      project,
+      Jason.encode!(%{
+        "kind" => "ptc-project",
+        "version" => 1,
+        "application" => %{"path" => "ptc.json"}
+      })
+    )
+
+    cases = [
+      {put_in(base, ["labels"], %{"tags" => %{"mode" => "private-invalid-mode"}}),
+       "/labels/tags/mode", "allowed: agent, deterministic, direct, wrapper, repl"},
+      {Map.put(base, "private-unknown-key", "private-value"), "",
+       "allowed: $schema, contracts, events, input, labels, limits, missions, providers, version, workflow"},
+      {Map.put(base, "version", "private-version"), "/version", "expected: 1"},
+      {Map.put(base, "labels", %{"tags" => %{"private-nested-key" => true}}), "/labels/tags",
+       "allowed: environment, mode, stage, suite"},
+      {put_in(base, ["input", "private-input-key"], 1), "/input", "allowed: value"}
+    ]
+
+    for {{manifest, pointer, choices}, index} <- Enum.with_index(cases) do
+      File.write!(path, Jason.encode!(manifest))
+      envelope = Path.join(dir, "failure-#{index}.json")
+      presentation = MixCommandAdapter.execute(["validate", project, "--envelope", envelope])
+      assert presentation.exit_status == 3, presentation.stderr
+      assert presentation.stderr =~ choices
+
+      assert presentation.stderr =~
+               if(pointer == "", do: "at document root", else: "at " <> pointer)
+
+      error = envelope |> File.read!() |> Jason.decode!() |> Map.fetch!("error")
+      assert error["path"] == pointer
+      assert error["subject"] == nil
+      assert error["notes"] == []
+      assert error["message"] =~ choices
+      refute Jason.encode!(error) =~ "private-"
+      refute presentation.stderr =~ "private-"
+    end
+  end
+
   defp seed_incomplete_build(build_path) do
     source_lib_path = Path.join(Mix.Project.build_path(), "lib")
     build_lib_path = Path.join(build_path, "lib")

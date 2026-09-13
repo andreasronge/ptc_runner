@@ -50,13 +50,21 @@ defmodule PtcRunner.Kernel.CommandDiagnosticRenderer do
     base =
       "#{error["phase"]}/#{error["code"]}: " <>
         subject_prefix(error["subject"]) <>
-        error["message"] <>
-        location_suffix(error) <>
+        message_with_location(error) <>
         local_context_suffix(error, opts)
 
     run_ref_suffix = if run_ref, do: " (run_ref: #{run_ref})", else: ""
     base <> run_ref_suffix <> diagnostic_suffix(error)
   end
+
+  defp message_with_location(%{"phase" => "application", "code" => "schema_violation"} = error) do
+    case String.split(error["message"], "; ", parts: 2) do
+      [base, vocabulary] -> base <> location_suffix(error) <> "; " <> vocabulary
+      [base] -> base <> location_suffix(error)
+    end
+  end
+
+  defp message_with_location(error), do: error["message"] <> location_suffix(error)
 
   defp local_context_suffix(
          %{"phase" => "application", "code" => "application_not_found"},
