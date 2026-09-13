@@ -185,16 +185,17 @@ The REPL binds one session to one run state for its lifetime. Serving needs
 many short runs against one session, so:
 
 - Creation and binding are split, because `RunConfig` is built before the
-  run state and tracker exist. `ProviderSession.borrow/1` takes the owner's
-  session and returns a `%ProviderSession.Borrowed{}` value that exposes the
+  run state and tracker exist. `ProviderSession.borrow/2` takes the owner's
+  session and an absolute deadline and returns a `%ProviderSession.Borrowed{}` value that exposes the
   capabilities and owns nothing; `RunBuilder` stores it in
   `RunConfig.provider_session`. Later, `RunConfig.bind_provider_session/4`
   with a borrowed value calls the new `ProviderSession.bind_borrowed/4` with
   the per-call run state and tracker, registering only the run-scoped
   lifecycle and counting the run under the session. A borrowed value carries
-  no run deadline: `RunConfig.new/1` takes the per-call absolute deadline from
-  the `ExecutionPolicy` the template froze (#1918) when the session is
-  borrowed, instead of deriving it from the session.
+  the absolute execution deadline the caller supplies to
+  `ProviderSession.borrow/2` (the admission-owned deadline `ServingCall`
+  already holds), and `ProviderSession.execution_deadline/1` returns it, so
+  `RunConfig.new/1` needs no new option and `ExecutionPolicy` gains no field.
   `RunConfig.close_provider_session/1` and `close_provider_session_detailed/1`
   return `:ok` for a borrowed value without touching the session, and
   `RunBuilder`'s build-failure cleanup does the same.
@@ -257,7 +258,7 @@ execution a provider-bearing preparation requires, dispatching
    `serving_template_acquisition_test.exs` to prove one acquisition across
    many concurrent calls, plus each pin failure, an unpinnable installation,
    session loss, and a drain with outstanding borrows.
-3. `ProviderSession.borrow/1` and `bind_borrowed/4`, the borrowed `RunConfig`
+3. `ProviderSession.borrow/2` and `bind_borrowed/4`, the borrowed `RunConfig`
    binding and no-op close, the `Retained` execution value through admission, the `Retained` context and `build_borrowed_owned/5`, with tests that
    a borrowed run closes no provider on success or failure and that a plan
    identity mismatch is refused before any provider is touched.
