@@ -52,6 +52,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeTest do
     Limits,
     PreparedRun,
     ProviderAcquisition,
+    ProviderCallAdmission,
     ProviderDescriptor,
     ProviderExecution,
     ProviderRegistry,
@@ -345,6 +346,96 @@ defmodule PtcRunner.Kernel.ProviderRuntimeTest do
     assert :atomics.get(counts, 2) == 1
     assert :ok = PtcRunner.Dotenv.with_loaded_file(path, fn -> :ok end)
     assert System.get_env(key) == nil
+  end
+
+  @tag :tmp_dir
+  test "cached warm tools refuse reservation and activation after a live gate fences", %{
+    tmp_dir: dir
+  } do
+    {template, _catalog, services, pins, _counts} = fixture(dir)
+
+    manifest =
+      dir |> Path.join("app.json") |> File.read!() |> Jason.decode!() |> Map.delete("providers")
+
+    free_path = Path.join(dir, "free.json")
+    File.write!(free_path, Jason.encode!(manifest))
+    {:ok, free} = ServingTemplate.from_directory(free_path, Limits.defaults())
+
+    {:ok, services} =
+      ProviderRuntimeServices.new(
+        activation: services.activation,
+        credential_resolver: fn _ -> {:ok, %{"bearer" => String.duplicate("token", 10)}} end
+      )
+
+    admission = start_supervised!({RunAdmission, max_concurrent_runs: 4})
+
+    {:ok, warm} =
+      WarmProviderRuntime.start_link(
+        tools: %{
+          "provider" => %{template: template, pins: pins},
+          "free" => %{
+            template: free,
+            pins: %{installation_config_pins: %{}, provider_snapshot_pins: %{}}
+          }
+        },
+        services: services,
+        bearer_binding: "bearer",
+        run_admission: admission,
+        max_active_provider_calls: 1,
+        max_waiting_provider_calls: 0
+      )
+
+    on_exit(fn -> if Process.alive?(warm), do: GenServer.stop(warm) end)
+    {:ok, provider} = WarmProviderRuntime.template(warm, "provider")
+    {:ok, free} = WarmProviderRuntime.template(warm, "free")
+    {:ok, provider_reservation} = ServingTemplate.reserve(provider, %{}, admission)
+    {:ok, free_reservation} = ServingTemplate.reserve(free, %{}, admission)
+    gate = :sys.get_state(warm).admission
+
+    {:ok, lease} =
+      ProviderCallAdmission.checkout(
+        gate,
+        System.monotonic_time(:millisecond) + 1_000
+      )
+
+    assert {:error, :provider_cleanup_failed} =
+             ProviderCallAdmission.complete(lease, :uncertain)
+
+    assert Process.alive?(gate)
+
+    for reservation <- [free_reservation, provider_reservation] do
+      result = ServingTemplate.activate(reservation)
+      assert ServingOutcome.code(result) == :admission_unavailable
+      assert ServingOutcome.metadata(result).dispatched == false
+    end
+
+    for cached <- [free, provider] do
+      result = ServingTemplate.call(cached, %{}, admission)
+      assert ServingOutcome.code(result) == :admission_unavailable
+      assert ServingOutcome.metadata(result).dispatched == false
+    end
+
+    assert %{ready: false, fenced: true} = WarmProviderRuntime.snapshot(warm)
+    GenServer.stop(warm)
+  end
+
+  @tag :tmp_dir
+  test "reserved provider call refuses activation when its runtime quiesces", %{tmp_dir: dir} do
+    {template, _catalog, services, pins, _counts} = fixture(dir)
+
+    {:ok, runtime} =
+      ProviderRuntime.start_link(template: template, services: services, pins: pins)
+
+    on_exit(fn -> if Process.alive?(runtime), do: GenServer.stop(runtime) end)
+    {:ok, bound} = ServingTemplate.with_provider_runtime(template, runtime)
+    admission = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+    {:ok, reservation} = ServingTemplate.reserve(bound, %{}, admission)
+    assert :ok = ProviderRuntime.quiesce(runtime)
+    result = ServingTemplate.activate(reservation)
+    assert ServingOutcome.code(result) == :admission_unavailable
+    assert ServingOutcome.metadata(result).dispatched == false
+    assert :ok = ProviderRuntime.drain(runtime, System.monotonic_time(:millisecond) + 1_000)
+    GenServer.stop(runtime)
   end
 
   @tag :tmp_dir

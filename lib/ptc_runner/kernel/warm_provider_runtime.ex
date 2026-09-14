@@ -16,7 +16,12 @@ defmodule PtcRunner.Kernel.WarmProviderRuntime do
   running transport is silently reconfigured. LLMDB is owned only when started
   transitively by ReqLLM. Provider-free tools start no optional application.
 
-  `template/2` returns a bound template. Reservations create no provider resource;
+  `template/2` returns a bound template. Every bound tool, including tools without
+  providers, checks this complete domain's serialized readiness before reservation
+  and execution activation. Cached templates cannot bypass a live fenced gate or
+  observed connection drift; a pre-dispatch refusal is `admission_unavailable`
+  with `dispatched: false`, unless its original deadline has expired.
+  Reservations create no provider resource;
   activation borrows with the original reservation deadline. Each call owns new
   input/policy identities, activity, task tracker, provider scope, sinks,
   publication authority and execution state. Acquisition is retained, with exact
@@ -304,12 +309,14 @@ defmodule PtcRunner.Kernel.WarmProviderRuntime do
   defp open_tools(plans, services, state) do
     Enum.reduce_while(plans, {:ok, state}, fn
       {name, template, _, nil}, {:ok, next} ->
-        {:cont, {:ok, put_in(next.tools[name], template)}}
+        bound = ServingTemplate.with_warm_runtime(template, self())
+        {:cont, {:ok, put_in(next.tools[name], bound)}}
 
       {name, template, pins, _}, {:ok, next} ->
         case ProviderRuntime.start_link(template: template, services: services, pins: pins) do
           {:ok, runtime} ->
             {:ok, bound} = ServingTemplate.with_provider_runtime(template, runtime)
+            bound = ServingTemplate.with_warm_runtime(bound, self())
             next = put_in(next.runtimes[name], runtime)
             {:cont, {:ok, put_in(next.tools[name], bound)}}
 

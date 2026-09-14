@@ -21,6 +21,7 @@ defmodule PtcRunner.Kernel.ServingCall do
   alias PtcRunner.Kernel.ServingTemplate
   alias PtcRunner.Kernel.StrictJSON
   alias PtcRunner.Kernel.ValueContract
+  alias PtcRunner.Kernel.WarmProviderRuntime
 
   @opaque reservation ::
             {__MODULE__, ServingTemplate.t(), map(), RunAdmission.reservation(), integer(), pid()}
@@ -189,35 +190,53 @@ defmodule PtcRunner.Kernel.ServingCall do
 
   defp runtime_ready?(template) do
     context = ServingTemplate.runtime_context(template)
-    not context.required? or ProviderRuntime.matches_template?(context.runtime, template)
+
+    warm_ready =
+      context.warm_runtime == nil or
+        WarmProviderRuntime.snapshot(context.warm_runtime).ready
+
+    warm_ready and
+      (not context.required? or ProviderRuntime.matches_template?(context.runtime, template))
   end
 
   defp activate_execution(template, lease, prepared, authority, deadline) do
     context = ServingTemplate.runtime_context(template)
 
-    if context.required? do
-      activate_provider_execution(context.runtime, lease, prepared, authority, deadline)
-    else
-      RunAdmission.activate(lease, prepared, authority)
+    cond do
+      not runtime_ready?(template) ->
+        {:error, :run_admission_unavailable}
+
+      context.required? ->
+        activate_provider_execution(context.runtime, lease, prepared, authority, deadline)
+
+      true ->
+        RunAdmission.activate(lease, prepared, authority)
     end
   end
 
   defp activate_provider_execution(runtime, lease, prepared, authority, deadline) do
-    with {:ok, borrow} <- ProviderRuntime.borrow(runtime, deadline) do
-      retained = %ProviderExecution.Retained{
-        execution: borrow.execution,
-        borrow: borrow,
-        plan_identity: borrow.plan_identity
-      }
+    case ProviderRuntime.borrow(runtime, deadline) do
+      {:ok, borrow} ->
+        retained = %ProviderExecution.Retained{
+          execution: borrow.execution,
+          borrow: borrow,
+          plan_identity: borrow.plan_identity
+        }
 
-      case RunAdmission.activate(lease, prepared, authority, retained) do
-        {:ok, _} = result ->
-          result
+        case RunAdmission.activate(lease, prepared, authority, retained) do
+          {:ok, _} = result ->
+            result
 
-        error ->
-          ProviderRuntime.return(borrow)
-          error
-      end
+          error ->
+            ProviderRuntime.return(borrow)
+            error
+        end
+
+      {:error, reason} when reason in [:provider_runtime_unavailable, :provider_runtime_lost] ->
+        {:error, :run_admission_unavailable}
+
+      error ->
+        error
     end
   end
 

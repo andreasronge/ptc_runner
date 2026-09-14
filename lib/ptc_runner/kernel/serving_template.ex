@@ -149,7 +149,8 @@ defmodule PtcRunner.Kernel.ServingTemplate do
 
   @enforce_keys [:package, :workflow, :missions, :effect, :effective_digest, :policy]
   @derive {Inspect, only: [:effect, :effective_digest, :policy]}
-  defstruct @enforce_keys ++ [retained: nil, installation_digests: %{}, provider_runtime: nil]
+  defstruct @enforce_keys ++
+              [retained: nil, installation_digests: %{}, provider_runtime: nil, warm_runtime: nil]
 
   @typedoc "An immutable compiled application with no owned execution resources."
   @opaque t :: %__MODULE__{
@@ -163,7 +164,8 @@ defmodule PtcRunner.Kernel.ServingTemplate do
             policy: map(),
             retained: map() | nil,
             installation_digests: map(),
-            provider_runtime: pid() | nil
+            provider_runtime: pid() | nil,
+            warm_runtime: pid() | nil
           }
   @typedoc "Single-use capacity reservation owned by its calling worker."
   @type reservation :: ServingCall.reservation()
@@ -396,11 +398,17 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   end
 
   @doc false
+  @spec with_warm_runtime(t(), pid()) :: t()
+  def with_warm_runtime(%__MODULE__{} = template, runtime) when is_pid(runtime),
+    do: %{template | warm_runtime: runtime}
+
+  @doc false
   @spec runtime_context(term()) :: map() | nil
   def runtime_context(%__MODULE__{} = template) do
     %{
       required?: not is_nil(template.retained),
       runtime: template.provider_runtime,
+      warm_runtime: template.warm_runtime,
       identity: {template.effective_digest, template.installation_digests}
     }
   end
