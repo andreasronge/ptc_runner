@@ -29,14 +29,19 @@ HOOKS_DIR=$(git rev-parse --git-path hooks)
 CONFIGURED_HOOKS_PATH=$(git config --get core.hooksPath)
 
 # Resolve symlinks (including individual hook files) before any mkdir or copy.
-# Git metadata is allowed inside a normal clone; checkout content is not.
+# Git metadata is allowed inside a normal clone; content in any registered
+# checkout is not, since linked worktrees share the default hooks directory.
 # Python is already a prerequisite of the tracked hooks and worktree setup.
-if ! python3 - "$HOOKS_DIR" "$(git rev-parse --show-toplevel)" \
-  "$(git rev-parse --git-common-dir)" <<'PY'
+if ! python3 - "$HOOKS_DIR" "$(git rev-parse --git-common-dir)" <<'PY'
 import os
+import subprocess
 import sys
 
-worktree, metadata = map(os.path.realpath, sys.argv[2:])
+metadata = os.path.realpath(sys.argv[2])
+listing = subprocess.run(["git", "worktree", "list", "--porcelain", "-z"],
+                         check=True, stdout=subprocess.PIPE).stdout
+worktrees = [os.path.realpath(os.fsdecode(record[len(b"worktree "):]))
+             for record in listing.split(b"\0") if record.startswith(b"worktree ")]
 
 def inside(path, directory):
     return os.path.commonpath([path, directory]) == directory
@@ -44,7 +49,7 @@ def inside(path, directory):
 for candidate in [sys.argv[1], os.path.join(sys.argv[1], "pre-commit"),
                   os.path.join(sys.argv[1], "pre-push")]:
     resolved = os.path.realpath(candidate)
-    if inside(resolved, worktree) and not inside(resolved, metadata):
+    if any(inside(resolved, worktree) for worktree in worktrees) and not inside(resolved, metadata):
         print(f"❌ Refusing to write hooks inside the worktree: {resolved}")
         sys.exit(1)
 PY

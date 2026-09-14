@@ -110,8 +110,9 @@ set a `0022` umask and, when `mix` is absent from Git's non-interactive `PATH`,
 run the tracked hooks through the same `mise` resolution used by worktree
 initialization.
 
-The installer refuses destinations inside the checkout (including `.githooks`
-and symlinked hook files), reports the configured `core.hooksPath`, and leaves
+The installer refuses destinations inside any registered checkout (including
+`.githooks` and hook symlinks into the main or another linked worktree),
+reports the configured `core.hooksPath`, and leaves
 checkout files untouched. Git metadata directories such as `.git/hooks` remain
 valid destinations. If `core.hooksPath=.githooks` is intentional, Git already
 uses the tracked hooks directly; do not run the wrapper installer. Clear the
