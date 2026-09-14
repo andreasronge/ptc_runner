@@ -23,6 +23,84 @@ defmodule PtcRunner.GitHooks.InstallHooksTest do
   end
 
   @tag :tmp_dir
+  test "supports configured metadata and external hooks directories", %{tmp_dir: dir} do
+    for hooks_path <- [".git/hooks", Path.join(dir, "outside hooks")] do
+      repo = init_repo(Path.join(dir, Path.basename(hooks_path)))
+      git(repo, ["config", "core.hooksPath", hooks_path])
+
+      {output, status} = install(repo)
+
+      assert status == 0, output
+
+      for hook <- ~w(pre-commit pre-push) do
+        assert File.exists?(Path.expand(Path.join(hooks_path, hook), repo))
+      end
+    end
+  end
+
+  @tag :tmp_dir
+  test "refuses worktree hook paths without changing tracked files", %{tmp_dir: dir} do
+    for hooks_path <- [".githooks", "scripts/new-hooks", "hook-alias", "external-hooks"] do
+      repo = init_repo(Path.join(dir, hooks_path))
+
+      for hook <- ~w(pre-commit pre-push) do
+        write_executable!(Path.join([repo, ".githooks", hook]), "#!/bin/bash\nexit 0\n")
+      end
+
+      File.ln_s!(".githooks", Path.join(repo, "hook-alias"))
+      external = Path.join([dir, hooks_path, "outside"])
+      File.mkdir_p!(external)
+      File.ln_s!(external, Path.join(repo, "external-hooks"))
+      File.ln_s!(Path.join([repo, ".githooks", "pre-push"]), Path.join(external, "pre-push"))
+
+      commit_fixture(repo)
+
+      assert git(repo, ["status", "--porcelain"]) == ""
+      git(repo, ["config", "core.hooksPath", hooks_path])
+
+      {output, status} = install(repo)
+
+      refute status == 0, output
+      assert output =~ "core.hooksPath is set to: #{hooks_path}"
+      assert output =~ "Refusing to write hooks inside the worktree"
+      assert git(repo, ["status", "--porcelain"]) == ""
+      refute File.exists?(Path.join([repo, "scripts", "new-hooks"]))
+      assert git(repo, ["config", "--get", "merge.ptc-generated.driver"]) == "true"
+    end
+  end
+
+  @tag :tmp_dir
+  test "shared hooks cannot overwrite tracked hooks in another checkout", %{tmp_dir: dir} do
+    for target_kind <- ~w(main sibling) do
+      base = Path.join(dir, target_kind)
+      repo = init_repo(base)
+      write_executable!(Path.join([repo, ".githooks", "pre-push"]), "#!/bin/bash\nexit 0\n")
+      commit_fixture(repo)
+
+      linked = Path.join(base, "linked")
+      sibling = Path.join(base, "sibling")
+      git(repo, ["worktree", "add", "-qb", "linked", linked])
+      git(repo, ["worktree", "add", "-qb", "sibling", sibling])
+      target_repo = if target_kind == "main", do: repo, else: sibling
+
+      File.ln_s!(
+        Path.join([target_repo, ".githooks", "pre-push"]),
+        Path.join([repo, ".git", "hooks", "pre-push"])
+      )
+
+      {output, status} = install(linked)
+
+      refute status == 0, output
+      assert output =~ "Refusing to write hooks inside the worktree"
+      assert output =~ target_repo
+
+      for checkout <- [repo, linked, sibling] do
+        assert git(checkout, ["status", "--porcelain"]) == ""
+      end
+    end
+  end
+
+  @tag :tmp_dir
   test "fails loudly when core.hooksPath points somewhere unwritable", %{tmp_dir: dir} do
     repo = init_repo(dir)
     # What a clone that disables hooks looks like: Git resolves the hooks
@@ -116,6 +194,22 @@ defmodule PtcRunner.GitHooks.InstallHooksTest do
       env: @git_env,
       stderr_to_stdout: true
     )
+  end
+
+  defp commit_fixture(repo) do
+    git(repo, ["add", "."])
+
+    git(repo, [
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.com",
+      "-c",
+      "core.hooksPath=/dev/null",
+      "commit",
+      "-qm",
+      "fixture"
+    ])
   end
 
   defp git(repo, args) do

@@ -110,6 +110,16 @@ set a `0022` umask and, when `mix` is absent from Git's non-interactive `PATH`,
 run the tracked hooks through the same `mise` resolution used by worktree
 initialization.
 
+The installer refuses destinations inside any registered checkout (including
+`.githooks` and hook symlinks into the main or another linked worktree),
+reports the configured `core.hooksPath`, and leaves
+checkout files untouched. Git metadata directories such as `.git/hooks` remain
+valid destinations. If `core.hooksPath=.githooks` is intentional, Git already
+uses the tracked hooks directly; do not run the wrapper installer. Clear the
+setting with `git config --unset core.hooksPath` before worktree initialization
+to install the runtime wrappers instead. Merge-driver registration still runs
+when hook installation is refused.
+
 The script also registers the merge driver for
 `priv/semantic_build_projection.json`. That projection is derived, its hashes
 cannot be merged, and only the release gate checks it — so never regenerate it
