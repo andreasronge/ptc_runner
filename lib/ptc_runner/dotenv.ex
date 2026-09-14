@@ -118,6 +118,35 @@ defmodule PtcRunner.Dotenv do
 
   def with_file_scope(_path, fun) when is_function(fun, 0), do: fun.()
 
+  @doc "Loads one exact file snapshot, runs startup capture, and restores its declared names."
+  @spec with_loaded_file(binary() | nil, (-> result)) :: result | {:error, file_error()}
+        when result: term()
+  def with_loaded_file(nil, fun) when is_function(fun, 0),
+    do: :global.trans({__MODULE__, self()}, fun)
+
+  def with_loaded_file(path, fun) when is_binary(path) and is_function(fun, 0) do
+    with {:ok, canonical} <- ConfinedFile.resolve_absolute(Path.expand(path)),
+         {:ok, bytes} <-
+           ConfinedFile.read(Path.dirname(canonical), Path.basename(canonical), @max_bytes),
+         true <- String.valid?(bytes) do
+      keys = keys_from_bytes(bytes)
+
+      :global.trans({__MODULE__, self()}, fn ->
+        previous = Map.new(keys, &{&1, System.get_env(&1)})
+
+        try do
+          :ok = parse(bytes)
+          fun.()
+        after
+          restore_environment(previous)
+        end
+      end)
+    else
+      false -> {:error, :environment_file_invalid_utf8}
+      {:error, reason} -> {:error, file_error(reason)}
+    end
+  end
+
   defp file_error(:not_found), do: :environment_file_not_found
   defp file_error(:not_regular), do: :environment_file_not_regular
   defp file_error(:unreadable), do: :environment_file_unreadable
@@ -131,18 +160,7 @@ defmodule PtcRunner.Dotenv do
          {:ok, bytes} <-
            ConfinedFile.read(Path.dirname(canonical), Path.basename(canonical), @max_bytes),
          true <- String.valid?(bytes) do
-      keys =
-        bytes
-        |> String.split("\n")
-        |> Enum.reduce([], fn line, keys ->
-          case String.trim(line) do
-            "" -> keys
-            "#" <> _comment -> keys
-            assignment -> declared_key(assignment, keys)
-          end
-        end)
-
-      {:ok, Enum.reverse(keys)}
+      {:ok, keys_from_bytes(bytes)}
     else
       _invalid -> {:error, :invalid_environment_file}
     end
@@ -150,6 +168,19 @@ defmodule PtcRunner.Dotenv do
     _exception -> {:error, :invalid_environment_file}
   catch
     _kind, _reason -> {:error, :invalid_environment_file}
+  end
+
+  defp keys_from_bytes(bytes) do
+    bytes
+    |> String.split("\n")
+    |> Enum.reduce([], fn line, keys ->
+      case String.trim(line) do
+        "" -> keys
+        "#" <> _ -> keys
+        assignment -> declared_key(assignment, keys)
+      end
+    end)
+    |> Enum.reverse()
   end
 
   defp declared_key(assignment, keys) do

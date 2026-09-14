@@ -12,6 +12,8 @@ defmodule PtcRunner.Kernel.ServingCall do
   alias PtcRunner.Kernel.ExecutionPolicy
   alias PtcRunner.Kernel.OwnerFailure
   alias PtcRunner.Kernel.PreparedRun
+  alias PtcRunner.Kernel.ProviderExecution
+  alias PtcRunner.Kernel.ProviderRuntime
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunAdmission
   alias PtcRunner.Kernel.RunRequest
@@ -48,6 +50,9 @@ defmodule PtcRunner.Kernel.ServingCall do
 
       deadline <= now ->
         outcome(template, :cancelled, false)
+
+      not runtime_ready?(template) ->
+        outcome(template, :admission_unavailable, false)
 
       true ->
         deadline = min(deadline, limit)
@@ -133,7 +138,7 @@ defmodule PtcRunner.Kernel.ServingCall do
   defp execute(template, prepared, authority, lease, deadline, hooks) do
     result =
       try do
-        case RunAdmission.activate(lease, prepared, authority) do
+        case activate_execution(template, lease, prepared, authority, deadline) do
           {:ok, execution} ->
             if hook = Map.get(hooks, :after_activation), do: hook.(execution)
             collect(template, RunAdmission.await(execution), authority, hooks)
@@ -179,6 +184,40 @@ defmodule PtcRunner.Kernel.ServingCall do
           _ ->
             replace_expired(template, result, deadline)
         end
+    end
+  end
+
+  defp runtime_ready?(template) do
+    context = ServingTemplate.runtime_context(template)
+    not context.required? or ProviderRuntime.matches_template?(context.runtime, template)
+  end
+
+  defp activate_execution(template, lease, prepared, authority, deadline) do
+    context = ServingTemplate.runtime_context(template)
+
+    if context.required? do
+      activate_provider_execution(context.runtime, lease, prepared, authority, deadline)
+    else
+      RunAdmission.activate(lease, prepared, authority)
+    end
+  end
+
+  defp activate_provider_execution(runtime, lease, prepared, authority, deadline) do
+    with {:ok, borrow} <- ProviderRuntime.borrow(runtime, deadline) do
+      retained = %ProviderExecution.Retained{
+        execution: borrow.execution,
+        borrow: borrow,
+        plan_identity: borrow.plan_identity
+      }
+
+      case RunAdmission.activate(lease, prepared, authority, retained) do
+        {:ok, _} = result ->
+          result
+
+        error ->
+          ProviderRuntime.return(borrow)
+          error
+      end
     end
   end
 

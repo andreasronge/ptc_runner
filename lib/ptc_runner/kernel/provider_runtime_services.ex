@@ -18,6 +18,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
 
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.BoundedWorker
+  alias PtcRunner.Kernel.CapturedCredentials
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.HostInstallationAuthority
   alias PtcRunner.Kernel.HostRuntimePayload
@@ -104,6 +105,25 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
   end
 
   def from_host_payload(_payload, _opts), do: {:error, :invalid_provider_runtime_services}
+
+  @doc "Replaces live credential lookup with a captured owner and one host admission domain."
+  @spec with_captured_credentials(t(), pid(), ProviderCallAdmission.t()) ::
+          {:ok, t()} | {:error, :invalid_provider_runtime_services}
+  def with_captured_credentials(%__MODULE__{} = services, credentials, admission) do
+    if valid?(services) and CapturedCredentials.ready?(credentials) do
+      build(
+        services.activation,
+        fn names -> CapturedCredentials.resolve(credentials, names) end,
+        :host_owned,
+        services.oauth_mode,
+        admission,
+        services.runtime_binding,
+        services.host_payload
+      )
+    else
+      {:error, :invalid_provider_runtime_services}
+    end
+  end
 
   @doc "Checks the complete sealed runtime-services value."
   @spec valid?(term()) :: boolean()

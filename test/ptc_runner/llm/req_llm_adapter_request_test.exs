@@ -616,6 +616,13 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
             }} = ReqLLMAdapter.call(put_test_http_options(target, plug), invocation)
   end
 
+  test "absolute requester deadline clamps inherited Finch checkout timeout" do
+    opts = [receive_timeout: 10_000, req_http_options: [finch: [pool_timeout: :infinity]]]
+    assert {:ok, bounded} = ReqLLMAdapter.request_deadline_opts(opts, 1_050, 1_000)
+    assert bounded[:receive_timeout] == 50
+    assert bounded[:req_http_options][:finch][:pool_timeout] == 50
+  end
+
   test "a deadline expiring at final ReqLLM option assembly returns timeout" do
     deadline = System.monotonic_time(:millisecond)
 

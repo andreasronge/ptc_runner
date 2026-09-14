@@ -54,7 +54,7 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   `call(template, json_object, admission_pid, deadline \\\\ :infinity)` reserves
   and activates immediately; use it when no transport commitment is needed.
   The host starts RunAdmission under its supervisor and bounds inbound workers.
-  These call helpers currently accept provider-free templates only.
+  Provider-bearing templates must first be bound with `with_provider_runtime/2`.
 
   ## Safe metadata
 
@@ -104,7 +104,7 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   document source on success and failure and discards its placeholder input.
   `prepare_call/2` seals a real RunRequest from cached bundles and complete
   metadata without recompilation or provider callbacks. ProviderRuntime owns
-  acquisition; ServingCall currently supports only provider-free templates.
+  acquisition; ServingCall borrows it with the reservation's unchanged deadline.
   `close(template)` returns `:ok` and is an idempotent no-op: it releases no owned
   resource and does not invalidate other copies. Drop all copies to reclaim memory.
 
@@ -138,6 +138,7 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderPlan
+  alias PtcRunner.Kernel.ProviderRuntime
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.RunRequest
@@ -148,7 +149,7 @@ defmodule PtcRunner.Kernel.ServingTemplate do
 
   @enforce_keys [:package, :workflow, :missions, :effect, :effective_digest, :policy]
   @derive {Inspect, only: [:effect, :effective_digest, :policy]}
-  defstruct @enforce_keys ++ [retained: nil, installation_digests: %{}]
+  defstruct @enforce_keys ++ [retained: nil, installation_digests: %{}, provider_runtime: nil]
 
   @typedoc "An immutable compiled application with no owned execution resources."
   @opaque t :: %__MODULE__{
@@ -159,7 +160,10 @@ defmodule PtcRunner.Kernel.ServingTemplate do
             missions: map(),
             effect: :read | :write,
             effective_digest: binary(),
-            policy: map()
+            policy: map(),
+            retained: map() | nil,
+            installation_digests: map(),
+            provider_runtime: pid() | nil
           }
   @typedoc "Single-use capacity reservation owned by its calling worker."
   @type reservation :: ServingCall.reservation()
@@ -232,6 +236,16 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   @doc "Returns frozen event, projection, inspection, publication and absolute-deadline rules."
   @spec policy(t()) :: map()
   def policy(%__MODULE__{policy: policy}), do: policy
+
+  @doc "Binds a provider-bearing template to its ready, exact warm runtime."
+  @spec with_provider_runtime(t(), pid()) :: {:ok, t()} | {:error, :provider_runtime_mismatch}
+  def with_provider_runtime(%__MODULE__{} = template, runtime) do
+    if ProviderRuntime.matches_template?(runtime, template),
+      do: {:ok, %{template | provider_runtime: runtime}},
+      else: {:error, :provider_runtime_mismatch}
+  end
+
+  def with_provider_runtime(_, _), do: {:error, :provider_runtime_mismatch}
 
   @doc "Reserves a validated complete JSON input without creating execution resources."
   @spec reserve(t(), term(), pid(), integer() | :infinity) ::
@@ -382,7 +396,19 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   end
 
   @doc false
-  @spec provider_plan(t()) :: {:ok, map()} | {:error, :provider_runtime_required}
+  @spec runtime_context(term()) :: map() | nil
+  def runtime_context(%__MODULE__{} = template) do
+    %{
+      required?: not is_nil(template.retained),
+      runtime: template.provider_runtime,
+      identity: {template.effective_digest, template.installation_digests}
+    }
+  end
+
+  def runtime_context(_), do: nil
+
+  @doc false
+  @spec provider_plan(term()) :: {:ok, map()} | {:error, :provider_runtime_required}
   def provider_plan(%__MODULE__{retained: nil}), do: {:error, :provider_runtime_required}
 
   def provider_plan(%__MODULE__{retained: %{reader: reader, attestation: attestation}} = template) do

@@ -129,7 +129,9 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
 
   def startup_attempted_after_admission?(_prepared, _catalog, _services, _target), do: false
 
-  defp requirements(declarations, catalog) do
+  @doc false
+  @spec requirements(list(), InstallationCatalog.t()) :: [{binary(), atom()}]
+  def requirements(declarations, catalog) do
     declarations
     |> Enum.reduce([], fn declaration, requirements ->
       implementation = Map.fetch!(catalog.implementations, declaration.name)

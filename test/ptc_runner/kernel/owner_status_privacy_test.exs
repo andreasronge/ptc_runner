@@ -63,7 +63,10 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
 
     Logger.flush()
 
-    refute_receive {:logger_probe, _event}
+    # The probe is VM-global; unrelated transports may finish after their test.
+    Enum.each(owner_pids(owners), fn pid ->
+      refute_receive {:logger_probe, %{meta: %{pid: ^pid}}}
+    end)
   end
 
   @tag :tmp_dir
