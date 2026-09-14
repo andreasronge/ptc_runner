@@ -26,6 +26,34 @@ echo "Installing git hooks..."
 # Resolve the effective hooks directory through Git so linked worktrees and a
 # configured core.hooksPath use the same location Git itself will execute.
 HOOKS_DIR=$(git rev-parse --git-path hooks)
+CONFIGURED_HOOKS_PATH=$(git config --get core.hooksPath)
+
+# Resolve symlinks (including individual hook files) before any mkdir or copy.
+# Git metadata is allowed inside a normal clone; checkout content is not.
+# Python is already a prerequisite of the tracked hooks and worktree setup.
+if ! python3 - "$HOOKS_DIR" "$(git rev-parse --show-toplevel)" \
+  "$(git rev-parse --git-common-dir)" <<'PY'
+import os
+import sys
+
+worktree, metadata = map(os.path.realpath, sys.argv[2:])
+
+def inside(path, directory):
+    return os.path.commonpath([path, directory]) == directory
+
+for candidate in [sys.argv[1], os.path.join(sys.argv[1], "pre-commit"),
+                  os.path.join(sys.argv[1], "pre-push")]:
+    resolved = os.path.realpath(candidate)
+    if inside(resolved, worktree) and not inside(resolved, metadata):
+        print(f"❌ Refusing to write hooks inside the worktree: {resolved}")
+        sys.exit(1)
+PY
+then
+  echo "   core.hooksPath is set to: ${CONFIGURED_HOOKS_PATH:-<unset>}"
+  echo "   Clear it to install wrappers: git config --unset core.hooksPath"
+  echo "   The merge driver above is registered regardless."
+  exit 1
+fi
 
 # A clone that disables hooks by pointing core.hooksPath at a non-directory
 # resolves to a path no hook can occupy. Every copy below would fail one line
@@ -34,7 +62,6 @@ HOOKS_DIR=$(git rev-parse --git-path hooks)
 if ! mkdir -p "$HOOKS_DIR" 2>/dev/null || [ ! -d "$HOOKS_DIR" ]; then
   echo "❌ Cannot install hooks: $HOOKS_DIR is not a usable directory"
 
-  CONFIGURED_HOOKS_PATH=$(git config --get core.hooksPath)
   if [ -n "$CONFIGURED_HOOKS_PATH" ]; then
     echo "   core.hooksPath is set to: $CONFIGURED_HOOKS_PATH"
     echo "   Clear it to restore hooks: git config --unset core.hooksPath"
