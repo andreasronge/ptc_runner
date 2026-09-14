@@ -12,6 +12,8 @@ defmodule PtcRunner.Kernel.ServingCall do
   alias PtcRunner.Kernel.ExecutionPolicy
   alias PtcRunner.Kernel.OwnerFailure
   alias PtcRunner.Kernel.PreparedRun
+  alias PtcRunner.Kernel.ProviderExecution
+  alias PtcRunner.Kernel.ProviderRuntime
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunAdmission
   alias PtcRunner.Kernel.RunRequest
@@ -19,6 +21,7 @@ defmodule PtcRunner.Kernel.ServingCall do
   alias PtcRunner.Kernel.ServingTemplate
   alias PtcRunner.Kernel.StrictJSON
   alias PtcRunner.Kernel.ValueContract
+  alias PtcRunner.Kernel.WarmProviderRuntime
 
   @opaque reservation ::
             {__MODULE__, ServingTemplate.t(), map(), RunAdmission.reservation(), integer(), pid()}
@@ -41,6 +44,7 @@ defmodule PtcRunner.Kernel.ServingCall do
     now = System.monotonic_time(:millisecond)
     limit = now + ServingTemplate.limits(template).run_duration_ms
     deadline = if caller_deadline == :infinity, do: limit, else: caller_deadline
+    deadline = if is_integer(deadline), do: min(deadline, limit), else: deadline
 
     cond do
       not is_integer(deadline) ->
@@ -49,9 +53,10 @@ defmodule PtcRunner.Kernel.ServingCall do
       deadline <= now ->
         outcome(template, :cancelled, false)
 
-      true ->
-        deadline = min(deadline, limit)
+      not runtime_ready?(template, deadline) ->
+        outcome(template, expired_code(deadline, :admission_unavailable), false)
 
+      true ->
         case RunAdmission.reserve(admission, deadline) do
           {:ok, lease} -> {:ok, {__MODULE__, template, input, lease, deadline, self()}}
           {:error, :run_capacity_exhausted} -> outcome(template, :busy, false)
@@ -133,7 +138,7 @@ defmodule PtcRunner.Kernel.ServingCall do
   defp execute(template, prepared, authority, lease, deadline, hooks) do
     result =
       try do
-        case RunAdmission.activate(lease, prepared, authority) do
+        case activate_execution(template, lease, prepared, authority, deadline) do
           {:ok, execution} ->
             if hook = Map.get(hooks, :after_activation), do: hook.(execution)
             collect(template, RunAdmission.await(execution), authority, hooks)
@@ -179,6 +184,59 @@ defmodule PtcRunner.Kernel.ServingCall do
           _ ->
             replace_expired(template, result, deadline)
         end
+    end
+  end
+
+  defp runtime_ready?(template, deadline) do
+    context = ServingTemplate.runtime_context(template)
+
+    warm_ready =
+      context.warm_runtime == nil or
+        WarmProviderRuntime.ready_before?(context.warm_runtime, deadline)
+
+    warm_ready and
+      (not context.required? or
+         ProviderRuntime.matches_template?(context.runtime, template, deadline))
+  end
+
+  defp activate_execution(template, lease, prepared, authority, deadline) do
+    context = ServingTemplate.runtime_context(template)
+
+    cond do
+      not runtime_ready?(template, deadline) ->
+        {:error, :run_admission_unavailable}
+
+      context.required? ->
+        activate_provider_execution(context.runtime, lease, prepared, authority, deadline)
+
+      true ->
+        RunAdmission.activate(lease, prepared, authority)
+    end
+  end
+
+  defp activate_provider_execution(runtime, lease, prepared, authority, deadline) do
+    case ProviderRuntime.borrow(runtime, deadline) do
+      {:ok, borrow} ->
+        retained = %ProviderExecution.Retained{
+          execution: borrow.execution,
+          borrow: borrow,
+          plan_identity: borrow.plan_identity
+        }
+
+        case RunAdmission.activate(lease, prepared, authority, retained) do
+          {:ok, _} = result ->
+            result
+
+          error ->
+            ProviderRuntime.return(borrow)
+            error
+        end
+
+      {:error, reason} when reason in [:provider_runtime_unavailable, :provider_runtime_lost] ->
+        {:error, :run_admission_unavailable}
+
+      error ->
+        error
     end
   end
 

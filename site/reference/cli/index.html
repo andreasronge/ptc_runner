@@ -581,7 +581,17 @@ test &quot;$actual&quot; = \
 <a href="/guides/evaluating-with-replay/">replay evaluation guide</a> shows the deterministic
 path; the <a href="/guides/quickstart/">Quickstart</a> keeps one deliberately small live check.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/reference/repl/">Kernel REPL</a> covers session and analysis modes.</li><li><a href="/reference/application-manifest/">Manifests and capabilities</a> defines the
 application boundary these commands enforce.</li><li><a href="/reference/host-installation/">Host configuration</a> defines provider installation.</li><li><a href="/guides/building-agents/">Building agents</a> explains the agent policy producing
-the runs.</li></ul>
+the runs.</li></ul><h2 id="warm-provider-pins-from-a-source-checkout">Warm-provider pins from a source checkout</h2><p><code class="inline">mix ptc.provider_pins ptc.json --host ptc-host.json --env-file credentials.env</code>
+acquires the selected LLM installations without executing the workflow and
+prints one JSON object containing <code class="inline">installation_config_pins</code> and
+<code class="inline">provider_snapshot_pins</code>. The first map uses installation names; the second
+uses <code class="inline">workflow/name</code> and <code class="inline">mission/name</code>. Both contain qualified SHA-256 values.
+The environment file is optional, is read once, and its temporary values are
+restored before the command exits. Manifests without providers print two empty maps.</p><p>Copy both exact maps into the tool configuration. Missing, extra, or mismatched
+entries refuse warm-runtime readiness. Credentials and provider-volatile content
+are absent from the output. Update pins and restart after changing installations,
+credentials, or acquisition identities; the warm runtime never automatically
+reacquires, re-pins, or replaces a fenced domain.</p>
 </article>
 <nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/mcp/">&larr; MCP reference</a><a class="pager-next" href="/reference/viewer/">Viewer reference &rarr;</a></nav>
 <footer>

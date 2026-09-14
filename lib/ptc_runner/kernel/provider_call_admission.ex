@@ -40,7 +40,7 @@ defmodule PtcRunner.Kernel.ProviderCallAdmission do
     do: %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}, restart: :temporary}
 
   @doc "Starts one admission domain with a closed active and waiter capacity."
-  @spec start_link(keyword()) :: GenServer.on_start() | {:error, :invalid_provider_call_admission}
+  @spec start_link(keyword()) :: {:ok, t()} | :ignore | {:error, term()}
   def start_link(opts) when is_list(opts) do
     with true <- Keyword.keyword?(opts),
          [:max_active_calls, :max_waiters] <- opts |> Keyword.keys() |> Enum.sort(),

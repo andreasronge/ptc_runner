@@ -1,14 +1,47 @@
 defmodule PtcRunner.Kernel.ProviderRuntimeTest do
   use ExUnit.Case, async: false
 
-  setup do
+  setup context do
     Process.flag(:trap_exit, true)
+
+    keys = [
+      {:req_llm, :load_dotenv},
+      {:llm_db, :load_dotenv},
+      {:req_llm, :stream_pool_protocols},
+      {:req_llm, :stream_pool_count},
+      {:req_llm, :stream_pool_size},
+      {:req_llm, :finch}
+    ]
+
+    previous = Map.new(keys, fn {app, key} -> {{app, key}, Application.fetch_env(app, key)} end)
+    running = Enum.map(Application.started_applications(), &elem(&1, 0))
+
+    if context[:cold_provider], do: Application.stop(:req_llm)
+
+    on_exit(fn ->
+      if context[:cold_provider], do: Application.stop(:req_llm)
+
+      for app <- [:req_llm, :llm_db], app not in running do
+        Application.stop(app)
+      end
+
+      Enum.each(previous, fn
+        {{app, key}, {:ok, value}} -> Application.put_env(app, key, value)
+        {{app, key}, :error} -> Application.delete_env(app, key)
+      end)
+
+      if context[:cold_provider] == true and :req_llm in running do
+        {:ok, _} = Application.ensure_all_started(:req_llm)
+      end
+    end)
+
     :ok
   end
 
   import ExUnit.CaptureIO
 
   alias PtcRunner.Kernel.{
+    Attestation,
     Capability,
     ExecutionInput,
     ExecutionOutcome,
@@ -20,6 +53,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeTest do
     Limits,
     PreparedRun,
     ProviderAcquisition,
+    ProviderCallAdmission,
     ProviderDescriptor,
     ProviderExecution,
     ProviderRegistry,
@@ -34,8 +68,613 @@ defmodule PtcRunner.Kernel.ProviderRuntimeTest do
     RunConfig,
     RunRequest,
     SelectionRules,
-    ServingTemplate
+    ServingOutcome,
+    ServingTemplate,
+    WarmProviderApplications,
+    WarmProviderRuntime
   }
+
+  alias PtcRunner.TestSupport.Eventually
+  alias PtcRunner.TestSupport.MCPHTTPFixture
+
+  @tag :tmp_dir
+  @tag :cold_provider
+  test "installed requester reuses an observable HTTP connection through warm serving calls", %{
+    tmp_dir: dir
+  } do
+    parent = self()
+    held = :atomics.new(1, [])
+
+    response =
+      Jason.encode!(%{
+        "id" => "warm-response",
+        "model" => "google/gemma-2-27b-it",
+        "choices" => [
+          %{
+            "index" => 0,
+            "finish_reason" => "stop",
+            "message" => %{"role" => "assistant", "content" => "ok"}
+          }
+        ],
+        "usage" => %{"prompt_tokens" => 1, "completion_tokens" => 1, "total_tokens" => 2}
+      })
+
+    server =
+      MCPHTTPFixture.start(fn request ->
+        send(parent, {:warm_connection, request.connection, request.headers["authorization"]})
+
+        if :atomics.get(held, 1) == 1 do
+          send(parent, {:held_http, self()})
+          receive do: (:release_http -> :ok)
+        end
+
+        {:keep_alive, 200, [{"content-type", "application/json"}], response}
+      end)
+
+    on_exit(server.close)
+    previous = Application.fetch_env(:req_llm, :openrouter)
+    Application.put_env(:req_llm, :openrouter, base_url: server.endpoint)
+
+    on_exit(fn ->
+      case previous do
+        {:ok, value} -> Application.put_env(:req_llm, :openrouter, value)
+        :error -> Application.delete_env(:req_llm, :openrouter)
+      end
+    end)
+
+    Enum.each(documents(), fn {name, contents} -> File.write!(Path.join(dir, name), contents) end)
+
+    File.write!(
+      Path.join(dir, "main.clj"),
+      ~s|(ns app) (defn run {:effect :write :requires ["tool:llm-request"]} [input] (return (tool/llm-request {"messages" [{"role" "user" "content" "hello"}]})))|
+    )
+
+    File.write!(
+      Path.join(dir, "schema.json"),
+      Jason.encode!(%{"type" => "object", "additionalProperties" => true})
+    )
+
+    host_path = Path.join(dir, "host.json")
+    token = String.duplicate("gateway-token", 4)
+    credential_path = Path.join(dir, "provider.key")
+    File.write!(credential_path, "provider-fixture-key")
+
+    File.write!(
+      host_path,
+      Jason.encode!(%{
+        "credentials" => %{
+          "key" => %{"file" => "provider.key"},
+          "bearer" => %{"literal" => token}
+        },
+        "install" => %{
+          "selected" => %{
+            "source" => "llm",
+            "model" => "openrouter:google/gemma-2-27b-it",
+            "credential" => "key",
+            "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
+            "installation_revision" => "warm-v1"
+          }
+        }
+      })
+    )
+
+    {:ok, host} = HostConfig.load(host_path)
+    {:ok, catalog} = HostInstallation.catalog(host)
+    {:ok, services} = HostInstallation.runtime_services(host)
+
+    {:ok, template} =
+      ServingTemplate.from_directory(Path.join(dir, "app.json"), host.limits, providers: catalog)
+
+    {:ok, applications, _} = WarmProviderApplications.start([:req_llm], 1)
+
+    output =
+      capture_io(fn ->
+        {:ok, discovery} =
+          ProviderRuntime.start_link(template: template, services: services, pins: :discover)
+
+        GenServer.stop(discovery)
+      end)
+
+    Enum.each(Enum.reverse(applications), &Application.stop/1)
+    discovered = Jason.decode!(output)
+
+    pins = %{
+      installation_config_pins: discovered["installation_config_pins"],
+      provider_snapshot_pins: discovered["provider_snapshot_pins"]
+    }
+
+    admission = start_supervised!({RunAdmission, max_concurrent_runs: 3})
+
+    {:ok, warm} =
+      WarmProviderRuntime.start_link(
+        tools: %{"tool" => %{template: template, pins: pins}},
+        services: services,
+        bearer_binding: "bearer",
+        run_admission: admission,
+        max_active_provider_calls: 1,
+        max_waiting_provider_calls: 1
+      )
+
+    {:ok, bound} = WarmProviderRuntime.template(warm, "tool")
+    File.write!(credential_path, "rotated-provider-key")
+
+    for _ <- 1..2 do
+      assert :success ==
+               ServingOutcome.code(ServingTemplate.call(bound, %{}, admission))
+    end
+
+    assert_receive {:warm_connection, connection, "Bearer provider-fixture-key"}
+    assert_receive {:warm_connection, ^connection, "Bearer provider-fixture-key"}
+
+    assert %{ready: true, provider_call_admission: %{active: 0, waiting: 0}} =
+             WarmProviderRuntime.snapshot(warm)
+
+    :atomics.put(held, 1, 1)
+    first = Task.async(fn -> ServingTemplate.call(bound, %{}, admission) end)
+    assert_receive {:held_http, first_worker}
+    second = Task.async(fn -> ServingTemplate.call(bound, %{}, admission) end)
+
+    Eventually.assert_eventually(fn ->
+      match?(
+        %{ready: true, provider_call_admission: %{active: 1, waiting: 1}},
+        WarmProviderRuntime.snapshot(warm)
+      )
+    end)
+
+    overflow = ServingTemplate.call(bound, %{}, admission)
+
+    assert {:ok,
+            %{"kind" => "provider_error", "reason" => "capacity_exhausted", "retryable?" => true}} =
+             ServingOutcome.value(overflow)
+
+    send(first_worker, :release_http)
+    assert :success == ServingOutcome.code(Task.await(first))
+    assert_receive {:held_http, second_worker}
+    send(second_worker, :release_http)
+    assert :success == ServingOutcome.code(Task.await(second))
+
+    assert :ok = Finch.set_pool_count(ReqLLM.Finch, Finch.Pool.new(server.endpoint), 2)
+    assert %{ready: false, fenced: true} = WarmProviderRuntime.snapshot(warm)
+
+    assert :admission_unavailable ==
+             ServingOutcome.code(ServingTemplate.call(bound, %{}, admission))
+
+    assert :ok =
+             WarmProviderRuntime.drain(
+               warm,
+               System.monotonic_time(:millisecond) + 1_000
+             )
+
+    GenServer.stop(warm)
+    InstallationCatalog.close(catalog)
+  end
+
+  @tag :tmp_dir
+  @tag :cold_provider
+  test "warm application startup owns one pool and refuses prestarted ReqLLM without resizing", %{
+    tmp_dir: dir
+  } do
+    {template, _catalog, _services, pins, _counts} = fixture(dir, provider_application: :req_llm)
+
+    {:ok, services} =
+      ProviderRuntimeServices.new(
+        credential_resolver: fn _ ->
+          {:ok, %{"bearer" => String.duplicate("token", 10)}}
+        end
+      )
+
+    admission = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+
+    opts = [
+      tools: %{"tool" => %{template: template, pins: pins}},
+      services: services,
+      bearer_binding: "bearer",
+      run_admission: admission,
+      max_active_provider_calls: 2,
+      max_waiting_provider_calls: 0
+    ]
+
+    {:ok, _} = Application.ensure_all_started(:llm_db)
+    {:ok, warm} = WarmProviderRuntime.start_link(opts)
+    on_exit(fn -> if Process.alive?(warm), do: GenServer.stop(warm) end)
+    pool = Process.whereis(ReqLLM.Finch.Supervisor)
+    assert WarmProviderApplications.ready?(pool, 2)
+    assert Application.get_env(:req_llm, :stream_pool_size) == 2
+    {:ok, bound} = WarmProviderRuntime.template(warm, "tool")
+
+    for _ <- 1..2 do
+      assert :success ==
+               ServingOutcome.code(ServingTemplate.call(bound, %{}, admission))
+
+      assert Process.whereis(ReqLLM.Finch.Supervisor) == pool
+    end
+
+    assert {:error, :provider_application_prestarted} =
+             WarmProviderRuntime.start_link(Keyword.put(opts, :max_active_provider_calls, 3))
+
+    assert Application.get_env(:req_llm, :stream_pool_size) == 2
+
+    assert :ok =
+             WarmProviderRuntime.drain(
+               warm,
+               System.monotonic_time(:millisecond) + 1_000
+             )
+
+    refute :req_llm in Enum.map(Application.started_applications(), &elem(&1, 0))
+    assert :llm_db in Enum.map(Application.started_applications(), &elem(&1, 0))
+    GenServer.stop(warm)
+  end
+
+  @tag :tmp_dir
+  test "startup pin refusal restores captured scope and closes acquired resources", %{
+    tmp_dir: dir
+  } do
+    {template, _catalog, _services, pins, counts} = fixture(dir)
+    key = "PTC_WARM_FAILED_START_TEST"
+    path = Path.join(dir, "failure.env")
+    File.write!(path, key <> "=" <> String.duplicate("token", 10) <> "\n")
+    previous = System.get_env(key)
+    System.delete_env(key)
+
+    on_exit(fn ->
+      if previous, do: System.put_env(key, previous), else: System.delete_env(key)
+    end)
+
+    {:ok, services} =
+      ProviderRuntimeServices.new(
+        credential_resolver: fn _ ->
+          {:ok, %{"bearer" => System.fetch_env!(key)}}
+        end
+      )
+
+    admission = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+    wrong = %{pins | provider_snapshot_pins: %{}}
+
+    assert {:error, :provider_pin_mismatch} =
+             WarmProviderRuntime.start_link(
+               tools: %{"tool" => %{template: template, pins: wrong}},
+               services: services,
+               bearer_binding: "bearer",
+               env_file: path,
+               run_admission: admission,
+               max_active_provider_calls: 1,
+               max_waiting_provider_calls: 0
+             )
+
+    assert System.get_env(key) == nil
+    assert :atomics.get(counts, 1) == 1
+    assert :atomics.get(counts, 2) == 1
+    assert :ok = PtcRunner.Dotenv.with_loaded_file(path, fn -> :ok end)
+    assert System.get_env(key) == nil
+  end
+
+  @tag :tmp_dir
+  test "retained template attestation consumes the readiness deadline before the runtime call", %{
+    tmp_dir: dir
+  } do
+    {template, _catalog, services, pins, _counts} = fixture(dir)
+
+    {:ok, runtime} =
+      ProviderRuntime.start_link(template: template, services: services, pins: pins)
+
+    :ok = :sys.suspend(runtime)
+
+    on_exit(fn ->
+      if Process.alive?(runtime) do
+        :sys.resume(runtime)
+        GenServer.stop(runtime)
+      end
+    end)
+
+    reader = template.retained.reader
+    padding = :binary.copy("x", 64 * 1024 * 1024)
+    padded_reader = fn -> Map.put(reader.(), :readiness_test_padding, padding) end
+
+    retained = %{
+      reader: padded_reader,
+      attestation:
+        Attestation.attest(
+          ServingTemplate,
+          {template.package, template.installation_digests, template.effective_digest,
+           padded_reader}
+        )
+    }
+
+    padded = %{template | retained: retained}
+    :erlang.trace_pattern({GenServer, :call, 3}, true, [:local])
+    on_exit(fn -> :erlang.trace_pattern({GenServer, :call, 3}, false, [:local]) end)
+
+    task =
+      Task.async(fn ->
+        receive do
+          :check ->
+            ProviderRuntime.matches_template?(
+              runtime,
+              padded,
+              System.monotonic_time(:millisecond) + 10
+            )
+        end
+      end)
+
+    :erlang.trace(task.pid, true, [:call, {:tracer, self()}])
+    send(task.pid, :check)
+    refute Task.await(task)
+    delivered = :erlang.trace_delivered(:all)
+    assert_receive {:trace_delivered, _, ^delivered}
+    caller = task.pid
+    refute_received {:trace, ^caller, :call, {GenServer, :call, [^runtime, _, _]}}
+    :sys.resume(runtime)
+    GenServer.stop(runtime)
+  end
+
+  @tag :tmp_dir
+  test "delayed failed warm health cannot outlive the reservation deadline", %{tmp_dir: dir} do
+    {template, _catalog, _services, pins, _counts} = fixture(dir)
+
+    {:ok, services} =
+      ProviderRuntimeServices.new(
+        credential_resolver: fn _ -> {:ok, %{"bearer" => String.duplicate("token", 10)}} end
+      )
+
+    admission = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+
+    {:ok, warm} = start_warm(template, services, pins, admission)
+
+    {:ok, bound} = WarmProviderRuntime.template(warm, "tool")
+    gate = :sys.get_state(warm).admission
+
+    {:ok, lease} =
+      ProviderCallAdmission.checkout(gate, System.monotonic_time(:millisecond) + 1_000)
+
+    assert {:error, :provider_cleanup_failed} = ProviderCallAdmission.complete(lease, :uncertain)
+    :ok = :sys.suspend(warm)
+
+    on_exit(fn ->
+      if Process.alive?(warm) do
+        :sys.resume(warm)
+        GenServer.stop(warm)
+      end
+    end)
+
+    parent = self()
+
+    controller =
+      spawn(fn ->
+        receive do
+          :resume ->
+            :sys.resume(warm)
+            send(parent, :health_resumed)
+        end
+      end)
+
+    Process.send_after(controller, :resume, 500)
+
+    result =
+      ServingTemplate.reserve(bound, %{}, admission, System.monotonic_time(:millisecond) + 30)
+
+    assert ServingOutcome.code(result) == :cancelled
+    assert ServingOutcome.metadata(result).dispatched == false
+    refute_received :health_resumed
+    assert_receive :health_resumed, 1_000
+    GenServer.stop(warm)
+  end
+
+  @tag :tmp_dir
+  test "cached warm tools refuse reservation and activation after a live gate fences", %{
+    tmp_dir: dir
+  } do
+    {template, _catalog, services, pins, _counts} = fixture(dir)
+
+    manifest =
+      dir |> Path.join("app.json") |> File.read!() |> Jason.decode!() |> Map.delete("providers")
+
+    free_path = Path.join(dir, "free.json")
+    File.write!(free_path, Jason.encode!(manifest))
+    {:ok, free} = ServingTemplate.from_directory(free_path, Limits.defaults())
+
+    {:ok, services} =
+      ProviderRuntimeServices.new(
+        activation: services.activation,
+        credential_resolver: fn _ -> {:ok, %{"bearer" => String.duplicate("token", 10)}} end
+      )
+
+    admission = start_supervised!({RunAdmission, max_concurrent_runs: 4})
+
+    {:ok, warm} =
+      WarmProviderRuntime.start_link(
+        tools: %{
+          "provider" => %{template: template, pins: pins},
+          "free" => %{
+            template: free,
+            pins: %{installation_config_pins: %{}, provider_snapshot_pins: %{}}
+          }
+        },
+        services: services,
+        bearer_binding: "bearer",
+        run_admission: admission,
+        max_active_provider_calls: 1,
+        max_waiting_provider_calls: 0
+      )
+
+    on_exit(fn -> if Process.alive?(warm), do: GenServer.stop(warm) end)
+    {:ok, provider} = WarmProviderRuntime.template(warm, "provider")
+    {:ok, free} = WarmProviderRuntime.template(warm, "free")
+    {:ok, provider_reservation} = ServingTemplate.reserve(provider, %{}, admission)
+    {:ok, free_reservation} = ServingTemplate.reserve(free, %{}, admission)
+    gate = :sys.get_state(warm).admission
+
+    {:ok, lease} =
+      ProviderCallAdmission.checkout(
+        gate,
+        System.monotonic_time(:millisecond) + 1_000
+      )
+
+    assert {:error, :provider_cleanup_failed} =
+             ProviderCallAdmission.complete(lease, :uncertain)
+
+    assert Process.alive?(gate)
+
+    for reservation <- [free_reservation, provider_reservation] do
+      result = ServingTemplate.activate(reservation)
+      assert ServingOutcome.code(result) == :admission_unavailable
+      assert ServingOutcome.metadata(result).dispatched == false
+    end
+
+    for cached <- [free, provider] do
+      result = ServingTemplate.call(cached, %{}, admission)
+      assert ServingOutcome.code(result) == :admission_unavailable
+      assert ServingOutcome.metadata(result).dispatched == false
+    end
+
+    assert %{ready: false, fenced: true} = WarmProviderRuntime.snapshot(warm)
+    GenServer.stop(warm)
+  end
+
+  @tag :tmp_dir
+  test "reserved provider call refuses activation when its runtime quiesces", %{tmp_dir: dir} do
+    {template, _catalog, services, pins, _counts} = fixture(dir)
+
+    {:ok, runtime} =
+      ProviderRuntime.start_link(template: template, services: services, pins: pins)
+
+    on_exit(fn -> if Process.alive?(runtime), do: GenServer.stop(runtime) end)
+    {:ok, bound} = ServingTemplate.with_provider_runtime(template, runtime)
+    admission = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+    {:ok, reservation} = ServingTemplate.reserve(bound, %{}, admission)
+    assert :ok = ProviderRuntime.quiesce(runtime)
+    result = ServingTemplate.activate(reservation)
+    assert ServingOutcome.code(result) == :admission_unavailable
+    assert ServingOutcome.metadata(result).dispatched == false
+    assert :ok = ProviderRuntime.drain(runtime, System.monotonic_time(:millisecond) + 1_000)
+    GenServer.stop(runtime)
+  end
+
+  @tag :tmp_dir
+  test "missing provider gate permanently fences old bound templates", %{tmp_dir: dir} do
+    {template, _catalog, _services, pins, _counts} = fixture(dir)
+
+    {:ok, services} =
+      ProviderRuntimeServices.new(
+        credential_resolver: fn _ ->
+          {:ok, %{"bearer" => String.duplicate("token", 10)}}
+        end
+      )
+
+    admission = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+
+    {:ok, warm} = start_warm(template, services, pins, admission)
+
+    on_exit(fn -> if Process.alive?(warm), do: GenServer.stop(warm) end)
+    {:ok, bound} = WarmProviderRuntime.template(warm, "tool")
+    gate = :sys.get_state(warm).admission
+    ref = Process.monitor(gate)
+    Process.exit(gate, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^gate, :killed}
+    assert %{ready: false, fenced: true} = WarmProviderRuntime.snapshot(warm)
+
+    assert :admission_unavailable ==
+             ServingOutcome.code(ServingTemplate.call(bound, %{}, admission))
+
+    GenServer.stop(warm)
+  end
+
+  @tag :tmp_dir
+  test "warm host captures once, restores env-file scope, and fences missing admission", %{
+    tmp_dir: dir
+  } do
+    {template, _catalog, _services, pins, counts} = fixture(dir)
+    token_name = "PTC_WARM_BEARER_TEST"
+    previous = System.get_env(token_name)
+    token = String.duplicate("startup-token", 4)
+    path = Path.join(dir, "startup.env")
+    File.write!(path, token_name <> "=" <> token <> "\n")
+    System.put_env(token_name, "inherited")
+
+    on_exit(fn ->
+      if previous, do: System.put_env(token_name, previous), else: System.delete_env(token_name)
+    end)
+
+    resolutions = :atomics.new(1, [])
+
+    {:ok, services} =
+      ProviderRuntimeServices.new(
+        credential_resolver: fn names ->
+          assert names == ["bearer"]
+          :atomics.add(resolutions, 1, 1)
+          {:ok, %{"bearer" => System.fetch_env!(token_name)}}
+        end
+      )
+
+    admission = start_supervised!({RunAdmission, max_concurrent_runs: 2})
+
+    {:ok, warm} =
+      WarmProviderRuntime.start_link(
+        tools: %{"tool" => %{template: template, pins: pins}},
+        services: services,
+        bearer_binding: "bearer",
+        env_file: path,
+        run_admission: admission,
+        max_active_provider_calls: 1,
+        max_waiting_provider_calls: 2
+      )
+
+    on_exit(fn -> if Process.alive?(warm), do: GenServer.stop(warm) end)
+    assert System.get_env(token_name) == "inherited"
+    assert :atomics.get(resolutions, 1) == 1
+    assert WarmProviderRuntime.authenticate(warm, token)
+    refute inspect(:sys.get_status(warm)) =~ token
+    System.put_env(token_name, String.duplicate("rotated", 8))
+    File.write!(path, token_name <> "=rotated-file\n")
+    assert WarmProviderRuntime.authenticate(warm, token)
+
+    assert %{ready: true, provider_call_admission: %{capacity: 1, status: :ready}} =
+             WarmProviderRuntime.snapshot(warm)
+
+    {:ok, bound} = WarmProviderRuntime.template(warm, "tool")
+
+    for _ <- 1..2 do
+      assert :success ==
+               ServingOutcome.code(ServingTemplate.call(bound, %{}, admission))
+    end
+
+    assert :atomics.get(counts, 1) == 1
+    assert :atomics.get(resolutions, 1) == 1
+
+    assert :ok =
+             WarmProviderRuntime.drain(
+               warm,
+               System.monotonic_time(:millisecond) + 1_000
+             )
+
+    assert :atomics.get(counts, 2) == 1
+    refute WarmProviderRuntime.snapshot(warm).ready
+    GenServer.stop(warm)
+  end
+
+  @tag :tmp_dir
+  test "serving calls borrow the warm acquisition and return every per-call resource", %{
+    tmp_dir: dir
+  } do
+    {template, _catalog, services, pins, counts} = fixture(dir)
+
+    {:ok, runtime} =
+      ProviderRuntime.start_link(template: template, services: services, pins: pins)
+
+    on_exit(fn -> if Process.alive?(runtime), do: GenServer.stop(runtime) end)
+    assert {:ok, template} = ServingTemplate.with_provider_runtime(template, runtime)
+    admission = start_supervised!({RunAdmission, max_concurrent_runs: 2})
+
+    for input <- [%{}, %{}] do
+      result = ServingTemplate.call(template, input, admission)
+      assert ServingOutcome.code(result) == :success
+    end
+
+    assert :atomics.get(counts, 1) == 1
+    assert :atomics.get(counts, 2) == 0
+    assert :ok = ProviderRuntime.drain(runtime, System.monotonic_time(:millisecond) + 1_000)
+    assert :atomics.get(counts, 2) == 1
+  end
 
   @tag :tmp_dir
   test "acquire once, concurrent borrowed executions never close shared providers", %{
@@ -717,6 +1356,17 @@ defmodule PtcRunner.Kernel.ProviderRuntimeTest do
     authority
   end
 
+  defp start_warm(template, services, pins, admission) do
+    WarmProviderRuntime.start_link(
+      tools: %{"tool" => %{template: template, pins: pins}},
+      services: services,
+      bearer_binding: "bearer",
+      run_admission: admission,
+      max_active_provider_calls: 1,
+      max_waiting_provider_calls: 0
+    )
+  end
+
   defp fixture(dir, opts \\ []) do
     counts = :atomics.new(3, signed: false)
     {:ok, rules} = SelectionRules.new(fields: %{}, cross_rules: [], named_sets: %{})
@@ -815,7 +1465,12 @@ defmodule PtcRunner.Kernel.ProviderRuntimeTest do
               if(Keyword.get(opts, :source, :llm) == :llm,
                 do: %{builder: builder, connectivity_probe: fn _, _, _ -> {:ok, %{}} end},
                 else: %{builder: builder}
-              ),
+              )
+              |> then(fn implementation ->
+                if app = Keyword.get(opts, :provider_application),
+                  do: Map.put(implementation, :provider_application, app),
+                  else: implementation
+              end),
             authority: nil
           }
         },

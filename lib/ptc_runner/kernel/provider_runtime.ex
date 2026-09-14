@@ -28,7 +28,9 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
 
   Session or registry authority loss permanently marks readiness
   `{:not_ready, :provider_runtime_lost}`. There is no reacquisition or re-pin.
-  Provider-call admission and ServingCall wiring belong to the host layer.
+  ServingCall borrows this acquisition with its reservation deadline.
+  WarmProviderRuntime owns captured credentials, provider applications and
+  aggregate provider-call admission for the complete host.
   """
   use GenServer
   use PtcRunner.Kernel.OwnerStatusRedaction
@@ -87,6 +89,10 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   def hold_borrow(%Borrow{} = borrow),
     do: safe_call(borrow.runtime, {:hold, borrow}, {:error, :provider_runtime_lost})
 
+  @doc "Refuses new borrows before the host begins draining all destinations."
+  @spec quiesce(pid()) :: :ok | {:error, :provider_runtime_lost}
+  def quiesce(runtime), do: safe_call(runtime, :quiesce, {:error, :provider_runtime_lost})
+
   @spec drain(pid(), integer()) :: :ok | {:error, term()}
   def drain(runtime, deadline) when is_integer(deadline),
     do: safe_call(runtime, {:drain, deadline}, {:error, :provider_runtime_lost}, :infinity)
@@ -111,6 +117,32 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   end
 
   def valid_borrow?(_borrow), do: false
+
+  @doc "Checks a runtime against the exact sealed template without borrowing."
+  @spec matches_template?(pid(), ServingTemplate.t()) :: boolean()
+  def matches_template?(runtime, template),
+    do: matches_template?(runtime, template, System.monotonic_time(:millisecond) + 5_000)
+
+  @doc false
+  @spec matches_template?(pid(), ServingTemplate.t(), integer()) :: boolean()
+  def matches_template?(runtime, template, deadline) do
+    deadline > System.monotonic_time(:millisecond) and
+      matches_template_before?(runtime, template, deadline)
+  end
+
+  defp matches_template_before?(runtime, template, deadline) do
+    case ServingTemplate.provider_plan(template) do
+      {:ok, retained} ->
+        {digest, digests} = ServingTemplate.runtime_context(template).identity
+        identity = {retained.catalog.attestation, digest, digests}
+
+        remaining = deadline - System.monotonic_time(:millisecond)
+        remaining > 0 and safe_call(runtime, {:matches_template, identity}, false, remaining)
+
+      _ ->
+        false
+    end
+  end
 
   @impl true
   def init(opts) do
@@ -174,6 +206,7 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
                borrows: %{},
                monitors: monitors,
                draining: nil,
+               execution: execution,
                identity: plan_identity(prepared)
              }}
 
@@ -267,6 +300,12 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   @impl true
   def handle_call(:status, _from, state), do: {:reply, state.status, state}
 
+  def handle_call({:matches_template, identity}, _from, state),
+    do: {:reply, state.status == :ready and state.identity == identity, state}
+
+  def handle_call(:quiesce, _from, state),
+    do: {:reply, :ok, %{state | status: :draining}}
+
   def handle_call({:valid_borrow, monitor}, _from, state),
     do:
       {:reply,
@@ -286,6 +325,7 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
           providers: state.opened.providers,
           registry: state.opened.registry,
           plan_identity: state.identity,
+          execution: state.execution,
           attestation: <<>>
         }
 

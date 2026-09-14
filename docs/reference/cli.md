@@ -1038,3 +1038,19 @@ path; the [Quickstart](../guides/quickstart.md) keeps one deliberately small liv
 - [Host configuration](host-installation.md) defines provider installation.
 - [Building agents](../guides/building-agents.md) explains the agent policy producing
   the runs.
+
+## Warm-provider pins from a source checkout
+
+`mix ptc.provider_pins ptc.json --host ptc-host.json --env-file credentials.env`
+acquires the selected LLM installations without executing the workflow and
+prints one JSON object containing `installation_config_pins` and
+`provider_snapshot_pins`. The first map uses installation names; the second
+uses `workflow/name` and `mission/name`. Both contain qualified SHA-256 values.
+The environment file is optional, is read once, and its temporary values are
+restored before the command exits. Manifests without providers print two empty maps.
+
+Copy both exact maps into the tool configuration. Missing, extra, or mismatched
+entries refuse warm-runtime readiness. Credentials and provider-volatile content
+are absent from the output. Update pins and restart after changing installations,
+credentials, or acquisition identities; the warm runtime never automatically
+reacquires, re-pins, or replaces a fenced domain.

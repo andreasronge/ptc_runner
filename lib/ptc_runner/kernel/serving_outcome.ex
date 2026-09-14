@@ -1,6 +1,6 @@
 defmodule PtcRunner.Kernel.ServingOutcome do
   @moduledoc """
-  Closed public result of a provider-free serving call.
+  Closed public result of a serving call.
 
   `code(outcome)` returns exactly one of `:success`, `:invalid_input`,
   `:execution_failed`, `:invalid_result`, `:cancelled`, `:busy`,

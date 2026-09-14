@@ -1816,8 +1816,29 @@ if Code.ensure_loaded?(ReqLLM) do
         {:ok,
          opts
          |> Keyword.put(:receive_timeout, max(receive_timeout, 1))
+         |> clamp_finch_checkout(remaining)
          |> Keyword.put(:total_timeout, :infinity)}
       end
+    end
+
+    defp clamp_finch_checkout(opts, remaining) do
+      http = opts |> Keyword.get(:req_http_options, []) |> Enum.to_list()
+
+      finch =
+        case Keyword.get(http, :finch) do
+          nil ->
+            [name: ReqLLM.Application.finch_name()]
+
+          name when is_atom(name) ->
+            [name: name]
+
+          options when is_list(options) ->
+            Keyword.put_new(options, :name, ReqLLM.Application.finch_name())
+        end
+
+      timeout = min(Keyword.get(finch, :pool_timeout, remaining), remaining)
+      http = Keyword.put(http, :finch, Keyword.put(finch, :pool_timeout, max(timeout, 1)))
+      Keyword.put(opts, :req_http_options, http)
     end
 
     defp request_deadline_error do

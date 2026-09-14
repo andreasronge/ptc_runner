@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.ProviderRuntime.Borrow do
     :providers,
     :registry,
     :plan_identity,
+    :execution,
     :attestation
   ]
   defstruct @enforce_keys
@@ -26,6 +27,7 @@ defmodule PtcRunner.Kernel.ProviderRuntime.Borrow do
           providers: map(),
           registry: PtcRunner.Kernel.ProviderRegistry.t(),
           plan_identity: tuple(),
+          execution: PtcRunner.Kernel.ProviderExecution.t(),
           attestation: binary()
         }
 end

@@ -7,6 +7,7 @@ defmodule PtcRunner.TestSupport.MCPHTTPFixture do
           | {:headers_only, pos_integer(), [{binary(), binary()}]}
           | {:status_only, pos_integer()}
           | {:script, (:gen_tcp.socket() -> :ok)}
+          | {:keep_alive, pos_integer(), [{binary(), binary()}], binary()}
           | :close
 
   @spec start((map() -> response())) :: map()
@@ -61,7 +62,7 @@ defmodule PtcRunner.TestSupport.MCPHTTPFixture do
     with {:ok, head, rest} <- read_head(socket, ""),
          {:ok, request, length} <- parse_head(head),
          {:ok, body} <- read_body(socket, rest, length) do
-      request = Map.put(request, :body, decode_body(body))
+      request = request |> Map.put(:body, decode_body(body)) |> Map.put(:connection, socket)
 
       case handler.(request) do
         {:status_only, status} ->
@@ -69,6 +70,10 @@ defmodule PtcRunner.TestSupport.MCPHTTPFixture do
 
         {:headers_only, status, headers} ->
           send_headers_only(socket, status, headers, owner)
+
+        {:keep_alive, status, headers, response_body} ->
+          send_response(socket, status, headers, response_body, "keep-alive")
+          handle_socket(socket, handler, owner)
 
         {status, headers, response_body} ->
           send_response(socket, status, headers, response_body)
@@ -151,14 +156,14 @@ defmodule PtcRunner.TestSupport.MCPHTTPFixture do
     end
   end
 
-  defp send_response(socket, status, headers, body) do
+  defp send_response(socket, status, headers, body, connection \\ "close") do
     reason = if status in 200..299, do: "OK", else: "Error"
 
     headers =
       headers ++
         [
           {"content-length", Integer.to_string(byte_size(body))},
-          {"connection", "close"}
+          {"connection", connection}
         ]
 
     encoded_headers = Enum.map_join(headers, "\r\n", fn {name, value} -> "#{name}: #{value}" end)
