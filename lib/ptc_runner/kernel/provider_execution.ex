@@ -1,5 +1,14 @@
 defmodule PtcRunner.Kernel.ProviderExecution do
-  @moduledoc false
+  @moduledoc """
+  The active provider pipeline for execution, connectivity, REPL and serving.
+
+  `open_serving/5` alone accepts a ServingRequest preparation. It consumes the
+  preparation, resolves credentials in the ordinary active pipeline and returns
+  owned acquired resources without building a run. Success retains both session
+  and registry for the runtime; failure closes them under ordinary cleanup rules.
+  Its deadline bounds acquisition only. Every evaluator entry refuses a serving
+  preparation with `:invalid_prepared_run`.
+  """
 
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.BoundedWorker
@@ -9,6 +18,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   alias PtcRunner.Kernel.ConnectivityResult
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.LocalPreflight
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.Authorization
   alias PtcRunner.Kernel.MCPOAuth.Context, as: OAuthContext
@@ -21,11 +31,14 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   alias PtcRunner.Kernel.ProviderApplicationGate
   alias PtcRunner.Kernel.ProviderCredentials
   alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.ProviderRuntime
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunRequest
+  alias PtcRunner.Kernel.ServingRequest
 
   @enforce_keys [:catalog, :services, :authorizations]
   defstruct @enforce_keys ++ [attestation: nil]
@@ -73,6 +86,12 @@ defmodule PtcRunner.Kernel.ProviderExecution do
       Enum.sort(Map.keys(execution)) == @field_keys and valid_fields?(execution) and
         Attestation.valid?(__MODULE__, payload(execution), attestation)
 
+  def valid?(%__MODULE__.Retained{} = retained),
+    do:
+      Enum.sort(Map.keys(retained)) == [:__struct__, :borrow, :execution, :plan_identity] and
+        valid?(retained.execution) and ProviderRuntime.valid_borrow?(retained.borrow) and
+        retained.plan_identity == retained.borrow.plan_identity
+
   def valid?(_execution), do: false
 
   @doc """
@@ -99,6 +118,11 @@ defmodule PtcRunner.Kernel.ProviderExecution do
       authorization_targets_valid?(execution, prepared)
   end
 
+  def bound_to_prepared?(%__MODULE__.Retained{} = retained, %PreparedRun{} = prepared),
+    do:
+      valid?(retained) and bound_to_prepared?(retained.execution, prepared) and
+        retained.plan_identity == ProviderRuntime.plan_identity(prepared)
+
   def bound_to_prepared?(_execution, _prepared), do: false
 
   @doc false
@@ -115,7 +139,19 @@ defmodule PtcRunner.Kernel.ProviderExecution do
           {:ok, PtcRunner.Kernel.ExecutionOutcome.t() | ConnectivityResult.t()}
           | {:error, term()}
   def execute(
-        %PreparedRun{} = prepared,
+        %PreparedRun{request: %ServingRequest{}},
+        _arg0,
+        _arg1,
+        _arg2,
+        _arg3,
+        _arg4,
+        _arg5,
+        _arg6
+      ),
+      do: {:error, :invalid_prepared_run}
+
+  def execute(
+        %PreparedRun{request: %RunRequest{}} = prepared,
         {authority, lease},
         opened_sinks,
         %__MODULE__{} = execution,
@@ -160,7 +196,17 @@ defmodule PtcRunner.Kernel.ProviderExecution do
           pid()
         ) :: {:ok, map()} | {:error, term()}
   def open_repl(
-        %PreparedRun{} = prepared,
+        %PreparedRun{request: %ServingRequest{}},
+        _arg0,
+        _arg1,
+        _arg2,
+        _arg3,
+        _arg4
+      ),
+      do: {:error, :invalid_prepared_run}
+
+  def open_repl(
+        %PreparedRun{request: %RunRequest{}} = prepared,
         authority,
         opened_sinks,
         %__MODULE__{} = execution,
@@ -185,7 +231,18 @@ defmodule PtcRunner.Kernel.ProviderExecution do
 
   @doc false
   def open_repl(
-        %PreparedRun{} = prepared,
+        %PreparedRun{request: %ServingRequest{}},
+        _arg0,
+        _arg1,
+        _arg2,
+        _arg3,
+        _arg4,
+        _arg5
+      ),
+      do: {:error, :invalid_prepared_run}
+
+  def open_repl(
+        %PreparedRun{request: %RunRequest{}} = prepared,
         authority,
         opened_sinks,
         %__MODULE__{} = execution,
@@ -217,6 +274,52 @@ defmodule PtcRunner.Kernel.ProviderExecution do
       ),
       do: {:error, :invalid_provider_execution}
 
+  @doc "Acquires a serving plan once without input, sinks or publication."
+  @spec open_serving(PreparedRun.t(), t(), tracker(), pid(), Deadline.t()) ::
+          {:ok, PtcRunner.Kernel.ProviderExecution.Opened.t()} | {:error, term()}
+  def open_serving(
+        %PreparedRun{request: %ServingRequest{}, effective_data_class: :private_inspection},
+        _execution,
+        _tracker,
+        _owner,
+        _deadline
+      ),
+      do: {:error, :private_result_unservable}
+
+  def open_serving(
+        %PreparedRun{request: %ServingRequest{}, effective_flow: :private},
+        _execution,
+        _tracker,
+        _owner,
+        _deadline
+      ),
+      do: {:error, :private_result_unservable}
+
+  def open_serving(
+        %PreparedRun{request: %ServingRequest{}} = prepared,
+        %__MODULE__{} = execution,
+        tracker,
+        owner,
+        %Deadline{} = deadline
+      )
+      when is_function(tracker, 3) and is_pid(owner) do
+    with true <- Deadline.live?(deadline),
+         :ok <- PreparedRun.consume(prepared) do
+      Process.put({__MODULE__, :serving_deadline}, deadline)
+
+      try do
+        do_execute(prepared, {nil, nil}, %{}, execution, nil, tracker, owner, {:serve, :all})
+      after
+        Process.delete({__MODULE__, :serving_deadline})
+      end
+    else
+      _invalid -> {:error, :invalid_prepared_run}
+    end
+  end
+
+  def open_serving(_prepared, _execution, _tracker, _owner, _deadline),
+    do: {:error, :invalid_prepared_run}
+
   defp do_execute(
          prepared,
          {authority, lease},
@@ -234,11 +337,11 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          true <- valid?(execution),
          true <- operation != :connect or non_interactive?(execution),
          true <- PreparedRun.consumed_valid?(prepared),
-         true <- PublicationAuthority.authorized?(authority),
+         true <- operation == :serve or PublicationAuthority.authorized?(authority),
          true <- publication_valid?(authority, lease, operation),
          true <- bound_to_prepared?(execution, prepared),
          true <- valid_target?(target, prepared, execution.catalog),
-         :ok <- local_checks(prepared, execution, target),
+         :ok <- local_checks(prepared, execution, target, operation),
          {:ok, session} <-
            open_consumed_setup(prepared, execution, lifecycle_owner, tracker, target) do
       execute_with_session(
@@ -270,6 +373,8 @@ defmodule PtcRunner.Kernel.ProviderExecution do
 
   defp notifier_matches_operation?(notifier, _operation),
     do: is_nil(notifier) or is_function(notifier, 1)
+
+  defp publication_valid?(nil, nil, :serve), do: true
 
   defp publication_valid?(_authority, nil, :repl), do: true
 
@@ -310,7 +415,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
 
     result = classify_marked_failure(result, prepared)
 
-    if operation == :repl,
+    if operation in [:repl, :serve],
       do: retain_or_close_repl(result, session, tracker),
       else: close_owned_session(result, session, tracker)
   end
@@ -660,6 +765,36 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   # own provider lifecycle.
   defp complete(
          prepared,
+         _authority,
+         _sinks,
+         registry,
+         session,
+         execution,
+         {:serve, :all},
+         credentials
+       ) do
+    with :ok <-
+           ProviderSession.claim_operation(
+             session,
+             prepared.request.package.limits,
+             prepared.attestation
+           ),
+         {:ok, providers} <-
+           prepared
+           |> ProviderAcquisition.acquire(execution.catalog, registry, session, :all, credentials)
+           |> ProviderAcquisition.close_failed(session) do
+      {:ok,
+       %PtcRunner.Kernel.ProviderExecution.Opened{
+         session: session,
+         providers: providers,
+         snapshot_sites: providers.snapshot_sites,
+         registry: registry
+       }}
+    end
+  end
+
+  defp complete(
+         prepared,
          authority,
          opened_sinks,
          registry,
@@ -752,6 +887,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     end
   end
 
+  defp provider_operation(:serve), do: :run
   defp provider_operation(:repl), do: :run
   defp provider_operation(operation), do: operation
 
@@ -1064,7 +1200,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          :ok <- tracker.(:put, :registry, registry) do
       result = callback.(registry)
 
-      if operation == :repl and match?({:ok, _built}, result) do
+      if operation in [:repl, :serve] and match?({:ok, _built}, result) do
         result
       else
         ProviderRegistry.close(registry)
@@ -1416,6 +1552,19 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   defp valid_target?(%MissionReplTarget{} = target, prepared, catalog),
     do: MissionReplTarget.valid_for?(target, prepared, catalog)
 
+  defp local_checks(prepared, execution, :all, :serve) do
+    deadline =
+      Deadline.earliest(
+        Deadline.new(prepared.request.package.limits.local_preflight_timeout_ms),
+        Process.get({__MODULE__, :serving_deadline})
+      )
+
+    LocalPreflight.run(prepared, execution.catalog, execution.services, deadline)
+  end
+
+  defp local_checks(prepared, execution, target, _operation),
+    do: local_checks(prepared, execution, target)
+
   defp local_checks(prepared, execution, :all),
     do: RunCoordinator.local_checks(prepared, execution.catalog, execution.services)
 
@@ -1448,6 +1597,16 @@ defmodule PtcRunner.Kernel.ProviderExecution do
            fn session -> tracker.(:put, :session, session) end,
            target
          )
+
+  defp begin_owned_operation(session, prepared, execution, :serve, :all) do
+    ProviderActiveSession.begin_serving_operation(
+      session,
+      prepared,
+      execution.catalog,
+      execution.services,
+      Process.get({__MODULE__, :serving_deadline})
+    )
+  end
 
   defp begin_owned_operation(session, prepared, execution, operation, :all),
     do:

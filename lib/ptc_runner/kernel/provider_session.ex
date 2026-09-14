@@ -1,6 +1,13 @@
 defmodule PtcRunner.Kernel.ProviderSession do
   @moduledoc """
-  One owner-backed cleanup stack for a command's active provider work.
+  One owner-backed cleanup stack for active provider work.
+
+  Serving runtimes may share an acquired session through `borrow/2`, which
+  carries each admission-owned absolute execution deadline. `bind_borrowed/4`
+  registers only that run's task tracker, never replaces the session owner and
+  never changes the acquisition clock. Run termination drains its own tracker;
+  session drain also drains all registered trackers before closing providers.
+  Closing a Borrowed value is always a no-op, including build failure cleanup.
 
   A session initially monitors its build creator and owns every acquisition
   scope opened through `PtcRunner.Kernel.ResourceRegistrar`. An active session
@@ -100,6 +107,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.ProviderCleanup
   alias PtcRunner.Kernel.ProviderScopeOwner
+  alias PtcRunner.Kernel.ProviderSession.Borrowed
   alias PtcRunner.Kernel.ProviderTaskTracker
   alias PtcRunner.Kernel.ResourceRegistrar
 
@@ -237,6 +245,43 @@ defmodule PtcRunner.Kernel.ProviderSession do
       {:error, :provider_session_unavailable}
   end
 
+  @doc "Creates a non-owning handle with the caller's absolute execution deadline."
+  @spec borrow(t(), integer()) :: {:ok, Borrowed.t()} | {:error, :provider_session_unavailable}
+  def borrow(%__MODULE__{} = session, deadline) when is_integer(deadline) do
+    if alive?(session) and session.lifecycle_owner == self() do
+      {:ok,
+       %Borrowed{
+         session: session,
+         deadline: deadline,
+         attestation: Attestation.attest(Borrowed, {session, deadline})
+       }}
+    else
+      {:error, :provider_session_unavailable}
+    end
+  end
+
+  def borrow(_session, _deadline), do: {:error, :provider_session_unavailable}
+
+  @doc false
+  @spec bind_borrowed(Borrowed.t(), pid(), pid(), ProviderTaskTracker.t()) ::
+          :ok | {:error, :provider_session_unavailable}
+  def bind_borrowed(%Borrowed{} = borrowed, owner, run_state, %ProviderTaskTracker{} = tracker)
+      when is_pid(owner) and is_pid(run_state) do
+    if valid?(borrowed) and owner == self() and
+         borrowed.deadline > System.monotonic_time(:millisecond) do
+      call(
+        borrowed.session.pid,
+        {borrowed.session.token, {:bind_borrowed, owner, run_state, tracker}},
+        max(borrowed.deadline - System.monotonic_time(:millisecond), 0) + @claim_reply_grace_ms
+      )
+    else
+      {:error, :provider_session_unavailable}
+    end
+  end
+
+  def bind_borrowed(_borrowed, _owner, _run_state, _tracker),
+    do: {:error, :provider_session_unavailable}
+
   @spec valid?(term()) :: boolean()
   def valid?(%__MODULE__{} = session),
     do:
@@ -248,17 +293,30 @@ defmodule PtcRunner.Kernel.ProviderSession do
         (is_nil(session.run_deadline) or Deadline.valid?(session.run_deadline)) and
         Attestation.valid?(__MODULE__, payload(session), session.attestation)
 
+  def valid?(%Borrowed{} = borrowed),
+    do:
+      Enum.sort(Map.keys(borrowed)) == [:__struct__, :attestation, :deadline, :session] and
+        is_integer(borrowed.deadline) and valid?(borrowed.session) and
+        Attestation.valid?(Borrowed, {borrowed.session, borrowed.deadline}, borrowed.attestation)
+
   def valid?(_session), do: false
 
   @doc false
   @spec alive?(term()) :: boolean()
   def alive?(%__MODULE__{} = session), do: valid?(session) and Process.alive?(session.pid)
+
+  def alive?(%Borrowed{} = borrowed), do: valid?(borrowed) and alive?(borrowed.session)
+
   def alive?(_session), do: false
 
   @doc false
   @spec lifecycle_owner(term()) :: pid() | nil
   def lifecycle_owner(%__MODULE__{} = session) do
     if valid?(session), do: session.lifecycle_owner
+  end
+
+  def lifecycle_owner(%Borrowed{} = borrowed) do
+    if valid?(borrowed), do: lifecycle_owner(borrowed.session)
   end
 
   def lifecycle_owner(_session), do: nil
@@ -272,6 +330,9 @@ defmodule PtcRunner.Kernel.ProviderSession do
       session.connectivity_duration_ms == limits.doctor_connectivity_timeout_ms and
       compatible_run_duration?(session, limits)
   end
+
+  def compatible_limits?(%Borrowed{} = borrowed, limits),
+    do: valid?(borrowed) and compatible_limits?(borrowed.session, limits)
 
   def compatible_limits?(_session, _limits), do: false
 
@@ -333,6 +394,27 @@ defmodule PtcRunner.Kernel.ProviderSession do
   def begin_operation(_session, _operation, _claim_timeout_ms),
     do: {:error, :provider_session_unavailable}
 
+  @doc false
+  @spec begin_serving_operation(t(), Deadline.t()) ::
+          {:ok, t()} | {:error, :provider_session_unavailable}
+  def begin_serving_operation(%__MODULE__{} = session, deadline) do
+    if valid?(session) and session.creator == self() and is_nil(session.run_deadline) and
+         Deadline.valid?(deadline) and Deadline.live?(deadline) do
+      run_deadline = Deadline.earliest(Deadline.new(session.run_duration_ms), deadline)
+
+      case call(
+             session.pid,
+             {session.token, {:begin_run, run_deadline, deadline}},
+             Deadline.remaining(deadline) + @claim_reply_grace_ms
+           ) do
+        :ok -> {:ok, seal(%{session | run_deadline: run_deadline, begun_operation: :run})}
+        _failure -> {:error, :provider_session_unavailable}
+      end
+    else
+      {:error, :provider_session_unavailable}
+    end
+  end
+
   defp sealed_duration(session, :connect), do: session.connectivity_duration_ms
   defp sealed_duration(session, _operation), do: session.run_duration_ms
 
@@ -380,6 +462,10 @@ defmodule PtcRunner.Kernel.ProviderSession do
     end
   end
 
+  def execution_deadline(%Borrowed{} = borrowed) do
+    if valid?(borrowed), do: {:ok, Deadline.from_expires_at(borrowed.deadline)}, else: :error
+  end
+
   def execution_deadline(_session), do: :error
 
   @doc false
@@ -388,12 +474,20 @@ defmodule PtcRunner.Kernel.ProviderSession do
     if valid?(session), do: session.pid
   end
 
+  def worker_cancel_target(%Borrowed{} = borrowed) do
+    if valid?(borrowed), do: worker_cancel_target(borrowed.session)
+  end
+
   def worker_cancel_target(_session), do: nil
 
   @doc false
   @spec cleanup_timeout(term()) :: pos_integer() | nil
   def cleanup_timeout(%__MODULE__{} = session) do
     if valid?(session), do: session.cleanup_timeout_ms
+  end
+
+  def cleanup_timeout(%Borrowed{} = borrowed) do
+    if valid?(borrowed), do: cleanup_timeout(borrowed.session)
   end
 
   def cleanup_timeout(_session), do: nil
@@ -545,6 +639,8 @@ defmodule PtcRunner.Kernel.ProviderSession do
   def open_registrar(_session), do: {:error, :provider_session_unavailable}
 
   @spec close(t()) :: :ok | {:error, :provider_cleanup_failed}
+  def close(%Borrowed{}), do: :ok
+
   def close(session) do
     case close_detailed(session) do
       {:error, {:provider_cleanup_failed, _details}} -> {:error, :provider_cleanup_failed}
@@ -555,6 +651,8 @@ defmodule PtcRunner.Kernel.ProviderSession do
   @doc false
   @spec close_detailed(t()) ::
           :ok | {:error, :provider_cleanup_failed | {:provider_cleanup_failed, map()}}
+  def close_detailed(%Borrowed{}), do: :ok
+
   def close_detailed(%__MODULE__{} = session) do
     if valid?(session) do
       close_within_anchored_budget(session)
@@ -880,11 +978,26 @@ defmodule PtcRunner.Kernel.ProviderSession do
        max_heap_words: limits.provider_heap_words,
        lifecycle_bound?: false,
        provider_tasks: nil,
+       borrowed_tasks: %{},
        pending_registrations: %{},
        scopes: %{},
        scope_order: [],
        committed: []
      }}
+  end
+
+  def handle_call(
+        {token, {:bind_borrowed, owner, run_state, tracker}},
+        {owner, _tag},
+        %{token: token} = state
+      ) do
+    with true <- Process.alive?(owner) and Process.alive?(run_state),
+         :ok <- ProviderTaskTracker.watch(tracker, self()) do
+      monitor = Process.monitor(tracker.pid)
+      {:reply, :ok, put_in(state.borrowed_tasks[monitor], tracker)}
+    else
+      _unavailable -> {:reply, {:error, :provider_session_unavailable}, state}
+    end
   end
 
   def handle_call(
@@ -1242,6 +1355,9 @@ defmodule PtcRunner.Kernel.ProviderSession do
     end
   end
 
+  def handle_info({:DOWN, monitor, :process, _pid, _reason}, state),
+    do: {:noreply, %{state | borrowed_tasks: Map.delete(state.borrowed_tasks, monitor)}}
+
   def handle_info(_message, state), do: {:noreply, state}
 
   @impl GenServer
@@ -1281,7 +1397,18 @@ defmodule PtcRunner.Kernel.ProviderSession do
         Deadline.expires_at(state.cleanup_deadline)
       )
 
-    %{state | task_cleanup: normalize_cleanup(result)}
+    borrowed_result =
+      Enum.reduce(state.borrowed_tasks, result, fn {_monitor, tracker}, cleanup ->
+        merge_cleanup(
+          cleanup,
+          ProviderTaskTracker.drain_provider_tasks(
+            tracker,
+            Deadline.expires_at(state.cleanup_deadline)
+          )
+        )
+      end)
+
+    %{state | task_cleanup: normalize_cleanup(borrowed_result), borrowed_tasks: %{}}
   end
 
   defp open_scope(scope, deadline, state) do

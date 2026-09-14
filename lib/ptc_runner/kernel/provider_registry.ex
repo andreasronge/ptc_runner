@@ -248,6 +248,13 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   def close(_registry), do: :ok
 
   @doc false
+  @spec monitor_owner(t()) :: reference() | nil
+  def monitor_owner(%__MODULE__{authority_owner: %HostInstallationAuthority{pid: pid}}),
+    do: Process.monitor(pid)
+
+  def monitor_owner(%__MODULE__{authority_owner: nil}), do: nil
+
+  @doc false
   @spec oauth_authority_epoch(t(), binary(), Deadline.t()) ::
           {:ok, term()} | {:error, :authorization_context_required}
   def oauth_authority_epoch(

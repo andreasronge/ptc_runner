@@ -46,6 +46,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.Kernel.SelectionRulesDiagnostic
+  alias PtcRunner.Kernel.ServingRequest
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.LiveStatus.Target
 
@@ -64,10 +65,11 @@ defmodule PtcRunner.Kernel.RunCoordinator do
     :bundle_compile_failed
   ]
 
-  @spec prepare(RunRequest.t(), InstallationCatalog.t()) ::
-          {:ok, PreparedRun.t()} | {:error, CommandDiagnostic.t()}
-  def prepare(%RunRequest{} = request, %InstallationCatalog{} = catalog) do
-    with true <- RunRequest.valid?(request),
+  @spec prepare(RunRequest.t() | ServingRequest.t(), InstallationCatalog.t()) ::
+          {:ok, PreparedRun.t()} | {:error, CommandDiagnostic.t() | :private_result_unservable}
+  def prepare(request, %InstallationCatalog{} = catalog)
+      when is_struct(request, RunRequest) or is_struct(request, ServingRequest) do
+    with true <- ServingRequest.request_valid?(request),
          true <- InstallationCatalog.valid?(catalog),
          true <- catalog.installed_limits == request.package.installed_limits,
          compile_deadline = System.monotonic_time(:millisecond) + @mission_compile_timeout_ms,
@@ -100,6 +102,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
            ),
          {:ok, derived} <-
            derive_provider_plan(request, workflow_bundle, mission_bundles, declarations),
+         :ok <- serving_policy(request, derived),
          declarations <- add_post_selection_context(declarations, derived.post_selection_context),
          prepared_declarations <- prepared_declarations(declarations),
          {:ok, prepared} <-
@@ -125,6 +128,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
       {:ok, prepared}
     else
       false -> {:error, diagnostic(:internal, :internal_error)}
+      {:error, :private_result_unservable} = error -> error
       {:error, %CommandDiagnostic{} = diagnostic} -> {:error, diagnostic}
       {:error, _reason} -> {:error, diagnostic(:internal, :internal_error)}
     end
@@ -136,6 +140,13 @@ defmodule PtcRunner.Kernel.RunCoordinator do
 
   def prepare(_request, _registry),
     do: {:error, diagnostic(:internal, :internal_error)}
+
+  defp serving_policy(%ServingRequest{}, derived)
+       when derived.effective_data_class == :private_inspection or
+              derived.effective_flow == :private,
+       do: {:error, :private_result_unservable}
+
+  defp serving_policy(_request, _derived), do: :ok
 
   defp validate_declared_read_effects(workflow_bundle, mission_bundles, missions, declarations) do
     case DeclaredReadEffectValidator.validate(
@@ -727,7 +738,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
         workflow: workflow_bundle.hash,
         missions: mission_bundle_hashes(mission_bundles)
       },
-      input_authority_class: request.input.authority,
+      input_authority_class: ServingRequest.input_authority(request),
       execution_scope_id: make_ref(),
       destination: occurrence.destination,
       index: occurrence.index,

@@ -12,7 +12,10 @@ defmodule PtcRunner.Kernel.ProviderTaskTracker do
   # terminated at its cleanup deadline, where `terminate/2` never runs. A
   # session drains through this owner before its own provider closers run, and
   # that drain also ends the owner, so no callback from the run is live when a
-  # connector closes and none can be attached behind it.
+  # connector closes and none can be attached behind it. Cleanup uncertainty
+  # survives lifecycle-triggered draining in the monitor exit reason
+  # {:shutdown, :provider_cleanup_failed}; execution owners must retain that
+  # completion witness before releasing admission.
 
   use GenServer
   use PtcRunner.Kernel.OwnerStatusRedaction
@@ -85,7 +88,7 @@ defmodule PtcRunner.Kernel.ProviderTaskTracker do
   # A session that was never bound to a tracker never owned a task.
   def drain_provider_tasks(_tracker, _deadline), do: :ok
 
-  defp normalize_drain_result(:ok, _reason), do: :ok
+  defp normalize_drain_result(:ok, :normal), do: :ok
 
   defp normalize_drain_result({:error, :closed}, reason) when reason in [:normal, :noproc],
     do: :ok
@@ -131,7 +134,7 @@ defmodule PtcRunner.Kernel.ProviderTaskTracker do
 
   def handle_call({token, {:drain, deadline}}, _from, %{token: token} = state) do
     {result, state} = drain(state, cleanup_deadline(state, deadline))
-    {:stop, :normal, result, state}
+    {:stop, drain_exit_reason(result), result, state}
   end
 
   def handle_call(
@@ -160,8 +163,8 @@ defmodule PtcRunner.Kernel.ProviderTaskTracker do
   @impl GenServer
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{lifecycles: lifecycles} = state)
       when is_map_key(lifecycles, ref) do
-    {_result, state} = drain(state, cleanup_deadline(state, nil))
-    {:stop, :normal, state}
+    {result, state} = drain(state, cleanup_deadline(state, nil))
+    {:stop, drain_exit_reason(result), state}
   end
 
   def handle_info({:DOWN, ref, :process, _pid, _reason}, state),
@@ -215,6 +218,9 @@ defmodule PtcRunner.Kernel.ProviderTaskTracker do
       timeout -> {guardians, uncertain?}
     end
   end
+
+  defp drain_exit_reason(:ok), do: :normal
+  defp drain_exit_reason(_failure), do: {:shutdown, :provider_cleanup_failed}
 
   defp cleanup_deadline(_state, deadline) when is_integer(deadline), do: deadline
 

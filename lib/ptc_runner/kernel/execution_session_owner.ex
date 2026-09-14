@@ -19,7 +19,9 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.ProviderExecutionResources
   alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.ProviderRuntime
   alias PtcRunner.Kernel.ProviderSession
+  alias PtcRunner.Kernel.ProviderTaskTracker
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunAdmission
   alias PtcRunner.Kernel.RunBuilder
@@ -46,7 +48,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           PreparedRun.t(),
           PublicationAuthority.t(),
           pid(),
-          ProviderExecution.t() | nil,
+          ProviderExecution.t() | ProviderExecution.Retained.t() | nil,
           (binary() -> term()) | nil,
           :run | :connect
         ) ::
@@ -64,7 +66,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           PreparedRun.t(),
           PublicationAuthority.t(),
           pid(),
-          ProviderExecution.t() | nil,
+          ProviderExecution.t() | ProviderExecution.Retained.t() | nil,
           (binary() -> term()) | nil,
           :run | :connect,
           Target.t() | nil
@@ -77,7 +79,8 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
              | :invalid_provider_execution}
   def start(prepared, authority, caller, provider_execution, notifier, operation, live_status)
       when is_pid(caller) and operation in [:run, :connect] do
-    with :ok <-
+    with :ok <- retained_caller(provider_execution, caller),
+         :ok <-
            admissible(
              prepared,
              authority,
@@ -121,7 +124,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           PreparedRun.t(),
           PublicationAuthority.t(),
           pid(),
-          ProviderExecution.t() | nil
+          ProviderExecution.t() | ProviderExecution.Retained.t() | nil
         ) ::
           {:ok, t()} | {:error, term()}
   def start_admitted(host, prepared, authority, caller, execution) do
@@ -141,7 +144,8 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   end
 
   defp start_with_admission(host, admission_request, prepared, authority, caller, execution) do
-    with :ok <- admissible(prepared, authority, execution, nil, :run, nil) do
+    with :ok <- retained_caller(execution, caller),
+         :ok <- admissible(prepared, authority, execution, nil, :run, nil) do
       token = make_ref()
 
       case GenServer.start(
@@ -179,12 +183,20 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
   # Every refusal here is decided before `init/1` consumes the prepared run, so
   # a rejected start leaves that preparation reusable.
+  defp retained_caller(%ProviderExecution.Retained{borrow: %{caller: caller}}, caller), do: :ok
+
+  defp retained_caller(%ProviderExecution.Retained{}, _caller),
+    do: {:error, :invalid_provider_execution}
+
+  defp retained_caller(_execution, _caller), do: :ok
+
   defp admissible(prepared, authority, provider_execution, notifier, operation, live_status) do
     cond do
       not live_status?(live_status) ->
         {:error, :invalid_prepared_run}
 
-      not PreparedRun.valid?(prepared) ->
+      not match?(%PreparedRun{request: %PtcRunner.Kernel.RunRequest{}}, prepared) or
+          not PreparedRun.valid?(prepared) ->
         {:error, :invalid_prepared_run}
 
       not PublicationAuthority.authorized?(authority) ->
@@ -296,6 +308,8 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       prepared: prepared,
       registry: nil,
       provider_session: nil,
+      borrowed: nil,
+      borrowed_tracker: nil,
       oauth_memory: nil,
       oauth_listener: nil,
       built: nil,
@@ -403,6 +417,15 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     end
   end
 
+  def handle_call(
+        {token, {:borrowed_tracker, tracker}},
+        {worker, _},
+        %{token: token, worker_pid: worker, borrowed: borrow} = state
+      )
+      when not is_nil(borrow) do
+    {:reply, :ok, %{state | borrowed_tracker: {tracker, Process.monitor(tracker.pid)}}}
+  end
+
   def handle_call({_token, :await}, _from, state),
     do: {:reply, {:error, :execution_session_unavailable}, state}
 
@@ -479,6 +502,13 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
      |> forget_resource(:authority)}
   end
 
+  def handle_info(
+        {:DOWN, ref, :process, _pid, reason},
+        %{borrowed_tracker: {_tracker, ref}} = state
+      ) do
+    {:noreply, tracker_completed(state, reason)}
+  end
+
   def handle_info({:DOWN, ref, :process, host, _}, %{admission: {host, ref}} = state),
     do: {:stop, :run_admission_unavailable, abort(state)}
 
@@ -492,6 +522,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
   def terminate(reason, state) do
     state = abort(state)
+    if state.borrowed, do: ProviderRuntime.release_borrow(state.borrowed)
 
     if state.admission do
       {host, _} = state.admission
@@ -588,6 +619,54 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     end
   end
 
+  defp execute_providers(
+         prepared,
+         {authority, lease},
+         sinks,
+         %ProviderExecution.Retained{} = retained,
+         _notifier,
+         _tracker,
+         {owner, token},
+         :run
+       ) do
+    with {:ok, built} <-
+           RunBuilder.build_borrowed_owned(
+             prepared,
+             retained.borrow.registry,
+             authority,
+             sinks,
+             retained.borrow
+           ) do
+      observer = fn tracker ->
+        GenServer.call(owner, {token, {:borrowed_tracker, tracker}}, :infinity)
+      end
+
+      RunBuilder.execute_built_claimed(Map.put(built, :publication_lease, lease), lease, observer)
+    end
+  end
+
+  defp execute_providers(
+         prepared,
+         publication,
+         sinks,
+         execution,
+         notifier,
+         tracker,
+         {owner, _token},
+         operation
+       ),
+       do:
+         ProviderExecution.execute(
+           prepared,
+           publication,
+           sinks,
+           execution,
+           notifier,
+           tracker,
+           owner,
+           operation
+         )
+
   defp open_provider_execution(
          initial,
          authority,
@@ -598,6 +677,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
        ) do
     owner = self()
     token = initial.token
+    {initial, held} = hold_borrow(initial, provider_execution)
 
     {worker_pid, worker_ref} =
       spawn_monitor(fn ->
@@ -613,16 +693,18 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
             execution_result =
               LiveStatus.with_target(initial.live_status, fn ->
-                ProviderExecution.execute(
-                  initial.prepared,
-                  {authority, initial.lease},
-                  opened_sinks,
-                  provider_execution,
-                  notifier,
-                  tracker,
-                  owner,
-                  operation
-                )
+                with :ok <- held do
+                  execute_providers(
+                    initial.prepared,
+                    {authority, initial.lease},
+                    opened_sinks,
+                    provider_execution,
+                    notifier,
+                    tracker,
+                    {owner, token},
+                    operation
+                  )
+                end
               end)
 
             send(owner, {token, :execution_result, self(), execution_result})
@@ -680,18 +762,20 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     {:reply, result, %{state | handoff_waiting?: true}}
   end
 
-  defp abort(state),
-    do:
-      release(state, [
-        :worker,
-        :session,
-        :listener,
-        :registry,
-        :memory,
-        :sinks,
-        :prepared,
-        :authority
-      ])
+  defp abort(state) do
+    state
+    |> release([:worker])
+    |> await_borrowed_tracker()
+    |> release([
+      :session,
+      :listener,
+      :registry,
+      :memory,
+      :sinks,
+      :prepared,
+      :authority
+    ])
+  end
 
   defp release_worker(%{worker_pid: worker_pid, worker_ref: worker_ref} = state) do
     Process.exit(worker_pid, :kill)
@@ -731,7 +815,33 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   defp finalize_aborted_sinks(state), do: release(state, [:sinks])
 
   defp close_owned_inputs(state),
-    do: release(state, [:session, :listener, :registry, :memory, :prepared])
+    do:
+      release(await_borrowed_tracker(state), [:session, :listener, :registry, :memory, :prepared])
+
+  defp hold_borrow(state, %ProviderExecution.Retained{borrow: borrow}) do
+    case ProviderRuntime.hold_borrow(borrow) do
+      :ok -> {%{state | borrowed: borrow}, :ok}
+      error -> {state, error}
+    end
+  end
+
+  defp hold_borrow(state, _execution), do: {state, :ok}
+
+  defp await_borrowed_tracker(%{borrowed_tracker: nil} = state), do: state
+
+  defp await_borrowed_tracker(%{borrowed_tracker: {tracker, ref}} = state) do
+    result = ProviderTaskTracker.drain_provider_tasks(tracker)
+
+    receive do
+      {:DOWN, ^ref, :process, _pid, reason} ->
+        tracker_completed(%{state | cleanup: merge_cleanup(state.cleanup, result)}, reason)
+    end
+  end
+
+  defp tracker_completed(state, :normal), do: %{state | borrowed_tracker: nil}
+
+  defp tracker_completed(state, _reason),
+    do: %{state | borrowed_tracker: nil, cleanup: {:error, :provider_cleanup_failed}}
 
   defp maybe_abort_authority(state, {:ok, _result}), do: state
   defp maybe_abort_authority(state, _result), do: abort_authority(state)

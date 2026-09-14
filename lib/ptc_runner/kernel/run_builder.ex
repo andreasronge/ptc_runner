@@ -73,13 +73,16 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.ProviderAcquisition
+  alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.ProviderRuntime
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.ResultArtifact
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.RunRequest
+  alias PtcRunner.Kernel.ServingRequest
   alias PtcRunner.Kernel.SourceIntern
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.WorkflowEnvironment
@@ -97,7 +100,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
           {:ok, CommandDiagnostic.t()} | :error
   def environment_failure_diagnostic(
         {:missing_capability_requirement, names},
-        %PreparedRun{} = prepared,
+        %PreparedRun{request: %RunRequest{}} = prepared,
         provider_activity
       )
       when is_list(names) and names != [] and is_boolean(provider_activity) do
@@ -201,6 +204,9 @@ defmodule PtcRunner.Kernel.RunBuilder do
   @doc "Builds an entry expression and complete run configuration from a sealed request."
   def build(request, registry, opts \\ [])
 
+  def build(%PreparedRun{request: %ServingRequest{}}, _arg0, _arg1),
+    do: {:error, :invalid_prepared_run}
+
   def build(%RunRequest{} = request, %ProviderRegistry{} = registry, opts) when is_list(opts) do
     package = request.package
 
@@ -226,7 +232,14 @@ defmodule PtcRunner.Kernel.RunBuilder do
   @doc "Builds a provider-free run directly from the sealed phase-4/5 result."
   def build_prepared(prepared, registry, opts \\ [])
 
-  def build_prepared(%PreparedRun{} = prepared, %ProviderRegistry{} = registry, opts)
+  def build_prepared(%PreparedRun{request: %ServingRequest{}}, _arg0, _arg1),
+    do: {:error, :invalid_prepared_run}
+
+  def build_prepared(
+        %PreparedRun{request: %RunRequest{}} = prepared,
+        %ProviderRegistry{} = registry,
+        opts
+      )
       when is_list(opts) do
     build_prepared(prepared, registry, opts, :close_opened_sinks)
   end
@@ -236,7 +249,15 @@ defmodule PtcRunner.Kernel.RunBuilder do
   @doc false
   @spec open_prepared_sinks(PreparedRun.t(), PublicationAuthority.t(), pid()) ::
           {:ok, map()} | {:error, term()} | {:error, term(), map()}
-  def open_prepared_sinks(%PreparedRun{} = prepared, authority, owner) when is_pid(owner) do
+  def open_prepared_sinks(
+        %PreparedRun{request: %ServingRequest{}},
+        _arg0,
+        _arg1
+      ),
+      do: {:error, :invalid_prepared_run}
+
+  def open_prepared_sinks(%PreparedRun{request: %RunRequest{}} = prepared, authority, owner)
+      when is_pid(owner) do
     with true <- PreparedRun.valid?(prepared),
          true <- PublicationAuthority.authorized?(authority),
          true <- PublicationAuthority.matches_prepared?(authority, prepared),
@@ -260,7 +281,15 @@ defmodule PtcRunner.Kernel.RunBuilder do
           MissionReplTarget.t()
         ) :: {:ok, map()} | {:error, term()} | {:error, term(), map()}
   def open_prepared_sinks(
-        %PreparedRun{} = prepared,
+        %PreparedRun{request: %ServingRequest{}},
+        _arg0,
+        _arg1,
+        _arg2
+      ),
+      do: {:error, :invalid_prepared_run}
+
+  def open_prepared_sinks(
+        %PreparedRun{request: %RunRequest{}} = prepared,
         authority,
         owner,
         %MissionReplTarget{} = target
@@ -290,7 +319,15 @@ defmodule PtcRunner.Kernel.RunBuilder do
           map()
         ) :: {:ok, map()} | {:error, term()}
   def build_prepared_owned(
-        %PreparedRun{} = prepared,
+        %PreparedRun{request: %ServingRequest{}},
+        _arg0,
+        _arg1,
+        _arg2
+      ),
+      do: {:error, :invalid_prepared_run}
+
+  def build_prepared_owned(
+        %PreparedRun{request: %RunRequest{}} = prepared,
         %ProviderRegistry{} = registry,
         authority,
         opened_sinks
@@ -328,7 +365,16 @@ defmodule PtcRunner.Kernel.RunBuilder do
           MissionReplTarget.t()
         ) :: {:ok, map()} | {:error, term()}
   def build_mission_repl_owned(
-        %PreparedRun{} = prepared,
+        %PreparedRun{request: %ServingRequest{}},
+        _arg0,
+        _arg1,
+        _arg2,
+        _arg3
+      ),
+      do: {:error, :invalid_prepared_run}
+
+  def build_mission_repl_owned(
+        %PreparedRun{request: %RunRequest{}} = prepared,
         %ProviderRegistry{} = registry,
         authority,
         opened_sinks,
@@ -478,7 +524,18 @@ defmodule PtcRunner.Kernel.RunBuilder do
           %{binary() => binary()}
         ) :: {:ok, map()} | {:error, term()}
   def build_active_owned(
-        %PreparedRun{} = prepared,
+        %PreparedRun{request: %ServingRequest{}},
+        _arg0,
+        _arg1,
+        _arg2,
+        _arg3,
+        _arg4,
+        _arg5
+      ),
+      do: {:error, :invalid_prepared_run}
+
+  def build_active_owned(
+        %PreparedRun{request: %RunRequest{}} = prepared,
         %InstallationCatalog{} = catalog,
         %ProviderRegistry{} = registry,
         session,
@@ -521,7 +578,19 @@ defmodule PtcRunner.Kernel.RunBuilder do
           MissionReplTarget.t()
         ) :: {:ok, map()} | {:error, term()}
   def build_mission_repl_active_owned(
-        %PreparedRun{} = prepared,
+        %PreparedRun{request: %ServingRequest{}},
+        _arg0,
+        _arg1,
+        _arg2,
+        _arg3,
+        _arg4,
+        _arg5,
+        _arg6
+      ),
+      do: {:error, :invalid_prepared_run}
+
+  def build_mission_repl_active_owned(
+        %PreparedRun{request: %RunRequest{}} = prepared,
         %InstallationCatalog{} = catalog,
         %ProviderRegistry{} = registry,
         session,
@@ -553,6 +622,86 @@ defmodule PtcRunner.Kernel.RunBuilder do
         _target
       ),
       do: {:error, :invalid_active_run}
+
+  @doc """
+  Builds a fresh run from a retained runtime borrow, acquiring nothing.
+
+  The per-call RunRequest must have the same catalog attestation, effective
+  application identity and installation digests; otherwise it refuses with
+  `:provider_runtime_mismatch`. Only an executor-authorized preparation crosses
+  the active build boundary. Expired deadlines build nothing and return the
+  borrow. Build failure never closes a shared provider, and execution closes
+  only the call's sinks, run state and task tracker.
+  """
+  @spec build_borrowed_owned(
+          PreparedRun.t(),
+          ProviderRegistry.t(),
+          PublicationAuthority.t(),
+          map(),
+          ProviderRuntime.Borrow.t()
+        ) :: {:ok, map()} | {:error, term()}
+  def build_borrowed_owned(
+        %PreparedRun{request: %RunRequest{}} = prepared,
+        %ProviderRegistry{} = registry,
+        authority,
+        opened_sinks,
+        %ProviderRuntime.Borrow{} = borrow
+      ) do
+    result =
+      with true <- PreparedRun.consumed_valid?(prepared),
+           :ok <- borrowed_plan_matches(prepared, borrow),
+           true <- ProviderRuntime.valid_borrow?(borrow),
+           true <- borrow.session.deadline > System.monotonic_time(:millisecond),
+           :ok <- validate_registry(registry),
+           true <- PublicationAuthority.authorized?(authority),
+           true <- PublicationAuthority.matches_prepared?(authority, prepared),
+           :ok <- validate_installed_limits(prepared.request.package, registry, []),
+           :ok <- validate_authority_inspection_selection(prepared.request, authority),
+           {:ok, sink_owner} <- EventSink.owner(opened_sinks.event_sink),
+           :ok <- validate_opened_sinks(opened_sinks, prepared, authority, sink_owner, :all),
+           :ok <- ProviderActivity.mark(prepared.provider_activity),
+           {:ok, providers} <-
+             providers(
+               prepared.request.package,
+               {prepared.workflow_bundle, prepared.mission_bundles},
+               registry,
+               provider_input_class(prepared.request.input.authority),
+               [],
+               %__MODULE__.Retained{borrow: borrow}
+             ) do
+        build_with_opened_sinks(
+          prepared.request,
+          {prepared.workflow_bundle, prepared.mission_bundles},
+          prepared.entry_source,
+          providers,
+          authority,
+          opened_sinks
+        )
+      else
+        false -> {:error, :invalid_prepared_run}
+        {:error, _reason} = error -> error
+      end
+
+    if match?({:error, _}, result), do: ProviderRuntime.release_borrow(borrow)
+    result
+  rescue
+    _exception ->
+      ProviderRuntime.release_borrow(borrow)
+      {:error, :invalid_prepared_run}
+  catch
+    _kind, _reason ->
+      ProviderRuntime.release_borrow(borrow)
+      {:error, :invalid_prepared_run}
+  end
+
+  def build_borrowed_owned(_prepared, _registry, _authority, _opened_sinks, _borrow),
+    do: {:error, :invalid_prepared_run}
+
+  defp borrowed_plan_matches(prepared, borrow) do
+    if ProviderRuntime.plan_identity(prepared) == borrow.plan_identity,
+      do: :ok,
+      else: {:error, :provider_runtime_mismatch}
+  end
 
   defp do_build_active_owned(
          prepared,
@@ -1110,7 +1259,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   defp validate_opened_sinks(
          opened_sinks,
-         %PreparedRun{} = prepared,
+         %PreparedRun{request: %RunRequest{}} = prepared,
          authority,
          expected_owner,
          target
@@ -1368,6 +1517,16 @@ defmodule PtcRunner.Kernel.RunBuilder do
   end
 
   defp acquire_providers(
+         _manifest,
+         _bundles,
+         _registry,
+         _input_class,
+         _opts,
+         %__MODULE__.Retained{borrow: borrow}
+       ),
+       do: {:ok, Map.put(borrow.providers, :provider_session, borrow.session)}
+
+  defp acquire_providers(
          manifest,
          {workflow_bundle, mission_bundles},
          registry,
@@ -1393,7 +1552,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
           )
         end
       )
-      |> close_failed_acquisition(session)
+      |> ProviderAcquisition.close_failed(session)
     end
   end
 
@@ -1411,7 +1570,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
        ) do
     prepared
     |> ProviderAcquisition.acquire(catalog, registry, session, :all, credentials)
-    |> close_failed_acquisition(session)
+    |> ProviderAcquisition.close_failed(session)
   end
 
   defp acquire_providers(
@@ -1424,20 +1583,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
        ) do
     prepared
     |> ProviderAcquisition.acquire(catalog, registry, session, target, credentials)
-    |> close_failed_acquisition(session)
+    |> ProviderAcquisition.close_failed(session)
   end
-
-  defp close_failed_acquisition({:ok, _providers} = success, _session), do: success
-
-  defp close_failed_acquisition({:unregistered_provider_close, reason, close}, session) do
-    prefer_cleanup_error(
-      {:error, reason},
-      ProviderSession.close_with_unregistered(session, close)
-    )
-  end
-
-  defp close_failed_acquisition({:error, _reason} = error, session),
-    do: prefer_cleanup_error(error, ProviderSession.close(session))
 
   defp preflight_provider_artifacts(manifest, effective_class, opts) do
     with :ok <- preflight_trace(manifest.events.policy, effective_class, opts),
@@ -1510,16 +1657,27 @@ defmodule PtcRunner.Kernel.RunBuilder do
   @doc false
   @spec execute_built_claimed(map(), PublicationAuthority.lease()) ::
           {:ok, ExecutionOutcome.t()} | {:error, term()}
+  @spec execute_built_claimed(
+          map(),
+          PublicationAuthority.lease(),
+          (PtcRunner.Kernel.ProviderTaskTracker.t() -> :ok) | nil
+        ) ::
+          {:ok, ExecutionOutcome.t()} | {:error, term()}
+  def execute_built_claimed(built, lease, observer \\ nil)
+
   def execute_built_claimed(
         %{
           entry_source: entry_source,
           config: %RunConfig{} = config,
           publication_authority: authority
         } = built,
-        lease
+        lease,
+        observer
       )
-      when is_binary(entry_source) do
+      when is_binary(entry_source) and (is_nil(observer) or is_function(observer, 1)) do
     if valid_built_binding?(built) and PublicationAuthority.lease_valid?(authority, lease) do
+      config = %{config | provider_cleanup_observer: observer}
+
       try do
         {result, terminal_batch} = Kernel.run_and_events(entry_source, config)
 
@@ -1540,7 +1698,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
-  def execute_built_claimed(_built, _lease), do: {:error, :invalid_execution_outcome}
+  def execute_built_claimed(_built, _lease, _observer), do: {:error, :invalid_execution_outcome}
 
   @doc false
   @spec publish_execution_report(ExecutionOutcome.t(), PublicationAuthority.t(), map()) ::
