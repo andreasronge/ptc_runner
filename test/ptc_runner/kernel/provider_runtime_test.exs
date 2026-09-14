@@ -41,6 +41,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeTest do
   import ExUnit.CaptureIO
 
   alias PtcRunner.Kernel.{
+    Attestation,
     Capability,
     ExecutionInput,
     ExecutionOutcome,
@@ -346,6 +347,65 @@ defmodule PtcRunner.Kernel.ProviderRuntimeTest do
     assert :atomics.get(counts, 2) == 1
     assert :ok = PtcRunner.Dotenv.with_loaded_file(path, fn -> :ok end)
     assert System.get_env(key) == nil
+  end
+
+  @tag :tmp_dir
+  test "retained template attestation consumes the readiness deadline before the runtime call", %{
+    tmp_dir: dir
+  } do
+    {template, _catalog, services, pins, _counts} = fixture(dir)
+
+    {:ok, runtime} =
+      ProviderRuntime.start_link(template: template, services: services, pins: pins)
+
+    :ok = :sys.suspend(runtime)
+
+    on_exit(fn ->
+      if Process.alive?(runtime) do
+        :sys.resume(runtime)
+        GenServer.stop(runtime)
+      end
+    end)
+
+    reader = template.retained.reader
+    padding = :binary.copy("x", 64 * 1024 * 1024)
+    padded_reader = fn -> Map.put(reader.(), :readiness_test_padding, padding) end
+
+    retained = %{
+      reader: padded_reader,
+      attestation:
+        Attestation.attest(
+          ServingTemplate,
+          {template.package, template.installation_digests, template.effective_digest,
+           padded_reader}
+        )
+    }
+
+    padded = %{template | retained: retained}
+    :erlang.trace_pattern({GenServer, :call, 3}, true, [:local])
+    on_exit(fn -> :erlang.trace_pattern({GenServer, :call, 3}, false, [:local]) end)
+
+    task =
+      Task.async(fn ->
+        receive do
+          :check ->
+            ProviderRuntime.matches_template?(
+              runtime,
+              padded,
+              System.monotonic_time(:millisecond) + 10
+            )
+        end
+      end)
+
+    :erlang.trace(task.pid, true, [:call, {:tracer, self()}])
+    send(task.pid, :check)
+    refute Task.await(task)
+    delivered = :erlang.trace_delivered(:all)
+    assert_receive {:trace_delivered, _, ^delivered}
+    caller = task.pid
+    refute_received {:trace, ^caller, :call, {GenServer, :call, [^runtime, _, _]}}
+    :sys.resume(runtime)
+    GenServer.stop(runtime)
   end
 
   @tag :tmp_dir

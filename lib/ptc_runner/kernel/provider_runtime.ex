@@ -121,22 +121,23 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   @doc "Checks a runtime against the exact sealed template without borrowing."
   @spec matches_template?(pid(), ServingTemplate.t()) :: boolean()
   def matches_template?(runtime, template),
-    do: matches_template_with_timeout?(runtime, template, 5_000)
+    do: matches_template?(runtime, template, System.monotonic_time(:millisecond) + 5_000)
 
   @doc false
   @spec matches_template?(pid(), ServingTemplate.t(), integer()) :: boolean()
   def matches_template?(runtime, template, deadline) do
-    remaining = deadline - System.monotonic_time(:millisecond)
-    remaining > 0 and matches_template_with_timeout?(runtime, template, remaining)
+    deadline > System.monotonic_time(:millisecond) and
+      matches_template_before?(runtime, template, deadline)
   end
 
-  defp matches_template_with_timeout?(runtime, template, timeout) do
+  defp matches_template_before?(runtime, template, deadline) do
     case ServingTemplate.provider_plan(template) do
       {:ok, retained} ->
         {digest, digests} = ServingTemplate.runtime_context(template).identity
         identity = {retained.catalog.attestation, digest, digests}
 
-        safe_call(runtime, {:matches_template, identity}, false, timeout)
+        remaining = deadline - System.monotonic_time(:millisecond)
+        remaining > 0 and safe_call(runtime, {:matches_template, identity}, false, remaining)
 
       _ ->
         false
