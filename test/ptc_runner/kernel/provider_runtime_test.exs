@@ -349,6 +349,58 @@ defmodule PtcRunner.Kernel.ProviderRuntimeTest do
   end
 
   @tag :tmp_dir
+  test "delayed failed warm health cannot outlive the reservation deadline", %{tmp_dir: dir} do
+    {template, _catalog, _services, pins, _counts} = fixture(dir)
+
+    {:ok, services} =
+      ProviderRuntimeServices.new(
+        credential_resolver: fn _ -> {:ok, %{"bearer" => String.duplicate("token", 10)}} end
+      )
+
+    admission = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+
+    {:ok, warm} = start_warm(template, services, pins, admission)
+
+    {:ok, bound} = WarmProviderRuntime.template(warm, "tool")
+    gate = :sys.get_state(warm).admission
+
+    {:ok, lease} =
+      ProviderCallAdmission.checkout(gate, System.monotonic_time(:millisecond) + 1_000)
+
+    assert {:error, :provider_cleanup_failed} = ProviderCallAdmission.complete(lease, :uncertain)
+    :ok = :sys.suspend(warm)
+
+    on_exit(fn ->
+      if Process.alive?(warm) do
+        :sys.resume(warm)
+        GenServer.stop(warm)
+      end
+    end)
+
+    parent = self()
+
+    controller =
+      spawn(fn ->
+        receive do
+          :resume ->
+            :sys.resume(warm)
+            send(parent, :health_resumed)
+        end
+      end)
+
+    Process.send_after(controller, :resume, 500)
+
+    result =
+      ServingTemplate.reserve(bound, %{}, admission, System.monotonic_time(:millisecond) + 30)
+
+    assert ServingOutcome.code(result) == :cancelled
+    assert ServingOutcome.metadata(result).dispatched == false
+    refute_received :health_resumed
+    assert_receive :health_resumed, 1_000
+    GenServer.stop(warm)
+  end
+
+  @tag :tmp_dir
   test "cached warm tools refuse reservation and activation after a live gate fences", %{
     tmp_dir: dir
   } do
@@ -451,15 +503,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeTest do
 
     admission = start_supervised!({RunAdmission, max_concurrent_runs: 1})
 
-    {:ok, warm} =
-      WarmProviderRuntime.start_link(
-        tools: %{"tool" => %{template: template, pins: pins}},
-        services: services,
-        bearer_binding: "bearer",
-        run_admission: admission,
-        max_active_provider_calls: 1,
-        max_waiting_provider_calls: 0
-      )
+    {:ok, warm} = start_warm(template, services, pins, admission)
 
     on_exit(fn -> if Process.alive?(warm), do: GenServer.stop(warm) end)
     {:ok, bound} = WarmProviderRuntime.template(warm, "tool")
@@ -1250,6 +1294,17 @@ defmodule PtcRunner.Kernel.ProviderRuntimeTest do
   defp authority do
     {:ok, authority} = PublicationAuthority.new([])
     authority
+  end
+
+  defp start_warm(template, services, pins, admission) do
+    WarmProviderRuntime.start_link(
+      tools: %{"tool" => %{template: template, pins: pins}},
+      services: services,
+      bearer_binding: "bearer",
+      run_admission: admission,
+      max_active_provider_calls: 1,
+      max_waiting_provider_calls: 0
+    )
   end
 
   defp fixture(dir, opts \\ []) do

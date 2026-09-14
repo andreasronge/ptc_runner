@@ -44,6 +44,7 @@ defmodule PtcRunner.Kernel.ServingCall do
     now = System.monotonic_time(:millisecond)
     limit = now + ServingTemplate.limits(template).run_duration_ms
     deadline = if caller_deadline == :infinity, do: limit, else: caller_deadline
+    deadline = if is_integer(deadline), do: min(deadline, limit), else: deadline
 
     cond do
       not is_integer(deadline) ->
@@ -52,12 +53,10 @@ defmodule PtcRunner.Kernel.ServingCall do
       deadline <= now ->
         outcome(template, :cancelled, false)
 
-      not runtime_ready?(template) ->
-        outcome(template, :admission_unavailable, false)
+      not runtime_ready?(template, deadline) ->
+        outcome(template, expired_code(deadline, :admission_unavailable), false)
 
       true ->
-        deadline = min(deadline, limit)
-
         case RunAdmission.reserve(admission, deadline) do
           {:ok, lease} -> {:ok, {__MODULE__, template, input, lease, deadline, self()}}
           {:error, :run_capacity_exhausted} -> outcome(template, :busy, false)
@@ -188,22 +187,23 @@ defmodule PtcRunner.Kernel.ServingCall do
     end
   end
 
-  defp runtime_ready?(template) do
+  defp runtime_ready?(template, deadline) do
     context = ServingTemplate.runtime_context(template)
 
     warm_ready =
       context.warm_runtime == nil or
-        WarmProviderRuntime.snapshot(context.warm_runtime).ready
+        WarmProviderRuntime.ready_before?(context.warm_runtime, deadline)
 
     warm_ready and
-      (not context.required? or ProviderRuntime.matches_template?(context.runtime, template))
+      (not context.required? or
+         ProviderRuntime.matches_template?(context.runtime, template, deadline))
   end
 
   defp activate_execution(template, lease, prepared, authority, deadline) do
     context = ServingTemplate.runtime_context(template)
 
     cond do
-      not runtime_ready?(template) ->
+      not runtime_ready?(template, deadline) ->
         {:error, :run_admission_unavailable}
 
       context.required? ->

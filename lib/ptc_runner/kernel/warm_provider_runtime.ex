@@ -21,6 +21,8 @@ defmodule PtcRunner.Kernel.WarmProviderRuntime do
   and execution activation. Cached templates cannot bypass a live fenced gate or
   observed connection drift; a pre-dispatch refusal is `admission_unavailable`
   with `dispatched: false`, unless its original deadline has expired.
+  Readiness calls share that original absolute deadline; time spent checking the
+  warm domain and retained runtime consumes the remaining reservation budget.
   Reservations create no provider resource;
   activation borrows with the original reservation deadline. Each call owns new
   input/policy identities, activity, task tracker, provider scope, sinks,
@@ -114,6 +116,13 @@ defmodule PtcRunner.Kernel.WarmProviderRuntime do
 
   @spec snapshot(pid()) :: map()
   def snapshot(owner), do: call(owner, :snapshot, %{ready: false, fenced: true})
+
+  @doc false
+  @spec ready_before?(pid(), integer()) :: boolean()
+  def ready_before?(owner, deadline) do
+    remaining = deadline - System.monotonic_time(:millisecond)
+    remaining > 0 and call(owner, :snapshot, %{ready: false}, remaining).ready
+  end
 
   @spec authenticate(pid(), binary()) :: boolean()
   def authenticate(owner, token), do: call(owner, {:authenticate, token}, false)
