@@ -193,7 +193,7 @@ defmodule PtcGatewayTest do
           put_in(config, ["admission", "max_active_provider_calls"], 65536),
           put_in(config, ["admission", "max_waiting_provider_calls"], -1),
           Map.put(config, "tools", []),
-          Map.put(config, "tools", List.duplicate(hd(config["tools"]), 257)),
+          Map.put(config, "tools", List.duplicate(hd(config["tools"]), 129)),
           update_in(
             config,
             ["tools"],
@@ -237,17 +237,38 @@ defmodule PtcGatewayTest do
     File.write!(path, Jason.encode!(exact_config))
     assert {:error, :template_invalid} = PtcGateway.start_link(path, env_file: env)
 
-    near_catalog = rewrite_schema_config(path, config, exact_schema, 31)
+    exact_response = sized_static_config(path, config, 4_194_304, :response)
     assert {:ok, catalog_owner} = PtcGateway.start_link(path, env_file: env)
-    on_exit(fn -> stop(catalog_owner) end)
-    listing = mcp(near_catalog, "tools/list", String.duplicate(<<0>>, 256))
+    listing = mcp(exact_response, "tools/list", String.duplicate(<<0>>, 256))
     assert listing.status == 200
-    assert deterministic_size(listing.body) <= 4_194_304
-    assert deterministic_size(listing.body) > 4_000_000
+    assert deterministic_size(listing.body) == 4_194_304
     stop(catalog_owner)
 
-    _over_catalog = rewrite_schema_config(path, config, exact_schema, 32)
+    _over_response = sized_static_config(path, config, 4_194_305, :response)
     assert {:error, :static_catalog_too_large} = PtcGateway.start_link(path, env_file: env)
+
+    exact_catalog = sized_static_tools(4_194_304, :catalog)
+    assert deterministic_size(exact_catalog) == 4_194_304
+    assert PtcGateway.Domain.within_static_limit?(exact_catalog)
+
+    over_catalog = sized_static_tools(4_194_305, :catalog)
+    assert deterministic_size(over_catalog) == 4_194_305
+    refute PtcGateway.Domain.within_static_limit?(over_catalog)
+  end
+
+  @tag :slow
+  @tag :tmp_dir
+  test "exactly 128 unique tools start and list successfully", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    exact_config = rewrite_schema_config(path, config, %{"type" => "object"}, 128)
+
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+    listing = mcp(exact_config, "tools/list", 1)
+    assert listing.status == 200
+    assert length(listing.body["result"]["tools"]) == 128
   end
 
   @tag :nightly
@@ -517,7 +538,7 @@ defmodule PtcGatewayTest do
 
     count_error = raw_mcp_response(config, [{"X-Count-57", "x"} | exact_count_headers])
     assert raw_status(count_error) == 431
-    assert byte_size(raw_body(count_error)) <= 128
+    assert raw_body(count_error) == ""
 
     exact_aggregate_headers = aggregate_padding_headers(config, 32_768)
     assert raw_status(raw_mcp_response(config, exact_aggregate_headers)) == 200
@@ -525,16 +546,14 @@ defmodule PtcGatewayTest do
     [{name, value} | rest] = exact_aggregate_headers
     aggregate_error = raw_mcp_response(config, [{name, value <> "x"} | rest])
     assert raw_status(aggregate_error) == 431
-    assert byte_size(raw_body(aggregate_error)) <= 128
-    refute raw_body(aggregate_error) =~ "Bandit"
+    assert raw_body(aggregate_error) == ~s({"error":"request_headers_too_large"})
 
     exact_line = raw_mcp_response(config, [{"X-Line", String.duplicate("x", 8_182)}])
     assert raw_status(exact_line) == 200
 
     oversized_line = raw_mcp_response(config, [{"X-Line", String.duplicate("x", 8_183)}])
     assert raw_status(oversized_line) == 431
-    assert byte_size(raw_body(oversized_line)) <= 128
-    refute raw_body(oversized_line) =~ "Bandit"
+    assert raw_body(oversized_line) == ""
   end
 
   @tag :tmp_dir
@@ -858,9 +877,17 @@ defmodule PtcGatewayTest do
 
     {:ok, socket} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false])
     :ok = :gen_tcp.send(socket, request)
-    {:ok, response} = :gen_tcp.recv(socket, 0, 2_000)
+    response = recv_to_close(socket, [])
     :gen_tcp.close(socket)
     response
+  end
+
+  defp recv_to_close(socket, chunks) do
+    case :gen_tcp.recv(socket, 0, 2_000) do
+      {:ok, chunk} -> recv_to_close(socket, [chunk | chunks])
+      {:error, :closed} -> chunks |> Enum.reverse() |> IO.iodata_to_binary()
+      {:error, reason} -> flunk("raw HTTP response read failed: #{inspect(reason)}")
+    end
   end
 
   defp raw_mcp_body do
@@ -981,6 +1008,78 @@ defmodule PtcGatewayTest do
     updated = Map.put(config, "tools", tools)
     File.write!(path, Jason.encode!(updated))
     updated
+  end
+
+  defp sized_static_config(path, config, target, :response) do
+    tools = sized_static_tools(target, :response)
+    schema = tools |> hd() |> Map.fetch!("inputSchema")
+    updated = rewrite_schema_config(path, config, schema, length(tools))
+
+    descriptions = Map.new(tools, &{&1["name"], &1["description"]})
+
+    updated =
+      update_in(
+        updated,
+        ["tools"],
+        &Enum.map(&1, fn tool ->
+          Map.replace!(tool, "description", Map.fetch!(descriptions, tool["name"]))
+        end)
+      )
+
+    File.write!(path, Jason.encode!(updated))
+    updated
+  end
+
+  defp sized_static_tools(target, kind) do
+    schema = sized_schema(63_500)
+    {:ok, normalized, _compiled} = PtcRunner.Kernel.JSONSchema.compile(schema)
+
+    tools =
+      for index <- 1..32 do
+        %{
+          "name" => "tool-#{String.pad_leading(Integer.to_string(index), 3, "0")}",
+          "title" => "A",
+          "description" => "A tool",
+          "inputSchema" => normalized,
+          "outputSchema" => normalized,
+          "annotations" => %{"readOnlyHint" => true}
+        }
+      end
+
+    sized_static_tools(tools, target, kind)
+  end
+
+  defp sized_static_tools(tools, target, kind) do
+    size = static_fixture_size(tools, kind)
+
+    if size > target, do: flunk("static fixture base exceeds target by #{size - target} bytes")
+
+    {tools, remaining} =
+      Enum.map_reduce(tools, target - size, fn tool, remaining ->
+        added = min(remaining, 4096 - byte_size(tool["description"]))
+
+        {Map.update!(tool, "description", &(&1 <> String.duplicate("x", added))),
+         remaining - added}
+      end)
+
+    if remaining == 0,
+      do: tools,
+      else: flunk("static fixture lacks #{remaining} bytes of padding capacity")
+  end
+
+  defp static_fixture_size(tools, :catalog), do: deterministic_size(tools)
+
+  defp static_fixture_size(tools, :response) do
+    deterministic_size(%{
+      "jsonrpc" => "2.0",
+      "id" => String.duplicate(<<0>>, 256),
+      "result" => %{
+        "resultType" => "complete",
+        "tools" => tools,
+        "ttlMs" => 0,
+        "cacheScope" => "private"
+      }
+    })
   end
 
   defp acquire_eventually(_admission, 0), do: :full

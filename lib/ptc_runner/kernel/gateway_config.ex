@@ -171,7 +171,7 @@ defmodule PtcRunner.Kernel.GatewayConfig do
         "tools" => %{
           "type" => "array",
           "minItems" => 1,
-          "maxItems" => 256,
+          "maxItems" => 128,
           "items" => tool_schema()
         },
         "private_audit" =>

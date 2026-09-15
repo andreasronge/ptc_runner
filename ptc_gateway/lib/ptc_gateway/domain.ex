@@ -133,10 +133,13 @@ defmodule PtcGateway.Domain do
     }
 
     if Enum.all?(schemas, &(encoded_size(&1) <= 65_536)) and
-         encoded_size(tools) <= 4_194_304 and encoded_size(listing) <= 4_194_304,
+         within_static_limit?(tools) and within_static_limit?(listing),
        do: :ok,
        else: {:error, :static_catalog_too_large}
   end
+
+  @doc false
+  def within_static_limit?(value), do: encoded_size(value) <= 4_194_304
 
   defp encoded_size(value) do
     case PtcRunner.Kernel.DeterministicJSON.encode(value) do
