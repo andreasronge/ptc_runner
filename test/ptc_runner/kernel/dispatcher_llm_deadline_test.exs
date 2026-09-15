@@ -388,11 +388,15 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
 
   test "an equal shared workflow clock keeps provider_timeout" do
     parent = self()
-    deadline_ms = System.monotonic_time(:millisecond) + 500
+    # Start both clocks from the same instant. Computing the absolute workflow
+    # deadline before dispatch setup made validation consume part of its 500 ms
+    # and occasionally win before the provider was called under suite load.
+    started_ms = System.monotonic_time(:millisecond)
+    deadline_ms = started_ms + 5_000
 
     {result, _state, _sink} =
       dispatch_llm(parent,
-        request_timeout_ms: 500,
+        request_timeout_ms: deadline_ms - started_ms,
         timeout_ms: 5_000,
         validation_deadline_ms: deadline_ms,
         requester: fn _request, _context ->

@@ -1122,10 +1122,10 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     builder_ref = Process.monitor(builder)
     assert_receive {:construction_started, resources}, 5_000
 
-    session_ref = Process.monitor(resources.session.pid)
-    trace_ref = Process.monitor(resources.session_trace.pid)
-    snapshot_ref = Process.monitor(resources.snapshot.pid)
-    run_state_ref = Process.monitor(resources.run_state.pid)
+    session_ref = monitor_live!(resources.session.pid, :session)
+    trace_ref = monitor_live!(resources.session_trace.pid, :session_trace)
+    snapshot_ref = monitor_live!(resources.snapshot.pid, :snapshot)
+    run_state_ref = monitor_live!(resources.run_state.pid, :run_state)
 
     # Process each monitor before builder death can trigger another owner's cleanup.
     for owner <- [
@@ -1145,6 +1145,12 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     assert_receive {:DOWN, ^snapshot_ref, :process, _pid, :normal}
     assert_receive {:DOWN, ^run_state_ref, :process, _pid, :normal}
     refute_received {:builder_result, _result}
+  end
+
+  defp monitor_live!(pid, name) do
+    ref = Process.monitor(pid)
+    assert Process.alive?(pid), "#{name} owner exited before its monitor was established"
+    ref
   end
 
   @tag :tmp_dir

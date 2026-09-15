@@ -164,7 +164,9 @@ defmodule PtcRunner.ViewerSnapshotStoreTest do
 
     path = write_project(directory, true)
     {:ok, project} = ProjectConfig.load(path)
-    {:ok, agent} = Agent.start_link(fn -> :ok end)
+    # on_exit runs after the test owner has exited. Keep this manually stopped
+    # fixture unlinked so an owner-exit shutdown cannot race Agent.stop/1.
+    {:ok, agent} = Agent.start(fn -> :ok end)
     on_exit(fn -> if Process.alive?(agent), do: Agent.stop(agent) end)
 
     capture = fn _project, _trace, _deadline ->
@@ -218,7 +220,7 @@ defmodule PtcRunner.ViewerSnapshotStoreTest do
 
     path = write_project(directory, true)
     {:ok, project} = ProjectConfig.load(path)
-    {:ok, agent} = Agent.start_link(fn -> :ok end)
+    {:ok, agent} = Agent.start(fn -> :ok end)
     on_exit(fn -> if Process.alive?(agent), do: Agent.stop(agent) end)
 
     capture = fn _current, _trace, _deadline ->
@@ -341,7 +343,7 @@ defmodule PtcRunner.ViewerSnapshotStoreTest do
     path = write_project(directory, true)
     {:ok, project} = ProjectConfig.load(path)
     revoked = %{project | viewer: %{project.viewer | private: false}}
-    {:ok, agent} = Agent.start_link(fn -> project end)
+    {:ok, agent} = Agent.start(fn -> project end)
     on_exit(fn -> if Process.alive?(agent), do: Agent.stop(agent) end)
 
     loader = fn ^path -> {:ok, Agent.get(agent, & &1)} end
@@ -375,7 +377,7 @@ defmodule PtcRunner.ViewerSnapshotStoreTest do
     ]
 
     Enum.with_index(failures, fn reason, index ->
-      {:ok, agent} = Agent.start_link(fn -> {:ok, project} end)
+      {:ok, agent} = Agent.start(fn -> {:ok, project} end)
       loader = fn ^path -> Agent.get(agent, & &1) end
       {:ok, store} = start_granted_store(project, path, fixture, project_loader: loader)
 
