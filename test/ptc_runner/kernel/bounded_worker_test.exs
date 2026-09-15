@@ -293,10 +293,21 @@ defmodule PtcRunner.Kernel.BoundedWorkerTest do
           BoundedWorker.run(
             fn ->
               send(parent, {:cancelled_worker, self()})
+              # The worker holds here until the test has monitored it. Without
+              # the handshake the monitor can be installed after the worker is
+              # already gone, and reports `:noproc` rather than the
+              # cancellation reason being asserted. `startup_fault_hook` is the
+              # sibling caller-kill case's answer to the same gap, but
+              # BoundedWorker only runs that hook for `cancel_with_caller`.
+              receive do: (:worker_monitored -> :ok)
               receive do: (:never -> :unexpected)
             end,
-            timeout_ms: 5_000,
-            max_heap_words: 10_000,
+            # This case isolates owner cancellation, not the timeout or the
+            # heap limit. Either bound can terminate the worker before the test
+            # installs its monitor under full-suite scheduler pressure, which
+            # is what the sibling case documents for a 10k-word worker.
+            timeout_ms: 60_000,
+            max_heap_words: 100_000,
             cancel_with: cancellation_owner
           )
 
@@ -306,6 +317,7 @@ defmodule PtcRunner.Kernel.BoundedWorkerTest do
     caller_ref = Process.monitor(caller)
     assert_receive {:cancelled_worker, worker}
     worker_ref = Process.monitor(worker)
+    send(worker, :worker_monitored)
     Process.exit(cancellation_owner, :kill)
 
     assert_receive {:DOWN, ^worker_ref, :process, ^worker, :killed}

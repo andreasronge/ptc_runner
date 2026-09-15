@@ -480,7 +480,73 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
     end
   end
 
-  defp read_authority_uid(executable) do
+  # A BEAM process cannot change its own uid or supplementary groups after it
+  # starts, so both are read once per VM and kept. Without this every private
+  # directory costs three subprocesses -- `id -u`, `id -G`, `mkdir` -- and the
+  # two identity reads are over half of that. Under suite concurrency each of
+  # those spawns is a chance for `SystemCommand.run/3` to fail or exceed its
+  # bound, which surfaces as :private_directory_unavailable in whichever test
+  # happened to be capturing a trace.
+  # Deliberately not single-flighted. Concurrent cold callers can each run the
+  # read once, which costs a handful of duplicate subprocesses in the first
+  # milliseconds of a VM against the thousands this removes over its life.
+  # Serialising that window would mean an owner process or a cross-node lock on
+  # a path that must stay callable from anywhere, which is a worse trade than
+  # the duplicates. The read is idempotent, so a race only repeats work.
+  defp cached(kind, executable, read) do
+    case identity(executable) do
+      {:ok, identity} -> cached_by({__MODULE__, kind, executable, identity}, read)
+      :error -> read.()
+    end
+  end
+
+  defp cached_by(key, read) do
+    case :persistent_term.get(key, :missing) do
+      :missing ->
+        case read.() do
+          {:ok, value} = ok ->
+            :persistent_term.put(key, value)
+            ok
+
+          {:error, _reason} = error ->
+            error
+        end
+
+      value ->
+        {:ok, value}
+    end
+  end
+
+  # An entry answers "what did this exact binary report", so the key carries the
+  # binary's content digest, not its pathname. `authority_executable/0` resolves
+  # through `System.find_executable/1`, so PATH decides which `id` answers and a
+  # stand-in on PATH is a different question -- which is how the ownership tests
+  # exercise an authority mismatch. A pathname alone is not enough: replacing the
+  # binary at that path would be served a stale uid forever. Nor is stat
+  # metadata: rewriting a small script in place keeps its device, inode and size
+  # and, at the one-second resolution Erlang reports, usually its mtime too.
+  # Digesting costs 0.53ms against the 12.26ms of subprocesses it guards, and an
+  # unreadable executable simply does not cache.
+  defp read_authority_uid(executable),
+    do:
+      cached(:authority_uid, executable, fn ->
+        read_authority_uid_uncached(executable)
+      end)
+
+  defp read_authority_groups(executable),
+    do:
+      cached(:authority_groups, executable, fn ->
+        read_authority_groups_uncached(executable)
+      end)
+
+  defp identity(executable) do
+    case File.read(executable) do
+      {:ok, contents} -> {:ok, :crypto.hash(:sha256, contents)}
+      _unreadable -> :error
+    end
+  end
+
+  defp read_authority_uid_uncached(executable) do
     case SystemCommand.run(executable, ["-u"], @external_command_timeout_ms) do
       {:ok, {output, 0}} ->
         case Integer.parse(String.trim(output)) do
@@ -495,7 +561,7 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
     _exception -> {:error, :private_directory_unavailable}
   end
 
-  defp read_authority_groups(executable) do
+  defp read_authority_groups_uncached(executable) do
     case SystemCommand.run(executable, ["-G"], @external_command_timeout_ms) do
       {:ok, {output, 0}} ->
         groups =
