@@ -717,18 +717,30 @@ defmodule PtcRunner.LiveStatusTest do
 
     assert_receive {:parked, _callback}
 
-    assert {:error, %{kind: :limit_exceeded, details: details}} = Task.await(run, 5_000)
+    case Task.await(run, 5_000) do
+      {:error, %{kind: :limit_exceeded, details: details}} ->
+        assert details.limit == :run_duration_ms
+        assert details.limit_ms == 2_000
 
-    assert details.limit == :run_duration_ms
-    assert details.limit_ms == 2_000
+        assert_receive {:live_frame,
+                        %{
+                          phase: "error",
+                          outcome_reason:
+                            "run_duration_ms limit 2000 ms was exceeded during execution; raise limits.run_duration_ms in the manifest, and the installed host ceiling if it is lower"
+                        }},
+                       2_000
 
-    assert_receive {:live_frame,
-                    %{
-                      phase: "error",
-                      outcome_reason:
-                        "run_duration_ms limit 2000 ms was exceeded during execution; raise limits.run_duration_ms in the manifest, and the installed host ceiling if it is lower"
-                    }},
-                   2_000
+      {:ok, %PtcRunner.Kernel.Result{value: [capability_result]}} ->
+        # Capability failures are recoverable Lisp values. At the shared
+        # absolute deadline, dispatch may observe closure just before pcalls
+        # observes its own deadline; that legitimate ordering must retain the
+        # same limit evidence instead of being mistaken for a missed deadline.
+        assert capability_result["kind"] == "limit_exceeded"
+        assert capability_result["reason"] == "run_closed"
+        assert capability_result["remaining_ms"] == 0
+        assert capability_result["closed?"] == true
+        assert_receive {:live_frame, %{phase: "ok"}}, 2_000
+    end
   end
 
   defp run_config(limits, sink, input) do

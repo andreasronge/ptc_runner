@@ -8,6 +8,16 @@ defmodule PtcRunnerLauncher.ConformanceTest do
 
   @hash_race_fixture Path.expand("../fixtures/mcp_stdio_hash_race_fixture.c", __DIR__)
 
+  setup do
+    # Ports stay linked so owner death exercises the production teardown path.
+    # Trap an abnormal launcher exit in the test process: on loaded macOS Intel
+    # runners a target that closes first can make the launcher report :epipe,
+    # which is already observable through the protocol and must not kill the
+    # conformance case before it can assert that outcome.
+    Process.flag(:trap_exit, true)
+    :ok
+  end
+
   setup_all do
     compiler = System.find_executable("cc") || flunk("C compiler is unavailable")
 

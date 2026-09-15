@@ -178,7 +178,10 @@ defmodule PtcRunner.CLIProgressTest do
     assert title =~ "bad??[2J.json"
     ref = Process.monitor(pid)
     assert :ok = CLIProgress.finish(pid, %{presentation() | exit_status: 3})
-    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+    # finish/2 deliberately bounds teardown at 250 ms and kills the progress
+    # process if a loaded scheduler cannot service the call in time. Both
+    # reasons mean the observable cleanup attempt completed.
+    assert_receive {:DOWN, ^ref, :process, ^pid, reason} when reason in [:normal, :killed]
     assert_receive {:written, cleanup}
     assert cleanup =~ String.duplicate(" ", String.length("preparing 00:00"))
   end
