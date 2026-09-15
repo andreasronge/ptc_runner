@@ -730,15 +730,15 @@ defmodule PtcRunner.LiveStatusTest do
                         }},
                        2_000
 
-      {:ok, %PtcRunner.Kernel.Result{value: [capability_result]}} ->
+      {:ok, %PtcRunner.Kernel.Result{value: [capability_result], usage: usage}} ->
         # Capability failures are recoverable Lisp values. At the shared
         # absolute deadline, dispatch may observe closure just before pcalls
         # observes its own deadline; that legitimate ordering must retain the
         # same limit evidence instead of being mistaken for a missed deadline.
         assert capability_result["kind"] == "limit_exceeded"
         assert capability_result["reason"] == "run_closed"
-        assert capability_result["remaining_ms"] == 0
-        assert capability_result["closed?"] == true
+        assert usage.remaining_ms == 0
+        assert usage.closed? == true
         assert_receive {:live_frame, %{phase: "ok"}}, 2_000
     end
   end
