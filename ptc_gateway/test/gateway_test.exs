@@ -21,7 +21,7 @@ defmodule PtcGatewayTest do
       assert {:ok, owner} = PtcGateway.start_link(path, env_file: "credentials.env")
       on_exit(fn -> stop(owner) end)
       metadata = PtcGateway.Domain.metadata(owner)
-      assert Enum.map(metadata.tools, & &1.name) == ["a", "z"]
+      assert Enum.map(metadata.tools, & &1["name"]) == ["a", "z"]
       assert System.get_env("GATEWAY_TEST_TOKEN") == previous
       assert WarmProviderRuntime.authenticate(PtcGateway.Domain.token_handle(owner), @token)
       refute inspect(:sys.get_status(owner)) =~ @token
@@ -177,6 +177,10 @@ defmodule PtcGatewayTest do
     _ = PtcGateway.Domain.metadata(owner)
     assert response(config, "/health/ready").status == 503
     assert response(config, "/health/live").status == 200
+    unavailable = mcp(config, "tools/list", 41)
+    assert unavailable.status == 503
+    assert unavailable.body["error"] == %{"code" => -31998, "message" => "Server unavailable"}
+    assert unavailable.body["id"] == 41
   end
 
   @tag :tmp_dir
@@ -210,6 +214,65 @@ defmodule PtcGatewayTest do
       File.write!(path, Jason.encode!(value))
       assert {:error, :config_invalid} = PtcGateway.start_link(path)
     end
+  end
+
+  @tag :slow
+  @tag :tmp_dir
+  test "normalized schema, static catalog, and encoded response ceilings refuse startup", %{
+    tmp_dir: dir
+  } do
+    {path, config} = fixture(dir)
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+
+    exact_schema = sized_schema(65_536)
+    assert {:ok, exact_normalized, _compiled} = PtcRunner.Kernel.JSONSchema.compile(exact_schema)
+    assert deterministic_size(exact_normalized) == 65_536
+    exact_config = rewrite_schema_config(path, config, exact_schema, 2)
+    assert {:ok, exact_owner} = PtcGateway.start_link(path, env_file: env)
+    stop(exact_owner)
+
+    oversized_schema = Map.update!(exact_schema, "description", &(&1 <> "x"))
+
+    assert {:error, {:invalid_schema, %{rule: :schema_too_large}}} =
+             PtcRunner.Kernel.JSONSchema.compile(oversized_schema)
+
+    File.write!(Path.join(dir, "schema.json"), Jason.encode!(oversized_schema))
+    File.write!(path, Jason.encode!(exact_config))
+    assert {:error, :template_invalid} = PtcGateway.start_link(path, env_file: env)
+
+    exact_response = sized_static_config(path, config, 4_194_304, :response)
+    assert {:ok, catalog_owner} = PtcGateway.start_link(path, env_file: env)
+    listing = mcp(exact_response, "tools/list", String.duplicate(<<0>>, 256))
+    assert listing.status == 200
+    assert deterministic_size(listing.body) == 4_194_304
+    stop(catalog_owner)
+
+    _over_response = sized_static_config(path, config, 4_194_305, :response)
+    assert {:error, :catalog_too_large} = PtcGateway.start_link(path, env_file: env)
+
+    exact_catalog = sized_static_tools(4_194_304, :catalog)
+    assert deterministic_size(exact_catalog) == 4_194_304
+    assert PtcGateway.Domain.within_static_limit?(exact_catalog)
+
+    over_catalog = sized_static_tools(4_194_305, :catalog)
+    assert deterministic_size(over_catalog) == 4_194_305
+    refute PtcGateway.Domain.within_static_limit?(over_catalog)
+  end
+
+  @tag :slow
+  @tag :tmp_dir
+  test "exactly 128 unique tools start and list successfully", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    exact_config = rewrite_schema_config(path, config, %{"type" => "object"}, 128)
+
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+    listing = mcp(exact_config, "tools/list", 1)
+    assert listing.status == 200
+    assert length(listing.body["result"]["tools"]) == 128
   end
 
   @tag :nightly
@@ -289,6 +352,431 @@ defmodule PtcGatewayTest do
 
       assert response(config, "/health/ready").status == 200
     end)
+  end
+
+  @tag :tmp_dir
+  test "MCP discovery and listing are authenticated, strict, and deterministic", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+
+    discover = mcp(config, "server/discover", "request-id")
+    assert discover.status == 200
+    assert discover.headers["cache-control"] == ["no-store"]
+    assert discover.body["id"] == "request-id"
+
+    assert discover.body["result"] == %{
+             "resultType" => "complete",
+             "supportedVersions" => ["2026-07-28"],
+             "capabilities" => %{"tools" => %{"listChanged" => false}},
+             "ttlMs" => 0,
+             "cacheScope" => "private"
+           }
+
+    listing =
+      mcp(config, "tools/list", -9,
+        headers: [{"mcp-session-id", "ignored"}, {"last-event-id", "ignored"}]
+      )
+
+    assert listing.status == 200
+    assert listing.body["id"] == -9
+    assert Enum.map(listing.body["result"]["tools"], & &1["name"]) == ["a", "z"]
+
+    assert Enum.all?(listing.body["result"]["tools"], fn tool ->
+             Map.keys(tool) |> Enum.sort() ==
+               Enum.sort(~w(annotations description inputSchema name outputSchema title)) and
+               tool["annotations"] == %{"readOnlyHint" => true}
+           end)
+
+    assert mcp(config, "tools/list", 1, params: %{"cursor" => "x"}).body["error"]["code"] ==
+             -32602
+
+    assert mcp(config, "resources/list", 1).status == 404
+    assert mcp(config, "resources/list", 1).body["error"]["code"] == -32601
+
+    unauthorized =
+      mcp(config, "server/discover", 1,
+        token: "wrong-token-that-is-long-enough-123",
+        raw_body: "not-json"
+      )
+
+    assert unauthorized.status == 401
+    assert unauthorized.headers["www-authenticate"] == ["Bearer"]
+    refute inspect(unauthorized) =~ "not-json"
+
+    assert mcp(config, "server/discover", 1, accept: "application/json").status == 406
+
+    assert mcp(config, "server/discover", 1,
+             accept: "*/*;q=1, application/json;q=0, text/event-stream;q=1"
+           ).status == 406
+
+    assert mcp(config, "server/discover", 1, accept: "*/json, text/event-stream").status ==
+             406
+
+    assert mcp(config, "server/discover", 1, accept: "application/json;q, text/event-stream").status ==
+             406
+
+    assert mcp(config, "server/discover", 1,
+             accept: "application/json;charset=latin1, text/event-stream"
+           ).status == 406
+
+    assert mcp(config, "server/discover", 1,
+             accept: ~s(application/json;charset="utf-8", text/event-stream)
+           ).status == 200
+
+    assert mcp(config, "server/discover", 1,
+             accept: ~s(application/json;foo="a,b", application/json, text/event-stream)
+           ).status == 200
+
+    assert mcp(config, "server/discover", 1, content_type: "text/plain").status == 415
+    assert response(config, "/mcp", method: :get).status == 405
+
+    mismatch = mcp(config, "server/discover", 1, protocol: "2025-11-25")
+    assert mismatch.status == 400
+    assert mismatch.body["error"]["code"] == -32022
+
+    malformed = mcp(config, "server/discover", 1, raw_body: "{")
+    assert malformed.status == 400
+    assert malformed.body["error"]["code"] == -32700
+    refute Map.has_key?(malformed.body, "id")
+
+    invalid_info = %{
+      "_meta" => %{
+        "io.modelcontextprotocol/protocolVersion" => "2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities" => %{},
+        "io.modelcontextprotocol/clientInfo" => %{
+          "name" => "client",
+          "version" => "1",
+          "icons" => 42
+        }
+      }
+    }
+
+    invalid_info_response = mcp(config, "server/discover", 1, full_params: invalid_info)
+    assert invalid_info_response.status == 400
+    assert invalid_info_response.body["error"]["code"] == -32602
+
+    invalid_info =
+      put_in(
+        invalid_info,
+        ["_meta", "io.modelcontextprotocol/clientInfo"],
+        %{"name" => "client", "version" => "1", "websiteUrl" => "http://exa mple.com"}
+      )
+
+    invalid_uri_response = mcp(config, "server/discover", 1, full_params: invalid_info)
+    assert invalid_uri_response.status == 400
+    assert invalid_uri_response.body["error"]["code"] == -32602
+
+    for invalid_uri <- ["http://example.com/%", "http://exa%ZZmple"] do
+      invalid_info =
+        put_in(
+          invalid_info,
+          ["_meta", "io.modelcontextprotocol/clientInfo", "websiteUrl"],
+          invalid_uri
+        )
+
+      response = mcp(config, "server/discover", 1, full_params: invalid_info)
+      assert response.status == 400
+      assert response.body["error"]["code"] == -32602
+    end
+
+    for valid_uri <- ["HTTP://example.com/path", "http://example.com:80"] do
+      valid_info =
+        put_in(
+          invalid_info,
+          ["_meta", "io.modelcontextprotocol/clientInfo", "websiteUrl"],
+          valid_uri
+        )
+
+      response = mcp(config, "server/discover", 1, full_params: valid_info)
+      assert response.status == 200
+      refute Map.has_key?(response.body, "error")
+    end
+  end
+
+  @tag :tmp_dir
+  test "MCP critical headers and aggregate header bounds are enforced", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+
+    config =
+      put_in(config, ["listen", "allowed_origins"], ["https://one.example", "https://two.example"])
+
+    File.write!(path, Jason.encode!(config))
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+
+    duplicate_cases = [
+      {"origin", "https://one.example", 403},
+      {"authorization", "Bearer #{@token}", 401},
+      {"content-type", "application/json", 415},
+      {"accept", "application/json, text/event-stream", 406},
+      {"mcp-protocol-version", "2026-07-28", 400},
+      {"mcp-method", "tools/list", 400},
+      {"mcp-name", "a", 400}
+    ]
+
+    assert raw_mcp_status(config, [
+             {"Host", "127.0.0.1:#{config["listen"]["port"]}"},
+             {"Host", "127.0.0.1:#{config["listen"]["port"]}"}
+           ]) == 400
+
+    assert raw_mcp_status(config, [{"Host", "evil.example"}]) == 400
+
+    for {name, value, status} <- duplicate_cases do
+      headers =
+        cond do
+          name == "origin" -> [{"origin", value}, {"origin", "https://two.example"}]
+          name == "mcp-name" -> [{name, value}, {name, value}]
+          true -> [{name, value}]
+        end
+
+      assert mcp(config, "tools/list", 1, headers: headers).status == status,
+             "duplicate #{name} was not rejected"
+    end
+
+    assert raw_mcp_status(config, [{"Mcp-Method", "TOOLS/LIST"}]) == 400
+    assert raw_mcp_status(config, [{"mcp-method", "tools/list"}]) == 200
+    assert raw_mcp_status(config, [{"MCP-METHOD", "tools/list"}]) == 200
+    assert raw_mcp_status(config, [{"Mcp-Method", " \ttools/list\t "}]) == 200
+    assert raw_status(raw_mcp_response(config, [], method_header: false)) == 400
+
+    tab_bearer = raw_mcp_response(config, [{"Authorization", "Bearer\t#{@token}"}])
+    assert raw_status(tab_bearer) == 401
+
+    exact_count_headers = for index <- 1..56, do: {"X-Count-#{index}", "x"}
+    assert raw_status(raw_mcp_response(config, exact_count_headers)) == 200
+
+    count_error = raw_mcp_response(config, [{"X-Count-57", "x"} | exact_count_headers])
+    assert raw_status(count_error) == 431
+    assert raw_body(count_error) == ""
+
+    exact_aggregate_headers = aggregate_padding_headers(config, 32_768)
+    assert raw_status(raw_mcp_response(config, exact_aggregate_headers)) == 200
+
+    [{name, value} | rest] = exact_aggregate_headers
+    aggregate_error = raw_mcp_response(config, [{name, value <> "x"} | rest])
+    assert raw_status(aggregate_error) == 431
+    assert raw_body(aggregate_error) == ~s({"error":"request_headers_too_large"})
+
+    exact_line = raw_mcp_response(config, [{"X-Line", String.duplicate("x", 8_182)}])
+    assert raw_status(exact_line) == 200
+
+    oversized_line = raw_mcp_response(config, [{"X-Line", String.duplicate("x", 8_183)}])
+    assert raw_status(oversized_line) == 431
+    assert raw_body(oversized_line) == ""
+
+    assert raw_status(
+             raw_mcp_response(config, [], request_target: "/" <> String.duplicate("x", 8_175))
+           ) ==
+             404
+
+    request_line_error =
+      raw_mcp_response(config, [], request_target: "/" <> String.duplicate("x", 8_176))
+
+    assert raw_status(request_line_error) == 414
+    assert raw_body(request_line_error) == ""
+  end
+
+  @tag :tmp_dir
+  test "MCP body, metadata, JSON, and ID ceilings accept the boundary only", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+
+    exact_body = sized_json_object(2_097_152)
+    assert byte_size(exact_body) == 2_097_152
+    assert mcp(config, "tools/list", 1, raw_body: exact_body).body["error"]["code"] == -32600
+
+    oversized_body = exact_body <> " "
+    body_error = mcp(config, "tools/list", 1, raw_body: oversized_body)
+    assert body_error.status == 413
+    assert body_error.body == %{"error" => "request_too_large"}
+    assert byte_size(Jason.encode!(body_error.body)) <= 128
+
+    exact_meta = sized_meta(65_536)
+    assert byte_size(Jason.encode!(exact_meta)) == 65_536
+
+    refute Map.has_key?(
+             mcp(config, "server/discover", 1, full_params: %{"_meta" => exact_meta}).body,
+             "error"
+           )
+
+    oversized_meta = Map.update!(exact_meta, "padding", &(&1 <> "x"))
+    meta_error = mcp(config, "server/discover", 1, full_params: %{"_meta" => oversized_meta})
+    assert meta_error.status == 400
+    assert meta_error.body["error"]["code"] == -32602
+
+    exact_depth = Jason.encode!(%{"padding" => nest_json(62)})
+
+    assert {:ok, _} =
+             PtcRunner.Kernel.StrictJSON.decode(exact_depth, max_depth: 64, max_nodes: 100_000)
+
+    assert mcp(config, "tools/list", 1, raw_body: exact_depth).body["error"]["code"] == -32600
+
+    excessive_depth = Jason.encode!(%{"padding" => nest_json(63)})
+    assert mcp(config, "tools/list", 1, raw_body: excessive_depth).body["error"]["code"] == -32700
+
+    exact_nodes = Jason.encode!(%{"padding" => List.duplicate(0, 99_997)})
+
+    assert {:ok, _} =
+             PtcRunner.Kernel.StrictJSON.decode(exact_nodes, max_depth: 64, max_nodes: 100_000)
+
+    assert mcp(config, "tools/list", 1, raw_body: exact_nodes).body["error"]["code"] == -32600
+
+    excessive_nodes = Jason.encode!(%{"padding" => List.duplicate(0, 99_998)})
+    assert mcp(config, "tools/list", 1, raw_body: excessive_nodes).body["error"]["code"] == -32700
+
+    for id <- [String.duplicate("x", 256), -9_007_199_254_740_991, 9_007_199_254_740_991] do
+      assert mcp(config, "server/discover", id).body["id"] == id
+    end
+
+    for id <- [String.duplicate("x", 257), -9_007_199_254_740_992, 9_007_199_254_740_992] do
+      response = mcp(config, "server/discover", id)
+      assert response.body["error"]["code"] == -32600
+      refute Map.has_key?(response.body, "id")
+    end
+  end
+
+  test "request admission atomically bounds active requests" do
+    assert {:ok, admission} = PtcGateway.RequestAdmission.start_link(1)
+    assert {:ok, lease} = PtcGateway.RequestAdmission.acquire(admission)
+    assert :full = PtcGateway.RequestAdmission.acquire(admission)
+    assert :ok = PtcGateway.RequestAdmission.release(admission, lease)
+    assert {:ok, _lease} = PtcGateway.RequestAdmission.acquire(admission)
+
+    assert {:ok, reclaiming} = PtcGateway.RequestAdmission.start_link(1)
+    parent = self()
+
+    holder =
+      spawn(fn ->
+        send(parent, {:held, PtcGateway.RequestAdmission.acquire(reclaiming)})
+        receive do: (:stop -> :ok)
+      end)
+
+    assert_receive {:held, {:ok, _lease}}
+    monitor = Process.monitor(holder)
+    Process.exit(holder, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^holder, :killed}
+    assert {:ok, _lease} = acquire_eventually(reclaiming, 100)
+  end
+
+  @tag :tmp_dir
+  test "full HTTP admission returns the reserved-range-safe busy code", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    config = put_in(config, ["admission", "max_inflight_requests"], 1)
+    File.write!(path, Jason.encode!(config))
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+    admission = :sys.get_state(owner).request_admission
+    assert {:ok, lease} = PtcGateway.RequestAdmission.acquire(admission)
+    on_exit(fn -> PtcGateway.RequestAdmission.release(admission, lease) end)
+
+    busy = mcp(config, "tools/list", 7)
+    assert busy.status == 429
+
+    assert busy.body == %{
+             "jsonrpc" => "2.0",
+             "error" => %{"code" => -31999, "message" => "Server busy"}
+           }
+  end
+
+  @tag :tmp_dir
+  test "unavailable HTTP admission rejects before body parsing without an ID", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+    admission = :sys.get_state(owner).request_admission
+    monitor = Process.monitor(admission)
+    Process.exit(admission, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^admission, :killed}
+    _ = PtcGateway.Domain.metadata(owner)
+
+    response = raw_mcp_response(config, [], body: "not-json")
+    assert raw_status(response) == 503
+
+    assert Jason.decode!(raw_body(response)) == %{
+             "jsonrpc" => "2.0",
+             "error" => %{"code" => -31998, "message" => "Server unavailable"}
+           }
+  end
+
+  @tag :nightly
+  @tag :tmp_dir
+  test "official MCP conformance discovery and listing subset", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    {:ok, socket} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
+    {:ok, proxy_port} = :inet.port(socket)
+    :gen_tcp.close(socket)
+    proxy_authority = "127.0.0.1:#{proxy_port}"
+    config = put_in(config, ["listen", "allowed_origins"], ["http://#{proxy_authority}"])
+    File.write!(path, Jason.encode!(config))
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+
+    target_authority = "127.0.0.1:#{config["listen"]["port"]}"
+
+    assert {:ok, proxy} =
+             Bandit.start_link(
+               plug:
+                 {PtcGateway.ConformanceProxy,
+                  target: "http://" <> target_authority,
+                  target_authority: target_authority,
+                  proxy_authority: proxy_authority,
+                  token: @token},
+               ip: {127, 0, 0, 1},
+               port: proxy_port,
+               startup_log: false,
+               http_2_options: [enabled: false]
+             )
+
+    on_exit(fn -> stop(proxy) end)
+    executable = Path.expand("support/mcp_conformance/node_modules/.bin/conformance", __DIR__)
+
+    for scenario <-
+          ~w(server-stateless tools-list dns-rebinding-protection caching) do
+      {output, status} =
+        System.cmd(
+          executable,
+          [
+            "server",
+            "--url",
+            "http://#{proxy_authority}/mcp",
+            "--scenario",
+            scenario,
+            "--spec-version",
+            "2026-07-28",
+            "--expected-failures",
+            Path.expand("support/mcp_conformance/expected-failures.yml", __DIR__)
+          ],
+          stderr_to_stdout: true
+        )
+
+      assert status == 0, String.slice(output, -5_000, 5_000)
+    end
+
+    client_script = Path.expand("support/mcp_conformance/client_journey.mjs", __DIR__)
+
+    {output, status} =
+      System.cmd("node", [client_script, "http://#{target_authority}/mcp", @token],
+        stderr_to_stdout: true
+      )
+
+    assert status == 0, output
+    assert %{"discover" => discover, "listing" => listing} = Jason.decode!(output)
+    assert discover["supportedVersions"] == ["2026-07-28"]
+    assert listing["tools"] == PtcGateway.Domain.metadata(owner).tools
   end
 
   @tag :tmp_dir
@@ -410,5 +898,292 @@ defmodule PtcGatewayTest do
     )
   end
 
-  defp stop(pid), do: if(Process.alive?(pid), do: GenServer.stop(pid))
+  defp mcp(config, method, id, opts \\ []) do
+    protocol = Keyword.get(opts, :protocol, "2026-07-28")
+
+    params =
+      Keyword.get_lazy(opts, :full_params, fn ->
+        Map.merge(
+          %{
+            "_meta" => %{
+              "io.modelcontextprotocol/protocolVersion" => protocol,
+              "io.modelcontextprotocol/clientCapabilities" => %{}
+            }
+          },
+          Keyword.get(opts, :params, %{})
+        )
+      end)
+
+    body =
+      Keyword.get_lazy(opts, :raw_body, fn ->
+        Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "method" => method, "params" => params})
+      end)
+
+    headers =
+      [
+        {"authorization", "Bearer #{Keyword.get(opts, :token, @token)}"},
+        {"content-type", Keyword.get(opts, :content_type, "application/json")},
+        {"accept", Keyword.get(opts, :accept, "application/json, text/event-stream")},
+        {"mcp-protocol-version", protocol}
+      ] ++
+        if Keyword.get(opts, :method_header, true), do: [{"mcp-method", method}], else: []
+
+    response(config, "/mcp",
+      method: :post,
+      headers: headers ++ Keyword.get(opts, :headers, []),
+      body: body
+    )
+  end
+
+  defp stop(pid) do
+    if Process.alive?(pid), do: GenServer.stop(pid)
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp raw_mcp_status(config, extra_headers) do
+    config |> raw_mcp_response(extra_headers) |> raw_status()
+  end
+
+  defp raw_mcp_response(config, extra_headers, opts \\ []) do
+    port = config["listen"]["port"]
+    body = Keyword.get(opts, :body, raw_mcp_body())
+    headers = raw_mcp_headers(config, extra_headers, body, opts)
+
+    request =
+      [
+        "POST #{Keyword.get(opts, :request_target, "/mcp")} HTTP/1.1\r\n",
+        Enum.map(headers, fn {name, value} -> [name, ": ", value, "\r\n"] end),
+        "\r\n",
+        body
+      ]
+
+    {:ok, socket} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false])
+    :ok = :gen_tcp.send(socket, request)
+    response = recv_to_close(socket, [])
+    :gen_tcp.close(socket)
+    response
+  end
+
+  defp recv_to_close(socket, chunks) do
+    case :gen_tcp.recv(socket, 0, 2_000) do
+      {:ok, chunk} -> recv_to_close(socket, [chunk | chunks])
+      {:error, :closed} -> chunks |> Enum.reverse() |> IO.iodata_to_binary()
+      {:error, reason} -> flunk("raw HTTP response read failed: #{inspect(reason)}")
+    end
+  end
+
+  defp raw_mcp_body do
+    Jason.encode!(%{
+      "jsonrpc" => "2.0",
+      "id" => 1,
+      "method" => "tools/list",
+      "params" => %{
+        "_meta" => %{
+          "io.modelcontextprotocol/protocolVersion" => "2026-07-28",
+          "io.modelcontextprotocol/clientCapabilities" => %{}
+        }
+      }
+    })
+  end
+
+  defp raw_mcp_headers(config, extra_headers, body, opts \\ []) do
+    port = config["listen"]["port"]
+
+    extra_headers =
+      if Enum.any?(extra_headers, fn {name, _value} -> String.downcase(name) == "host" end),
+        do: extra_headers,
+        else: [{"Host", "127.0.0.1:#{port}"} | extra_headers]
+
+    default_authorization =
+      if Enum.any?(extra_headers, fn {name, _value} ->
+           String.downcase(name) == "authorization"
+         end),
+         do: [],
+         else: [{"Authorization", "Bearer #{@token}"}]
+
+    default_method =
+      if Keyword.get(opts, :method_header, true) and
+           not Enum.any?(extra_headers, fn {name, _value} ->
+             String.downcase(name) == "mcp-method"
+           end),
+         do: [{"Mcp-Method", "tools/list"}],
+         else: []
+
+    extra_headers ++
+      default_authorization ++
+      [
+        {"Content-Type", "application/json"},
+        {"Accept", "application/json, text/event-stream"},
+        {"MCP-Protocol-Version", "2026-07-28"},
+        {"Content-Length", Integer.to_string(byte_size(body))},
+        {"Connection", "close"}
+      ] ++ default_method
+  end
+
+  defp aggregate_padding_headers(config, target) do
+    base_bytes = header_bytes(raw_mcp_headers(config, [], raw_mcp_body()))
+    names = for index <- 1..4, do: "X-Pad-#{index}"
+    value_bytes = target - base_bytes - Enum.sum(Enum.map(names, &byte_size/1))
+    common = div(value_bytes, length(names))
+    remainder = rem(value_bytes, length(names))
+
+    names
+    |> Enum.with_index()
+    |> Enum.map(fn {name, index} ->
+      {name, String.duplicate("x", common + if(index < remainder, do: 1, else: 0))}
+    end)
+  end
+
+  defp header_bytes(headers),
+    do: Enum.sum(Enum.map(headers, fn {name, value} -> byte_size(name) + byte_size(value) end))
+
+  defp raw_status(response) do
+    [_, status | _] = :binary.split(response, " ", [:global])
+    String.to_integer(status)
+  end
+
+  defp raw_body(response) do
+    case :binary.split(response, "\r\n\r\n") do
+      [_headers, body] -> body
+      [_headers] -> ""
+    end
+  end
+
+  defp sized_json_object(size) do
+    prefix = ~s({"padding":")
+    suffix = ~s("})
+    prefix <> String.duplicate("x", size - byte_size(prefix) - byte_size(suffix)) <> suffix
+  end
+
+  defp sized_meta(size) do
+    base = %{
+      "io.modelcontextprotocol/protocolVersion" => "2026-07-28",
+      "io.modelcontextprotocol/clientCapabilities" => %{},
+      "padding" => ""
+    }
+
+    encoded_size = byte_size(Jason.encode!(base))
+    Map.put(base, "padding", String.duplicate("x", size - encoded_size))
+  end
+
+  defp nest_json(0), do: 0
+  defp nest_json(depth), do: [nest_json(depth - 1)]
+
+  defp sized_schema(size) do
+    base = %{"type" => "object", "description" => ""}
+    {:ok, normalized, _compiled} = PtcRunner.Kernel.JSONSchema.compile(base)
+    Map.put(base, "description", String.duplicate("x", size - deterministic_size(normalized)))
+  end
+
+  defp deterministic_size(value) do
+    {:ok, encoded} = PtcRunner.Kernel.DeterministicJSON.encode(value)
+    byte_size(encoded)
+  end
+
+  defp rewrite_schema_config(path, config, schema, tool_count) do
+    directory = Path.dirname(path)
+    File.write!(Path.join(directory, "schema.json"), Jason.encode!(schema))
+
+    {:ok, template} =
+      ServingTemplate.from_directory(
+        Path.join(directory, "app.json"),
+        Limits.installed_defaults()
+      )
+
+    digest = ServingTemplate.application_content_digest(template)
+    base_tool = hd(config["tools"])
+
+    tools =
+      for index <- 1..tool_count do
+        base_tool
+        |> Map.put("name", "tool-#{String.pad_leading(Integer.to_string(index), 3, "0")}")
+        |> Map.put("expected_application_content_digest", digest)
+      end
+
+    updated = Map.put(config, "tools", tools)
+    File.write!(path, Jason.encode!(updated))
+    updated
+  end
+
+  defp sized_static_config(path, config, target, :response) do
+    tools = sized_static_tools(target, :response)
+    schema = tools |> hd() |> Map.fetch!("inputSchema")
+    updated = rewrite_schema_config(path, config, schema, length(tools))
+
+    descriptions = Map.new(tools, &{&1["name"], &1["description"]})
+
+    updated =
+      update_in(
+        updated,
+        ["tools"],
+        &Enum.map(&1, fn tool ->
+          Map.replace!(tool, "description", Map.fetch!(descriptions, tool["name"]))
+        end)
+      )
+
+    File.write!(path, Jason.encode!(updated))
+    updated
+  end
+
+  defp sized_static_tools(target, kind) do
+    schema = sized_schema(63_500)
+    {:ok, normalized, _compiled} = PtcRunner.Kernel.JSONSchema.compile(schema)
+
+    tools =
+      for index <- 1..32 do
+        %{
+          "name" => "tool-#{String.pad_leading(Integer.to_string(index), 3, "0")}",
+          "title" => "A",
+          "description" => "A tool",
+          "inputSchema" => normalized,
+          "outputSchema" => normalized,
+          "annotations" => %{"readOnlyHint" => true}
+        }
+      end
+
+    sized_static_tools(tools, target, kind)
+  end
+
+  defp sized_static_tools(tools, target, kind) do
+    size = static_fixture_size(tools, kind)
+
+    if size > target, do: flunk("static fixture base exceeds target by #{size - target} bytes")
+
+    {tools, remaining} =
+      Enum.map_reduce(tools, target - size, fn tool, remaining ->
+        added = min(remaining, 4096 - byte_size(tool["description"]))
+
+        {Map.update!(tool, "description", &(&1 <> String.duplicate("x", added))),
+         remaining - added}
+      end)
+
+    if remaining == 0,
+      do: tools,
+      else: flunk("static fixture lacks #{remaining} bytes of padding capacity")
+  end
+
+  defp static_fixture_size(tools, :catalog), do: deterministic_size(tools)
+
+  defp static_fixture_size(tools, :response) do
+    deterministic_size(%{
+      "jsonrpc" => "2.0",
+      "id" => String.duplicate(<<0>>, 256),
+      "result" => %{
+        "resultType" => "complete",
+        "tools" => tools,
+        "ttlMs" => 0,
+        "cacheScope" => "private"
+      }
+    })
+  end
+
+  defp acquire_eventually(_admission, 0), do: :full
+
+  defp acquire_eventually(admission, attempts) do
+    case PtcGateway.RequestAdmission.acquire(admission) do
+      :full -> acquire_eventually(admission, attempts - 1)
+      result -> result
+    end
+  end
 end
