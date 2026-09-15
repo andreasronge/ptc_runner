@@ -88,6 +88,11 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   policy for accepted templates and input authority are
   normal, result projection is JSON, inspection capture is disabled, and
   publication is artifact-free. None of these choices is a per-call override.
+  The private refusal is the decided contract rather than an unimplemented
+  destination: serving authorizes no artifact destination at all, so a private
+  policy has no private result to place, and possessing a serving template must
+  not become an implicit override of it. Serve such an application by publishing
+  it under a `normal` policy instead.
 
   ## Ownership and close
 
