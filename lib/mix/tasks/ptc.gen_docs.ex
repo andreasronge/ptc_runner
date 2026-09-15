@@ -20,6 +20,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   13. the exit-status catalog inside `docs/reference/cli.md`
   14. the profile-frontend diagnostic catalog inside `docs/reference/cli.md`
   15. the static-site guide pages under `site/guides/` (via `mix ptc.gen_site_guides`)
+  16. `priv/schemas/ptc-gateway-config.schema.json` — strict loopback gateway JSON Schema
 
   ## Usage
 
@@ -35,6 +36,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   alias PtcRunner.Kernel.CommandFrontend
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.DiagnosticCatalog
+  alias PtcRunner.Kernel.GatewayConfig
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.LimitCatalog
@@ -64,11 +66,13 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   @manifest_schema_path "priv/schemas/ptc-application-manifest.schema.json"
   @command_schema_path "priv/schemas/ptc-command-envelope-v4.schema.json"
   @project_schema_path "priv/schemas/ptc-project-config.schema.json"
+  @gateway_schema_path "priv/schemas/ptc-gateway-config.schema.json"
   @generated_schema_paths [
     @host_schema_path,
     @manifest_schema_path,
     @command_schema_path,
-    @project_schema_path
+    @project_schema_path,
+    @gateway_schema_path
   ]
 
   @audits [
@@ -178,6 +182,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     generate_manifest_schema(check?)
     generate_command_schema(check?)
     generate_project_schema(check?)
+    generate_gateway_schema(check?)
 
     # The site-guide generator needs EarmarkParser and therefore lives under
     # dev/; dispatching by name keeps this module compilable in :prod, where
@@ -544,6 +549,12 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     {:ok, encoded} = CommandContract.schema() |> DeterministicJSON.encode()
     write_or_check!(@command_schema_path, encoded <> "\n", check?)
     report_generation(@command_schema_path, 1, "schema", check?)
+  end
+
+  defp generate_gateway_schema(check?) do
+    {:ok, encoded} = GatewayConfig.schema() |> DeterministicJSON.encode()
+    write_or_check!(@gateway_schema_path, encoded <> "\n", check?)
+    report_generation(@gateway_schema_path, 1, "schema", check?)
   end
 
   defp generate_project_schema(check?) do

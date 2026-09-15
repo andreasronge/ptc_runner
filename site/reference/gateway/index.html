@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gateway configuration · PtcRunner</title>
+<meta name="description" content="The loopback gateway loads one fixed set of applications and exposes health
+checks.">
+<link rel="canonical" href="https://ptc-runner.dev/reference/gateway/">
+<meta property="og:title" content="Gateway configuration · PtcRunner">
+<meta property="og:description" content="The loopback gateway loads one fixed set of applications and exposes health
+checks.">
+<meta property="og:url" content="https://ptc-runner.dev/reference/gateway/">
+<meta property="og:type" content="article">
+<link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Inspect and customize components</a></li>
+</ul>
+
+<h2>Design</h2>
+<ul>
+<li><a href="/guides/designing-agent-workflows/">Design an agent workflow</a></li>
+<li><a href="/guides/agent-workflow-patterns/">Choose a workflow shape</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/inspecting-source-and-programs/">Inspect source and generated programs</a></li>
+<li><a href="/guides/self-improvement/">Let an agent improve its own workflow</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/examples/">Examples reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/gateway/" class="current" aria-current="page">Gateway configuration</a></li>
+<li><a href="/reference/viewer/">Viewer reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="gateway-configuration">Gateway configuration</h1><p>The loopback gateway loads one fixed set of applications and exposes health
+checks.</p><p>MCP discovery, request-header authentication, execution, and standalone release
+integration are separate delivery steps.</p><p>Run the source command from <code class="inline">ptc_gateway/</code>:</p><pre><code class="sh language-sh">mix ptc.gateway /absolute/path/ptc-gateway.json --env-file /absolute/path/credentials.env</code></pre><p>Remote clients need an authenticated tunnel to loopback. Native TLS, proxy
+trust, direct private-network binding, and container port publishing are not
+supported. Changing configuration, credentials, templates, or pins requires a
+whole-domain restart.</p><h2 id="version-1-contract">Version 1 contract</h2><p><code class="inline">priv/schemas/ptc-gateway-config.schema.json</code> is generated from
+<code class="inline">PtcRunner.Kernel.GatewayConfig.schema/0</code> by <code class="inline">mix ptc.gen_docs</code>. The root
+staleness gate checks it. The schema and this semantic table are normative.
+There is no implicit configuration search or implicit environment-file search.</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Surface</th><th style="text-align: left;">Rule</th></tr></thead><tbody><tr><td style="text-align: left;">JSON</td><td style="text-align: left;">UTF-8, at most 1,000,000 bytes; duplicate and unknown keys rejected at every depth. Strings exclude NUL, CR and LF. Schema string maxima are also byte maxima.</td></tr><tr><td style="text-align: left;">Required fields</td><td style="text-align: left;"><code class="inline">version</code>, <code class="inline">listen</code>, <code class="inline">authentication</code>, <code class="inline">host</code>, <code class="inline">admission</code>, <code class="inline">tools</code>; nested requirements are specified by the schema.</td></tr><tr><td style="text-align: left;">Version</td><td style="text-align: left;">Exactly <code class="inline">1</code>. Optional <code class="inline">$schema</code> has the exact published gateway schema URL.</td></tr><tr><td style="text-align: left;">Listener</td><td style="text-align: left;">Literal <code class="inline">127.0.0.1</code> or <code class="inline">::1</code>; port 1–65535, fixed path <code class="inline">/mcp</code>.</td></tr><tr><td style="text-align: left;">Origins</td><td style="text-align: left;"><code class="inline">listen.allowed_origins</code> defaults to <code class="inline">[]</code>; at most 128 unique HTTP(S) serialized origins, each at most 2048 bytes. No userinfo, path, query, fragment, whitespace, escapes, uppercase host, or explicit default port.</td></tr><tr><td style="text-align: left;">Authority</td><td style="text-align: left;">Every request requires exactly the configured literal listener authority, including its port except port 80; IPv6 uses brackets. No proxy headers are trusted.</td></tr><tr><td style="text-align: left;">Bearer</td><td style="text-align: left;"><code class="inline">authentication.bearer.binding</code> names a host credential. The document never carries the bearer value. Capture enforces 32–4096 ASCII bytes in HTTP bearer-token grammar.</td></tr><tr><td style="text-align: left;">Admission</td><td style="text-align: left;"><code class="inline">max_inflight_requests</code>, <code class="inline">max_concurrent_runs</code>, and <code class="inline">max_active_provider_calls</code> each require 1–65535; <code class="inline">max_waiting_provider_calls</code> requires 0–65535. The request limit is supplied to the future MCP transport.</td></tr><tr><td style="text-align: left;">Tools</td><td style="text-align: left;">1–128 entries, unique names matching <code class="inline">[a-zA-Z0-9_.-]{1,128}</code>, validated in name order. Titles require 1–256 bytes; descriptions 1–4096.</td></tr><tr><td style="text-align: left;">Application</td><td style="text-align: left;"><code class="inline">application.manifest</code> names one manifest file, at most 1024 bytes. The serving constructor requires object input/output contracts and a validated read/write effect.</td></tr><tr><td style="text-align: left;">Write permission</td><td style="text-align: left;"><code class="inline">allow_write</code> defaults to false. A compiled write effect requires true; permission never changes the compiled effect.</td></tr><tr><td style="text-align: left;">Content pin</td><td style="text-align: left;">Required <code class="inline">expected_application_content_digest</code>, exactly <code class="inline">sha256:</code> plus 64 lowercase hex characters; effective application identity is not interchangeable.</td></tr><tr><td style="text-align: left;">Installation pins</td><td style="text-align: left;">Required exact map <code class="inline">installation_config_pins</code>, keyed by installation name. Missing, extra, stale or mismatched values refuse startup.</td></tr><tr><td style="text-align: left;">Snapshot pins</td><td style="text-align: left;">Required exact map <code class="inline">provider_snapshot_pins</code>, keyed <code class="inline">workflow/name</code> or <code class="inline">mission/name</code>. Values pin acquisition identity, never volatile content. Tools without providers require both maps to be empty.</td></tr><tr><td style="text-align: left;">Paths</td><td style="text-align: left;">Host, application manifests and audit directory resolve from the gateway document directory. Nested host-owned paths retain host-document-relative semantics.</td></tr><tr><td style="text-align: left;">Environment file</td><td style="text-align: left;">Anchored once from the invocation directory. Warm startup captures the bearer and selected provider credentials in one scope, restoring environment and lock before listener binding, including on failure.</td></tr><tr><td style="text-align: left;">Private audit</td><td style="text-align: left;">Required iff any tool sets <code class="inline">allow_write: true</code>; forbidden otherwise. Required fields: <code class="inline">directory</code>, <code class="inline">max_file_bytes</code> (1024–67108864), <code class="inline">max_retained_files</code> (2–128).</td></tr></tbody></table></div><h2 id="pins">Pins</h2><p>From the root project, obtain the two provider pin maps using the existing safe
+command. It never runs the workflow and prints no credential or volatile
+provider content:</p><pre><code class="sh language-sh">mix ptc.provider_pins /absolute/path/app.json --host /absolute/path/host.json --env-file /absolute/path/credentials.env</code></pre><p>An application without providers prints exactly:</p><pre><code class="json language-json">{&quot;installation_config_pins&quot;:{},&quot;provider_snapshot_pins&quot;:{}}</code></pre><p>Provider-bearing output uses the same keys and <code class="inline">sha256:&lt;64 lowercase hex&gt;</code>
+values. Copy both complete maps into that tool's configuration. Obtain the
+application content pin from the root source project without running the
+workflow or resolving credentials:</p><pre><code class="sh language-sh">mix run -e '
+with {:ok, host} &lt;- PtcRunner.Kernel.HostConfig.load(&quot;/absolute/path/host.json&quot;),
+     {:ok, package, _} &lt;- PtcRunner.Kernel.ApplicationPackage.acquire_directory(
+       &quot;/absolute/path/app.json&quot;, installed_limits: host.limits, omit_input: true) do
+  IO.puts(&quot;sha256:&quot; &lt;&gt; package.application_content_digest)
+else
+  _ -&gt; IO.puts(:stderr, &quot;Application pin unavailable&quot;); System.halt(78)
+end'</code></pre><p>The command prints one line, <code class="inline">sha256:&lt;64 lowercase hex&gt;</code>. Copy it into
+<code class="inline">expected_application_content_digest</code>.</p><h2 id="private-audit-directory">Private audit directory</h2><p>Startup rejects symbolic links anywhere in the audit hierarchy and unsafe
+ownership or writable ancestry. It creates missing directories as 0700 and
+files as 0600 before writing any content. The private directory is exclusively
+locked for the owner's lifetime. After an unclean owner death, the retained
+lock requires you to stop the old process before removing it.</p><p>Each startup durably opens a new numbered file and separately appends and
+flushes a temporary probe before readiness. The probe is then removed. Only after the replacement is durable may retention
+remove closed files, oldest first. Active files are never truncated. Unexpected
+files, hard links, oversized files or wrong permissions refuse startup. There
+is no HTTP audit-reading endpoint. Per-call redacted records and execution
+failure fencing belong to the execution integration.</p><h2 id="health">Health</h2><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Request</th><th style="text-align: left;">Response</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">GET /health/live</code></td><td style="text-align: left;">200 <code class="inline">{&quot;status&quot;:&quot;live&quot;}</code> while listener and gateway owner remain alive.</td></tr><tr><td style="text-align: left;"><code class="inline">GET /health/ready</code></td><td style="text-align: left;">200 <code class="inline">{&quot;status&quot;:&quot;ready&quot;}</code> when the warm domain is ready; otherwise 503 <code class="inline">{&quot;status&quot;:&quot;not_ready&quot;}</code>.</td></tr><tr><td style="text-align: left;">Other method on either health path</td><td style="text-align: left;">405. <code class="inline">OPTIONS</code> is unsupported.</td></tr><tr><td style="text-align: left;">Other path</td><td style="text-align: left;">404.</td></tr><tr><td style="text-align: left;">Invalid authority, on any path</td><td style="text-align: left;">400 before routing.</td></tr></tbody></table></div><p>Health needs no bearer and returns no CORS headers. Responses use
+<code class="inline">application/json</code> and <code class="inline">Cache-Control: no-store</code>. Readiness uses the warm
+runtime's bounded snapshot, including captured credentials, pinned providers,
+run admission and provider-call admission. Saturation stays ready; required
+runtime loss or fencing makes readiness permanently false while liveness
+continues. Invalid static startup configuration prevents listener binding.</p><h2 id="startup-failures">Startup failures</h2><p>Only the first error is returned. Precedence is document read/JSON, structural
+schema and byte bounds, origins, duplicate tool names, audit presence, host,
+then each tool's constructor/pin and write permission in name order, audit
+filesystem probe, run admission, warm credential capture/provider pins, and
+listener binding. A stage must succeed before the next stage runs.</p><p>The CLI writes one JSON object <code class="inline">{&quot;error&quot;:&quot;&lt;code&gt;&quot;}</code> and newline to stderr,
+nothing to stdout, and exits 78. Successful startup is silent. No names, paths,
+credentials, causes or stack traces belong in startup diagnostics.</p><p>The finite catalog is <code class="inline">config_unavailable</code>, <code class="inline">duplicate_json_key</code>,
+<code class="inline">config_invalid</code>, <code class="inline">origin_invalid</code>, <code class="inline">tool_name_duplicate</code>, <code class="inline">audit_invalid</code>,
+<code class="inline">host_invalid</code>, <code class="inline">template_invalid</code>, <code class="inline">application_content_digest_mismatch</code>,
+<code class="inline">write_forbidden</code>, <code class="inline">audit_unavailable</code>, <code class="inline">run_admission_unavailable</code>,
+<code class="inline">credential_unavailable</code>, <code class="inline">installation_pin_mismatch</code>, <code class="inline">provider_pin_mismatch</code>,
+<code class="inline">provider_pin_unavailable</code>, <code class="inline">provider_admission_unavailable</code>,
+<code class="inline">provider_runtime_unavailable</code>, <code class="inline">listener_unavailable</code>, and <code class="inline">internal_error</code>.
+Unrecognized internal failures map to <code class="inline">internal_error</code>.</p>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/cli/">&larr; Command-line reference</a><a class="pager-next" href="/reference/viewer/">Viewer reference &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/reference/gateway.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>
