@@ -813,6 +813,53 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       assert {:error, :source_unavailable} =
                TraceLog.append_jsonl(path, [], private: true)
     end
+
+    @tag :tmp_dir
+    test "a replaced authority binary at one path is not served a cached answer", %{
+      tmp_dir: dir
+    } do
+      original_path = System.get_env("PATH")
+      actual_uid = current_uid()
+
+      path =
+        Path.join(
+          "/tmp",
+          "ptc-private-rebind-#{System.unique_integer([:positive])}.private.jsonl"
+        )
+
+      on_exit(fn ->
+        System.put_env("PATH", original_path)
+        File.rm(path)
+      end)
+
+      fake_bin = Path.join(dir, "bin")
+      File.mkdir!(fake_bin)
+      fake_id = Path.join(fake_bin, "id")
+      owner_uid = if actual_uid == 0, do: 1, else: actual_uid
+
+      write_fake_id = fn uid ->
+        File.write!(fake_id, "#!/bin/sh\nprintf '%s\\n' '#{uid}'\n")
+        File.chmod!(fake_id, 0o755)
+      end
+
+      write_fake_id.(owner_uid + 1)
+      System.put_env("PATH", fake_bin <> ":" <> original_path)
+
+      File.write!(path, "")
+      File.chmod!(path, 0o600)
+      if actual_uid == 0, do: :ok = :file.change_owner(String.to_charlist(path), owner_uid)
+
+      # Populates any authority cache under this pathname with the mismatch.
+      assert {:error, :trace_destination_unavailable} =
+               TraceLog.preflight_destination(path, true)
+
+      # The same pathname now answers with the owning uid. A cache keyed on the
+      # pathname alone would keep refusing; the binary's identity has changed,
+      # so the answer must be read again.
+      write_fake_id.(owner_uid)
+
+      assert :ok = TraceLog.preflight_destination(path, true)
+    end
   end
 
   describe "temporary sibling path bounds" do

@@ -165,7 +165,11 @@ defmodule PtcRunner.Kernel.DispatcherBoundedSchemaTest do
         dispatch_capability(
           capability,
           %{"schema" => @request_schema},
-          [validation_deadline_ms: deadline_ms, timeout_ms: 5_000],
+          # The 1s validation deadline above is this case's subject. The
+          # dispatch timeout is not: at 5s it raced the default assert_receive
+          # budget below, and under suite load the dispatch could return before
+          # the callback's handshake arrived, leaving `:in_callback` unsent.
+          [validation_deadline_ms: deadline_ms, timeout_ms: 60_000],
           prepared
         )
       end)

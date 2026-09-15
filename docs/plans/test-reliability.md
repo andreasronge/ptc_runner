@@ -117,7 +117,10 @@ Measured on an idle machine:
 | `id -u` | 4.63 ms |
 | `id -G` | 7.63 ms |
 | `mkdir -m 700` | 4.91 ms |
-| **one `PrivateDirectory.create/1`** | **23.13 ms** |
+| **one `PrivateDirectory.create/1`** | **~22 ms** |
+
+With the cache, and over three runs each on the same machine, one
+`create/1` costs ~8 ms against ~22 ms — about 2.7x.
 
 **The repair: cache the authority identity for the VM's lifetime.** A BEAM
 process cannot change its own uid or supplementary groups after start, so
@@ -128,6 +131,22 @@ two failure surfaces that map to `:private_directory_unavailable`.
 Cache in `:persistent_term` behind a single accessor, populated on first use;
 `command_contract.ex`, `semantic_revision.ex` and `attestation.ex` already use
 it in this kernel, so the mechanism is not new here.
+
+Two decisions that independent review pushed on, recorded so they are not
+relitigated blind:
+
+- **The key carries the binary's identity, not its pathname.** `id` is resolved
+  through PATH, and the ownership tests exercise an authority mismatch by
+  installing a stand-in on PATH, so a module-global key breaks them. A pathname
+  alone is not enough either: replacing the binary at that path would be served
+  a stale uid forever. The key is `{kind, path, device, inode, mtime, size}`,
+  one `lstat` guarding a subprocess. `inspection_preflight_test` covers the
+  same-path replacement, and that test fails against a pathname-only key.
+- **The fill is not single-flighted.** Concurrent cold callers can each read
+  once. That costs a handful of duplicate subprocesses in a VM's first
+  milliseconds against the thousands removed over its life, and serialising it
+  would mean an owner process or a cross-node lock on a path that must stay
+  callable from anywhere. The read is idempotent, so a race only repeats work.
 It must stay a cache of a genuinely immutable fact, not a convenience: the
 directory-ownership checks that compare a stat's uid against the authority uid
 keep their meaning, because the value they compare against cannot have changed.
@@ -145,10 +164,20 @@ not, they need their own diagnosis.
 | `test/ptc_runner/live_status_test.exs:692` | `Task.await(run, 5000)` | `limit_exceeded` arrived as a value, not an error |
 | `test/ptc_runner/kernel/project_command_test.exs:186` | 60s per-test | `ExUnit.TimeoutError` |
 
-`project_command_test.exs:186` is the clearest and the least interesting: the
-whole file takes 58.0s against a 60s per-test timeout on an idle machine. It is
-not marginally over budget under load, it is marginally under budget at rest.
-Either the test does less work or it states why it needs that long.
+`project_command_test.exs:186` needed no change of its own: shape 2 fixed it.
+The file drives 20 `CommandFrontend.execute/3` calls plus an init and a run,
+each creating private directories, so it was paying the subprocess cost more
+than most. Measured on the same machine, same file:
+
+| | Wall |
+| --- | --- |
+| without the identity cache | 48.0s |
+| with it | 33.8s |
+
+The slowest single test runs in 17.5s in isolation, real headroom against the
+60s per-test timeout it was tripping. This is the useful kind of
+result: the timeout was a symptom of the substrate in shape 2, not a budget
+that needed widening.
 
 `live_status_test.exs:692` is the one that deserves care and should not be
 treated as a timing fix. It asserts a run deadline surfaces as
@@ -167,8 +196,11 @@ timeout would hide a real ambiguity.
    accessor for uid and groups. Production change with the widest blast radius
    in this plan, and the only one that can make the suite faster as well as
    steadier.
-3. **Shape 3, `dispatcher_bounded_schema_test.exs:130` and
-   `project_command_test.exs:186`.** Budget and workload decisions per test.
+3. **Shape 3, `dispatcher_bounded_schema_test.exs:130`.** Its dispatch
+   `timeout_ms` raced the default `assert_receive` budget at the same 5s, so
+   the dispatch could return before the callback handshake arrived. The 1s
+   validation deadline is the subject; the dispatch timeout should not be a
+   competing bound. `project_command_test.exs:186` is covered by item 2.
 4. **Shape 1, `analysis_session_test.exs:1100`.** Liveness assertions that turn
    the next occurrence into a lead. Diagnostic, not a fix.
 5. **`live_status_test.exs:692`.** Settle the contract question first.
