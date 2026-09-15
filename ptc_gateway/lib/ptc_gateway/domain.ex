@@ -51,6 +51,7 @@ defmodule PtcGateway.Domain do
       }
 
       with {:ok, tools, metadata} <- templates(config["tools"], host, catalog),
+           :ok <- static_catalog(metadata),
            {:ok, services} <- HostInstallation.runtime_services(host) do
         boot(config, tools, services, env_file, %{state | metadata: metadata})
       else
@@ -90,11 +91,12 @@ defmodule PtcGateway.Domain do
           }
 
           safe = %{
-            name: entry["name"],
-            title: entry["title"],
-            description: entry["description"],
-            effect: ServingTemplate.effect(template),
-            application_content_digest: ServingTemplate.application_content_digest(template)
+            "name" => entry["name"],
+            "title" => entry["title"],
+            "description" => entry["description"],
+            "inputSchema" => ServingTemplate.input_schema(template),
+            "outputSchema" => ServingTemplate.output_schema(template),
+            "annotations" => %{"readOnlyHint" => ServingTemplate.effect(template) == :read}
           }
 
           {:cont,
@@ -105,6 +107,21 @@ defmodule PtcGateway.Domain do
           {:halt, {:error, code}}
       end
     end)
+  end
+
+  defp static_catalog(tools) do
+    schemas = Enum.flat_map(tools, &[&1["inputSchema"], &1["outputSchema"]])
+
+    if Enum.all?(schemas, &(encoded_size(&1) <= 65_536)) and encoded_size(tools) <= 4_194_304,
+      do: :ok,
+      else: {:error, :static_catalog_too_large}
+  end
+
+  defp encoded_size(value) do
+    case PtcRunner.Kernel.DeterministicJSON.encode(value) do
+      {:ok, bytes} -> byte_size(bytes)
+      _ -> 4_194_305
+    end
   end
 
   defp template(entry, host, catalog) do
@@ -168,7 +185,7 @@ defmodule PtcGateway.Domain do
     ip = if listen["address"] == "::1", do: {0, 0, 0, 0, 0, 0, 0, 1}, else: {127, 0, 0, 1}
 
     case Bandit.start_link(
-           plug: {PtcGateway.Health, listen: listen, warm: state.warm},
+           plug: {PtcGateway.Router, listen: listen, warm: state.warm, tools: state.metadata},
            ip: ip,
            port: listen["port"],
            startup_log: false,
@@ -177,6 +194,7 @@ defmodule PtcGateway.Domain do
              log_exceptions_with_status_codes: [],
              log_client_closures: false
            ],
+           http_1_options: [max_header_length: 8_192, max_header_count: 64],
            http_2_options: [enabled: false]
          ) do
       {:ok, listener} -> {:ok, %{child(state, listener) | listener: listener}}

@@ -21,7 +21,7 @@ defmodule PtcGatewayTest do
       assert {:ok, owner} = PtcGateway.start_link(path, env_file: "credentials.env")
       on_exit(fn -> stop(owner) end)
       metadata = PtcGateway.Domain.metadata(owner)
-      assert Enum.map(metadata.tools, & &1.name) == ["a", "z"]
+      assert Enum.map(metadata.tools, & &1["name"]) == ["a", "z"]
       assert System.get_env("GATEWAY_TEST_TOKEN") == previous
       assert WarmProviderRuntime.authenticate(PtcGateway.Domain.token_handle(owner), @token)
       refute inspect(:sys.get_status(owner)) =~ @token
@@ -193,7 +193,7 @@ defmodule PtcGatewayTest do
           put_in(config, ["admission", "max_active_provider_calls"], 65536),
           put_in(config, ["admission", "max_waiting_provider_calls"], -1),
           Map.put(config, "tools", []),
-          Map.put(config, "tools", List.duplicate(hd(config["tools"]), 129)),
+          Map.put(config, "tools", List.duplicate(hd(config["tools"]), 257)),
           update_in(
             config,
             ["tools"],
@@ -289,6 +289,72 @@ defmodule PtcGatewayTest do
 
       assert response(config, "/health/ready").status == 200
     end)
+  end
+
+  @tag :tmp_dir
+  test "MCP discovery and listing are authenticated, strict, and deterministic", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+
+    discover = mcp(config, "server/discover", "request-id")
+    assert discover.status == 200
+    assert discover.headers["cache-control"] == ["no-store"]
+    assert discover.body["id"] == "request-id"
+
+    assert discover.body["result"] == %{
+             "resultType" => "complete",
+             "supportedVersions" => ["2026-07-28"],
+             "capabilities" => %{"tools" => %{"listChanged" => false}},
+             "ttlMs" => 0,
+             "cacheScope" => "private"
+           }
+
+    listing =
+      mcp(config, "tools/list", -9,
+        headers: [{"mcp-session-id", "ignored"}, {"last-event-id", "ignored"}]
+      )
+
+    assert listing.status == 200
+    assert listing.body["id"] == -9
+    assert Enum.map(listing.body["result"]["tools"], & &1["name"]) == ["a", "z"]
+
+    assert Enum.all?(listing.body["result"]["tools"], fn tool ->
+             Map.keys(tool) |> Enum.sort() ==
+               Enum.sort(~w(annotations description inputSchema name outputSchema title)) and
+               tool["annotations"] == %{"readOnlyHint" => true}
+           end)
+
+    assert mcp(config, "tools/list", 1, params: %{"cursor" => "x"}).body["error"]["code"] ==
+             -32602
+
+    assert mcp(config, "resources/list", 1).status == 404
+    assert mcp(config, "resources/list", 1).body["error"]["code"] == -32601
+
+    unauthorized =
+      mcp(config, "server/discover", 1,
+        token: "wrong-token-that-is-long-enough-123",
+        raw_body: "not-json"
+      )
+
+    assert unauthorized.status == 401
+    assert unauthorized.headers["www-authenticate"] == ["Bearer"]
+    refute inspect(unauthorized) =~ "not-json"
+
+    assert mcp(config, "server/discover", 1, accept: "application/json").status == 406
+    assert mcp(config, "server/discover", 1, content_type: "text/plain").status == 415
+    assert response(config, "/mcp", method: :get).status == 405
+
+    mismatch = mcp(config, "server/discover", 1, protocol: "2025-11-25")
+    assert mismatch.status == 400
+    assert mismatch.body["error"]["code"] == -32022
+
+    malformed = mcp(config, "server/discover", 1, raw_body: "{")
+    assert malformed.status == 400
+    assert malformed.body["error"]["code"] == -32700
+    refute Map.has_key?(malformed.body, "id")
   end
 
   @tag :tmp_dir
@@ -407,6 +473,40 @@ defmodule PtcGatewayTest do
   defp response(config, path, opts \\ []) do
     Req.request!(
       [url: "http://127.0.0.1:#{config["listen"]["port"]}#{path}", retry: false] ++ opts
+    )
+  end
+
+  defp mcp(config, method, id, opts \\ []) do
+    protocol = Keyword.get(opts, :protocol, "2026-07-28")
+
+    params =
+      Map.merge(
+        %{
+          "_meta" => %{
+            "io.modelcontextprotocol/protocolVersion" => protocol,
+            "io.modelcontextprotocol/clientCapabilities" => %{}
+          }
+        },
+        Keyword.get(opts, :params, %{})
+      )
+
+    body =
+      Keyword.get_lazy(opts, :raw_body, fn ->
+        Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "method" => method, "params" => params})
+      end)
+
+    headers = [
+      {"authorization", "Bearer #{Keyword.get(opts, :token, @token)}"},
+      {"content-type", Keyword.get(opts, :content_type, "application/json")},
+      {"accept", Keyword.get(opts, :accept, "application/json, text/event-stream")},
+      {"mcp-protocol-version", protocol},
+      {"mcp-method", method}
+    ]
+
+    response(config, "/mcp",
+      method: :post,
+      headers: headers ++ Keyword.get(opts, :headers, []),
+      body: body
     )
   end
 
