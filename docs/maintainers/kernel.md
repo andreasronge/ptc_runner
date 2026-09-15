@@ -795,9 +795,10 @@ suites must keep proving, concretely:
 
 Run focused tests while editing, then `mix precommit` for quality. When
 documentation changed, also run `MIX_ENV=dev mix docs --warnings-as-errors`.
-For an ordinary push, let the tracked pre-push hook invoke the same
-repository-owned root, Viewer, launcher, release, and documentation scripts as
-GitHub Actions. Invoke `mix prepush` directly only for static or Dialyzer
-diagnosis, or when hooks are unavailable. Secret-dependent and model-driven
+For an ordinary push, let the tracked pre-push hook invoke the path-selected
+root, Viewer, launcher, and documentation scripts. Required pull-request CI
+also verifies release packages; release preparation adds that gate locally
+with `FORCE_FULL_PRE_PUSH=1`. Invoke `mix prepush` directly only for static or
+Dialyzer diagnosis, or when hooks are unavailable. Secret-dependent and model-driven
 E2E tests require their documented credentials; deterministic tests remain the
 authority for containment, ownership, accounting, rollback, and cleanup.

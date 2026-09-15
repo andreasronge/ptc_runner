@@ -68,8 +68,10 @@ Run one fresh review of the complete draft and follow it through its session:
 
 Then run the gates on the reviewed tree: `mix precommit`, plus
 `MIX_ENV=dev mix docs --warnings-as-errors` when documentation changed. The
-suite, Dialyzer, ExDoc HTML, Viewer, launcher, and release run on `git push`;
-do not follow `mix precommit` with `git push --no-verify`. Return in-scope
+suite, Dialyzer, ExDoc HTML, Viewer, and launcher run on `git push`; required
+pull-request CI runs release verification, while release preparation adds it
+locally with `FORCE_FULL_PRE_PUSH=1`. Do not follow `mix precommit` with
+`git push --no-verify`. Return in-scope
 source or generated-artifact repairs to the same session.
 
 Before declaring the branch ready, rebase onto `origin/main`, rerun the gates,
