@@ -91,8 +91,9 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   The private refusal is the decided contract rather than an unimplemented
   destination: serving authorizes no artifact destination at all, so a private
   policy has no private result to place, and possessing a serving template must
-  not become an implicit override of it. Serve such an application by publishing
-  it under a `normal` policy instead.
+  not become an implicit override of it. Serve such an application by setting its
+  manifest policy to normal and pinning the application content digest that
+  change produces.
 
   ## Ownership and close
 
