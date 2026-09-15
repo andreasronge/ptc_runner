@@ -51,6 +51,14 @@ defmodule PtcRunner.Scripts.CIGatesTest do
     assert output |> String.split("command failed:") |> length() == 2
   end
 
+  test "standalone release waits for run readiness before sending SIGINT" do
+    script = File.read!(Path.join(@root, "scripts/verify_standalone_release.sh"))
+
+    assert script =~ "--progress"
+    assert script =~ "packaged ptc run did not become ready"
+    refute script =~ "time.sleep(1)"
+  end
+
   test "core tests establish the CI contract without reducing native scheduler pressure" do
     %{marker: marker} = fake = fake_mix()
 
