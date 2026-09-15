@@ -48,6 +48,7 @@ defmodule PtcRunner.Soak.AnalysisSessionSoakTest do
   alias PtcRunner.Kernel.AnalysisSessionBuilder
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.LLMBudget
   alias PtcRunner.Kernel.PublicRunAnalysisProfile
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.TestSupport.LifecycleSoak
@@ -232,7 +233,18 @@ defmodule PtcRunner.Soak.AnalysisSessionSoakTest do
     {:ok, limits} = Limits.new()
     {:ok, sink} = EventSink.start(:normal, limits, run_id: run_id)
     :ok = EventSink.emit(sink, "run-started", %{missions: %{}})
-    :ok = EventSink.emit(sink, "run-stopped", %{outcome: :ok, reason: nil})
+
+    # A terminal run-stopped event carries the run's usage, and TraceEventValidation
+    # requires its llm_budget projection: a missing one is :invalid_llm_budget, which
+    # append_jsonl reports as :malformed_source. Seeding without it made this setup
+    # fail outright once the rule landed.
+    :ok =
+      EventSink.emit(sink, "run-stopped", %{
+        outcome: :ok,
+        reason: nil,
+        usage: %{llm_budget: LLMBudget.initial_terminal_projection(limits)}
+      })
+
     :ok = TraceLog.append_jsonl(Path.join(directory, run_id <> ".jsonl"), EventSink.events(sink))
     EventSink.stop(sink)
   end
