@@ -33,11 +33,11 @@ defmodule PtcGateway.MCP do
 
   defp admitted(conn, opts) do
     case PtcGateway.RequestAdmission.acquire(opts[:request_admission]) do
-      :ok ->
+      {:ok, lease} ->
         try do
           handle_body(conn, opts)
         after
-          PtcGateway.RequestAdmission.release(opts[:request_admission])
+          PtcGateway.RequestAdmission.release(opts[:request_admission], lease)
         end
 
       :full ->
@@ -152,14 +152,15 @@ defmodule PtcGateway.MCP do
     header
     |> String.split(",")
     |> Enum.map(&media_range/1)
-    |> Enum.filter(fn {type, subtype, _quality} ->
-      type in ["*", wanted_type] and subtype in ["*", wanted_subtype]
+    |> Enum.filter(fn {type, subtype, params, _quality} ->
+      type in ["*", wanted_type] and subtype in ["*", wanted_subtype] and
+        compatible_params?(wanted_type, wanted_subtype, params)
     end)
     |> Enum.max_by(
-      fn {type, subtype, _quality} -> specificity(type, subtype) end,
-      fn -> {"*", "*", 0.0} end
+      fn {type, subtype, params, _quality} -> {specificity(type, subtype), map_size(params)} end,
+      fn -> {"*", "*", %{}, 0.0} end
     )
-    |> elem(2)
+    |> elem(3)
     |> Kernel.>(0)
   end
 
@@ -174,25 +175,48 @@ defmodule PtcGateway.MCP do
          subtype <- String.downcase(subtype),
          true <- media_token?(type) and media_token?(subtype),
          true <- type != "*" or subtype == "*",
-         {:ok, quality} <- media_quality(params) do
-      {type, subtype, quality}
+         {:ok, media_params, quality} <- media_params(params) do
+      {type, subtype, media_params, quality}
     else
       _ -> :invalid
     end
   end
 
-  defp media_quality(params) do
-    qualities =
-      for param <- params,
-          [name, value] <- [String.split(String.trim(param), "=", parts: 2)],
-          String.downcase(name) == "q",
-          do: value
+  defp media_params(params) do
+    Enum.reduce_while(params, {:ok, %{}, 1.0, false}, fn param, {:ok, values, quality, seen_q?} ->
+      case String.split(String.trim(param), "=", parts: 2) do
+        [name, value] ->
+          parse_media_param(String.downcase(name), value, values, quality, seen_q?)
 
-    case qualities do
-      [] -> {:ok, 1.0}
-      [value] -> parse_quality(value)
-      _ -> :error
+        _ ->
+          {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, values, quality, _seen_q?} -> {:ok, values, quality}
+      :error -> :error
     end
+  end
+
+  defp parse_media_param("q", value, values, _quality, false) do
+    case parse_quality(value) do
+      {:ok, quality} -> {:cont, {:ok, values, quality, true}}
+      :error -> {:halt, :error}
+    end
+  end
+
+  defp parse_media_param("q", _value, _values, _quality, true), do: {:halt, :error}
+
+  defp parse_media_param(name, value, values, quality, false) do
+    if media_token?(name) and media_parameter_value?(value) and not Map.has_key?(values, name),
+      do: {:cont, {:ok, Map.put(values, name, String.downcase(value)), quality, false}},
+      else: {:halt, :error}
+  end
+
+  defp parse_media_param(name, value, values, quality, true) do
+    if media_token?(name) and media_parameter_value?(value),
+      do: {:cont, {:ok, values, quality, true}},
+      else: {:halt, :error}
   end
 
   defp parse_quality(value) do
@@ -204,6 +228,14 @@ defmodule PtcGateway.MCP do
 
   defp media_token?("*"), do: true
   defp media_token?(value), do: Regex.match?(~r/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/, value)
+
+  defp media_parameter_value?(value),
+    do: media_token?(value) or Regex.match?(~r/^"[^"\r\n]*"$/, value)
+
+  defp compatible_params?("application", "json", params),
+    do: params in [%{}, %{"charset" => "utf-8"}]
+
+  defp compatible_params?(_type, _subtype, params), do: map_size(params) == 0
   defp specificity("*", "*"), do: 0
   defp specificity(_type, "*"), do: 1
   defp specificity(_type, _subtype), do: 2
@@ -251,7 +283,7 @@ defmodule PtcGateway.MCP do
     cond do
       not is_map(meta) or not is_binary(version) or not is_map(capabilities) or
         not valid_client_info?(meta) or encoded_size(meta) > 65_536 ->
-        {:rpc, conn, 200, -32602, "Invalid Params", id, nil}
+        {:rpc, conn, 400, -32602, "Invalid Params", id, nil}
 
       single(conn, "mcp-protocol-version") != version or single(conn, "mcp-method") != method or
           get_req_header(conn, "mcp-name") != [] ->
@@ -285,7 +317,7 @@ defmodule PtcGateway.MCP do
   defp valid_website?(info) do
     case Map.fetch(info, "websiteUrl") do
       :error -> true
-      {:ok, value} when is_binary(value) -> URI.parse(value).scheme not in [nil, ""]
+      {:ok, value} when is_binary(value) -> valid_uri?(value)
       _ -> false
     end
   rescue
@@ -301,7 +333,7 @@ defmodule PtcGateway.MCP do
   end
 
   defp valid_icon?(%{"src" => src} = icon) when is_binary(src) do
-    URI.parse(src).scheme not in [nil, ""] and optional_string?(icon, "mimeType") and
+    valid_uri?(src) and optional_string?(icon, "mimeType") and
       (not Map.has_key?(icon, "sizes") or
          (is_list(icon["sizes"]) and Enum.all?(icon["sizes"], &is_binary/1))) and
       (not Map.has_key?(icon, "theme") or icon["theme"] in ["dark", "light"])
@@ -310,6 +342,13 @@ defmodule PtcGateway.MCP do
   end
 
   defp valid_icon?(_icon), do: false
+
+  defp valid_uri?(value) do
+    case URI.new(value) do
+      {:ok, uri} -> is_binary(uri.scheme) and uri.scheme != "" and URI.to_string(uri) == value
+      _ -> false
+    end
+  end
 
   defp single(conn, header) do
     case get_req_header(conn, header) do

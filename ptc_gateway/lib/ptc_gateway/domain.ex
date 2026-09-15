@@ -123,7 +123,7 @@ defmodule PtcGateway.Domain do
 
     listing = %{
       "jsonrpc" => "2.0",
-      "id" => String.duplicate("x", 256),
+      "id" => String.duplicate(<<0>>, 256),
       "result" => %{
         "resultType" => "complete",
         "tools" => tools,

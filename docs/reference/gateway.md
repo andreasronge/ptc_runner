@@ -158,6 +158,15 @@ tool execution; `completion-complete`, `resources-*`, `prompts-*`, and
 requires server requests and multi-round tool execution. Neither this milestone
 nor the parent claims the complete server suite.
 
+The checked-in expected-failures baseline narrows mixed scenarios to this
+milestone. It excludes server-stateless checks requiring tool calls, response
+streams, logging tools, or optional server identity; caching checks for prompts
+and resources; and the tool-call-only cases embedded under
+`http-header-validation` (whose check IDs are reused across list and call
+cases, so the runner can baseline only that mixed scenario). The applicable
+discovery, listing, DNS, cache, and header checks still execute through the
+authenticated conformance proxy in the gateway CI gate.
+
 ## Startup failures
 
 Only the first error is returned. Precedence is document read/JSON, structural

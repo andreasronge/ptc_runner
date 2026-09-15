@@ -352,6 +352,13 @@ defmodule PtcGatewayTest do
     assert mcp(config, "server/discover", 1, accept: "*/json, text/event-stream").status ==
              406
 
+    assert mcp(config, "server/discover", 1, accept: "application/json;q, text/event-stream").status ==
+             406
+
+    assert mcp(config, "server/discover", 1,
+             accept: "application/json;charset=latin1, text/event-stream"
+           ).status == 406
+
     assert mcp(config, "server/discover", 1, content_type: "text/plain").status == 415
     assert response(config, "/mcp", method: :get).status == 405
 
@@ -378,14 +385,94 @@ defmodule PtcGatewayTest do
 
     assert mcp(config, "server/discover", 1, full_params: invalid_info).body["error"]["code"] ==
              -32602
+
+    invalid_info =
+      put_in(
+        invalid_info,
+        ["_meta", "io.modelcontextprotocol/clientInfo"],
+        %{"name" => "client", "version" => "1", "websiteUrl" => "http://exa mple.com"}
+      )
+
+    assert mcp(config, "server/discover", 1, full_params: invalid_info).body["error"]["code"] ==
+             -32602
   end
 
   test "request admission atomically bounds active requests" do
     assert {:ok, admission} = PtcGateway.RequestAdmission.start_link(1)
-    assert :ok = PtcGateway.RequestAdmission.acquire(admission)
+    assert {:ok, lease} = PtcGateway.RequestAdmission.acquire(admission)
     assert :full = PtcGateway.RequestAdmission.acquire(admission)
-    assert :ok = PtcGateway.RequestAdmission.release(admission)
-    assert :ok = PtcGateway.RequestAdmission.acquire(admission)
+    assert :ok = PtcGateway.RequestAdmission.release(admission, lease)
+    assert {:ok, _lease} = PtcGateway.RequestAdmission.acquire(admission)
+
+    assert {:ok, reclaiming} = PtcGateway.RequestAdmission.start_link(1)
+    parent = self()
+
+    holder =
+      spawn(fn ->
+        send(parent, {:held, PtcGateway.RequestAdmission.acquire(reclaiming)})
+        receive do: (:stop -> :ok)
+      end)
+
+    assert_receive {:held, {:ok, _lease}}
+    monitor = Process.monitor(holder)
+    Process.exit(holder, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^holder, :killed}
+    assert {:ok, _lease} = acquire_eventually(reclaiming, 100)
+  end
+
+  @tag :nightly
+  @tag :tmp_dir
+  test "official MCP conformance discovery and listing subset", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+
+    target_authority = "127.0.0.1:#{config["listen"]["port"]}"
+    {:ok, socket} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
+    {:ok, proxy_port} = :inet.port(socket)
+    :gen_tcp.close(socket)
+    proxy_authority = "127.0.0.1:#{proxy_port}"
+
+    assert {:ok, proxy} =
+             Bandit.start_link(
+               plug:
+                 {PtcGateway.ConformanceProxy,
+                  target: "http://" <> target_authority,
+                  target_authority: target_authority,
+                  proxy_authority: proxy_authority,
+                  token: @token},
+               ip: {127, 0, 0, 1},
+               port: proxy_port,
+               startup_log: false,
+               http_2_options: [enabled: false]
+             )
+
+    on_exit(fn -> stop(proxy) end)
+    executable = Path.expand("support/mcp_conformance/node_modules/.bin/conformance", __DIR__)
+
+    for scenario <-
+          ~w(server-stateless tools-list dns-rebinding-protection caching http-header-validation) do
+      {output, status} =
+        System.cmd(
+          executable,
+          [
+            "server",
+            "--url",
+            "http://#{proxy_authority}/mcp",
+            "--scenario",
+            scenario,
+            "--spec-version",
+            "2026-07-28",
+            "--expected-failures",
+            Path.expand("support/mcp_conformance/expected-failures.yml", __DIR__)
+          ],
+          stderr_to_stdout: true
+        )
+
+      assert status == 0, String.slice(output, -5_000, 5_000)
+    end
   end
 
   @tag :tmp_dir
@@ -543,5 +630,18 @@ defmodule PtcGatewayTest do
     )
   end
 
-  defp stop(pid), do: if(Process.alive?(pid), do: GenServer.stop(pid))
+  defp stop(pid) do
+    if Process.alive?(pid), do: GenServer.stop(pid)
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp acquire_eventually(_admission, 0), do: :full
+
+  defp acquire_eventually(admission, attempts) do
+    case PtcGateway.RequestAdmission.acquire(admission) do
+      :full -> acquire_eventually(admission, attempts - 1)
+      result -> result
+    end
+  end
 end

@@ -1,3 +1,4 @@
 /deps/
 /_build/
 /tmp/
+/test/support/mcp_conformance/node_modules/
