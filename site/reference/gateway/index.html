@@ -148,23 +148,28 @@ methods return 405, and unsupported MCP methods return HTTP 404 with JSON-RPC
 one bearer authorization, <code class="inline">Content-Type: application/json</code> (optionally with a
 UTF-8 charset), and an <code class="inline">Accept</code> value that admits both <code class="inline">application/json</code> and
 <code class="inline">text/event-stream</code> at nonzero quality. Critical headers may occur only once.
-Authentication precedes content and body parsing. Limits are 64 headers, 32
-KiB of application-visible header bytes, 8 KiB per HTTP/1 header, 2 MiB body,
+Authorization permits outer HTTP OWS but requires one or more SP bytes between
+the case-insensitive <code class="inline">Bearer</code> scheme and token. Authentication precedes content
+and body parsing. Limits are an 8 KiB HTTP/1 request line, 64 headers, 32 KiB
+of decoded header-name plus header-value bytes, 8 KiB per complete HTTP/1 header field line, 2 MiB body,
 64 KiB decoded <code class="inline">_meta</code>, JSON depth 64 and 100,000 nodes. String IDs contain
 1–256 UTF-8 bytes; integer IDs are in the interoperable safe range.</p><p>Every request has object <code class="inline">params._meta</code> fields
 <code class="inline">io.modelcontextprotocol/protocolVersion</code> and
 <code class="inline">io.modelcontextprotocol/clientCapabilities</code>, with optional schema-shaped
 <code class="inline">io.modelcontextprotocol/clientInfo</code>. <code class="inline">MCP-Protocol-Version</code> and <code class="inline">Mcp-Method</code>
 must match the body. <code class="inline">Mcp-Name</code> is forbidden for these methods. Responses are
-deterministic JSON, at most 4 MiB, and use <code class="inline">Cache-Control: no-store</code>.</p><p>Discovery advertises the fixed revision and static tool capability. Listing
+deterministic JSON, at most 4 MiB, and use <code class="inline">Cache-Control: no-store</code>.
+Missing or malformed required metadata returns HTTP 400 JSON-RPC <code class="inline">-32602</code>.
+Admission saturation returns HTTP 429 <code class="inline">-31999</code>; an unavailable or fenced
+runtime returns HTTP 503 <code class="inline">-31998</code>.</p><p>Discovery advertises the fixed revision and static tool capability. Listing
 returns every configured tool in UTF-8 name-byte order with its configured
 name, title and description, exact normalized input/output schemas, and only
 the compiler-derived <code class="inline">annotations.readOnlyHint</code>. A cursor, unknown parameter,
 or malformed method parameters returns HTTP 200 JSON-RPC <code class="inline">-32602</code>.</p><p>The official suite is pinned in
 <code class="inline">ptc_gateway/test/support/mcp_conformance/package.json</code> at
-<code class="inline">@modelcontextprotocol/conformance@0.2.0-alpha.10</code>. Applicable server scenario
-IDs are <code class="inline">server-stateless</code>, <code class="inline">tools-list</code>, <code class="inline">dns-rebinding-protection</code>, <code class="inline">caching</code>,
-and <code class="inline">http-header-validation</code>. The remaining listed server scenario IDs are
+<code class="inline">@modelcontextprotocol/conformance@0.2.0-alpha.11</code>. Applicable server scenario
+IDs are <code class="inline">server-stateless</code>, <code class="inline">tools-list</code>, <code class="inline">dns-rebinding-protection</code>, and <code class="inline">caching</code>.
+The remaining listed server scenario IDs are
 excluded: <code class="inline">tools-call-*</code> and <code class="inline">http-custom-header-server-validation</code> require
 tool execution; <code class="inline">completion-complete</code>, <code class="inline">resources-*</code>, <code class="inline">prompts-*</code>, and
 <code class="inline">sep-2164-resource-not-found</code> require unsupported feature families;
@@ -174,10 +179,8 @@ requires server requests and multi-round tool execution. Neither this milestone
 nor the parent claims the complete server suite.</p><p>The checked-in expected-failures baseline narrows mixed scenarios to this
 milestone. It excludes server-stateless checks requiring tool calls, response
 streams, logging tools, or optional server identity; caching checks for prompts
-and resources; the stateless check that requires HTTP 400 for malformed
-metadata, where this profile requires HTTP 200 <code class="inline">-32602</code>; and the tool-call-only cases embedded under
-<code class="inline">http-header-validation</code> (whose check IDs are reused across list and call
-cases, so the runner can baseline only that mixed scenario). The applicable
+and resources. The mixed <code class="inline">http-header-validation</code> scenario is deferred in full
+because its check IDs are reused across list and tool-call cases. The applicable
 discovery, listing, DNS, and cache checks still execute through the
 authenticated conformance proxy in the gateway CI gate. Gateway boundary
 tests independently enforce the applicable header scenario cases (missing,
@@ -193,7 +196,7 @@ listener binding. A stage must succeed before the next stage runs.</p><p>The CLI
 nothing to stdout, and exits 78. Successful startup is silent. No names, paths,
 credentials, causes or stack traces belong in startup diagnostics.</p><p>The finite catalog is <code class="inline">config_unavailable</code>, <code class="inline">duplicate_json_key</code>,
 <code class="inline">config_invalid</code>, <code class="inline">origin_invalid</code>, <code class="inline">tool_name_duplicate</code>, <code class="inline">audit_invalid</code>,
-<code class="inline">host_invalid</code>, <code class="inline">template_invalid</code>, <code class="inline">static_catalog_too_large</code>, <code class="inline">application_content_digest_mismatch</code>,
+<code class="inline">host_invalid</code>, <code class="inline">template_invalid</code>, <code class="inline">catalog_too_large</code>, <code class="inline">application_content_digest_mismatch</code>,
 <code class="inline">write_forbidden</code>, <code class="inline">audit_unavailable</code>, <code class="inline">run_admission_unavailable</code>,
 <code class="inline">credential_unavailable</code>, <code class="inline">installation_pin_mismatch</code>, <code class="inline">provider_pin_mismatch</code>,
 <code class="inline">provider_pin_unavailable</code>, <code class="inline">provider_admission_unavailable</code>,

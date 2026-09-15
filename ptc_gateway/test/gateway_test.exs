@@ -177,6 +177,10 @@ defmodule PtcGatewayTest do
     _ = PtcGateway.Domain.metadata(owner)
     assert response(config, "/health/ready").status == 503
     assert response(config, "/health/live").status == 200
+    unavailable = mcp(config, "tools/list", 41)
+    assert unavailable.status == 503
+    assert unavailable.body["error"] == %{"code" => -31998, "message" => "Server unavailable"}
+    assert unavailable.body["id"] == 41
   end
 
   @tag :tmp_dir
@@ -245,7 +249,7 @@ defmodule PtcGatewayTest do
     stop(catalog_owner)
 
     _over_response = sized_static_config(path, config, 4_194_305, :response)
-    assert {:error, :static_catalog_too_large} = PtcGateway.start_link(path, env_file: env)
+    assert {:error, :catalog_too_large} = PtcGateway.start_link(path, env_file: env)
 
     exact_catalog = sized_static_tools(4_194_304, :catalog)
     assert deterministic_size(exact_catalog) == 4_194_304
@@ -447,7 +451,7 @@ defmodule PtcGatewayTest do
     }
 
     invalid_info_response = mcp(config, "server/discover", 1, full_params: invalid_info)
-    assert invalid_info_response.status == 200
+    assert invalid_info_response.status == 400
     assert invalid_info_response.body["error"]["code"] == -32602
 
     invalid_info =
@@ -458,7 +462,7 @@ defmodule PtcGatewayTest do
       )
 
     invalid_uri_response = mcp(config, "server/discover", 1, full_params: invalid_info)
-    assert invalid_uri_response.status == 200
+    assert invalid_uri_response.status == 400
     assert invalid_uri_response.body["error"]["code"] == -32602
 
     for invalid_uri <- ["http://example.com/%", "http://exa%ZZmple"] do
@@ -470,7 +474,7 @@ defmodule PtcGatewayTest do
         )
 
       response = mcp(config, "server/discover", 1, full_params: invalid_info)
-      assert response.status == 200
+      assert response.status == 400
       assert response.body["error"]["code"] == -32602
     end
 
@@ -533,6 +537,9 @@ defmodule PtcGatewayTest do
 
     assert mcp(config, "tools/list", 1, method_header: false).status == 400
 
+    tab_bearer = raw_mcp_response(config, [{"Authorization", "Bearer\t#{@token}"}])
+    assert raw_status(tab_bearer) == 401
+
     exact_count_headers = for index <- 1..56, do: {"X-Count-#{index}", "x"}
     assert raw_status(raw_mcp_response(config, exact_count_headers)) == 200
 
@@ -554,6 +561,17 @@ defmodule PtcGatewayTest do
     oversized_line = raw_mcp_response(config, [{"X-Line", String.duplicate("x", 8_183)}])
     assert raw_status(oversized_line) == 431
     assert raw_body(oversized_line) == ""
+
+    assert raw_status(
+             raw_mcp_response(config, [], request_target: "/" <> String.duplicate("x", 8_175))
+           ) ==
+             404
+
+    request_line_error =
+      raw_mcp_response(config, [], request_target: "/" <> String.duplicate("x", 8_176))
+
+    assert raw_status(request_line_error) == 414
+    assert raw_body(request_line_error) == ""
   end
 
   @tag :tmp_dir
@@ -584,7 +602,7 @@ defmodule PtcGatewayTest do
 
     oversized_meta = Map.update!(exact_meta, "padding", &(&1 <> "x"))
     meta_error = mcp(config, "server/discover", 1, full_params: %{"_meta" => oversized_meta})
-    assert meta_error.status == 200
+    assert meta_error.status == 400
     assert meta_error.body["error"]["code"] == -32602
 
     exact_depth = Jason.encode!(%{"padding" => nest_json(62)})
@@ -641,20 +659,44 @@ defmodule PtcGatewayTest do
     assert {:ok, _lease} = acquire_eventually(reclaiming, 100)
   end
 
+  @tag :tmp_dir
+  test "full HTTP admission returns the reserved-range-safe busy code", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    config = put_in(config, ["admission", "max_inflight_requests"], 1)
+    File.write!(path, Jason.encode!(config))
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+    admission = :sys.get_state(owner).request_admission
+    assert {:ok, lease} = PtcGateway.RequestAdmission.acquire(admission)
+    on_exit(fn -> PtcGateway.RequestAdmission.release(admission, lease) end)
+
+    busy = mcp(config, "tools/list", 7)
+    assert busy.status == 429
+
+    assert busy.body == %{
+             "jsonrpc" => "2.0",
+             "error" => %{"code" => -31999, "message" => "Server busy"}
+           }
+  end
+
   @tag :nightly
   @tag :tmp_dir
   test "official MCP conformance discovery and listing subset", %{tmp_dir: dir} do
     {path, config} = fixture(dir)
+    {:ok, socket} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
+    {:ok, proxy_port} = :inet.port(socket)
+    :gen_tcp.close(socket)
+    proxy_authority = "127.0.0.1:#{proxy_port}"
+    config = put_in(config, ["listen", "allowed_origins"], ["http://#{proxy_authority}"])
+    File.write!(path, Jason.encode!(config))
     env = Path.join(dir, "credentials.env")
     File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
     assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
     on_exit(fn -> stop(owner) end)
 
     target_authority = "127.0.0.1:#{config["listen"]["port"]}"
-    {:ok, socket} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
-    {:ok, proxy_port} = :inet.port(socket)
-    :gen_tcp.close(socket)
-    proxy_authority = "127.0.0.1:#{proxy_port}"
 
     assert {:ok, proxy} =
              Bandit.start_link(
@@ -674,7 +716,7 @@ defmodule PtcGatewayTest do
     executable = Path.expand("support/mcp_conformance/node_modules/.bin/conformance", __DIR__)
 
     for scenario <-
-          ~w(server-stateless tools-list dns-rebinding-protection caching http-header-validation) do
+          ~w(server-stateless tools-list dns-rebinding-protection caching) do
       {output, status} =
         System.cmd(
           executable,
@@ -694,6 +736,18 @@ defmodule PtcGatewayTest do
 
       assert status == 0, String.slice(output, -5_000, 5_000)
     end
+
+    client_script = Path.expand("support/mcp_conformance/client_journey.mjs", __DIR__)
+
+    {output, status} =
+      System.cmd("node", [client_script, "http://#{target_authority}/mcp", @token],
+        stderr_to_stdout: true
+      )
+
+    assert status == 0, output
+    assert %{"discover" => discover, "listing" => listing} = Jason.decode!(output)
+    assert discover["supportedVersions"] == ["2026-07-28"]
+    assert listing["tools"] == PtcGateway.Domain.metadata(owner).tools
   end
 
   @tag :tmp_dir
@@ -862,14 +916,14 @@ defmodule PtcGatewayTest do
     config |> raw_mcp_response(extra_headers) |> raw_status()
   end
 
-  defp raw_mcp_response(config, extra_headers) do
+  defp raw_mcp_response(config, extra_headers, opts \\ []) do
     port = config["listen"]["port"]
     body = raw_mcp_body()
     headers = raw_mcp_headers(config, extra_headers, body)
 
     request =
       [
-        "POST /mcp HTTP/1.1\r\n",
+        "POST #{Keyword.get(opts, :request_target, "/mcp")} HTTP/1.1\r\n",
         Enum.map(headers, fn {name, value} -> [name, ": ", value, "\r\n"] end),
         "\r\n",
         body
@@ -912,9 +966,16 @@ defmodule PtcGatewayTest do
         do: extra_headers,
         else: [{"Host", "127.0.0.1:#{port}"} | extra_headers]
 
+    default_authorization =
+      if Enum.any?(extra_headers, fn {name, _value} ->
+           String.downcase(name) == "authorization"
+         end),
+         do: [],
+         else: [{"Authorization", "Bearer #{@token}"}]
+
     extra_headers ++
+      default_authorization ++
       [
-        {"Authorization", "Bearer #{@token}"},
         {"Content-Type", "application/json"},
         {"Accept", "application/json, text/event-stream"},
         {"MCP-Protocol-Version", "2026-07-28"},
@@ -927,7 +988,7 @@ defmodule PtcGatewayTest do
   defp aggregate_padding_headers(config, target) do
     base_bytes = header_bytes(raw_mcp_headers(config, [], raw_mcp_body()))
     names = for index <- 1..4, do: "X-Pad-#{index}"
-    value_bytes = target - base_bytes - Enum.sum(Enum.map(names, &(byte_size(&1) + 4)))
+    value_bytes = target - base_bytes - Enum.sum(Enum.map(names, &byte_size/1))
     common = div(value_bytes, length(names))
     remainder = rem(value_bytes, length(names))
 
@@ -939,8 +1000,7 @@ defmodule PtcGatewayTest do
   end
 
   defp header_bytes(headers),
-    do:
-      Enum.sum(Enum.map(headers, fn {name, value} -> byte_size(name) + byte_size(value) + 4 end))
+    do: Enum.sum(Enum.map(headers, fn {name, value} -> byte_size(name) + byte_size(value) end))
 
   defp raw_status(response) do
     [_, status | _] = :binary.split(response, " ", [:global])

@@ -18,10 +18,8 @@ defmodule PtcGateway.ConformanceProxy do
 
     headers =
       conn.req_headers
-      |> Enum.reject(fn
-        {name, _value} when name in ["host", "content-length", "authorization"] -> true
-        {"origin", value} -> local_origin?(value)
-        _ -> false
+      |> Enum.reject(fn {name, _value} ->
+        name in ["host", "content-length", "authorization"]
       end)
       |> Kernel.++([{"host", forwarded_host}, {"authorization", "Bearer " <> opts[:token]}])
 
@@ -42,6 +40,4 @@ defmodule PtcGateway.ConformanceProxy do
 
     send_resp(conn, response.status, response.body)
   end
-
-  defp local_origin?(value), do: URI.parse(value).host in ["localhost", "127.0.0.1", "::1"]
 end

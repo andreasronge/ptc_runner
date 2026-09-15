@@ -6,7 +6,7 @@ defmodule PtcGateway.StartupError do
   order, audit, admission, warm capture/pins, then listener binding.
   """
   @codes ~w(config_unavailable duplicate_json_key config_invalid origin_invalid tool_name_duplicate
-    audit_invalid host_invalid template_invalid static_catalog_too_large application_content_digest_mismatch write_forbidden
+    audit_invalid host_invalid template_invalid catalog_too_large application_content_digest_mismatch write_forbidden
     audit_unavailable run_admission_unavailable credential_unavailable installation_pin_mismatch
     provider_pin_mismatch provider_pin_unavailable provider_admission_unavailable
     provider_runtime_unavailable listener_unavailable internal_error)a

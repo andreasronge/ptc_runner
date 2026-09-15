@@ -135,7 +135,7 @@ defmodule PtcGateway.Domain do
     if Enum.all?(schemas, &(encoded_size(&1) <= 65_536)) and
          within_static_limit?(tools) and within_static_limit?(listing),
        do: :ok,
-       else: {:error, :static_catalog_too_large}
+       else: {:error, :catalog_too_large}
   end
 
   @doc false
@@ -233,7 +233,11 @@ defmodule PtcGateway.Domain do
              log_exceptions_with_status_codes: [],
              log_client_closures: false
            ],
-           http_1_options: [max_header_length: 8_192, max_header_count: 64],
+           http_1_options: [
+             max_request_line_length: 8_192,
+             max_header_length: 8_192,
+             max_header_count: 64
+           ],
            http_2_options: [enabled: false]
          ) do
       {:ok, listener} -> {:ok, %{child(state, listener) | listener: listener}}

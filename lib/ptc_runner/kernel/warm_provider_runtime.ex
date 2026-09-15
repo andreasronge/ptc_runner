@@ -170,7 +170,7 @@ defmodule PtcRunner.Kernel.WarmProviderRuntime do
 
   defp validate(opts) do
     cond do
-      not is_map(opts[:tools]) or map_size(opts[:tools]) not in 1..256 ->
+      not is_map(opts[:tools]) or map_size(opts[:tools]) not in 1..128 ->
         {:error, :invalid_warm_provider_runtime}
 
       not ProviderRuntimeServices.valid?(opts[:services]) ->

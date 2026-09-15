@@ -127,8 +127,10 @@ Requests require the exact listener authority, an allowed or absent `Origin`,
 one bearer authorization, `Content-Type: application/json` (optionally with a
 UTF-8 charset), and an `Accept` value that admits both `application/json` and
 `text/event-stream` at nonzero quality. Critical headers may occur only once.
-Authentication precedes content and body parsing. Limits are 64 headers, 32
-KiB of application-visible header bytes, 8 KiB per HTTP/1 header, 2 MiB body,
+Authorization permits outer HTTP OWS but requires one or more SP bytes between
+the case-insensitive `Bearer` scheme and token. Authentication precedes content
+and body parsing. Limits are an 8 KiB HTTP/1 request line, 64 headers, 32 KiB
+of decoded header-name plus header-value bytes, 8 KiB per complete HTTP/1 header field line, 2 MiB body,
 64 KiB decoded `_meta`, JSON depth 64 and 100,000 nodes. String IDs contain
 1–256 UTF-8 bytes; integer IDs are in the interoperable safe range.
 
@@ -138,6 +140,9 @@ Every request has object `params._meta` fields
 `io.modelcontextprotocol/clientInfo`. `MCP-Protocol-Version` and `Mcp-Method`
 must match the body. `Mcp-Name` is forbidden for these methods. Responses are
 deterministic JSON, at most 4 MiB, and use `Cache-Control: no-store`.
+Missing or malformed required metadata returns HTTP 400 JSON-RPC `-32602`.
+Admission saturation returns HTTP 429 `-31999`; an unavailable or fenced
+runtime returns HTTP 503 `-31998`.
 
 Discovery advertises the fixed revision and static tool capability. Listing
 returns every configured tool in UTF-8 name-byte order with its configured
@@ -147,9 +152,9 @@ or malformed method parameters returns HTTP 200 JSON-RPC `-32602`.
 
 The official suite is pinned in
 `ptc_gateway/test/support/mcp_conformance/package.json` at
-`@modelcontextprotocol/conformance@0.2.0-alpha.10`. Applicable server scenario
-IDs are `server-stateless`, `tools-list`, `dns-rebinding-protection`, `caching`,
-and `http-header-validation`. The remaining listed server scenario IDs are
+`@modelcontextprotocol/conformance@0.2.0-alpha.11`. Applicable server scenario
+IDs are `server-stateless`, `tools-list`, `dns-rebinding-protection`, and `caching`.
+The remaining listed server scenario IDs are
 excluded: `tools-call-*` and `http-custom-header-server-validation` require
 tool execution; `completion-complete`, `resources-*`, `prompts-*`, and
 `sep-2164-resource-not-found` require unsupported feature families;
@@ -161,10 +166,8 @@ nor the parent claims the complete server suite.
 The checked-in expected-failures baseline narrows mixed scenarios to this
 milestone. It excludes server-stateless checks requiring tool calls, response
 streams, logging tools, or optional server identity; caching checks for prompts
-and resources; the stateless check that requires HTTP 400 for malformed
-metadata, where this profile requires HTTP 200 `-32602`; and the tool-call-only cases embedded under
-`http-header-validation` (whose check IDs are reused across list and call
-cases, so the runner can baseline only that mixed scenario). The applicable
+and resources. The mixed `http-header-validation` scenario is deferred in full
+because its check IDs are reused across list and tool-call cases. The applicable
 discovery, listing, DNS, and cache checks still execute through the
 authenticated conformance proxy in the gateway CI gate. Gateway boundary
 tests independently enforce the applicable header scenario cases (missing,
@@ -188,7 +191,7 @@ credentials, causes or stack traces belong in startup diagnostics.
 
 The finite catalog is `config_unavailable`, `duplicate_json_key`,
 `config_invalid`, `origin_invalid`, `tool_name_duplicate`, `audit_invalid`,
-`host_invalid`, `template_invalid`, `static_catalog_too_large`, `application_content_digest_mismatch`,
+`host_invalid`, `template_invalid`, `catalog_too_large`, `application_content_digest_mismatch`,
 `write_forbidden`, `audit_unavailable`, `run_admission_unavailable`,
 `credential_unavailable`, `installation_pin_mismatch`, `provider_pin_mismatch`,
 `provider_pin_unavailable`, `provider_admission_unavailable`,

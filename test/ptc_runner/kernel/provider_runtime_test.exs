@@ -275,6 +275,14 @@ defmodule PtcRunner.Kernel.ProviderRuntimeTest do
       max_waiting_provider_calls: 0
     ]
 
+    oversized_tools =
+      Map.new(1..129, fn index ->
+        {"tool-#{index}", %{template: template, pins: pins}}
+      end)
+
+    assert {:error, :invalid_warm_provider_runtime} =
+             WarmProviderRuntime.start_link(Keyword.put(opts, :tools, oversized_tools))
+
     {:ok, _} = Application.ensure_all_started(:llm_db)
     {:ok, warm} = WarmProviderRuntime.start_link(opts)
     on_exit(fn -> if Process.alive?(warm), do: GenServer.stop(warm) end)

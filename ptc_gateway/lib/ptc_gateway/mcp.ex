@@ -41,10 +41,10 @@ defmodule PtcGateway.MCP do
         end
 
       :full ->
-        rpc_error(conn, 429, -32001, "Server busy", nil, nil)
+        rpc_error(conn, 429, -31999, "Server busy", nil, nil)
 
       :unavailable ->
-        rpc_error(conn, 503, -32002, "Server unavailable", nil, nil)
+        rpc_error(conn, 503, -31998, "Server unavailable", nil, nil)
     end
   end
 
@@ -70,7 +70,7 @@ defmodule PtcGateway.MCP do
   defp bounded_headers(conn) do
     bytes =
       Enum.reduce(conn.req_headers, 0, fn {name, value}, total ->
-        total + byte_size(name) + byte_size(value) + 4
+        total + byte_size(name) + byte_size(value)
       end)
 
     if length(conn.req_headers) <= 64 and bytes <= 32_768,
@@ -97,7 +97,7 @@ defmodule PtcGateway.MCP do
           if not String.valid?(value) do
             false
           else
-            case Regex.run(~r/^([^ \t]+)[ \t]+([^ \t]+)$/u, value, capture: :all_but_first) do
+            case Regex.run(~r/^([^ \t]+) +([^ \t]+)$/u, value, capture: :all_but_first) do
               [scheme, token] ->
                 String.downcase(scheme) == "bearer" and
                   WarmProviderRuntime.authenticate(opts[:warm], token)
@@ -304,7 +304,7 @@ defmodule PtcGateway.MCP do
     cond do
       not is_map(meta) or not is_binary(version) or not is_map(capabilities) or
         not valid_client_info?(meta) or encoded_size(meta) > 65_536 ->
-        {:rpc, conn, 200, -32602, "Invalid Params", id, nil}
+        {:rpc, conn, 400, -32602, "Invalid Params", id, nil}
 
       single(conn, "mcp-protocol-version") != version or single(conn, "mcp-method") != method or
           get_req_header(conn, "mcp-name") != [] ->
@@ -421,7 +421,7 @@ defmodule PtcGateway.MCP do
         {:rpc, conn, 200, -32602, "Invalid Params", id, nil}
 
       not WarmProviderRuntime.snapshot(opts[:warm]).ready ->
-        {:rpc, conn, 503, -32002, "Server unavailable", id, nil}
+        {:rpc, conn, 503, -31998, "Server unavailable", id, nil}
 
       true ->
         {:ok,
