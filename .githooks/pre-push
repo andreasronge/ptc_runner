@@ -5,13 +5,13 @@
 #   1. Documentation routing: disposable plan-only changes skip the gate;
 #      other documentation-only changes run the ExDoc warnings gate.
 #   2. Otherwise: classify the affected contracts, run documentation first,
-#      then invoke the same repository-owned root, Viewer, and launcher gate
-#      scripts as GitHub Actions. The hook supplies changed paths; the scripts
-#      own commands and environment.
+#      then invoke the repository-owned root, Viewer, and launcher gates. The
+#      required pull-request CI additionally verifies release packages without
+#      putting that production build on every local push's critical path.
 #
 # Override:
-#   FORCE_FULL_PRE_PUSH=1 git push  → always run the full gate, even if
-#   the docs-only check would have allowed a skip.
+#   FORCE_FULL_PRE_PUSH=1 git push  → run every local gate, including release
+#                                    verification, regardless of path routing.
 #
 # Stdin contract (githooks(5)):
 #   <local-ref> <local-sha> <remote-ref> <remote-sha>\n  (one per ref)
@@ -446,7 +446,7 @@ run_gate() {
 # build trees and have no shared mutable state:
 #
 #   lane A   core-static -> core-Dialyzer   _build/test  (shared: serial)
-#   lane B   core-release                   _build/prod
+#   lane B   core-release                   _build/prod  (forced full run only)
 #   lane C   Viewer                         ptc_viewer/_build/test
 #
 # Documentation keeps its head start above: it owns `_build/dev` and is
@@ -606,6 +606,14 @@ if [ "$core" = true ] || [ "$mcp_http" = true ] ||
   run_core_gates=true
 fi
 
+# Production package assembly remains a required pull-request CI job. Locally
+# it is an explicit release/reproduction check rather than a cost every source
+# push pays after the full suite.
+run_release_gate=false
+if [ "$run_core_gates" = true ] && [ -n "${FORCE_FULL_PRE_PUSH:-}" ]; then
+  run_release_gate=true
+fi
+
 # Root trace and inspection contracts are consumed by the Viewer, so retain
 # Viewer coverage for core changes as well as Viewer-owned changes.
 run_viewer_gate=false
@@ -621,6 +629,9 @@ if [ -n "${PTC_PRE_PUSH_SERIAL:-}" ]; then
   if [ "$run_core_gates" = true ]; then
     run_gate "core static analysis" "$HOOK_REPO_ROOT/scripts/ci/core-static.sh"
     run_gate "core Dialyzer" "$HOOK_REPO_ROOT/scripts/ci/core-dialyzer.sh"
+  fi
+
+  if [ "$run_release_gate" = true ]; then
     run_gate "core release verification" "$HOOK_REPO_ROOT/scripts/ci/core-release.sh"
   fi
 
@@ -633,6 +644,9 @@ elif [ "$run_core_gates" = true ] || [ "$run_viewer_gate" = true ]; then
 
   if [ "$run_core_gates" = true ]; then
     start_lane "core static analysis + Dialyzer" core_static_and_dialyzer
+  fi
+
+  if [ "$run_release_gate" = true ]; then
     start_lane "core release verification" \
       "$HOOK_REPO_ROOT/scripts/ci/core-release.sh"
   fi

@@ -289,9 +289,9 @@ defmodule PtcRunner.MixProject do
   defp aliases do
     [
       ptc: &run_ptc/1,
-      # Nested fetch then quality. The suite, Viewer, launcher package, and
-      # release belong to the pre-push hook and GitHub Actions, so an agent
-      # that runs this before commit does not pay for them again on push.
+      # Nested fetch then quality. The suite and path-selected Viewer or
+      # launcher gates belong to pre-push; required pull-request CI adds release
+      # verification. An agent that runs this before commit does not repeat it.
       precommit: [
         "cmd scripts/ci/preflight.sh",
         "cmd scripts/ci/core-quality.sh"

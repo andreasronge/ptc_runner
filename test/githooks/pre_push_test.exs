@@ -230,10 +230,7 @@ defmodule PtcRunner.GitHooks.PrePushTest do
              ["ci-gate launcher"]
   end
 
-  # The Viewer ships inside the standalone release, and the core release gate
-  # starts it and serves a trace through it, so its own validation is no longer
-  # the only gate a Viewer change can break.
-  test "Viewer changes run the Viewer gate and the root gate" do
+  test "Viewer changes run the Viewer gate and the root test gate" do
     %{repo: repo, mix_marker: mix_marker, path: path} =
       git_repo_with_change("ptc_viewer/lib/ptc_viewer.ex")
 
@@ -245,11 +242,11 @@ defmodule PtcRunner.GitHooks.PrePushTest do
 
     markers = mix_marker |> File.read!() |> String.split("\n", trim: true)
     assert "ci-gate viewer" in markers
-    assert "ci-gate core-release" in markers
+    refute "ci-gate core-release" in markers
   end
 
   @tag :slow
-  test "full gate invokes every deterministic root entry point once" do
+  test "an ordinary core push keeps release verification off the local critical path" do
     %{repo: repo, mix_marker: mix_marker, path: path} =
       git_repo_with_change("lib/example.ex")
 
@@ -258,7 +255,7 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     assert status == 0, output
     assert output =~ ~r/core tests passed in \d+s/
     assert output =~ ~r/core static analysis \+ Dialyzer passed in \d+s/
-    assert output =~ ~r/core release verification passed in \d+s/
+    refute output =~ "core release verification"
 
     assert output =~ "Phase timings:"
     assert output =~ ~r/core tests\s+\d+s/
@@ -268,7 +265,7 @@ defmodule PtcRunner.GitHooks.PrePushTest do
   end
 
   @tag :slow
-  test "serial mode runs every gate in the documented order" do
+  test "serial mode runs the ordinary local gates in the documented order" do
     %{repo: repo, mix_marker: mix_marker, path: path} =
       git_repo_with_change("lib/example.ex")
 
@@ -283,18 +280,41 @@ defmodule PtcRunner.GitHooks.PrePushTest do
                "ci-gate core-tests",
                "ci-gate core-static",
                "ci-gate core-dialyzer",
-               "ci-gate core-release",
                "ci-gate viewer"
              ]
   end
 
   @tag :slow
-  test "a failing lane fails the push and still reports its siblings" do
+  test "forced full mode adds release and launcher verification" do
+    %{repo: repo, mix_marker: mix_marker, path: path} =
+      git_repo_with_change("lib/example.ex")
+
+    {output, status} =
+      run_hook(repo, path, [{"FORCE_FULL_PRE_PUSH", "1"}, {"PTC_PRE_PUSH_SERIAL", "1"}])
+
+    assert status == 0, output
+
+    assert mix_marker |> File.read!() |> String.split("\n", trim: true) ==
+             [
+               "deps.get --check-locked",
+               "docs --warnings-as-errors",
+               "ci-gate core-tests",
+               "ci-gate core-static",
+               "ci-gate core-dialyzer",
+               "ci-gate core-release",
+               "ci-gate viewer",
+               "ci-gate launcher"
+             ]
+  end
+
+  @tag :slow
+  test "a failing release lane fails a forced full push and still reports its siblings" do
     %{repo: repo, mix_marker: mix_marker, path: path} =
       git_repo_with_change("lib/example.ex")
 
     {output, status} =
       run_hook(repo, path, [
+        {"FORCE_FULL_PRE_PUSH", "1"},
         {"MIX_FAIL_GATE", "core-release"},
         {"MIX_FAIL_MESSAGE",
          "error: command failed: test -f missing\n  status: 1\n  location: scripts/verify_core_package.sh:42"}
@@ -333,8 +353,9 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     assert "ci-gate core-static" in invocations
     refute "ci-gate core-dialyzer" in invocations
 
-    # The sibling lanes are independent and still run to completion.
-    assert "ci-gate core-release" in invocations
+    # The Viewer lane is independent and still runs to completion. Release
+    # verification belongs only to an explicitly forced local run.
+    refute "ci-gate core-release" in invocations
     assert "ci-gate viewer" in invocations
   end
 
@@ -401,7 +422,6 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     "ci-gate core-tests",
     "ci-gate core-static",
     "ci-gate core-dialyzer",
-    "ci-gate core-release",
     "ci-gate viewer"
   ]
 
@@ -419,7 +439,7 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     assert_runs_before(invocations, "docs --warnings-as-errors", "ci-gate core-tests")
 
     # The suite owns the machine: no lane starts until it has finished.
-    for lane <- ["ci-gate core-static", "ci-gate core-release", "ci-gate viewer"] do
+    for lane <- ["ci-gate core-static", "ci-gate viewer"] do
       assert_runs_before(invocations, "ci-gate core-tests", lane)
     end
 

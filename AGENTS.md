@@ -83,9 +83,12 @@ body. An assignee marks the issue as taken.
   `mix ptc ...` otherwise skips dependency validation for fast startup.
 - `mix precommit` — quality gate: format, compile, cycles, Credo, duplication,
   spec, and generated-artifact staleness. It does not run the suite, Viewer,
-  launcher, Dialyzer, ExDoc, or release; those run on `git push`.
-- `git push` — the tracked pre-push hook runs the same gate scripts as GitHub
-  Actions for the paths you changed. When a staleness check fires, run its
+  launcher, Dialyzer, ExDoc, or release.
+- `git push` — the tracked pre-push hook runs the local test, static, Dialyzer,
+  Viewer, launcher, and ExDoc gates selected by the paths you changed. Required
+  pull-request CI additionally runs release-package verification in parallel;
+  `FORCE_FULL_PRE_PUSH=1 git push` adds it locally for release preparation or
+  diagnosis. When a staleness check fires, run its
   write form (`mix ptc.gen_docs` for generated docs and schemas,
   `mix ptc.conformance_report --write-inventory` for
   `conformance_inventory.json`) and stage the result. Never push with
