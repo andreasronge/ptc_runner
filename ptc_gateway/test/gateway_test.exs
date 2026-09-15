@@ -426,6 +426,10 @@ defmodule PtcGatewayTest do
              accept: ~s(application/json;charset="utf-8", text/event-stream)
            ).status == 200
 
+    assert mcp(config, "server/discover", 1,
+             accept: ~s(application/json;foo="a,b", application/json, text/event-stream)
+           ).status == 200
+
     assert mcp(config, "server/discover", 1, content_type: "text/plain").status == 415
     assert response(config, "/mcp", method: :get).status == 405
 
@@ -520,6 +524,8 @@ defmodule PtcGatewayTest do
              {"Host", "127.0.0.1:#{config["listen"]["port"]}"}
            ]) == 400
 
+    assert raw_mcp_status(config, [{"Host", "evil.example"}]) == 400
+
     for {name, value, status} <- duplicate_cases do
       headers =
         cond do
@@ -532,10 +538,11 @@ defmodule PtcGatewayTest do
              "duplicate #{name} was not rejected"
     end
 
-    assert mcp(config, "tools/list", 1, headers: [{"mcp-method", "TOOLS/LIST"}]).status ==
-             400
-
-    assert mcp(config, "tools/list", 1, method_header: false).status == 400
+    assert raw_mcp_status(config, [{"Mcp-Method", "TOOLS/LIST"}]) == 400
+    assert raw_mcp_status(config, [{"mcp-method", "tools/list"}]) == 200
+    assert raw_mcp_status(config, [{"MCP-METHOD", "tools/list"}]) == 200
+    assert raw_mcp_status(config, [{"Mcp-Method", " \ttools/list\t "}]) == 200
+    assert raw_status(raw_mcp_response(config, [], method_header: false)) == 400
 
     tab_bearer = raw_mcp_response(config, [{"Authorization", "Bearer\t#{@token}"}])
     assert raw_status(tab_bearer) == 401
@@ -678,6 +685,28 @@ defmodule PtcGatewayTest do
     assert busy.body == %{
              "jsonrpc" => "2.0",
              "error" => %{"code" => -31999, "message" => "Server busy"}
+           }
+  end
+
+  @tag :tmp_dir
+  test "unavailable HTTP admission rejects before body parsing without an ID", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+    admission = :sys.get_state(owner).request_admission
+    monitor = Process.monitor(admission)
+    Process.exit(admission, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^admission, :killed}
+    _ = PtcGateway.Domain.metadata(owner)
+
+    response = raw_mcp_response(config, [], body: "not-json")
+    assert raw_status(response) == 503
+
+    assert Jason.decode!(raw_body(response)) == %{
+             "jsonrpc" => "2.0",
+             "error" => %{"code" => -31998, "message" => "Server unavailable"}
            }
   end
 
@@ -918,8 +947,8 @@ defmodule PtcGatewayTest do
 
   defp raw_mcp_response(config, extra_headers, opts \\ []) do
     port = config["listen"]["port"]
-    body = raw_mcp_body()
-    headers = raw_mcp_headers(config, extra_headers, body)
+    body = Keyword.get(opts, :body, raw_mcp_body())
+    headers = raw_mcp_headers(config, extra_headers, body, opts)
 
     request =
       [
@@ -958,7 +987,7 @@ defmodule PtcGatewayTest do
     })
   end
 
-  defp raw_mcp_headers(config, extra_headers, body) do
+  defp raw_mcp_headers(config, extra_headers, body, opts \\ []) do
     port = config["listen"]["port"]
 
     extra_headers =
@@ -973,16 +1002,23 @@ defmodule PtcGatewayTest do
          do: [],
          else: [{"Authorization", "Bearer #{@token}"}]
 
+    default_method =
+      if Keyword.get(opts, :method_header, true) and
+           not Enum.any?(extra_headers, fn {name, _value} ->
+             String.downcase(name) == "mcp-method"
+           end),
+         do: [{"Mcp-Method", "tools/list"}],
+         else: []
+
     extra_headers ++
       default_authorization ++
       [
         {"Content-Type", "application/json"},
         {"Accept", "application/json, text/event-stream"},
         {"MCP-Protocol-Version", "2026-07-28"},
-        {"Mcp-Method", "tools/list"},
         {"Content-Length", Integer.to_string(byte_size(body))},
         {"Connection", "close"}
-      ]
+      ] ++ default_method
   end
 
   defp aggregate_padding_headers(config, target) do

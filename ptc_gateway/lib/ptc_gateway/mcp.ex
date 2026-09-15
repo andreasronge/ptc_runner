@@ -137,9 +137,13 @@ defmodule PtcGateway.MCP do
     valid? =
       case get_req_header(conn, "accept") do
         [value] when is_binary(value) ->
-          String.valid?(value) and valid_media_ranges?(value) and
-            accepts?(value, "application", "json") and
-            accepts?(value, "text", "event-stream")
+          with true <- String.valid?(value),
+               {:ok, ranges} <- media_ranges(value) do
+            accepts?(ranges, "application", "json") and
+              accepts?(ranges, "text", "event-stream")
+          else
+            _ -> false
+          end
 
         _ ->
           false
@@ -148,10 +152,8 @@ defmodule PtcGateway.MCP do
     if valid?, do: :ok, else: {:fixed, conn, 406, "not_acceptable", []}
   end
 
-  defp accepts?(header, wanted_type, wanted_subtype) do
-    header
-    |> String.split(",")
-    |> Enum.map(&media_range/1)
+  defp accepts?(ranges, wanted_type, wanted_subtype) do
+    ranges
     |> Enum.filter(fn {type, subtype, params, _quality} ->
       type in ["*", wanted_type] and subtype in ["*", wanted_subtype] and
         compatible_params?(wanted_type, wanted_subtype, params)
@@ -164,11 +166,13 @@ defmodule PtcGateway.MCP do
     |> Kernel.>(0)
   end
 
-  defp valid_media_ranges?(header),
-    do: Enum.all?(String.split(header, ","), &(media_range(&1) != :invalid))
+  defp media_ranges(header) do
+    ranges = header |> quoted_split(?,) |> Enum.map(&media_range/1)
+    if :invalid in ranges, do: :error, else: {:ok, ranges}
+  end
 
   defp media_range(range) do
-    [media | params] = String.split(range, ";")
+    [media | params] = quoted_split(range, ?;)
 
     with [type, subtype] <- String.split(String.trim(media), "/", parts: 2),
          type <- String.downcase(type),
@@ -179,6 +183,34 @@ defmodule PtcGateway.MCP do
       {type, subtype, media_params, quality}
     else
       _ -> :invalid
+    end
+  end
+
+  defp quoted_split(value, separator),
+    do: quoted_split(value, separator, false, false, [], [])
+
+  defp quoted_split(<<>>, _separator, _quoted?, _escaped?, current, parts) do
+    part = current |> Enum.reverse() |> IO.iodata_to_binary()
+    Enum.reverse([part | parts])
+  end
+
+  defp quoted_split(<<byte, rest::binary>>, separator, quoted?, escaped?, current, parts) do
+    cond do
+      escaped? ->
+        quoted_split(rest, separator, quoted?, false, [byte | current], parts)
+
+      quoted? and byte == ?\\ ->
+        quoted_split(rest, separator, quoted?, true, [byte | current], parts)
+
+      byte == ?" ->
+        quoted_split(rest, separator, not quoted?, false, [byte | current], parts)
+
+      byte == separator and not quoted? ->
+        part = current |> Enum.reverse() |> IO.iodata_to_binary()
+        quoted_split(rest, separator, false, false, [], [part | parts])
+
+      true ->
+        quoted_split(rest, separator, quoted?, false, [byte | current], parts)
     end
   end
 
@@ -388,8 +420,20 @@ defmodule PtcGateway.MCP do
 
   defp single(conn, header) do
     case get_req_header(conn, header) do
-      [value] -> value
+      [value] -> trim_ows(value)
       _ -> nil
+    end
+  end
+
+  defp trim_ows(<<byte, rest::binary>>) when byte in [32, 9], do: trim_ows(rest)
+
+  defp trim_ows(value) do
+    size = byte_size(value)
+
+    if size > 0 and :binary.last(value) in [32, 9] do
+      trim_ows(binary_part(value, 0, size - 1))
+    else
+      value
     end
   end
 
