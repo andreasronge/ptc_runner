@@ -8,7 +8,6 @@ defmodule PtcGateway.MCP do
   @body_limit 2_097_152
   @response_limit 4_194_304
   @safe_integer 9_007_199_254_740_991
-  @critical ~w(host origin authorization content-type accept mcp-protocol-version mcp-method mcp-name)
 
   @impl true
   def init(opts), do: opts
@@ -21,8 +20,36 @@ defmodule PtcGateway.MCP do
          :ok <- valid_origin(conn, opts),
          :ok <- authenticated(conn, opts),
          :ok <- valid_content_type(conn),
-         :ok <- valid_accept(conn),
-         {:ok, body, conn} <- read_bounded_body(conn),
+         :ok <- valid_accept(conn) do
+      admitted(conn, opts)
+    else
+      {:fixed, conn, status, value, headers} -> fixed_reply(conn, status, value, headers)
+    end
+  rescue
+    _ -> rpc_error(conn, 500, -32603, "Internal error", nil, nil)
+  catch
+    _, _ -> rpc_error(conn, 500, -32603, "Internal error", nil, nil)
+  end
+
+  defp admitted(conn, opts) do
+    case PtcGateway.RequestAdmission.acquire(opts[:request_admission]) do
+      :ok ->
+        try do
+          handle_body(conn, opts)
+        after
+          PtcGateway.RequestAdmission.release(opts[:request_admission])
+        end
+
+      :full ->
+        rpc_error(conn, 429, -32001, "Server busy", nil, nil)
+
+      :unavailable ->
+        rpc_error(conn, 503, -32002, "Server unavailable", nil, nil)
+    end
+  end
+
+  defp handle_body(conn, opts) do
+    with {:ok, body, conn} <- read_bounded_body(conn),
          {:ok, request} <- decode(body, conn),
          {:ok, id, method, params} <- envelope(request, conn),
          :ok <- valid_metadata(conn, id, method, params),
@@ -35,24 +62,18 @@ defmodule PtcGateway.MCP do
       {:rpc, conn, status, code, message, id, data} ->
         rpc_error(conn, status, code, message, id, data)
     end
-  rescue
-    _ -> rpc_error(conn, 500, -32603, "Internal error", nil, nil)
-  catch
-    _, _ -> rpc_error(conn, 500, -32603, "Internal error", nil, nil)
   end
 
   defp valid_method(%{method: "POST"}), do: :ok
   defp valid_method(conn), do: {:fixed, conn, 405, "method_not_allowed", [{"allow", "POST"}]}
 
   defp bounded_headers(conn) do
-    duplicate? = Enum.any?(@critical, &(length(get_req_header(conn, &1)) > 1))
-
     bytes =
       Enum.reduce(conn.req_headers, 0, fn {name, value}, total ->
         total + byte_size(name) + byte_size(value) + 4
       end)
 
-    if length(conn.req_headers) <= 64 and bytes <= 32_768 and not duplicate?,
+    if length(conn.req_headers) <= 64 and bytes <= 32_768,
       do: :ok,
       else: {:fixed, conn, 431, "request_headers_too_large", []}
   end
@@ -72,14 +93,18 @@ defmodule PtcGateway.MCP do
   defp authenticated(conn, opts) do
     valid? =
       case get_req_header(conn, "authorization") do
-        [value] ->
-          case Regex.run(~r/^([^ \t]+)[ \t]+([^ \t]+)$/u, value, capture: :all_but_first) do
-            [scheme, token] ->
-              String.downcase(scheme) == "bearer" and
-                WarmProviderRuntime.authenticate(opts[:warm], token)
+        [value] when is_binary(value) ->
+          if not String.valid?(value) do
+            false
+          else
+            case Regex.run(~r/^([^ \t]+)[ \t]+([^ \t]+)$/u, value, capture: :all_but_first) do
+              [scheme, token] ->
+                String.downcase(scheme) == "bearer" and
+                  WarmProviderRuntime.authenticate(opts[:warm], token)
 
-            _ ->
-              false
+              _ ->
+                false
+            end
           end
 
         _ ->
@@ -94,11 +119,12 @@ defmodule PtcGateway.MCP do
   defp valid_content_type(conn) do
     valid? =
       case get_req_header(conn, "content-type") do
-        [value] ->
-          Regex.match?(
-            ~r/^application\/json(?:[ \t]*;[ \t]*charset[ \t]*=[ \t]*(?:utf-8|"utf-8"))?$/iu,
-            value
-          )
+        [value] when is_binary(value) ->
+          String.valid?(value) and
+            Regex.match?(
+              ~r/^application\/json(?:[ \t]*;[ \t]*charset[ \t]*=[ \t]*(?:utf-8|"utf-8"))?$/iu,
+              value
+            )
 
         _ ->
           false
@@ -110,8 +136,10 @@ defmodule PtcGateway.MCP do
   defp valid_accept(conn) do
     valid? =
       case get_req_header(conn, "accept") do
-        [value] ->
-          accepts?(value, "application", "json") and accepts?(value, "text", "event-stream")
+        [value] when is_binary(value) ->
+          String.valid?(value) and valid_media_ranges?(value) and
+            accepts?(value, "application", "json") and
+            accepts?(value, "text", "event-stream")
 
         _ ->
           false
@@ -123,34 +151,62 @@ defmodule PtcGateway.MCP do
   defp accepts?(header, wanted_type, wanted_subtype) do
     header
     |> String.split(",")
-    |> Enum.any?(fn range ->
-      [media | params] = String.split(range, ";")
-
-      case String.split(String.trim(media), "/", parts: 2) do
-        [type, subtype] ->
-          type = String.downcase(type)
-          subtype = String.downcase(subtype)
-          quality = Enum.find_value(params, 1.0, &quality/1)
-          quality > 0 and type in ["*", wanted_type] and subtype in ["*", wanted_subtype]
-
-        _ ->
-          false
-      end
+    |> Enum.map(&media_range/1)
+    |> Enum.filter(fn {type, subtype, _quality} ->
+      type in ["*", wanted_type] and subtype in ["*", wanted_subtype]
     end)
+    |> Enum.max_by(
+      fn {type, subtype, _quality} -> specificity(type, subtype) end,
+      fn -> {"*", "*", 0.0} end
+    )
+    |> elem(2)
+    |> Kernel.>(0)
   end
 
-  defp quality(param) do
-    case String.split(String.trim(param), "=", parts: 2) do
-      [name, value] when name in ["q", "Q"] ->
-        case Float.parse(value) do
-          {quality, ""} when quality >= 0 and quality <= 1 -> quality
-          _ -> -1.0
-        end
+  defp valid_media_ranges?(header),
+    do: Enum.all?(String.split(header, ","), &(media_range(&1) != :invalid))
 
-      _ ->
-        nil
+  defp media_range(range) do
+    [media | params] = String.split(range, ";")
+
+    with [type, subtype] <- String.split(String.trim(media), "/", parts: 2),
+         type <- String.downcase(type),
+         subtype <- String.downcase(subtype),
+         true <- media_token?(type) and media_token?(subtype),
+         true <- type != "*" or subtype == "*",
+         {:ok, quality} <- media_quality(params) do
+      {type, subtype, quality}
+    else
+      _ -> :invalid
     end
   end
+
+  defp media_quality(params) do
+    qualities =
+      for param <- params,
+          [name, value] <- [String.split(String.trim(param), "=", parts: 2)],
+          String.downcase(name) == "q",
+          do: value
+
+    case qualities do
+      [] -> {:ok, 1.0}
+      [value] -> parse_quality(value)
+      _ -> :error
+    end
+  end
+
+  defp parse_quality(value) do
+    if Regex.match?(~r/^(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$/, value),
+      do:
+        {:ok, String.to_float(if(String.contains?(value, "."), do: value, else: value <> ".0"))},
+      else: :error
+  end
+
+  defp media_token?("*"), do: true
+  defp media_token?(value), do: Regex.match?(~r/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/, value)
+  defp specificity("*", "*"), do: 0
+  defp specificity(_type, "*"), do: 1
+  defp specificity(_type, _subtype), do: 2
 
   defp read_bounded_body(conn) do
     case read_body(conn, length: @body_limit + 1, read_length: 64_000) do
@@ -212,11 +268,48 @@ defmodule PtcGateway.MCP do
 
   defp valid_client_info?(meta) do
     case Map.fetch(meta, "io.modelcontextprotocol/clientInfo") do
+      :error ->
+        true
+
+      {:ok, %{"name" => name, "version" => version} = info} ->
+        is_binary(name) and is_binary(version) and optional_string?(info, "title") and
+          optional_string?(info, "description") and valid_website?(info) and valid_icons?(info)
+
+      _ ->
+        false
+    end
+  end
+
+  defp optional_string?(map, key), do: not Map.has_key?(map, key) or is_binary(map[key])
+
+  defp valid_website?(info) do
+    case Map.fetch(info, "websiteUrl") do
       :error -> true
-      {:ok, %{"name" => name, "version" => version}} -> is_binary(name) and is_binary(version)
+      {:ok, value} when is_binary(value) -> URI.parse(value).scheme not in [nil, ""]
+      _ -> false
+    end
+  rescue
+    _ -> false
+  end
+
+  defp valid_icons?(info) do
+    case Map.fetch(info, "icons") do
+      :error -> true
+      {:ok, icons} when is_list(icons) -> Enum.all?(icons, &valid_icon?/1)
       _ -> false
     end
   end
+
+  defp valid_icon?(%{"src" => src} = icon) when is_binary(src) do
+    URI.parse(src).scheme not in [nil, ""] and optional_string?(icon, "mimeType") and
+      (not Map.has_key?(icon, "sizes") or
+         (is_list(icon["sizes"]) and Enum.all?(icon["sizes"], &is_binary/1))) and
+      (not Map.has_key?(icon, "theme") or icon["theme"] in ["dark", "light"])
+  rescue
+    _ -> false
+  end
+
+  defp valid_icon?(_icon), do: false
 
   defp single(conn, header) do
     case get_req_header(conn, header) do
@@ -241,27 +334,28 @@ defmodule PtcGateway.MCP do
   end
 
   defp dispatch(conn, id, "tools/list", params, opts) do
-    if not WarmProviderRuntime.snapshot(opts[:warm]).ready do
-      {:rpc, conn, 503, -32002, "Server unavailable", id, nil}
-    else
-      list_tools(conn, id, params, opts)
-    end
+    list_tools(conn, id, params, opts)
   end
 
   defp dispatch(conn, id, _method, _params, _opts),
     do: {:rpc, conn, 404, -32601, "Method not found", id, nil}
 
   defp list_tools(conn, id, params, opts) do
-    if Map.keys(params) == ["_meta"] do
-      {:ok,
-       %{
-         "resultType" => "complete",
-         "tools" => opts[:tools],
-         "ttlMs" => 0,
-         "cacheScope" => "private"
-       }}
-    else
-      {:rpc, conn, 200, -32602, "Invalid Params", id, nil}
+    cond do
+      Map.keys(params) != ["_meta"] ->
+        {:rpc, conn, 200, -32602, "Invalid Params", id, nil}
+
+      not WarmProviderRuntime.snapshot(opts[:warm]).ready ->
+        {:rpc, conn, 503, -32002, "Server unavailable", id, nil}
+
+      true ->
+        {:ok,
+         %{
+           "resultType" => "complete",
+           "tools" => opts[:tools],
+           "ttlMs" => 0,
+           "cacheScope" => "private"
+         }}
     end
   end
 

@@ -27,7 +27,16 @@ defmodule PtcGateway.Domain do
   @impl true
   def init({path, env_file}) do
     Process.flag(:trap_exit, true)
-    state = %{catalog: nil, children: [], warm: nil, listener: nil, metadata: [], policy: nil}
+
+    state = %{
+      catalog: nil,
+      children: [],
+      warm: nil,
+      listener: nil,
+      request_admission: nil,
+      metadata: [],
+      policy: nil
+    }
 
     case configure(path, env_file, state) do
       {:ok, ready} ->
@@ -112,9 +121,21 @@ defmodule PtcGateway.Domain do
   defp static_catalog(tools) do
     schemas = Enum.flat_map(tools, &[&1["inputSchema"], &1["outputSchema"]])
 
-    if Enum.all?(schemas, &(encoded_size(&1) <= 65_536)) and encoded_size(tools) <= 4_194_304,
-      do: :ok,
-      else: {:error, :static_catalog_too_large}
+    listing = %{
+      "jsonrpc" => "2.0",
+      "id" => String.duplicate("x", 256),
+      "result" => %{
+        "resultType" => "complete",
+        "tools" => tools,
+        "ttlMs" => 0,
+        "cacheScope" => "private"
+      }
+    }
+
+    if Enum.all?(schemas, &(encoded_size(&1) <= 65_536)) and
+         encoded_size(tools) <= 4_194_304 and encoded_size(listing) <= 4_194_304,
+       do: :ok,
+       else: {:error, :static_catalog_too_large}
   end
 
   defp encoded_size(value) do
@@ -171,9 +192,19 @@ defmodule PtcGateway.Domain do
                max_waiting_provider_calls: admission["max_waiting_provider_calls"],
                env_file: env_file
              ) do
-          {:ok, warm} -> listen(config, %{child(state, warm) | warm: warm})
+          {:ok, warm} -> start_request_admission(config, %{child(state, warm) | warm: warm})
           {:error, code} -> {:error, PtcGateway.StartupError.normalize(code), state}
         end
+
+      _ ->
+        {:error, :run_admission_unavailable, state}
+    end
+  end
+
+  defp start_request_admission(config, state) do
+    case PtcGateway.RequestAdmission.start_link(config["admission"]["max_inflight_requests"]) do
+      {:ok, admission} ->
+        listen(config, %{child(state, admission) | request_admission: admission})
 
       _ ->
         {:error, :run_admission_unavailable, state}
@@ -185,7 +216,12 @@ defmodule PtcGateway.Domain do
     ip = if listen["address"] == "::1", do: {0, 0, 0, 0, 0, 0, 0, 1}, else: {127, 0, 0, 1}
 
     case Bandit.start_link(
-           plug: {PtcGateway.Router, listen: listen, warm: state.warm, tools: state.metadata},
+           plug:
+             {PtcGateway.Router,
+              listen: listen,
+              warm: state.warm,
+              tools: state.metadata,
+              request_admission: state.request_admission},
            ip: ip,
            port: listen["port"],
            startup_log: false,

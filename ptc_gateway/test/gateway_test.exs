@@ -344,6 +344,14 @@ defmodule PtcGatewayTest do
     refute inspect(unauthorized) =~ "not-json"
 
     assert mcp(config, "server/discover", 1, accept: "application/json").status == 406
+
+    assert mcp(config, "server/discover", 1,
+             accept: "*/*;q=1, application/json;q=0, text/event-stream;q=1"
+           ).status == 406
+
+    assert mcp(config, "server/discover", 1, accept: "*/json, text/event-stream").status ==
+             406
+
     assert mcp(config, "server/discover", 1, content_type: "text/plain").status == 415
     assert response(config, "/mcp", method: :get).status == 405
 
@@ -355,6 +363,29 @@ defmodule PtcGatewayTest do
     assert malformed.status == 400
     assert malformed.body["error"]["code"] == -32700
     refute Map.has_key?(malformed.body, "id")
+
+    invalid_info = %{
+      "_meta" => %{
+        "io.modelcontextprotocol/protocolVersion" => "2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities" => %{},
+        "io.modelcontextprotocol/clientInfo" => %{
+          "name" => "client",
+          "version" => "1",
+          "icons" => 42
+        }
+      }
+    }
+
+    assert mcp(config, "server/discover", 1, full_params: invalid_info).body["error"]["code"] ==
+             -32602
+  end
+
+  test "request admission atomically bounds active requests" do
+    assert {:ok, admission} = PtcGateway.RequestAdmission.start_link(1)
+    assert :ok = PtcGateway.RequestAdmission.acquire(admission)
+    assert :full = PtcGateway.RequestAdmission.acquire(admission)
+    assert :ok = PtcGateway.RequestAdmission.release(admission)
+    assert :ok = PtcGateway.RequestAdmission.acquire(admission)
   end
 
   @tag :tmp_dir
@@ -480,15 +511,17 @@ defmodule PtcGatewayTest do
     protocol = Keyword.get(opts, :protocol, "2026-07-28")
 
     params =
-      Map.merge(
-        %{
-          "_meta" => %{
-            "io.modelcontextprotocol/protocolVersion" => protocol,
-            "io.modelcontextprotocol/clientCapabilities" => %{}
-          }
-        },
-        Keyword.get(opts, :params, %{})
-      )
+      Keyword.get_lazy(opts, :full_params, fn ->
+        Map.merge(
+          %{
+            "_meta" => %{
+              "io.modelcontextprotocol/protocolVersion" => protocol,
+              "io.modelcontextprotocol/clientCapabilities" => %{}
+            }
+          },
+          Keyword.get(opts, :params, %{})
+        )
+      end)
 
     body =
       Keyword.get_lazy(opts, :raw_body, fn ->
