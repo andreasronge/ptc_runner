@@ -8,6 +8,22 @@ defmodule PtcRunner.GitHooks.PrePushTest do
   @executable_guides Path.expand("../support/executable_guides.txt", __DIR__)
   @git_env GitEnv.clear()
 
+  test "managed validation preserves manager-owned worktrees without running garbage collection" do
+    %{repo: repo, path: path} = git_repo_with_change("lib/example.ex")
+    marker = Path.join(repo, "gc-called")
+    write_executable!(Path.join(repo, "scripts/worktree.sh"), "#!/bin/sh\ntouch \"$GC_MARKER\"\n")
+
+    {output, status} =
+      run_hook(repo, path, [
+        {"PTC_MANAGED_OPERATION_CONTEXT", "/managed/context.json"},
+        {"PTC_OPERATION_ACTIVE", "1"},
+        {"GC_MARKER", marker}
+      ])
+
+    assert status == 0, output
+    refute File.exists?(marker)
+  end
+
   test "managed pushes coordinate the complete hook exactly once" do
     %{repo: repo, path: path} = git_repo_with_change("docs/plans/managed-hook.md")
     operation_marker = install_operation_wrapper!(path)

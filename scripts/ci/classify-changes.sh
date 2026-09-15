@@ -88,6 +88,10 @@ while IFS= read -r path || [ -n "$path" ]; do
       launcher=true
       ;;
 
+    ptc_gateway/*)
+      core=true
+      ;;
+
     ptc_viewer/*)
       # The Viewer ships inside the standalone release, and the core release
       # gate starts it and serves a trace through it, so a Viewer change can

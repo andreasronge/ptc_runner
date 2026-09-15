@@ -16,10 +16,13 @@ consistency checks that compare the whole project therefore wait for
 stays project-wide because Mix is incremental and `--warnings-as-errors` has
 to see the build.
 Scoped tests run only for staged `*_test.exs` files, with `:slow` excluded.
+The Viewer and gateway each use their own project formatter and compiler.
 
 The pre-push hook classifies the pushed and dirty paths, then invokes the same
 repository-owned root, Viewer, launcher, release, or documentation entry
-points as GitHub Actions. For mixed documentation and code changes, ExDoc runs
+points as GitHub Actions. The core static gate also runs the sibling gateway
+format, compile, and test gate, including its short startup CLI smoke test.
+For mixed documentation and code changes, ExDoc runs
 before the longer test and Dialyzer stages. Plan-only changes skip the
 expensive gate. Scheduled workflows (`nightly.yml`, `soak.yml`, `e2e.yml`,
 `pages.yml`) and other paths that cannot break a product gate select none.
@@ -39,7 +42,7 @@ gate that is slow. Set `PTC_PRE_PUSH_SERIAL=1` to run every gate serially when
 diagnosing a failure or pushing from a machine too small to overlap them.
 
 For an ordinary push, run `git push` and let the hook execute the complete gate
-once. "Complete" excludes `:nightly` tests, which spawn Mix/OS processes or
+once. "Complete" excludes root `:nightly` tests, which spawn Mix/OS processes or
 wait on multi-second deadlines and run in the `Nightly` workflow instead;
 everything else runs. `mix precommit` is the quality gate (nested fetch plus
 format, compile, credo, duplication, spec, and generated-artifact checks).
@@ -59,3 +62,6 @@ The core test entry point sets `CI=1` but uses the project's scheduler-count
 ExUnit concurrency. Do not reduce that pressure to make a failing push pass;
 reproduce the reported seed and fix the load-sensitive test instead. For a
 second, lower-concurrency signal, run `scripts/ci/core-tests.sh --schedulers 4`.
+
+PtcManager owns managed worktree lifetimes. Managed pre-push runs retain every
+quality gate and skip the final advisory worktree garbage collection.
