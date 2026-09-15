@@ -32,7 +32,7 @@ There is no implicit configuration search or implicit environment-file search.
 | Listener | Literal `127.0.0.1` or `::1`; port 1–65535, fixed path `/mcp`. |
 | Origins | `listen.allowed_origins` defaults to `[]`; at most 128 unique HTTP(S) serialized origins, each at most 2048 bytes. No userinfo, path, query, fragment, whitespace, escapes, uppercase host, or explicit default port. |
 | Authority | Every request requires exactly the configured literal listener authority, including its port except port 80; IPv6 uses brackets. No proxy headers are trusted. |
-| Bearer | `authentication.bearer.binding` names a host credential. The document never carries the bearer value. Capture enforces 32–4096 ASCII bytes in HTTP bearer-token grammar. |
+| Bearer | `authentication.bearer.binding` names a host credential bound to an environment variable or a file. A literal host credential is refused, so neither document carries the bearer value. Capture enforces 32–4096 ASCII bytes in HTTP bearer-token grammar. |
 | Admission | `max_inflight_requests`, `max_concurrent_runs`, and `max_active_provider_calls` each require 1–65535; `max_waiting_provider_calls` requires 0–65535. The request limit is supplied to the future MCP transport. |
 | Tools | 1–128 entries, unique names matching `[a-zA-Z0-9_.-]{1,128}`, validated in name order. Titles require 1–256 bytes; descriptions 1–4096. |
 | Application | `application.manifest` names one manifest file, at most 1024 bytes. The serving constructor requires object input/output contracts and a validated read/write effect. |
@@ -88,9 +88,13 @@ locked for the owner's lifetime. After an unclean owner death, the retained
 lock requires you to stop the old process before removing it.
 
 Each startup durably opens a new numbered file and separately appends and
-flushes a temporary probe before readiness. The probe is then removed. Only after the replacement is durable may retention
-remove closed files, oldest first. Active files are never truncated. Unexpected
-files, hard links, oversized files or wrong permissions refuse startup. There
+flushes a temporary probe before readiness. The probe is then removed. Only
+after the replacement is durable may retention remove closed files, oldest
+first, so narrowing `max_retained_files` prunes down to the new bound on the
+next startup. A startup that fails after opening its replacement removes it
+again, so a failed start leaves no empty file counting against that bound.
+Active files are never truncated. Unexpected files, hard links, oversized files
+or wrong permissions refuse startup. There
 is no HTTP audit-reading endpoint. Per-call redacted records and execution
 failure fencing belong to the execution integration.
 

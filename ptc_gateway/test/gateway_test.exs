@@ -291,6 +291,50 @@ defmodule PtcGatewayTest do
     end)
   end
 
+  @tag :tmp_dir
+  test "a literal bearer credential refuses startup", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+
+    File.write!(
+      Path.join(dir, "host.json"),
+      Jason.encode!(%{
+        "credentials" => %{"gateway" => %{"literal" => @token}},
+        "install" => %{}
+      })
+    )
+
+    File.write!(path, Jason.encode!(config))
+    assert {:error, :credential_unavailable} = PtcGateway.start_link(path)
+  end
+
+  @tag :tmp_dir
+  test "rotation prunes down to a narrowed retention bound, oldest first", %{tmp_dir: dir} do
+    config = %{
+      "directory" => Path.join(dir, "audit"),
+      "max_file_bytes" => 1024,
+      "max_retained_files" => 2
+    }
+
+    wide = %{config | "max_retained_files" => 8}
+
+    for _ <- 1..4 do
+      assert {:ok, owner} = PtcGateway.PrivateAudit.start_link(wide)
+      GenServer.stop(owner)
+    end
+
+    assert length(File.ls!(config["directory"])) == 4
+    [oldest, next | _] = Enum.sort(File.ls!(config["directory"]))
+
+    # The next startup opens its replacement and then prunes to the narrowed
+    # bound: the deletion the bound asks for, taking the oldest files first.
+    assert {:ok, owner} = PtcGateway.PrivateAudit.start_link(config)
+    GenServer.stop(owner)
+    kept = Enum.sort(File.ls!(config["directory"]))
+    assert length(kept) == 2
+    refute oldest in kept
+    refute next in kept
+  end
+
   defp fixture(dir, effect \\ :read) do
     File.mkdir_p!(dir)
 

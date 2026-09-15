@@ -42,6 +42,7 @@ defmodule PtcGateway.Domain do
   defp configure(path, env_file, state) do
     with {:ok, config} <- GatewayConfig.load(path),
          {:ok, host} <- load_host(config["host"]["path"]),
+         :ok <- bearer_binding(host, config["authentication"]["bearer"]["binding"]),
          {:ok, catalog} <- HostInstallation.catalog(host) do
       state = %{
         state
@@ -64,6 +65,18 @@ defmodule PtcGateway.Domain do
     case HostConfig.load(path) do
       {:ok, host} -> {:ok, host}
       _ -> {:error, :host_invalid}
+    end
+  end
+
+  # The bearer is a binding the host resolves once inside the env-file scope.
+  # A literal credential would keep the token in the host document itself,
+  # outside that scope and outside the opaque owner, so it is refused before
+  # any child starts. An unknown binding refuses here with the same closed code
+  # that capture would raise later.
+  defp bearer_binding(host, binding) do
+    case host.credentials[binding] do
+      %{source: source} when source != :literal -> :ok
+      _ -> {:error, :credential_unavailable}
     end
   end
 

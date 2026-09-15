@@ -4,7 +4,8 @@ defmodule PtcGateway.PrivateAudit do
 
   Startup rejects links throughout the hierarchy, validates ownership, creates
   missing directories owner-only, and durably opens a new 0600 file before
-  pruning oldest closed files. A create/append/sync probe finishes before
+  pruning oldest closed files down to the retention bound. A startup that fails
+  after opening its replacement removes it. A create/append/sync probe finishes before
   startup returns. The probe is removed; active files contain no invented audit
   record. Files use increasing numeric names and are never truncated.
   The directory is exclusively locked for this owner's lifetime. Per-call
@@ -84,17 +85,24 @@ defmodule PtcGateway.PrivateAudit do
               {:ok, %{io: io, path: path, directory: directory, config: config}}
 
             _ ->
-              File.close(io)
-              {:error, :audit_unavailable}
+              discard(io, path)
           end
 
         _ ->
-          File.close(io)
-          {:error, :audit_unavailable}
+          discard(io, path)
       end
     else
       _ -> {:error, :audit_unavailable}
     end
+  end
+
+  # The replacement carries no record until the gateway serves a call, so a
+  # startup that fails after opening it removes it again rather than leaving an
+  # empty file to count against the next startup's retention bound.
+  defp discard(io, path) do
+    File.close(io)
+    File.rm(path)
+    {:error, :audit_unavailable}
   end
 
   defp inventory(names, directory, uid, max_bytes) do
@@ -153,6 +161,9 @@ defmodule PtcGateway.PrivateAudit do
     end
   end
 
+  # Rotation removes closed files oldest first, and only once the replacement is
+  # durable. Narrowing max_retained_files therefore prunes down to the new bound
+  # on the next startup, which is the deletion that bound asks for.
   defp prune(files, retain) do
     files
     |> Enum.sort()
