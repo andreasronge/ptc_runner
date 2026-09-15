@@ -84,10 +84,14 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   share that deadline; it is never reset at activation. No absolute timestamp is
   stored in the template.
 
-  Private event policy is rejected with `:private_result_unservable`; event
-  policy for accepted templates and input authority are
-  normal, result projection is JSON, inspection capture is disabled, and
-  publication is artifact-free. None of these choices is a per-call override.
+  Private event policy is rejected at construction with
+  `:private_result_unservable`. Serving has no authorized private destination;
+  possession of a gateway endpoint does not authorize private disclosure, and
+  no per-call option bypasses the manifest policy. To serve an application, set
+  its event policy to normal and use the resulting new application content pin.
+  Accepted templates therefore have normal event policy and input authority,
+  JSON result projection, disabled inspection capture, and artifact-free
+  publication. None of these choices is a per-call override.
 
   ## Ownership and close
 
