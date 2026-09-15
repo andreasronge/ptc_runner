@@ -169,7 +169,10 @@ discovery, listing, DNS, and cache checks still execute through the
 authenticated conformance proxy in the gateway CI gate. Gateway boundary
 tests independently enforce the applicable header scenario cases (missing,
 mismatched, case-insensitive, and case-mismatched method headers), every
-critical-header duplicate, and both configured aggregate header ceilings.
+critical-header duplicate, and the exact parser and application header
+ceilings. Integration boundaries also exercise exact and excessive body,
+metadata, JSON depth/node, ID, normalized-schema, static-catalog, and encoded
+response sizes.
 
 ## Startup failures
 

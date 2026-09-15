@@ -182,7 +182,10 @@ discovery, listing, DNS, and cache checks still execute through the
 authenticated conformance proxy in the gateway CI gate. Gateway boundary
 tests independently enforce the applicable header scenario cases (missing,
 mismatched, case-insensitive, and case-mismatched method headers), every
-critical-header duplicate, and both configured aggregate header ceilings.</p><h2 id="startup-failures">Startup failures</h2><p>Only the first error is returned. Precedence is document read/JSON, structural
+critical-header duplicate, and the exact parser and application header
+ceilings. Integration boundaries also exercise exact and excessive body,
+metadata, JSON depth/node, ID, normalized-schema, static-catalog, and encoded
+response sizes.</p><h2 id="startup-failures">Startup failures</h2><p>Only the first error is returned. Precedence is document read/JSON, structural
 schema and byte bounds, origins, duplicate tool names, audit presence, host,
 then each tool's constructor/pin and write permission in name order, audit
 filesystem probe, run admission, warm credential capture/provider pins, and
