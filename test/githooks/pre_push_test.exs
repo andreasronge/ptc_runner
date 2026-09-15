@@ -299,6 +299,7 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     refute status == 0
 
     assert output =~ "core release verification failed"
+    assert output =~ "simulated core-release command failed with status 1"
     assert output =~ "PTC_PRE_PUSH_SERIAL=1"
 
     # Every lane is awaited and reported even once one of them has failed,
@@ -479,6 +480,7 @@ defmodule PtcRunner.GitHooks.PrePushTest do
       exit 1
     fi
     if [ -n "${MIX_FAIL_GATE:-}" ] && [ "$*" = "ci-gate ${MIX_FAIL_GATE}" ]; then
+      printf 'simulated %s command failed with status 1\n' "$MIX_FAIL_GATE" >&2
       exit 1
     fi
     exit 0

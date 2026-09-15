@@ -11,7 +11,19 @@ defmodule PtcRunner.Scripts.CIGatesTest do
   @launcher_package Path.join(@root, "scripts/ci/launcher-package.sh")
   @flake_hunt Path.join(@root, "scripts/ci/flake-hunt.sh")
   @flake_hunt_summary Path.join(@root, "scripts/ci/flake_hunt_summary.exs")
+  @verify_scripts ~w(verify_core_package.sh verify_standalone_release.sh)
   @git_env GitEnv.clear()
+
+  test "release verification failures name the command, status, script, and line" do
+    for script <- @verify_scripts do
+      {output, status, copied_script} = run_with_deliberate_failure(script)
+
+      assert status == 1
+      refute output =~ "expected failure"
+      assert output =~ ~s(command `test "diagnostic failure" = pass` exited with status 1)
+      assert output =~ ~r/#{Regex.escape(copied_script)}:\d+/
+    end
+  end
 
   test "core tests establish the CI contract without reducing native scheduler pressure" do
     %{marker: marker} = fake = fake_mix()
@@ -457,6 +469,49 @@ defmodule PtcRunner.Scripts.CIGatesTest do
       assert record["wall_ms"] >= record["async_ms"]
       assert record["sync_ms"] == record["wall_ms"] - record["async_ms"]
     end
+  end
+
+  defp run_with_deliberate_failure(script) do
+    temp =
+      Path.join(
+        System.tmp_dir!(),
+        "ptc-gate-diagnostic-#{System.unique_integer([:positive, :monotonic])}"
+      )
+
+    scripts_dir = Path.join(temp, "scripts")
+    common_dir = Path.join(scripts_dir, "ci")
+    File.mkdir_p!(common_dir)
+    on_exit(fn -> File.rm_rf!(temp) end)
+
+    source = File.read!(Path.join(@root, "scripts/#{script}"))
+    source_line = ~s(source "$script_dir/ci/_common.sh")
+    failing_command = ~s(test "diagnostic failure" = pass)
+
+    deliberate_failure = """
+    set +e
+    test "expected failure" = pass
+    expected_status=$?
+    set -e
+    test "$expected_status" -eq 1
+
+    diagnostic_failure() {
+      #{failing_command}
+    }
+    (diagnostic_failure)
+    """
+
+    instrumented = String.replace(source, source_line, source_line <> "\n" <> deliberate_failure)
+    refute instrumented == source, "#{script} must source scripts/ci/_common.sh"
+
+    copied_script = Path.join(scripts_dir, script)
+    File.write!(copied_script, instrumented)
+    File.cp!(Path.join(@root, "scripts/ci/_common.sh"), Path.join(common_dir, "_common.sh"))
+    File.chmod!(copied_script, 0o755)
+
+    {output, status} =
+      System.cmd(copied_script, [], cd: @root, env: @git_env, stderr_to_stdout: true)
+
+    {output, status, copied_script}
   end
 
   # Every gate is exercised the same way: the repository root as the working

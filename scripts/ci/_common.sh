@@ -3,7 +3,23 @@
 # Shared process contract for repository-owned deterministic gates.
 # This file is sourced by the executable entry points in this directory.
 
-set -euo pipefail
+set -Eeuo pipefail
+
+ci_report_error() {
+  local status="$1"
+  local command="$2"
+  local source="$3"
+  local line="$4"
+
+  # `ERR` also fires while a caller has deliberately disabled errexit to
+  # inspect a command's status. Report only failures that would abort the gate.
+  [[ $- == *e* ]] || return 0
+
+  printf 'ERROR: command `%s` exited with status %s at %s:%s\n' \
+    "$command" "$status" "$source" "$line" >&2
+}
+
+trap 'ci_report_error "$?" "$BASH_COMMAND" "${BASH_SOURCE[0]}" "$LINENO"' ERR
 
 ci_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ci_repo_root"
