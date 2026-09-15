@@ -255,13 +255,34 @@ import time
 command, project, stdout_path, stderr_path = sys.argv[1:]
 with open(stdout_path, "wb") as stdout, open(stderr_path, "wb") as stderr:
     process = subprocess.Popen(
-        [command, "run", project],
+        [command, "run", project, "--progress"],
         stdin=subprocess.DEVNULL,
         stdout=stdout,
         stderr=stderr,
         start_new_session=True,
     )
-    time.sleep(1)
+
+    # The non-TTY progress writer emits its preparing milestone only after the
+    # packaged BEAM has started and parsed the run command. Waiting for that
+    # observable command boundary proves SIGINT can reach the runtime; elapsed
+    # time says nothing about readiness when another build lane owns the CPU.
+    readiness_marker = b"[00:00] preparing "
+    readiness_deadline = time.monotonic() + 60
+    ready = False
+    while process.poll() is None:
+        with open(stderr_path, "rb") as progress:
+            ready = readiness_marker in progress.read()
+        if ready:
+            break
+        if time.monotonic() >= readiness_deadline:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait()
+            raise SystemExit("packaged ptc run did not become ready within 60s")
+        time.sleep(0.05)
+
+    if not ready:
+        raise SystemExit("packaged ptc run exited before becoming ready")
+
     os.killpg(process.pid, signal.SIGINT)
     try:
         returncode = process.wait(timeout=30)
