@@ -161,11 +161,15 @@ nor the parent claims the complete server suite.
 The checked-in expected-failures baseline narrows mixed scenarios to this
 milestone. It excludes server-stateless checks requiring tool calls, response
 streams, logging tools, or optional server identity; caching checks for prompts
-and resources; and the tool-call-only cases embedded under
+and resources; the stateless check that requires HTTP 400 for malformed
+metadata, where this profile requires HTTP 200 `-32602`; and the tool-call-only cases embedded under
 `http-header-validation` (whose check IDs are reused across list and call
 cases, so the runner can baseline only that mixed scenario). The applicable
-discovery, listing, DNS, cache, and header checks still execute through the
-authenticated conformance proxy in the gateway CI gate.
+discovery, listing, DNS, and cache checks still execute through the
+authenticated conformance proxy in the gateway CI gate. Gateway boundary
+tests independently enforce the applicable header scenario cases (missing,
+mismatched, case-insensitive, and case-mismatched method headers), every
+critical-header duplicate, and both configured aggregate header ceilings.
 
 ## Startup failures
 

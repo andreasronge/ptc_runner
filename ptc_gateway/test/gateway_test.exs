@@ -359,6 +359,10 @@ defmodule PtcGatewayTest do
              accept: "application/json;charset=latin1, text/event-stream"
            ).status == 406
 
+    assert mcp(config, "server/discover", 1,
+             accept: ~s(application/json;charset="utf-8", text/event-stream)
+           ).status == 200
+
     assert mcp(config, "server/discover", 1, content_type: "text/plain").status == 415
     assert response(config, "/mcp", method: :get).status == 405
 
@@ -383,8 +387,9 @@ defmodule PtcGatewayTest do
       }
     }
 
-    assert mcp(config, "server/discover", 1, full_params: invalid_info).body["error"]["code"] ==
-             -32602
+    invalid_info_response = mcp(config, "server/discover", 1, full_params: invalid_info)
+    assert invalid_info_response.status == 200
+    assert invalid_info_response.body["error"]["code"] == -32602
 
     invalid_info =
       put_in(
@@ -393,8 +398,87 @@ defmodule PtcGatewayTest do
         %{"name" => "client", "version" => "1", "websiteUrl" => "http://exa mple.com"}
       )
 
-    assert mcp(config, "server/discover", 1, full_params: invalid_info).body["error"]["code"] ==
-             -32602
+    invalid_uri_response = mcp(config, "server/discover", 1, full_params: invalid_info)
+    assert invalid_uri_response.status == 200
+    assert invalid_uri_response.body["error"]["code"] == -32602
+
+    for invalid_uri <- ["http://example.com/%", "http://exa%ZZmple"] do
+      invalid_info =
+        put_in(
+          invalid_info,
+          ["_meta", "io.modelcontextprotocol/clientInfo", "websiteUrl"],
+          invalid_uri
+        )
+
+      response = mcp(config, "server/discover", 1, full_params: invalid_info)
+      assert response.status == 200
+      assert response.body["error"]["code"] == -32602
+    end
+
+    for valid_uri <- ["HTTP://example.com/path", "http://example.com:80"] do
+      valid_info =
+        put_in(
+          invalid_info,
+          ["_meta", "io.modelcontextprotocol/clientInfo", "websiteUrl"],
+          valid_uri
+        )
+
+      response = mcp(config, "server/discover", 1, full_params: valid_info)
+      assert response.status == 200
+      refute Map.has_key?(response.body, "error")
+    end
+  end
+
+  @tag :tmp_dir
+  test "MCP critical headers and aggregate header bounds are enforced", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+
+    config =
+      put_in(config, ["listen", "allowed_origins"], ["https://one.example", "https://two.example"])
+
+    File.write!(path, Jason.encode!(config))
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+
+    duplicate_cases = [
+      {"origin", "https://one.example", 403},
+      {"authorization", "Bearer #{@token}", 401},
+      {"content-type", "application/json", 415},
+      {"accept", "application/json, text/event-stream", 406},
+      {"mcp-protocol-version", "2026-07-28", 400},
+      {"mcp-method", "tools/list", 400},
+      {"mcp-name", "a", 400}
+    ]
+
+    assert raw_mcp_status(config, [
+             {"Host", "127.0.0.1:#{config["listen"]["port"]}"},
+             {"Host", "127.0.0.1:#{config["listen"]["port"]}"}
+           ]) == 400
+
+    for {name, value, status} <- duplicate_cases do
+      headers =
+        cond do
+          name == "origin" -> [{"origin", value}, {"origin", "https://two.example"}]
+          name == "mcp-name" -> [{name, value}, {name, value}]
+          true -> [{name, value}]
+        end
+
+      assert mcp(config, "tools/list", 1, headers: headers).status == status,
+             "duplicate #{name} was not rejected"
+    end
+
+    assert mcp(config, "tools/list", 1, headers: [{"mcp-method", "TOOLS/LIST"}]).status ==
+             400
+
+    assert mcp(config, "tools/list", 1, method_header: false).status == 400
+
+    extra_headers = for index <- 1..60, do: {"x-bound-#{index}", "x"}
+    assert mcp(config, "tools/list", 1, headers: extra_headers).status == 431
+
+    large_headers = for index <- 1..5, do: {"x-large-#{index}", String.duplicate("x", 7_000)}
+    assert mcp(config, "tools/list", 1, headers: large_headers).status == 431
   end
 
   test "request admission atomically bounds active requests" do
@@ -615,13 +699,14 @@ defmodule PtcGatewayTest do
         Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "method" => method, "params" => params})
       end)
 
-    headers = [
-      {"authorization", "Bearer #{Keyword.get(opts, :token, @token)}"},
-      {"content-type", Keyword.get(opts, :content_type, "application/json")},
-      {"accept", Keyword.get(opts, :accept, "application/json, text/event-stream")},
-      {"mcp-protocol-version", protocol},
-      {"mcp-method", method}
-    ]
+    headers =
+      [
+        {"authorization", "Bearer #{Keyword.get(opts, :token, @token)}"},
+        {"content-type", Keyword.get(opts, :content_type, "application/json")},
+        {"accept", Keyword.get(opts, :accept, "application/json, text/event-stream")},
+        {"mcp-protocol-version", protocol}
+      ] ++
+        if Keyword.get(opts, :method_header, true), do: [{"mcp-method", method}], else: []
 
     response(config, "/mcp",
       method: :post,
@@ -634,6 +719,50 @@ defmodule PtcGatewayTest do
     if Process.alive?(pid), do: GenServer.stop(pid)
   catch
     :exit, _ -> :ok
+  end
+
+  defp raw_mcp_status(config, extra_headers) do
+    port = config["listen"]["port"]
+
+    body =
+      Jason.encode!(%{
+        "jsonrpc" => "2.0",
+        "id" => 1,
+        "method" => "tools/list",
+        "params" => %{
+          "_meta" => %{
+            "io.modelcontextprotocol/protocolVersion" => "2026-07-28",
+            "io.modelcontextprotocol/clientCapabilities" => %{}
+          }
+        }
+      })
+
+    headers =
+      extra_headers ++
+        [
+          {"Authorization", "Bearer #{@token}"},
+          {"Content-Type", "application/json"},
+          {"Accept", "application/json, text/event-stream"},
+          {"MCP-Protocol-Version", "2026-07-28"},
+          {"Mcp-Method", "tools/list"},
+          {"Content-Length", Integer.to_string(byte_size(body))},
+          {"Connection", "close"}
+        ]
+
+    request =
+      [
+        "POST /mcp HTTP/1.1\r\n",
+        Enum.map(headers, fn {name, value} -> [name, ": ", value, "\r\n"] end),
+        "\r\n",
+        body
+      ]
+
+    {:ok, socket} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false])
+    :ok = :gen_tcp.send(socket, request)
+    {:ok, response} = :gen_tcp.recv(socket, 0, 2_000)
+    :gen_tcp.close(socket)
+    [_, status | _] = response |> :binary.split(" ", [:global])
+    String.to_integer(status)
   end
 
   defp acquire_eventually(_admission, 0), do: :full

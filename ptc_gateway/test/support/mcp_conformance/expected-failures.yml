@@ -4,6 +4,7 @@ server:
   - server-stateless:sep-2575-missing-capability-http-400
   - server-stateless:sep-2575-http-server-no-independent-requests-on-stream
   - server-stateless:sep-2575-server-no-log-without-loglevel
+  - server-stateless:sep-2575-http-server-meta-invalid-400
   - caching:sep-2549-prompts-list-caching-hints
   - caching:sep-2549-resources-list-caching-hints
   - caching:sep-2549-resources-templates-list-caching-hints

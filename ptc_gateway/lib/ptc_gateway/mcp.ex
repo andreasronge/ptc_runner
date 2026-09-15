@@ -208,15 +208,21 @@ defmodule PtcGateway.MCP do
   defp parse_media_param("q", _value, _values, _quality, true), do: {:halt, :error}
 
   defp parse_media_param(name, value, values, quality, false) do
-    if media_token?(name) and media_parameter_value?(value) and not Map.has_key?(values, name),
-      do: {:cont, {:ok, Map.put(values, name, String.downcase(value)), quality, false}},
-      else: {:halt, :error}
+    with true <- media_token?(name) and not Map.has_key?(values, name),
+         {:ok, value} <- media_parameter_value(value) do
+      {:cont, {:ok, Map.put(values, name, String.downcase(value)), quality, false}}
+    else
+      _ -> {:halt, :error}
+    end
   end
 
   defp parse_media_param(name, value, values, quality, true) do
-    if media_token?(name) and media_parameter_value?(value),
-      do: {:cont, {:ok, values, quality, true}},
-      else: {:halt, :error}
+    with true <- media_token?(name),
+         {:ok, _value} <- media_parameter_value(value) do
+      {:cont, {:ok, values, quality, true}}
+    else
+      _ -> {:halt, :error}
+    end
   end
 
   defp parse_quality(value) do
@@ -229,8 +235,23 @@ defmodule PtcGateway.MCP do
   defp media_token?("*"), do: true
   defp media_token?(value), do: Regex.match?(~r/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/, value)
 
-  defp media_parameter_value?(value),
-    do: media_token?(value) or Regex.match?(~r/^"[^"\r\n]*"$/, value)
+  defp media_parameter_value(value) do
+    cond do
+      media_token?(value) ->
+        {:ok, value}
+
+      Regex.match?(~r/^"(?:[^"\\\r\n]|\\[\x09\x20-\x7E])*"$/u, value) ->
+        decoded =
+          value
+          |> binary_part(1, byte_size(value) - 2)
+          |> then(&Regex.replace(~r/\\(.)/u, &1, "\\1"))
+
+        {:ok, decoded}
+
+      true ->
+        :error
+    end
+  end
 
   defp compatible_params?("application", "json", params),
     do: params in [%{}, %{"charset" => "utf-8"}]
@@ -283,7 +304,7 @@ defmodule PtcGateway.MCP do
     cond do
       not is_map(meta) or not is_binary(version) or not is_map(capabilities) or
         not valid_client_info?(meta) or encoded_size(meta) > 65_536 ->
-        {:rpc, conn, 400, -32602, "Invalid Params", id, nil}
+        {:rpc, conn, 200, -32602, "Invalid Params", id, nil}
 
       single(conn, "mcp-protocol-version") != version or single(conn, "mcp-method") != method or
           get_req_header(conn, "mcp-name") != [] ->
@@ -345,10 +366,25 @@ defmodule PtcGateway.MCP do
 
   defp valid_uri?(value) do
     case URI.new(value) do
-      {:ok, uri} -> is_binary(uri.scheme) and uri.scheme != "" and URI.to_string(uri) == value
-      _ -> false
+      {:ok, uri} ->
+        is_binary(uri.scheme) and uri.scheme != "" and valid_percent_encoding?(value)
+
+      _ ->
+        false
     end
   end
+
+  defp valid_percent_encoding?(<<>>), do: true
+
+  defp valid_percent_encoding?(<<"%", high, low, rest::binary>>)
+       when high in ?0..?9 or high in ?A..?F or high in ?a..?f do
+    if low in ?0..?9 or low in ?A..?F or low in ?a..?f,
+      do: valid_percent_encoding?(rest),
+      else: false
+  end
+
+  defp valid_percent_encoding?(<<"%", _rest::binary>>), do: false
+  defp valid_percent_encoding?(<<_byte, rest::binary>>), do: valid_percent_encoding?(rest)
 
   defp single(conn, header) do
     case get_req_header(conn, header) do
