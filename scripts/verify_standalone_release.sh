@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "$script_dir/ci/_error_trap.sh"
+
+project_root="$(cd "$script_dir/.." && pwd)"
 release_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/ptc-runner-standalone-release.XXXXXX")"
 
 # The Viewer check runs a long-lived command in the background. Reaping it
@@ -278,7 +282,9 @@ if grep -q 'BREAK:' "$release_tmp_dir/interrupt.stdout" \
   echo 'packaged ptc run opened the BEAM break menu on SIGINT' >&2
   exit 1
 fi
-test -z "$(find "$interrupt_root/.ptc" -type f -name 'cmd-*.jsonl' -print -quit)"
+if [[ -d "$interrupt_root/.ptc" ]]; then
+  test -z "$(find "$interrupt_root/.ptc" -type f -name 'cmd-*.jsonl' -print -quit)"
+fi
 
 envelope_path="$release_tmp_dir/run-envelope.json"
 "$command_bin" run "$application_root/ptc.json" --envelope "$envelope_path" \

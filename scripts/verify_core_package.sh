@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "$script_dir/ci/_error_trap.sh"
+
+project_root="$(cd "$script_dir/.." && pwd)"
 package_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/ptc-runner-core-package.XXXXXX")"
 dependency_build=""
 
