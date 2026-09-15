@@ -13,6 +13,44 @@ defmodule PtcRunner.Scripts.CIGatesTest do
   @flake_hunt_summary Path.join(@root, "scripts/ci/flake_hunt_summary.exs")
   @git_env GitEnv.clear()
 
+  test "release verification gates report unhandled command failures" do
+    for script <- ~w(verify_core_package.sh verify_standalone_release.sh) do
+      source = File.read!(Path.join([@root, "scripts", script]))
+
+      assert source =~ ~s(source "$script_dir/ci/_error_trap.sh")
+    end
+
+    helper = Path.join(@root, "scripts/ci/_error_trap.sh")
+
+    fixture =
+      Path.join(System.tmp_dir!(), "release-gate-error-#{System.unique_integer([:positive])}.sh")
+
+    File.write!(fixture, """
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source "#{helper}"
+    set +e
+    test -f /deliberately/missing/handled-fixture
+    set -e
+    fail_in_function() {
+      test -f /deliberately/missing/release-gate-fixture
+    }
+    fail_in_function
+    """)
+
+    on_exit(fn -> File.rm(fixture) end)
+
+    {output, status} =
+      System.cmd("bash", [fixture], stderr_to_stdout: true)
+
+    assert status == 1
+    refute output =~ "handled-fixture"
+    assert output =~ "command failed: test -f /deliberately/missing/release-gate-fixture"
+    assert output =~ "status: 1"
+    assert output =~ ~r/location: .*release-gate-error-\d+\.sh:\d+/
+    assert output |> String.split("command failed:") |> length() == 2
+  end
+
   test "core tests establish the CI contract without reducing native scheduler pressure" do
     %{marker: marker} = fake = fake_mix()
 

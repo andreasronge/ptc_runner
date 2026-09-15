@@ -294,11 +294,18 @@ defmodule PtcRunner.GitHooks.PrePushTest do
       git_repo_with_change("lib/example.ex")
 
     {output, status} =
-      run_hook(repo, path, [{"MIX_FAIL_GATE", "core-release"}])
+      run_hook(repo, path, [
+        {"MIX_FAIL_GATE", "core-release"},
+        {"MIX_FAIL_MESSAGE",
+         "error: command failed: test -f missing\n  status: 1\n  location: scripts/verify_core_package.sh:42"}
+      ])
 
     refute status == 0
 
     assert output =~ "core release verification failed"
+    assert output =~ "command failed: test -f missing"
+    assert output =~ "status: 1"
+    assert output =~ "location: scripts/verify_core_package.sh:42"
     assert output =~ "PTC_PRE_PUSH_SERIAL=1"
 
     # Every lane is awaited and reported even once one of them has failed,
@@ -479,6 +486,9 @@ defmodule PtcRunner.GitHooks.PrePushTest do
       exit 1
     fi
     if [ -n "${MIX_FAIL_GATE:-}" ] && [ "$*" = "ci-gate ${MIX_FAIL_GATE}" ]; then
+      if [ -n "${MIX_FAIL_MESSAGE:-}" ]; then
+        printf '%s\n' "$MIX_FAIL_MESSAGE" >&2
+      fi
       exit 1
     fi
     exit 0
