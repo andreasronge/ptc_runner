@@ -13,4 +13,30 @@ case "${1:-}" in
     ;;
 esac
 
+# Erlang exposes SIGTERM but not SIGINT through os:set_signal/2. Keep the
+# gateway behind this tiny signal-forwarding parent so Ctrl-C takes the same
+# bounded shutdown path and returns the child's proven cleanup status.
+if [ "${1:-}" = "gateway" ]; then
+  "$release_root/bin/ptc_runner" eval 'PtcRunner.StandaloneCLI.main(System.argv())' "$@" &
+  gateway_pid=$!
+  gateway_signal=0
+  trap 'gateway_signal=1; kill -TERM "$gateway_pid" 2>/dev/null || true' INT TERM
+
+  set +e
+  wait "$gateway_pid"
+  gateway_status=$?
+
+  while [ "$gateway_signal" -eq 1 ] && kill -0 "$gateway_pid" 2>/dev/null; do
+    wait "$gateway_pid"
+    gateway_status=$?
+  done
+
+  if [ "$gateway_signal" -eq 1 ]; then
+    wait "$gateway_pid"
+    gateway_status=$?
+  fi
+
+  exit "$gateway_status"
+fi
+
 exec "$release_root/bin/ptc_runner" eval 'PtcRunner.StandaloneCLI.main(System.argv())' "$@"

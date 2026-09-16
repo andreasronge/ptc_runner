@@ -153,14 +153,31 @@ defmodule PtcRunner.Kernel.ServingCall do
         do: replace_expired(template, result, deadline),
         else: outcome(template, :cleanup_failed, ServingOutcome.metadata(result).dispatched)
 
-    terminal_clean? =
-      case Map.get(hooks, :before_release) do
-        nil -> true
-        hook -> hook.(terminal) == :ok
-      end
+    terminal = close_outcome(hooks, terminal)
+    publication_clean? = run_terminal_hook(hooks, :before_release, terminal)
 
-    clean? = clean? and terminal_clean?
+    terminal =
+      if publication_clean?,
+        do: terminal,
+        else: outcome(template, :cleanup_failed, ServingOutcome.metadata(terminal).dispatched)
+
+    audit_clean? = run_terminal_hook(hooks, :before_release_audit, terminal)
+    clean? = clean? and publication_clean? and audit_clean?
     finish(template, lease, deadline, result, terminal, clean?)
+  end
+
+  defp close_outcome(hooks, terminal) do
+    case Map.get(hooks, :close_outcome) do
+      nil -> terminal
+      hook -> hook.(terminal)
+    end
+  end
+
+  defp run_terminal_hook(hooks, name, terminal) do
+    case Map.get(hooks, name) do
+      nil -> true
+      hook -> hook.(terminal) == :ok
+    end
   end
 
   defp run_execution(template, prepared, authority, lease, deadline, hooks) do

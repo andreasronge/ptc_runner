@@ -48,6 +48,16 @@ defmodule PtcGatewayTest do
   end
 
   @tag :tmp_dir
+  test "idle staged shutdown proves clean admission and provider cleanup", %{tmp_dir: dir} do
+    {path, _config} = fixture(dir)
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    assert :ok = PtcGateway.Domain.shutdown(owner, 100, 1_000)
+    refute Process.alive?(owner)
+  end
+
+  @tag :tmp_dir
   test "invalid configuration never binds and errors stay closed", %{tmp_dir: dir} do
     {path, config} = fixture(dir)
 
@@ -242,6 +252,26 @@ defmodule PtcGatewayTest do
       File.write!(path, Jason.encode!(value))
       assert {:error, :config_invalid} = PtcGateway.start_link(path)
     end
+  end
+
+  @tag :tmp_dir
+  test "invalid MCP header annotations refuse readiness", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+
+    invalid = %{
+      "type" => "object",
+      "properties" => %{
+        "nested" => %{
+          "type" => "object",
+          "x-mcp-header" => "Nested"
+        }
+      }
+    }
+
+    _config = rewrite_schema_config(path, config, invalid, 2)
+    assert {:error, :template_invalid} = PtcGateway.start_link(path, env_file: env)
   end
 
   @tag :slow
@@ -614,6 +644,119 @@ defmodule PtcGatewayTest do
              Enum.sort(
                ~w(call_id cleanup_status disconnected dispatch_state ended_at outcome_code started_at tool_name write_effects_may_have_occurred)
              )
+  end
+
+  @tag :tmp_dir
+  @tag timeout: 30_000
+  test "loopback disconnect survives the request and retains admission through audit", %{
+    tmp_dir: dir
+  } do
+    {path, config} = fixture(dir, :write)
+
+    config =
+      config
+      |> put_in(["admission", "max_concurrent_runs"], 1)
+      |> Map.put("private_audit", %{
+        "directory" => "audit",
+        "max_file_bytes" => 4096,
+        "max_retained_files" => 2
+      })
+      |> update_in(["tools"], &Enum.map(&1, fn tool -> Map.put(tool, "allow_write", true) end))
+
+    File.write!(path, Jason.encode!(config))
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+    state = :sys.get_state(owner)
+    parent = self()
+
+    {:ok, socket} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
+    {:ok, port} = :inet.port(socket)
+    :gen_tcp.close(socket)
+    listen = %{config["listen"] | "port" => port}
+
+    assert {:ok, listener} =
+             Bandit.start_link(
+               plug:
+                 {PtcGateway.Router,
+                  listen: listen,
+                  warm: state.warm,
+                  tools: state.metadata,
+                  tool_entries: state.tools,
+                  run_admission: state.run_admission,
+                  audit: state.audit,
+                  request_admission: state.request_admission,
+                  serving_hooks: %{
+                    after_activation: fn _execution ->
+                      send(parent, {:activated, self()})
+                      receive do: (:release_execution -> :ok)
+                    end,
+                    before_audit: fn outcome, disconnected ->
+                      send(parent, {:audit_waiting, self(), outcome, disconnected})
+                      receive do: (:release_audit -> :ok)
+                    end
+                  }},
+               ip: {127, 0, 0, 1},
+               port: port,
+               startup_log: false,
+               http_2_options: [enabled: false]
+             )
+
+    on_exit(fn -> stop(listener) end)
+    body = call_body("a", %{})
+
+    request = [
+      "POST /mcp HTTP/1.1\r\n",
+      "Host: 127.0.0.1:#{port}\r\n",
+      "Authorization: Bearer #{@token}\r\n",
+      "Content-Type: application/json\r\n",
+      "Accept: application/json, text/event-stream\r\n",
+      "MCP-Protocol-Version: 2026-07-28\r\n",
+      "Mcp-Method: tools/call\r\n",
+      "Mcp-Name: a\r\n",
+      "Content-Length: #{byte_size(body)}\r\n\r\n",
+      body
+    ]
+
+    {:ok, client} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false])
+    :ok = :gen_tcp.send(client, request)
+    assert_receive {:activated, worker}, 2_000
+    :ok = :gen_tcp.close(client)
+    assert {:ok, %{in_use: 1}} = PtcRunner.Kernel.RunAdmission.snapshot(state.run_admission)
+
+    # The five-second heartbeat observes the closed loopback socket. Execution
+    # remains deliberately held until after that cancellation bound.
+    receive do
+    after
+      5_500 -> :ok
+    end
+
+    send(worker, :release_execution)
+    assert_receive {:audit_waiting, audit_worker, outcome, true}, 10_000
+    assert PtcRunner.Kernel.ServingOutcome.code(outcome) == :success
+    assert {:ok, %{in_use: 1}} = PtcRunner.Kernel.RunAdmission.snapshot(state.run_admission)
+
+    busy =
+      mcp(config, "tools/call", 12,
+        params: %{"name" => "a"},
+        headers: [{"mcp-name", "a"}]
+      )
+
+    assert busy.status == 429
+    send(audit_worker, :release_audit)
+    assert :ok = await_run_release(state.run_admission, 100)
+
+    [record | _] =
+      Path.join(dir, "audit")
+      |> Path.join("*.jsonl")
+      |> Path.wildcard()
+      |> Enum.flat_map(fn audit ->
+        audit |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
+      end)
+
+    assert record["disconnected"] == true
+    assert record["outcome_code"] == "success"
   end
 
   @tag :tmp_dir
@@ -1214,6 +1357,22 @@ defmodule PtcGatewayTest do
     })
   end
 
+  defp call_body(name, arguments) do
+    Jason.encode!(%{
+      "jsonrpc" => "2.0",
+      "id" => 1,
+      "method" => "tools/call",
+      "params" => %{
+        "_meta" => %{
+          "io.modelcontextprotocol/protocolVersion" => "2026-07-28",
+          "io.modelcontextprotocol/clientCapabilities" => %{}
+        },
+        "name" => name,
+        "arguments" => arguments
+      }
+    })
+  end
+
   defp raw_mcp_headers(config, extra_headers, body, opts \\ []) do
     port = config["listen"]["port"]
 
@@ -1411,6 +1570,21 @@ defmodule PtcGatewayTest do
     case PtcGateway.RequestAdmission.acquire(admission) do
       :full -> acquire_eventually(admission, attempts - 1)
       result -> result
+    end
+  end
+
+  defp await_run_release(_admission, 0), do: {:error, :timeout}
+
+  defp await_run_release(admission, attempts) do
+    case PtcRunner.Kernel.RunAdmission.snapshot(admission) do
+      {:ok, %{in_use: 0}} ->
+        :ok
+
+      _ ->
+        receive do
+        after
+          10 -> await_run_release(admission, attempts - 1)
+        end
     end
   end
 end

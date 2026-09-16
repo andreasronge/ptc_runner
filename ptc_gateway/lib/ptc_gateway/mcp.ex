@@ -587,14 +587,23 @@ defmodule PtcGateway.MCP do
             outcome =
               case reservation do
                 {:ok, reserved} ->
-                  ServingTemplate.activate(reserved, %{
-                    before_release: fn terminal ->
-                      terminal_call(request, parent, name, template, terminal, started_at, opts)
+                  hooks = %{
+                    close_outcome: &wire_outcome(id, template, &1),
+                    before_release: &publish_terminal(request, parent, &1),
+                    before_release_audit: fn terminal ->
+                      audit_terminal(name, template, terminal, started_at, opts)
                     end
-                  })
+                  }
+
+                  hooks =
+                    Map.merge(hooks, Map.take(opts[:serving_hooks] || %{}, [:after_activation]))
+
+                  ServingTemplate.activate(reserved, hooks)
 
                 closed ->
-                  _ = terminal_call(request, parent, name, template, closed, started_at, opts)
+                  closed = wire_outcome(id, template, closed)
+                  _ = publish_terminal(request, parent, closed)
+                  _ = audit_terminal(name, template, closed, started_at, opts)
                   closed
               end
 
@@ -655,7 +664,7 @@ defmodule PtcGateway.MCP do
   defp await_outcome(conn, id, owner, monitor, reservation) do
     receive do
       {:publish, ^owner, outcome} ->
-        encoded = bounded_call_response(id, outcome)
+        {:ok, encoded} = encode_call_response(id, outcome)
 
         published? =
           match?({:ok, _}, chunk(conn, ["event: message\n", "data: ", encoded, "\n\n"]))
@@ -686,7 +695,7 @@ defmodule PtcGateway.MCP do
     end
   end
 
-  defp terminal_call(request, parent, name, template, outcome, started_at, opts) do
+  defp publish_terminal(request, parent, outcome) do
     disconnected =
       receive do
         {:disconnected, ^request} -> true
@@ -694,45 +703,54 @@ defmodule PtcGateway.MCP do
         0 -> false
       end
 
-    with :ok <- audit_result(opts[:audit], name, template, outcome, started_at, disconnected) do
-      if disconnected do
-        :ok
-      else
-        send(parent, {:publish, self(), outcome})
+    Process.put(:ptc_gateway_disconnected, disconnected)
 
-        receive do
-          {:published, ^request, true} -> :ok
-          {:published, ^request, false} -> {:error, :publication_failed}
-          {:disconnected, ^request} -> {:error, :publication_failed}
-        after
-          10_000 -> {:error, :publication_failed}
-        end
+    if disconnected do
+      :ok
+    else
+      send(parent, {:publish, self(), outcome})
+
+      receive do
+        {:published, ^request, true} -> :ok
+        {:published, ^request, false} -> mark_disconnected()
+        {:disconnected, ^request} -> mark_disconnected()
+      after
+        10_000 -> mark_disconnected()
       end
     end
   end
 
-  defp bounded_call_response(id, outcome) do
+  defp mark_disconnected do
+    Process.put(:ptc_gateway_disconnected, true)
+    {:error, :publication_failed}
+  end
+
+  defp audit_terminal(name, template, outcome, started_at, opts) do
+    disconnected = Process.get(:ptc_gateway_disconnected, false)
+    if hook = get_in(opts, [:serving_hooks, :before_audit]), do: hook.(outcome, disconnected)
+    audit_result(opts[:audit], name, template, outcome, started_at, disconnected)
+  end
+
+  defp wire_outcome(id, template, outcome) do
+    case encode_call_response(id, outcome) do
+      {:ok, _encoded} ->
+        outcome
+
+      :too_large ->
+        metadata = ServingOutcome.metadata(outcome)
+        ServingOutcome.new(:invalid_result, metadata.dispatched, ServingTemplate.effect(template))
+    end
+  end
+
+  defp encode_call_response(id, outcome) do
     response = %{"jsonrpc" => "2.0", "id" => id, "result" => tool_result(outcome)}
 
     case DeterministicJSON.encode(response) do
       {:ok, encoded} when byte_size(encoded) <= @response_limit ->
-        encoded
+        {:ok, encoded}
 
       _ ->
-        fallback = %{
-          "jsonrpc" => "2.0",
-          "id" => id,
-          "result" => %{
-            "resultType" => "complete",
-            "content" => [
-              %{"type" => "text", "text" => "Tool result exceeded the response limit"}
-            ],
-            "isError" => true
-          }
-        }
-
-        {:ok, encoded} = DeterministicJSON.encode(fallback)
-        encoded
+        :too_large
     end
   end
 

@@ -38,6 +38,9 @@ stop_viewer_process() {
 
 cleanup() {
   if [ -n "$gateway_pid" ]; then
+    if ! kill -0 "$gateway_pid" 2> /dev/null; then
+      cat "$release_tmp_dir/gateway.stderr" >&2
+    fi
     kill -TERM "$gateway_pid" 2> /dev/null || true
     wait "$gateway_pid" 2> /dev/null || true
   fi
@@ -583,7 +586,7 @@ cat > "$gateway_root/host.json" <<'EOF'
 EOF
 
 cat > "$gateway_root/credentials.env" <<'EOF'
-GATEWAY_RELEASE_TOKEN=release-gateway-token
+GATEWAY_RELEASE_TOKEN=release-gateway-token-0123456789abcdef
 EOF
 
 cat > "$gateway_root/gateway.json" <<EOF
@@ -661,7 +664,7 @@ body = json.dumps({
 conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
 conn.request("POST", "/mcp", body=body, headers={
     "Host": f"127.0.0.1:{port}",
-    "Authorization": "Bearer release-gateway-token",
+    "Authorization": "Bearer release-gateway-token-0123456789abcdef",
     "Content-Type": "application/json",
     "Accept": "application/json, text/event-stream",
     "MCP-Protocol-Version": "2026-07-28",
@@ -681,7 +684,11 @@ wait "$gateway_pid"
 gateway_status=$?
 set -e
 gateway_pid=""
-test "$gateway_status" -eq 0
+if [ "$gateway_status" -ne 0 ]; then
+  echo "packaged gateway exited with status $gateway_status" >&2
+  cat "$release_tmp_dir/gateway.stderr" >&2
+  exit 1
+fi
 test ! -s "$release_tmp_dir/gateway.stdout"
 test ! -s "$release_tmp_dir/gateway.stderr"
 

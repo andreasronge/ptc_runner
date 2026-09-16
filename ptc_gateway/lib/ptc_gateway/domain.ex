@@ -8,6 +8,7 @@ defmodule PtcGateway.Domain do
     HostConfig,
     HostInstallation,
     InstallationCatalog,
+    MCPProtocol,
     RunAdmission,
     ServingTemplate,
     WarmProviderRuntime
@@ -139,11 +140,21 @@ defmodule PtcGateway.Domain do
       }
     }
 
-    if Enum.all?(schemas, &(encoded_size(&1) <= 65_536)) and
-         within_static_limit?(tools) and within_static_limit?(listing),
-       do: :ok,
-       else: {:error, :catalog_too_large}
+    cond do
+      not Enum.all?(tools, &valid_header_schema?/1) ->
+        {:error, :template_invalid}
+
+      Enum.all?(schemas, &(encoded_size(&1) <= 65_536)) and
+        within_static_limit?(tools) and within_static_limit?(listing) ->
+        :ok
+
+      true ->
+        {:error, :catalog_too_large}
+    end
   end
+
+  defp valid_header_schema?(tool),
+    do: match?({:ok, _parameters}, MCPProtocol.header_parameters(tool["inputSchema"]))
 
   @doc false
   def within_static_limit?(value), do: encoded_size(value) <= 4_194_304
@@ -294,7 +305,7 @@ defmodule PtcGateway.Domain do
     admission_clean = wait_for_admission(state.run_admission, cleanup_deadline)
 
     result =
-      if quiesced and providers_clean and admission_clean,
+      if quiesced and drained and providers_clean and admission_clean,
         do: :ok,
         else: {:error, :uncertain_cleanup}
 

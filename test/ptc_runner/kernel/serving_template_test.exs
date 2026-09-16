@@ -375,6 +375,36 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
   end
 
   @tag :tmp_dir
+  test "terminal transformation and publication settle before retained audit", %{tmp_dir: dir} do
+    assert {:ok, template} = build(fixture(dir))
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+    parent = self()
+    {:ok, reservation} = ServingTemplate.reserve(template, %{"answer" => 1}, host)
+
+    outcome =
+      ServingCall.activate(reservation, %{
+        close_outcome: fn success ->
+          assert ServingOutcome.code(success) == :success
+          ServingOutcome.new(:invalid_result, true, :write)
+        end,
+        before_release: fn closed ->
+          assert ServingOutcome.code(closed) == :invalid_result
+          {:error, :publication_failed}
+        end,
+        before_release_audit: fn closed ->
+          assert ServingOutcome.code(closed) == :cleanup_failed
+          assert {:ok, %{in_use: 1}} = RunAdmission.snapshot(host)
+          send(parent, :audited)
+          :ok
+        end
+      })
+
+    assert_received :audited
+    assert ServingOutcome.code(outcome) == :cleanup_failed
+    assert {:ok, %{in_use: 0, status: :unavailable}} = RunAdmission.snapshot(host)
+  end
+
+  @tag :tmp_dir
   test "unused and foreign reservations cannot dispatch and release capacity", %{tmp_dir: dir} do
     assert {:ok, template} = build(fixture(dir))
     host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
