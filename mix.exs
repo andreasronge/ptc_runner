@@ -584,6 +584,7 @@ defmodule PtcRunner.MixProject do
           "docs/maintainers/guide-budget.md",
           "docs/maintainers/documentation.md",
           "docs/maintainers/signature-integration.md",
+          "docs/maintainers/gateway-load-probe.md",
           "docs/maintainers/kernel.md",
           "docs/maintainers/trace-log-contract.md"
         ] ++ Path.wildcard("docs/conformance/*-audit.md"),

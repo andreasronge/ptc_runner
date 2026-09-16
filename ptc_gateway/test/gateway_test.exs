@@ -1,8 +1,9 @@
 defmodule PtcGatewayTest do
   use ExUnit.Case, async: false
+  import PtcGateway.TestSupport.GatewayFixture
   alias PtcRunner.Kernel.{GatewayConfig, Limits, ServingTemplate, WarmProviderRuntime}
 
-  @token String.duplicate("a", 32)
+  @token PtcGateway.TestSupport.GatewayFixture.token()
   @authority_uid 4_294_967_294
   @foreign_uid 65_534
   setup do
@@ -1351,75 +1352,6 @@ defmodule PtcGatewayTest do
     refute next in kept
   end
 
-  defp fixture(dir, effect \\ :read) do
-    File.mkdir_p!(dir)
-
-    File.write!(
-      Path.join(dir, "workflow.clj"),
-      "(ns app) (defn run {:effect :#{effect}} [input] (return input))"
-    )
-
-    File.write!(Path.join(dir, "schema.json"), Jason.encode!(%{"type" => "object"}))
-
-    manifest = %{
-      "version" => 1,
-      "workflow" => %{
-        "components" => [%{"id" => "app", "path" => "workflow.clj"}],
-        "entry" => "app/run"
-      },
-      "input" => %{"path" => "missing.json"},
-      "contracts" => %{
-        "input_schema" => %{"path" => "schema.json"},
-        "result_schema" => %{"path" => "schema.json"}
-      }
-    }
-
-    manifest_path = Path.join(dir, "app.json")
-    File.write!(manifest_path, Jason.encode!(manifest))
-    {:ok, template} = ServingTemplate.from_directory(manifest_path, Limits.installed_defaults())
-
-    File.write!(
-      Path.join(dir, "host.json"),
-      Jason.encode!(%{
-        "credentials" => %{"gateway" => %{"env" => "GATEWAY_TEST_TOKEN"}},
-        "install" => %{}
-      })
-    )
-
-    {:ok, socket} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
-    {:ok, port} = :inet.port(socket)
-    :gen_tcp.close(socket)
-
-    tool = %{
-      "name" => "a",
-      "title" => "A",
-      "description" => "A tool",
-      "application" => %{"manifest" => "app.json"},
-      "expected_application_content_digest" =>
-        ServingTemplate.application_content_digest(template),
-      "installation_config_pins" => %{},
-      "provider_snapshot_pins" => %{}
-    }
-
-    config = %{
-      "version" => 1,
-      "listen" => %{"address" => "127.0.0.1", "port" => port, "path" => "/mcp"},
-      "authentication" => %{"bearer" => %{"binding" => "gateway"}},
-      "host" => %{"path" => "host.json"},
-      "admission" => %{
-        "max_inflight_requests" => 16,
-        "max_concurrent_runs" => 4,
-        "max_active_provider_calls" => 4,
-        "max_waiting_provider_calls" => 0
-      },
-      "tools" => [Map.put(tool, "name", "z"), tool]
-    }
-
-    path = Path.join(dir, "gateway.json")
-    File.write!(path, Jason.encode!(config))
-    {path, config}
-  end
-
   defp audit_config(directory) do
     %{
       "directory" => directory,
@@ -1440,55 +1372,6 @@ defmodule PtcGatewayTest do
       "disconnected" => false,
       "cleanup_status" => "complete"
     }
-  end
-
-  defp response(config, path, opts \\ []) do
-    Req.request!(
-      [url: "http://127.0.0.1:#{config["listen"]["port"]}#{path}", retry: false] ++ opts
-    )
-  end
-
-  defp mcp(config, method, id, opts \\ []) do
-    protocol = Keyword.get(opts, :protocol, "2026-07-28")
-
-    params =
-      Keyword.get_lazy(opts, :full_params, fn ->
-        Map.merge(
-          %{
-            "_meta" => %{
-              "io.modelcontextprotocol/protocolVersion" => protocol,
-              "io.modelcontextprotocol/clientCapabilities" => %{}
-            }
-          },
-          Keyword.get(opts, :params, %{})
-        )
-      end)
-
-    body =
-      Keyword.get_lazy(opts, :raw_body, fn ->
-        Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "method" => method, "params" => params})
-      end)
-
-    headers =
-      [
-        {"authorization", "Bearer #{Keyword.get(opts, :token, @token)}"},
-        {"content-type", Keyword.get(opts, :content_type, "application/json")},
-        {"accept", Keyword.get(opts, :accept, "application/json, text/event-stream")},
-        {"mcp-protocol-version", protocol}
-      ] ++
-        if Keyword.get(opts, :method_header, true), do: [{"mcp-method", method}], else: []
-
-    response(config, "/mcp",
-      method: :post,
-      headers: headers ++ Keyword.get(opts, :headers, []),
-      body: body
-    )
-  end
-
-  defp stop(pid) do
-    if Process.alive?(pid), do: GenServer.stop(pid)
-  catch
-    :exit, _ -> :ok
   end
 
   defp raw_mcp_status(config, extra_headers) do
