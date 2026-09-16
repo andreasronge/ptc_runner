@@ -357,7 +357,8 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
   end
 
   test "docs outcomes satisfy the published envelope schema" do
-    assert {:ok, root} = CommandContract.envelope_schema_root()
+    assert {:ok, root} =
+             JSV.build(CommandContract.published_schema(), atoms: false, warnings: :silent)
 
     for argv <- [
           ["docs"],
@@ -413,7 +414,7 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
   end
 
   test "the envelope schema pins no documentation content" do
-    encoded = CommandContract.schema() |> Jason.encode!()
+    encoded = CommandContract.published_schema() |> Jason.encode!()
 
     # Titles, sizes, and bodies are derived from the shipped documents. Pinning
     # any of them here would make every documentation edit rebuild this

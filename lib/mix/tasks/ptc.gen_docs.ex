@@ -546,7 +546,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   end
 
   defp generate_command_schema(check?) do
-    {:ok, encoded} = CommandContract.schema() |> DeterministicJSON.encode()
+    {:ok, encoded} = CommandContract.published_schema() |> DeterministicJSON.encode()
     write_or_check!(@command_schema_path, encoded <> "\n", check?)
     report_generation(@command_schema_path, 1, "schema", check?)
   end

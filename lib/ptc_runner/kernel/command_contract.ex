@@ -2,11 +2,12 @@ defmodule PtcRunner.Kernel.CommandContract do
   @moduledoc """
   Generated-in-source JSON Schema for the V4 command envelope.
 
-  The checked-in JSON artifact is produced from this module. Diagnostic
-  phase/code/retryability/message rows come only from `DiagnosticCatalog`.
+  The checked-in structural JSON artifact is produced from this module.
+  Diagnostic phase/code/retryability/message rows come only from
+  `DiagnosticCatalog`.
 
-  Envelope validation compiles that schema once per VM and reuses the JSV
-  root. `schema/0` still materializes the source map for generators and docs.
+  Envelope validation compiles the strict `schema/0` once per VM and reuses the
+  JSV root. `published_schema/0` materializes the external structural contract.
   """
 
   alias PtcRunner.Kernel.AgentConfigDiagnostic
@@ -206,7 +207,22 @@ defmodule PtcRunner.Kernel.CommandContract do
     }
   end
 
-  # The published envelope refs only the per-branch diagnostic definitions. This
+  @doc """
+  Returns the structural command-envelope schema published for external consumers.
+
+  Unlike `schema/0`, this document validates diagnostic fields without preserving
+  the internal correlation between each catalog code and its exact rendered values.
+  """
+  @spec published_schema() :: map()
+  def published_schema do
+    published = replace_diagnostic_unions(schema())
+
+    Map.update!(published, "$defs", fn definitions ->
+      Map.merge(definitions, published_diagnostic_definitions())
+    end)
+  end
+
+  # The strict envelope refs only the per-branch diagnostic definitions. This
   # union over every catalog row is deliberately not part of the contract: it
   # exists so callers can assert that each row renders to something the
   # generated constants admit, without publishing a definition no branch admits.
@@ -1430,6 +1446,83 @@ defmodule PtcRunner.Kernel.CommandContract do
     }
   end
 
+  defp published_diagnostic_definitions do
+    rows = DiagnosticCatalog.rows()
+    diagnostic_members = diagnostic_schema()["oneOf"]
+
+    %{
+      "diagnostic" =>
+        closed(
+          ~w(phase code message source path span subject notes retryable provider_activity),
+          %{
+            "phase" => %{"enum" => rows |> Enum.map(&Atom.to_string(&1.phase)) |> Enum.uniq()},
+            "code" => %{"enum" => rows |> Enum.map(&Atom.to_string(&1.code)) |> Enum.uniq()},
+            "message" => %{"type" => "string"},
+            "source" => ref("diagnostic_source"),
+            "path" => ref("diagnostic_path"),
+            "span" => ref("diagnostic_span"),
+            "subject" => ref("diagnostic_subject"),
+            "notes" => %{"type" => "array"},
+            "retryable" => %{"type" => "boolean"},
+            "provider_activity" => %{"type" => "boolean"}
+          }
+        ),
+      "diagnostic_source" => structural_diagnostic_field_schema(diagnostic_members, "source"),
+      "diagnostic_path" => structural_diagnostic_field_schema(diagnostic_members, "path"),
+      "diagnostic_span" => structural_diagnostic_field_schema(diagnostic_members, "span"),
+      "diagnostic_subject" => structural_diagnostic_field_schema(diagnostic_members, "subject")
+    }
+  end
+
+  defp structural_diagnostic_field_schema(diagnostic_members, field) do
+    branches =
+      diagnostic_members
+      |> Enum.flat_map(fn diagnostic ->
+        diagnostic
+        |> get_in(["properties", field])
+        |> schema_branches()
+      end)
+      |> Enum.uniq()
+
+    %{"oneOf" => branches}
+  end
+
+  defp schema_branches(%{"oneOf" => branches} = schema) when map_size(schema) == 1,
+    do: Enum.flat_map(branches, &schema_branches/1)
+
+  defp schema_branches(schema), do: [schema]
+
+  defp replace_diagnostic_unions(%{"oneOf" => branches} = schema) do
+    if branches != [] and Enum.all?(branches, &diagnostic_object_schema?/1) do
+      ref("diagnostic")
+    else
+      Map.new(schema, fn {key, value} -> {key, replace_diagnostic_unions(value)} end)
+    end
+  end
+
+  defp replace_diagnostic_unions(schema) when is_map(schema),
+    do: Map.new(schema, fn {key, value} -> {key, replace_diagnostic_unions(value)} end)
+
+  defp replace_diagnostic_unions(schema) when is_list(schema),
+    do: Enum.map(schema, &replace_diagnostic_unions/1)
+
+  defp replace_diagnostic_unions(schema), do: schema
+
+  defp diagnostic_object_schema?(%{
+         "type" => "object",
+         "additionalProperties" => false,
+         "required" =>
+           ~w(phase code message source path span subject notes retryable provider_activity),
+         "properties" => properties
+       }),
+       do:
+         Map.keys(properties) |> Enum.sort() ==
+           Enum.sort(
+             ~w(phase code message source path span subject notes retryable provider_activity)
+           )
+
+  defp diagnostic_object_schema?(_schema), do: false
+
   defp diagnostic_row(row, source, path, span, provider_activity) do
     closed(
       ~w(phase code message source path span subject notes retryable provider_activity),
@@ -1584,7 +1677,7 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   # Both dynamic messages above are admitted only against a null source, so the
   # sourced branches of the same rows must stay pinned to the catalog literal;
-  # otherwise the published schema would accept a pairing the command refuses to
+  # otherwise the strict schema would accept a pairing the command refuses to
   # build.
   defp diagnostic_message_schema(
          %{phase: :result_cleanup, code: :result_limit_exceeded} = row,

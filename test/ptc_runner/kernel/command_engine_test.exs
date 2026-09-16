@@ -4573,6 +4573,71 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     end
   end
 
+  test "published diagnostics accept every internal catalog row and source kind" do
+    assert {:ok, internal_root} =
+             JSV.build(CommandContract.catalog_diagnostic_schema(),
+               atoms: false,
+               warnings: :silent
+             )
+
+    published = CommandContract.published_schema()
+
+    assert {:ok, published_root} =
+             JSV.build(
+               %{
+                 "$schema" => published["$schema"],
+                 "$defs" => published["$defs"],
+                 "$ref" => "#/$defs/diagnostic"
+               },
+               atoms: false,
+               warnings: :silent
+             )
+
+    for row <- DiagnosticCatalog.rows(),
+        kind <- [nil | DiagnosticCatalog.source_kinds(row.phase, row.code)] do
+      rendered =
+        row
+        |> diagnostic_for_row()
+        |> CommandDiagnostic.to_map()
+        |> Map.put("source", published_source(kind))
+
+      assert {:ok, _validated} = JSV.validate(rendered, internal_root, cast: false)
+      assert {:ok, _validated} = JSV.validate(rendered, published_root, cast: false)
+    end
+  end
+
+  test "published diagnostics remain closed and catalog-bounded" do
+    published = CommandContract.published_schema()
+
+    assert {:ok, root} =
+             JSV.build(
+               %{
+                 "$schema" => published["$schema"],
+                 "$defs" => published["$defs"],
+                 "$ref" => "#/$defs/diagnostic"
+               },
+               atoms: false,
+               warnings: :silent
+             )
+
+    valid =
+      DiagnosticCatalog.rows()
+      |> hd()
+      |> diagnostic_for_row()
+      |> CommandDiagnostic.to_map()
+
+    mutations = [
+      Map.put(valid, "code", "unknown"),
+      Map.put(valid, "phase", "unknown"),
+      Map.put(valid, "unknown", true),
+      Map.delete(valid, "message")
+    ]
+
+    for mutation <- mutations do
+      assert {:error, _reason} = JSV.validate(mutation, root, cast: false)
+    end
+  end
+
   test "run failures always carry their closed run-only fields" do
     diagnostic = CommandDiagnostic.new!(:arguments, :invalid_arguments)
     run_ref = CommandRunRef.encode(@zero_entropy)
@@ -9762,6 +9827,14 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       1_000 -> flunk("prepared-run consumer task did not exit")
     end
   end
+
+  defp published_source(nil), do: nil
+
+  defp published_source(kind)
+       when kind in [:component, :input_contract, :result_contract, :phase_return_contract],
+       do: %{"kind" => Atom.to_string(kind), "name" => "main"}
+
+  defp published_source(kind), do: CommandSource.fixed(kind) |> CommandSource.to_map()
 
   defp manifest_error_path({:manifest_path, path, _reason}), do: path
 
