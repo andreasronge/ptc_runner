@@ -175,7 +175,10 @@ most every five seconds to detect a disconnected client. Success returns
 deterministic JSON in both <code class="inline">structuredContent</code> and its exact text encoding.
 Execution-domain failures return a complete tool error. A write failure with
 possible effects uses exactly <code class="inline">Operation may have changed data; do not retry automatically</code>; the gateway makes no retry or transaction claim.</p><p>SIGINT and SIGTERM stop the gateway owner and exit zero only after its listener,
-provider runtime, audit owner, and admissions have stopped cleanly.</p><p>The official suite is pinned in
+provider runtime, audit owner, and admissions have stopped cleanly. From a
+source checkout, use <code class="inline">scripts/run_gateway_source.sh CONFIG [--env-file FILE]</code>;
+the wrapper forwards both signals into the same staged shutdown path, including
+during application and gateway startup.</p><p>The official suite is pinned in
 <code class="inline">ptc_gateway/test/support/mcp_conformance/package.json</code> at
 <code class="inline">@modelcontextprotocol/conformance@0.2.0-alpha.11</code>. Applicable server scenario
 IDs are <code class="inline">server-stateless</code>, <code class="inline">tools-list</code>, <code class="inline">dns-rebinding-protection</code>, <code class="inline">caching</code>,

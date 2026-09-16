@@ -590,6 +590,7 @@ defmodule PtcGateway.MCP do
 
     {owner, monitor} =
       spawn_monitor(fn ->
+        request_monitor = Process.monitor(parent)
         reservation = ServingTemplate.reserve(template, arguments, opts[:run_admission])
         send(parent, {:reserved, self(), reservation})
 
@@ -611,7 +612,9 @@ defmodule PtcGateway.MCP do
 
                 closed ->
                   closed = wire_outcome(id, template, closed)
-                  _ = publish_terminal(request, parent, closed)
+                  request_monitor = monitor_request(request, nil)
+                  _ = publish_terminal(request, request_monitor, parent, closed)
+                  send(request_monitor, :stop)
                   _ = audit_terminal(name, template, closed, started_at, opts)
                   closed
               end
@@ -621,6 +624,10 @@ defmodule PtcGateway.MCP do
           :close ->
             if match?({:ok, _}, reservation),
               do: reservation |> elem(1) |> ServingTemplate.close()
+
+          {:DOWN, ^request_monitor, :process, ^parent, _reason} ->
+            if match?({:ok, _}, reservation),
+              do: reservation |> elem(1) |> ServingTemplate.cancel_external()
         end
       end)
 
@@ -642,22 +649,41 @@ defmodule PtcGateway.MCP do
   end
 
   defp activate_transport(reserved, id, request, parent, name, template, started_at, opts) do
+    request_monitor = monitor_request(request, reserved)
     close = &wire_outcome(id, template, &1)
-    publish = &publish_terminal(request, parent, &1)
+    publish = &publish_terminal(request, request_monitor, parent, &1)
     audit = &audit_terminal(name, template, &1, started_at, opts)
 
-    case opts[:serving_hooks] do
-      nil ->
-        ServingTemplate.activate_transport(reserved, close, publish, audit)
+    try do
+      case opts[:serving_hooks] do
+        nil ->
+          ServingTemplate.activate_transport(reserved, close, publish, audit)
 
-      hooks ->
-        ServingTemplate.activate(reserved, %{
-          close_outcome: close,
-          before_release: publish,
-          before_release_audit: audit,
-          after_activation: hooks[:after_activation]
-        })
+        hooks ->
+          ServingTemplate.activate(reserved, %{
+            close_outcome: close,
+            before_release: publish,
+            before_release_audit: audit,
+            after_activation: hooks[:after_activation]
+          })
+      end
+    after
+      send(request_monitor, :stop)
     end
+  end
+
+  defp monitor_request(request, reserved) do
+    spawn(fn ->
+      reference = Process.monitor(request)
+
+      receive do
+        {:DOWN, ^reference, :process, ^request, _reason} ->
+          if reserved, do: ServingTemplate.cancel_external(reserved)
+
+        :stop ->
+          Process.demonitor(reference, [:flush])
+      end
+    end)
   end
 
   defp precommit_outcome({:ok, _}), do: :reserved
@@ -737,7 +763,7 @@ defmodule PtcGateway.MCP do
     {:ok, {:stream, conn}}
   end
 
-  defp publish_terminal(request, parent, outcome) do
+  defp publish_terminal(request, request_monitor, parent, outcome) do
     disconnected =
       receive do
         {:disconnected, ^request} -> true
@@ -757,8 +783,19 @@ defmodule PtcGateway.MCP do
         {:published, ^request, false} -> mark_disconnected()
         {:disconnected, ^request} -> mark_disconnected()
       after
-        10_000 -> {:error, :publication_timeout}
+        10_000 -> publication_timeout(request, request_monitor)
       end
+    end
+  end
+
+  defp publication_timeout(request, request_monitor) do
+    reference = Process.monitor(request)
+    Process.exit(request, :kill)
+
+    receive do
+      {:DOWN, ^reference, :process, ^request, _reason} ->
+        send(request_monitor, :stop)
+        {:error, :publication_timeout}
     end
   end
 

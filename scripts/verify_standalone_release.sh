@@ -544,8 +544,13 @@ cat > "$gateway_app/main.clj" <<'EOF'
 (defn run {:effect :write} [input] (return input))
 EOF
 
+cat > "$gateway_app/read.clj" <<'EOF'
+(ns gateway.read)
+(defn run {:effect :read} [input] (return input))
+EOF
+
 cat > "$gateway_app/schema.json" <<'EOF'
-{"type":"object"}
+{"type":"object","properties":{"query":{"type":"string","x-mcp-header":"Query"}},"required":["query"],"additionalProperties":false}
 EOF
 
 cat > "$gateway_app/ptc.json" <<'EOF'
@@ -554,6 +559,22 @@ cat > "$gateway_app/ptc.json" <<'EOF'
   "workflow": {
     "components": [{"id": "gateway.main", "path": "main.clj"}],
     "entry": "gateway.main/run"
+  },
+  "input": {"path": "missing.json"},
+  "contracts": {
+    "input_schema": {"path": "schema.json"},
+    "result_schema": {"path": "schema.json"}
+  }
+}
+EOF
+
+
+cat > "$gateway_app/read-ptc.json" <<'EOF'
+{
+  "version": 1,
+  "workflow": {
+    "components": [{"id": "gateway.read", "path": "read.clj"}],
+    "entry": "gateway.read/run"
   },
   "input": {"path": "missing.json"},
   "contracts": {
@@ -572,6 +593,16 @@ gateway_digest="$("$release_root/bin/ptc_runner" eval '
     )
   IO.write(PtcRunner.Kernel.ServingTemplate.application_content_digest(template))
 ' "$gateway_app/ptc.json")"
+
+gateway_read_digest="$("$release_root/bin/ptc_runner" eval '
+  [manifest] = System.argv()
+  {:ok, template} =
+    PtcRunner.Kernel.ServingTemplate.from_directory(
+      manifest,
+      PtcRunner.Kernel.Limits.installed_defaults()
+    )
+  IO.write(PtcRunner.Kernel.ServingTemplate.application_content_digest(template))
+' "$gateway_app/read-ptc.json")"
 
 gateway_port="$(python3 - <<'PYTHON'
 import socket
@@ -607,6 +638,15 @@ cat > "$gateway_root/gateway.json" <<EOF
     "max_retained_files": 2
   },
   "tools": [{
+    "name": "a",
+    "title": "Read",
+    "description": "Packaged read probe",
+    "application": {"manifest": "application/read-ptc.json"},
+    "expected_application_content_digest": "$gateway_read_digest",
+    "installation_config_pins": {},
+    "provider_snapshot_pins": {},
+    "allow_write": false
+  }, {
     "name": "write",
     "title": "Write",
     "description": "Packaged write probe",
@@ -658,7 +698,7 @@ body = json.dumps({
             "io.modelcontextprotocol/clientCapabilities": {},
         },
         "name": "write",
-        "arguments": {},
+        "arguments": {"query": "write"},
     },
 }, separators=(",", ":"))
 conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
@@ -670,11 +710,34 @@ conn.request("POST", "/mcp", body=body, headers={
     "MCP-Protocol-Version": "2026-07-28",
     "Mcp-Method": "tools/call",
     "Mcp-Name": "write",
+    "Mcp-Param-Query": "write",
 })
 response = conn.getresponse()
 payload = response.read().decode()
 if response.status != 200 or '"isError":false' not in payload:
     raise SystemExit(f"packaged gateway write failed: {response.status} {payload}")
+PYTHON
+
+# The pinned real MCP client must exercise the assembled release, not only the
+# source test server. It covers discover, list, read, write, and contract error
+# through the SDK's negotiated 2026-07-28 transport.
+npm --prefix "$project_root/ptc_gateway/test/support/mcp_conformance" \
+  ci --ignore-scripts --silent
+node "$project_root/ptc_gateway/test/support/mcp_conformance/client_journey.mjs" \
+  "http://127.0.0.1:$gateway_port/mcp" \
+  release-gateway-token-0123456789abcdef \
+  > "$release_tmp_dir/gateway-client.json"
+python3 - "$release_tmp_dir/gateway-client.json" <<'PYTHON'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    journey = json.load(stream)
+
+if journey["read"].get("isError") or journey["write"].get("isError"):
+    raise SystemExit("packaged MCP client read/write journey failed")
+if not journey["contractFailure"].get("isError"):
+    raise SystemExit("packaged MCP client contract failure was not a tool error")
 PYTHON
 
 grep -q '"tool_name":"write"' "$gateway_audit"/*.jsonl

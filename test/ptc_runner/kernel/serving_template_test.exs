@@ -406,6 +406,38 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
   end
 
   @tag :tmp_dir
+  test "publication failure cannot replace cancellation or uncertain cleanup", %{tmp_dir: dir} do
+    assert {:ok, template} = build(fixture(dir))
+
+    for {terminal_code, clean?} <- [cancelled: true, cleanup_failed: false] do
+      host = start_supervised!({RunAdmission, max_concurrent_runs: 1}, id: make_ref())
+      {:ok, reservation} = ServingTemplate.reserve(template, %{"answer" => 1}, host)
+
+      outcome =
+        ServingCall.activate(reservation, %{
+          close_outcome: fn outcome ->
+            ServingOutcome.new(
+              terminal_code,
+              ServingOutcome.metadata(outcome).dispatched,
+              :write
+            )
+          end,
+          cleanup: fn authority ->
+            :ok = PublicationAuthority.abort(authority)
+            if clean?, do: :ok, else: {:error, :uncertain}
+          end,
+          before_release: fn _outcome -> {:error, :publication_failed} end,
+          before_release_audit: fn audited ->
+            assert ServingOutcome.code(audited) == terminal_code
+            :ok
+          end
+        })
+
+      assert ServingOutcome.code(outcome) == terminal_code
+    end
+  end
+
+  @tag :tmp_dir
   test "unused and foreign reservations cannot dispatch and release capacity", %{tmp_dir: dir} do
     assert {:ok, template} = build(fixture(dir))
     host = start_supervised!({RunAdmission, max_concurrent_runs: 1})

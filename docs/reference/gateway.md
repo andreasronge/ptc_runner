@@ -171,7 +171,10 @@ possible effects uses exactly `Operation may have changed data; do not retry
 automatically`; the gateway makes no retry or transaction claim.
 
 SIGINT and SIGTERM stop the gateway owner and exit zero only after its listener,
-provider runtime, audit owner, and admissions have stopped cleanly.
+provider runtime, audit owner, and admissions have stopped cleanly. From a
+source checkout, use `scripts/run_gateway_source.sh CONFIG [--env-file FILE]`;
+the wrapper forwards both signals into the same staged shutdown path, including
+during application and gateway startup.
 
 The official suite is pinned in
 `ptc_gateway/test/support/mcp_conformance/package.json` at

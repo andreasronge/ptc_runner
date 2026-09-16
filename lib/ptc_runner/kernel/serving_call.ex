@@ -162,10 +162,7 @@ defmodule PtcRunner.Kernel.ServingCall do
     terminal = settled_outcome(template, terminal, settlement, deadline)
     publication_clean? = run_terminal_hook(hooks, :before_release, terminal)
 
-    terminal =
-      if publication_clean?,
-        do: terminal,
-        else: outcome(template, :publication_failed, ServingOutcome.metadata(terminal).dispatched)
+    terminal = publication_outcome(template, terminal, publication_clean?)
 
     audit_clean? = run_terminal_hook(hooks, :before_release_audit, terminal)
     release = RunAdmission.finish_publication(lease, audit_clean? and publication_clean?)
@@ -188,6 +185,18 @@ defmodule PtcRunner.Kernel.ServingCall do
       hook -> hook.(terminal) == :ok
     end
   end
+
+  # Cleanup and cancellation have higher public precedence than transport
+  # publication. A failed transport callback may replace only an outcome below
+  # it in ServingOutcome's documented ordering.
+  defp publication_outcome(_template, terminal, true), do: terminal
+
+  defp publication_outcome(_template, terminal, false)
+       when terminal.code in [:cleanup_failed, :cancelled],
+       do: terminal
+
+  defp publication_outcome(template, terminal, false),
+    do: outcome(template, :publication_failed, ServingOutcome.metadata(terminal).dispatched)
 
   defp run_execution(template, prepared, authority, lease, deadline, hooks) do
     case activate_execution(template, lease, prepared, authority, deadline) do

@@ -285,12 +285,14 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   Activates a reserved transport call and retains admission through terminal publication and audit.
 
   `close_outcome` may replace the execution outcome with a bounded wire-safe
-  outcome. `publish` performs the transport's one terminal publication and
-  returns `:ok` when publication or a positively observed disconnect is clean.
-  Admission then atomically freezes cancellation, deadline and cleanup state;
-  `audit` receives that final outcome and must durably finish before capacity
-  is released. Any callback failure closes as uncertain cleanup and fences new
-  admission.
+  outcome. Admission then atomically freezes cancellation, deadline and cleanup
+  state before `publish` performs the transport's one terminal publication.
+  `publish` returns `:ok` when publication or a positively observed disconnect
+  is clean. Its failure becomes `:publication_failed` only when the frozen
+  outcome is lower precedence; cancellation and uncertain cleanup remain
+  authoritative. `audit` receives that final outcome and must durably finish
+  before capacity is released. Audit or admission-release failure closes as
+  uncertain cleanup and fences new admission.
   """
   @spec activate_transport(
           reservation(),
