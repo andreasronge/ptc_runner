@@ -1,4 +1,4 @@
 # Each run writes its packages, envelopes, traces and owner-only inspection
 # artifacts into a private directory. None of it belongs in the repository.
 .arm-a-*/
-arm-a-results.json
+results.json
