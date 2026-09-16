@@ -175,3 +175,60 @@ program, many tool calls, one page load.
 - A run that drops trace events cannot be certified by `ptc transcript` at all,
   and the dropped set included the one `limit-exceeded` event that explained the
   failure. The envelope's `execution.usage` was the only surviving account.
+
+## How the recipe was found, turn by turn
+
+Read out of the run's own inspection record, not reconstructed:
+
+```console
+ptc repl --profile private-run-analysis-v2 --run <run_ref> \
+  --resource traces=<dir> --resource inspection=<dir> \
+  --private-unattended --format jsonl \
+  -e '(analysis/read "<run_ref>" {"collection" "turns" "limit" 12})'
+```
+
+The eleven turns of `cmd-3dz31p7hv546vtps1sn0jh7k3w`:
+
+```clojure
+turn 1  (println (lab.probe/read-text ".../quotes"))
+turn 2  (println (lab.probe/read-text ".../held-out"))
+turn 3  (lab.probe/try-recipes ".../quotes"
+          [{"container" "blockquote" "text_selector" "p"     "author_selector" "footer"}
+           {"container" ".quote"     "text_selector" ".text" "author_selector" ".attribution"}
+           {"container" "div.quote"  "text_selector" "p"     "author_selector" "cite"} ...])
+turn 4-7  narrows to `.entry` and `article` containers, tries positional
+          selectors (p:first-child, p:nth-child(2), p:first-of-type),
+          alternating between the two pages
+turn 8    ... {"container" "article" "text_selector" "p" "author_selector" "span"} ...
+turn 9  (lab.probe/try-recipes ".../quotes"   [{article p span}])
+        (lab.probe/try-recipes ".../held-out" [{article p span}])
+turn 10 (return {"container" "article" "text_selector" "p" "author_selector" "span"})
+```
+
+It opened with conventional quotation markup that does not exist on this
+fixture (`blockquote`/`footer`, `.quote`/`.attribution`, `cite`), then worked
+down to what the pages actually contain, and at turn 9 re-applied the single
+finalist to both pages before committing. Input tokens per turn ran 1,495 to
+9,209; the accumulating history is where the compile cost goes.
+
+### Who did what
+
+- The **model** (`openrouter:deepseek/deepseek-v4-flash`) performed the search.
+- **I** wrote the compiler application: the prompt, the two probes, the result
+  contract, the limits. The selectors it found are not the ones I had written by
+  hand, which were narrower.
+- The **runtime** confined the search to two callable functions and one grant,
+  evaluated each program, returned records as feedback, enforced the result
+  contract, and recorded every turn.
+- The **3/3 is not the model's self-report.** After it returned, the driver wrote
+  the recipe into `compiled/ptc.json` mission data and re-extracted all three
+  pages through a manifest that installs no model at all.
+
+A fair sentence: a model, searching inside a bounded run over a probe surface
+written for it, found a recipe, and an independent run verified it.
+
+### Discrepancy
+
+`analysis/runs` reported `llm_calls: 8` with `truncated: true` for this run,
+while both the envelope's `capability_calls` and the `turns` collection
+(`item_count: 11`) say eleven. The summary view undercounts.
