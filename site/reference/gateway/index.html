@@ -4,12 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gateway configuration · PtcRunner</title>
-<meta name="description" content="The loopback gateway exposes health checks, authenticated MCP discovery, and a
-fixed tool catalog.">
+<meta name="description" content="The loopback gateway exposes health checks and an authenticated MCP tool server.">
 <link rel="canonical" href="https://ptc-runner.dev/reference/gateway/">
 <meta property="og:title" content="Gateway configuration · PtcRunner">
-<meta property="og:description" content="The loopback gateway exposes health checks, authenticated MCP discovery, and a
-fixed tool catalog.">
+<meta property="og:description" content="The loopback gateway exposes health checks and an authenticated MCP tool server.">
 <meta property="og:url" content="https://ptc-runner.dev/reference/gateway/">
 <meta property="og:type" content="article">
 <link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
@@ -102,8 +100,7 @@ fixed tool catalog.">
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="gateway-configuration">Gateway configuration</h1><p>The loopback gateway exposes health checks, authenticated MCP discovery, and a
-fixed tool catalog.</p><p>Tool execution and standalone release integration are separate delivery steps.</p><p>Run the source command from <code class="inline">ptc_gateway/</code>:</p><pre><code class="sh language-sh">mix ptc.gateway /absolute/path/ptc-gateway.json --env-file /absolute/path/credentials.env</code></pre><p>Remote clients need an authenticated tunnel to loopback. Native TLS, proxy
+<h1 id="gateway-configuration">Gateway configuration</h1><p>The loopback gateway exposes health checks and an authenticated MCP tool server.</p><p>Run the source command from <code class="inline">ptc_gateway/</code>:</p><pre><code class="sh language-sh">mix ptc.gateway /absolute/path/ptc-gateway.json --env-file /absolute/path/credentials.env</code></pre><p>The assembled standalone release provides the equivalent command:</p><pre><code class="sh language-sh">ptc gateway /absolute/path/ptc-gateway.json --env-file /absolute/path/credentials.env</code></pre><p>Remote clients need an authenticated tunnel to loopback. Native TLS, proxy
 trust, direct private-network binding, and container port publishing are not
 supported. Changing configuration, credentials, templates, or pins requires a
 whole-domain restart.</p><h2 id="version-1-contract">Version 1 contract</h2><p><code class="inline">priv/schemas/ptc-gateway-config.schema.json</code> is generated from
@@ -134,14 +131,16 @@ next startup. A startup that fails after opening its replacement removes it
 again, so a failed start leaves no empty file counting against that bound.
 Active files are never truncated. Unexpected files, hard links, oversized files
 or wrong permissions refuse startup. There
-is no HTTP audit-reading endpoint. Per-call redacted records and execution
-failure fencing belong to the execution integration.</p><h2 id="health">Health</h2><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Request</th><th style="text-align: left;">Response</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">GET /health/live</code></td><td style="text-align: left;">200 <code class="inline">{&quot;status&quot;:&quot;live&quot;}</code> while listener and gateway owner remain alive.</td></tr><tr><td style="text-align: left;"><code class="inline">GET /health/ready</code></td><td style="text-align: left;">200 <code class="inline">{&quot;status&quot;:&quot;ready&quot;}</code> when the warm domain is ready; otherwise 503 <code class="inline">{&quot;status&quot;:&quot;not_ready&quot;}</code>.</td></tr><tr><td style="text-align: left;">Other method on either health path</td><td style="text-align: left;">405. <code class="inline">OPTIONS</code> is unsupported.</td></tr><tr><td style="text-align: left;">Other path</td><td style="text-align: left;">404.</td></tr><tr><td style="text-align: left;">Invalid authority, on any path</td><td style="text-align: left;">400 before routing.</td></tr></tbody></table></div><p>Health needs no bearer and returns no CORS headers. Responses use
+is no HTTP audit-reading endpoint. Every dispatched write durably appends one
+bounded record before run admission is released. It contains only the call ID,
+tool name, start/end times, closed outcome and dispatch state, write uncertainty,
+disconnect flag, and cleanup status.</p><h2 id="health">Health</h2><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Request</th><th style="text-align: left;">Response</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">GET /health/live</code></td><td style="text-align: left;">200 <code class="inline">{&quot;status&quot;:&quot;live&quot;}</code> while listener and gateway owner remain alive.</td></tr><tr><td style="text-align: left;"><code class="inline">GET /health/ready</code></td><td style="text-align: left;">200 <code class="inline">{&quot;status&quot;:&quot;ready&quot;}</code> when the warm domain is ready; otherwise 503 <code class="inline">{&quot;status&quot;:&quot;not_ready&quot;}</code>.</td></tr><tr><td style="text-align: left;">Other method on either health path</td><td style="text-align: left;">405. <code class="inline">OPTIONS</code> is unsupported.</td></tr><tr><td style="text-align: left;">Other path</td><td style="text-align: left;">404.</td></tr><tr><td style="text-align: left;">Invalid authority, on any path</td><td style="text-align: left;">400 before routing.</td></tr></tbody></table></div><p>Health needs no bearer and returns no CORS headers. Responses use
 <code class="inline">application/json</code> and <code class="inline">Cache-Control: no-store</code>. Readiness uses the warm
 runtime's bounded snapshot, including captured credentials, pinned providers,
 run admission and provider-call admission. Saturation stays ready; required
 runtime loss or fencing makes readiness permanently false while liveness
-continues. Invalid static startup configuration prevents listener binding.</p><h2 id="mcp-discovery-and-listing">MCP discovery and listing</h2><p><code class="inline">POST /mcp</code> accepts only MCP revision <code class="inline">2026-07-28</code> methods
-<code class="inline">server/discover</code> and <code class="inline">tools/list</code>. It is stateless: <code class="inline">Mcp-Session-Id</code> and
+continues. Invalid static startup configuration prevents listener binding.</p><h2 id="mcp-discovery-listing-and-calls">MCP discovery, listing, and calls</h2><p><code class="inline">POST /mcp</code> accepts only MCP revision <code class="inline">2026-07-28</code> methods
+<code class="inline">server/discover</code>, <code class="inline">tools/list</code>, and <code class="inline">tools/call</code>. It is stateless: <code class="inline">Mcp-Session-Id</code> and
 <code class="inline">Last-Event-ID</code> are ignored and no session header is returned. Other HTTP
 methods return 405, and unsupported MCP methods return HTTP 404 with JSON-RPC
 <code class="inline">-32601</code>.</p><p>Requests require the exact listener authority, an allowed or absent <code class="inline">Origin</code>,
@@ -165,28 +164,41 @@ runtime returns HTTP 503 <code class="inline">-31998</code>.</p><p>Discovery adv
 returns every configured tool in UTF-8 name-byte order with its configured
 name, title and description, exact normalized input/output schemas, and only
 the compiler-derived <code class="inline">annotations.readOnlyHint</code>. A cursor, unknown parameter,
-or malformed method parameters returns HTTP 200 JSON-RPC <code class="inline">-32602</code>.</p><p>The official suite is pinned in
+or malformed method parameters returns HTTP 200 JSON-RPC <code class="inline">-32602</code>.</p><p>A call accepts only <code class="inline">name</code>, optional object <code class="inline">arguments</code> (default <code class="inline">{}</code>), and the
+required <code class="inline">_meta</code>. Exactly one <code class="inline">Mcp-Name</code> must decode to the body name. Schema
+leaves annotated with <code class="inline">x-mcp-header</code> require exactly matching <code class="inline">Mcp-Param-*</code>
+headers; duplicate, missing, unexpected, malformed, and mismatched headers return
+<code class="inline">-32020</code>. Unknown call fields return <code class="inline">-32602</code>.</p><p>After validating a known call, the gateway atomically reserves run admission,
+commits HTTP 200 <code class="inline">text/event-stream</code>, and only then activates execution. It emits
+one final <code class="inline">message</code> event and closes. While silent it writes an SSE comment at
+most every five seconds to detect a disconnected client. Success returns
+deterministic JSON in both <code class="inline">structuredContent</code> and its exact text encoding.
+Execution-domain failures return a complete tool error. A write failure with
+possible effects uses exactly <code class="inline">Operation may have changed data; do not retry automatically</code>; the gateway makes no retry or transaction claim.</p><p>SIGINT and SIGTERM stop the gateway owner and exit zero only after its listener,
+provider runtime, audit owner, and admissions have stopped cleanly. From a
+source checkout, use <code class="inline">scripts/run_gateway_source.sh CONFIG [--env-file FILE]</code>;
+the wrapper forwards both signals into the same staged shutdown path, including
+during application and gateway startup.</p><p>The official suite is pinned in
 <code class="inline">ptc_gateway/test/support/mcp_conformance/package.json</code> at
 <code class="inline">@modelcontextprotocol/conformance@0.2.0-alpha.11</code>. Applicable server scenario
-IDs are <code class="inline">server-stateless</code>, <code class="inline">tools-list</code>, <code class="inline">dns-rebinding-protection</code>, and <code class="inline">caching</code>.
+IDs are <code class="inline">server-stateless</code>, <code class="inline">tools-list</code>, <code class="inline">dns-rebinding-protection</code>, <code class="inline">caching</code>,
+<code class="inline">http-header-validation</code>, and <code class="inline">http-custom-header-server-validation</code>.
 The remaining listed server scenario IDs are
-excluded: <code class="inline">tools-call-*</code> and <code class="inline">http-custom-header-server-validation</code> require
-tool execution; <code class="inline">completion-complete</code>, <code class="inline">resources-*</code>, <code class="inline">prompts-*</code>, and
+excluded: <code class="inline">tools-call-*</code> require diagnostic tools and content families not
+provided by configured workflows; <code class="inline">completion-complete</code>, <code class="inline">resources-*</code>, <code class="inline">prompts-*</code>, and
 <code class="inline">sep-2164-resource-not-found</code> require unsupported feature families;
 <code class="inline">server-sse-multiple-streams</code> requires GET/session streams;
 <code class="inline">json-schema-2020-12</code> exercises a tool call; and <code class="inline">input-required-result-*</code>
 requires server requests and multi-round tool execution. Neither this milestone
 nor the parent claims the complete server suite.</p><p>The checked-in expected-failures baseline narrows mixed scenarios to this
-milestone. It excludes server-stateless checks requiring tool calls, response
+profile. It excludes server-stateless checks requiring diagnostic tools, response
 streams, logging tools, or optional server identity; caching checks for prompts
-and resources. The mixed <code class="inline">http-header-validation</code> scenario is deferred in full
-because its check IDs are reused across list and tool-call cases. The applicable
-discovery, listing, DNS, and cache checks still execute through the
-authenticated conformance proxy in the gateway CI gate. Gateway boundary
-tests independently enforce the applicable header scenario cases (missing,
-mismatched, case-insensitive, and case-mismatched method headers), every
-critical-header duplicate, and the exact parser and application header
-ceilings. Integration boundaries also exercise exact and excessive body,
+and resources. Both header-validation scenarios execute without a baseline,
+including Base64/literal custom parameter decoding and mismatch rejection.
+All applicable checks execute through the authenticated conformance proxy in
+the gateway CI gate. Gateway boundary tests additionally enforce every critical
+header duplicate and the exact parser and application header ceilings.
+Integration boundaries also exercise exact and excessive body,
 metadata, JSON depth/node, ID, normalized-schema, static-catalog, and encoded
 response sizes.</p><h2 id="startup-failures">Startup failures</h2><p>Only the first error is returned. Precedence is document read/JSON, structural
 schema and byte bounds, origins, duplicate tool names, audit presence, host,

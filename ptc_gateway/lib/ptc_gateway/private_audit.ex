@@ -12,12 +12,15 @@ defmodule PtcGateway.PrivateAudit do
   records, fencing and shutdown policy belong to the execution integration.
   """
   use GenServer
-  use PtcRunner.Kernel.OwnerStatusRedaction
+  use PtcGateway.OwnerStatusRedaction
   alias PtcRunner.Kernel.PrivateDirectory
   import Bitwise
 
   @spec start_link(map()) :: GenServer.on_start()
   def start_link(config), do: GenServer.start_link(__MODULE__, config)
+
+  @spec append(pid(), map()) :: :ok | {:error, :audit_unavailable}
+  def append(owner, record), do: GenServer.call(owner, {:append, record}, :infinity)
   @doc false
   def child_spec(config),
     do: %{id: __MODULE__, start: {__MODULE__, :start_link, [config]}, restart: :temporary}
@@ -175,6 +178,81 @@ defmodule PtcGateway.PrivateAudit do
       end
     end)
   end
+
+  @impl true
+  def handle_call({:append, record}, _from, state) do
+    result = append_record(state, record)
+
+    case result do
+      {:ok, next} -> {:reply, :ok, next}
+      error -> {:stop, :audit_unavailable, error, state}
+    end
+  end
+
+  defp append_record(state, record) do
+    with true <- audit_record?(record),
+         {:ok, encoded} <- PtcRunner.Kernel.DeterministicJSON.encode(record),
+         true <- byte_size(encoded) + 1 <= state.config["max_file_bytes"],
+         {:ok, state} <- ensure_space(state, byte_size(encoded) + 1),
+         :ok <- :file.write(state.io, [encoded, "\n"]),
+         :ok <- :file.sync(state.io) do
+      {:ok, state}
+    else
+      _ -> {:error, :audit_unavailable}
+    end
+  end
+
+  defp ensure_space(state, bytes) do
+    with {:ok, %{size: size}} <- File.stat(state.path) do
+      if size + bytes <= state.config["max_file_bytes"], do: {:ok, state}, else: rotate(state)
+    end
+  end
+
+  defp rotate(state) do
+    name = Path.basename(state.path, ".jsonl")
+
+    with {sequence, ""} <- Integer.parse(name),
+         true <- sequence < 99_999_999_999_999_999_999,
+         path <-
+           Path.join(
+             state.directory,
+             String.pad_leading(Integer.to_string(sequence + 1), 20, "0") <> ".jsonl"
+           ),
+         {:ok, io} <- File.open(path, [:raw, :binary, :append, :exclusive]),
+         :ok <- File.chmod(path, 0o600),
+         :ok <- :file.sync(io),
+         :ok <- sync_directory(state.directory),
+         :ok <- File.close(state.io),
+         {:ok, names} <- File.ls(state.directory),
+         {:ok, uid} <- PrivateDirectory.preflight_owner(path),
+         {:ok, files} <-
+           inventory(
+             names -- [".gateway-lock", Path.basename(path)],
+             state.directory,
+             uid,
+             state.config["max_file_bytes"]
+           ),
+         :ok <- prune(files, state.config["max_retained_files"] - 1),
+         :ok <- sync_directory(state.directory) do
+      {:ok, %{state | io: io, path: path}}
+    else
+      _ -> {:error, :audit_unavailable}
+    end
+  end
+
+  defp audit_record?(record) when is_map(record) do
+    Map.keys(record) |> Enum.sort() ==
+      Enum.sort(
+        ~w(call_id tool_name started_at ended_at outcome_code dispatch_state write_effects_may_have_occurred disconnected cleanup_status)
+      ) and
+      is_binary(record["call_id"]) and is_binary(record["tool_name"]) and
+      is_binary(record["started_at"]) and is_binary(record["ended_at"]) and
+      is_binary(record["outcome_code"]) and is_binary(record["dispatch_state"]) and
+      is_boolean(record["write_effects_may_have_occurred"]) and
+      is_boolean(record["disconnected"]) and is_binary(record["cleanup_status"])
+  end
+
+  defp audit_record?(_record), do: false
 
   @impl true
   def terminate(_, state) do

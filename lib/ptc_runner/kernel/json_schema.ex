@@ -16,12 +16,11 @@ defmodule PtcRunner.Kernel.JSONSchema do
   (2020-12). Because the accepted profile is a common subset of the
   allowlisted dialects, a supported root `$schema` URI (2020-12, or draft-07
   as a deliberate compatibility translation) is accepted and removed, while
-  unknown, malformed, and nested dialect markers are rejected. Vendor `x-…`
-  extension keys and the standard non-validating `default` annotation are
-  discarded from every level as a deliberate client policy — mainstream MCP
-  SDKs emit them by default. They do not reach normalized output, encodings,
-  hashes, or runtime argument construction. All other unknown keywords remain
-  rejected.
+  unknown, malformed, and nested dialect markers are rejected. The MCP
+  `x-mcp-header` transport annotation is retained; other vendor `x-…` keys and
+  the standard non-validating `default` annotation are discarded. Extensions
+  other than `x-mcp-header` do not reach normalized output, encodings, hashes,
+  or runtime argument construction. All other unknown keywords remain rejected.
 
   Each normalized schema is at most 64 KiB with maximum depth 16, 128
   properties per object, and 256 enum members. Host construction compiles with
@@ -51,7 +50,7 @@ defmodule PtcRunner.Kernel.JSONSchema do
   alias PtcRunner.Kernel.JSONSchema.SHA256Format
   alias PtcRunner.Kernel.JSONValue
 
-  @allowed ~w(type title description properties required additionalProperties propertyNames items enum const minimum maximum minLength maxLength minItems maxItems maxProperties format)
+  @allowed ~w(type title description properties required additionalProperties propertyNames items enum const minimum maximum minLength maxLength minItems maxItems maxProperties format x-mcp-header)
   @types ~w(null boolean object array number integer string)
   @non_null_types @types -- ["null"]
   @max_schema_bytes 65_536
@@ -544,13 +543,13 @@ defmodule PtcRunner.Kernel.JSONSchema do
   defp reject(rule, path, suffix \\ []),
     do: {:error, rejection(rule, Enum.reverse(path, suffix))}
 
-  # Vendor "x-…" extension keys and JSON Schema's non-validating "default"
-  # annotation are discarded as deliberate client policy; mainstream MCP SDKs
-  # emit them by default and this profile assigns them no runtime semantics.
+  # MCP's transport annotation survives normalization for public projection.
+  # Other vendor extensions and JSON Schema's non-validating default remain
+  # discarded; this bounded profile assigns them no runtime semantics.
   # Unsupported semantic keywords remain rejected.
   defp drop_ignored_annotations(schema) do
     Map.reject(schema, fn {key, _value} ->
-      key == "default" or String.starts_with?(key, "x-")
+      key == "default" or (String.starts_with?(key, "x-") and key != "x-mcp-header")
     end)
   end
 

@@ -2,8 +2,9 @@ import {
   Client,
   StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
+import { readFile, writeFile } from "node:fs/promises";
 
-const [url, token] = process.argv.slice(2);
+const [url, token, disconnectTool, dispatchPath, cleanupStartedPath, cleanupReleasePath] = process.argv.slice(2);
 const client = new Client(
   { name: "ptc-gateway-interoperability", version: "1.0.0" },
   { versionNegotiation: { mode: { pin: "2026-07-28" } } },
@@ -16,7 +17,54 @@ try {
   await client.connect(transport);
   const discover = client.getDiscoverResult();
   const listing = await client.listTools();
-  process.stdout.write(JSON.stringify({ discover, listing }));
+  const read = await client.callTool({ name: "a", arguments: { query: "read" } });
+  const write = await client.callTool({ name: "write", arguments: { query: "write" } });
+  const contractFailure = await client.callTool({ name: "a", arguments: { query: "invalid", extra: true } });
+  let disconnectCancellation = null;
+  if (disconnectTool) {
+    const controller = new AbortController();
+    const pending = client.callTool({
+      name: disconnectTool,
+      arguments: { city: "nyc", delay_ms: 30000 },
+    }, { signal: controller.signal });
+    let settled;
+    pending.then(value => { settled = { value }; }, error => { settled = { error }; });
+    const deadline = Date.now() + 10000;
+    while (true) {
+      const dispatches = await readFile(dispatchPath, "utf8").catch(() => "");
+      if (dispatches.split("\n").filter(Boolean).length >= 1) break;
+      if (settled) throw new Error(`disconnect call settled before provider dispatch: ${JSON.stringify(settled.value ?? String(settled.error))}`);
+      if (Date.now() >= deadline) throw new Error("disconnect call never reached provider dispatch");
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    controller.abort();
+    if (cleanupStartedPath) {
+      const cleanupDeadline = Date.now() + 10000;
+      while (!(await readFile(cleanupStartedPath).then(() => true).catch(() => false))) {
+        if (Date.now() >= cleanupDeadline) throw new Error("disconnected call did not reach its held audit cleanup");
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      let overloaded = false;
+      let overloadDetail;
+      try {
+        const result = await client.callTool({ name: "a", arguments: { query: "blocked" } });
+        overloadDetail = result;
+        overloaded = result.isError === true;
+      } catch (error) {
+        overloadDetail = String(error);
+        overloaded = error?.code === -31999 || String(error).includes("Server busy");
+      }
+      if (!overloaded) throw new Error(`admission was released while disconnected-call cleanup was held: ${JSON.stringify(overloadDetail)}`);
+      await writeFile(cleanupReleasePath, "release\n");
+    }
+    try {
+      const cancelled = await pending;
+      disconnectCancellation = cancelled.isError === true;
+    } catch (_) {
+      disconnectCancellation = true;
+    }
+  }
+  process.stdout.write(JSON.stringify({ discover, listing, read, write, contractFailure, disconnectCancellation }));
 } finally {
   await client.close();
 }

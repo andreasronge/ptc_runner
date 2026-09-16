@@ -71,6 +71,10 @@ defmodule PtcRunner.Kernel.ServingCall do
 
   def close(_), do: {:error, :run_admission_unavailable}
 
+  @doc false
+  def cancel_external({__MODULE__, _, _, lease, _, _}), do: RunAdmission.cancel_external(lease)
+  def cancel_external(_), do: {:error, :run_admission_unavailable}
+
   @spec activate(reservation()) :: ServingOutcome.t()
   def activate(reservation), do: activate(reservation, %{})
 
@@ -138,17 +142,7 @@ defmodule PtcRunner.Kernel.ServingCall do
   defp execute(template, prepared, authority, lease, deadline, hooks) do
     result =
       try do
-        case activate_execution(template, lease, prepared, authority, deadline) do
-          {:ok, execution} ->
-            if hook = Map.get(hooks, :after_activation), do: hook.(execution)
-            collect(template, RunAdmission.await(execution), authority, hooks)
-
-          {:error, :run_admission_unavailable} ->
-            outcome(template, :admission_unavailable, false)
-
-          {:error, reason} ->
-            failure(template, reason)
-        end
+        run_execution(template, prepared, authority, lease, deadline, hooks)
       rescue
         _ -> outcome(template, :internal_error, :unknown)
       catch
@@ -158,32 +152,82 @@ defmodule PtcRunner.Kernel.ServingCall do
     prepared_clean? = PreparedRun.close(prepared) == :ok
     clean? = cleanup(authority, hooks) == :ok and prepared_clean?
 
-    case RunAdmission.finish_publication(lease, clean?) do
-      :ok when clean? ->
-        replace_expired(template, result, deadline)
+    terminal =
+      if clean?,
+        do: replace_expired(template, result, deadline),
+        else: outcome(template, :cleanup_failed, ServingOutcome.metadata(result).dispatched)
 
-      {:error, :call_admission_refused} when clean? ->
+    terminal = close_outcome(hooks, terminal)
+    settlement = RunAdmission.freeze_publication(lease, clean?)
+    terminal = settled_outcome(template, terminal, settlement, deadline)
+    publication_clean? = run_terminal_hook(hooks, :before_release, terminal)
+
+    terminal = publication_outcome(template, terminal, publication_clean?)
+
+    audit_clean? = run_terminal_hook(hooks, :before_release_audit, terminal)
+    release = RunAdmission.finish_publication(lease, audit_clean? and publication_clean?)
+
+    if audit_clean? and release == :ok,
+      do: terminal,
+      else: outcome(template, :cleanup_failed, ServingOutcome.metadata(terminal).dispatched)
+  end
+
+  defp close_outcome(hooks, terminal) do
+    case Map.get(hooks, :close_outcome) do
+      nil -> terminal
+      hook -> hook.(terminal)
+    end
+  end
+
+  defp run_terminal_hook(hooks, name, terminal) do
+    case Map.get(hooks, name) do
+      nil -> true
+      hook -> hook.(terminal) == :ok
+    end
+  end
+
+  # Cleanup and cancellation have higher public precedence than transport
+  # publication. A failed transport callback may replace only an outcome below
+  # it in ServingOutcome's documented ordering.
+  defp publication_outcome(_template, terminal, true), do: terminal
+
+  defp publication_outcome(_template, terminal, false)
+       when terminal.code in [:cleanup_failed, :cancelled],
+       do: terminal
+
+  defp publication_outcome(template, terminal, false),
+    do: outcome(template, :publication_failed, ServingOutcome.metadata(terminal).dispatched)
+
+  defp run_execution(template, prepared, authority, lease, deadline, hooks) do
+    case activate_execution(template, lease, prepared, authority, deadline) do
+      {:ok, execution} ->
+        if hook = Map.get(hooks, :after_activation), do: hook.(execution)
+        collect(template, RunAdmission.await(execution), authority, hooks)
+
+      {:error, :run_admission_unavailable} ->
+        outcome(template, :admission_unavailable, false)
+
+      {:error, reason} ->
+        failure(template, reason)
+    end
+  end
+
+  defp settled_outcome(template, terminal, settlement, deadline) do
+    case settlement do
+      :ok ->
+        terminal
+
+      {:error, :call_admission_refused} ->
         replace_expired(template, outcome(template, :admission_unavailable, false), deadline)
 
       {:error, :call_cleanup_failed} ->
-        outcome(template, :cleanup_failed, ServingOutcome.metadata(result).dispatched)
+        outcome(template, :cleanup_failed, ServingOutcome.metadata(terminal).dispatched)
 
-      {:error, :call_cancelled} when clean? ->
-        outcome(template, :cancelled, ServingOutcome.metadata(result).dispatched)
+      {:error, :call_cancelled} ->
+        outcome(template, :cancelled, ServingOutcome.metadata(terminal).dispatched)
 
       _ ->
-        RunAdmission.close(lease)
-
-        case admission_status(lease) do
-          :unavailable ->
-            outcome(template, :cleanup_failed, ServingOutcome.metadata(result).dispatched)
-
-          _ when not clean? ->
-            outcome(template, :cleanup_failed, ServingOutcome.metadata(result).dispatched)
-
-          _ ->
-            replace_expired(template, result, deadline)
-        end
+        outcome(template, :cleanup_failed, ServingOutcome.metadata(terminal).dispatched)
     end
   end
 
@@ -237,13 +281,6 @@ defmodule PtcRunner.Kernel.ServingCall do
 
       error ->
         error
-    end
-  end
-
-  defp admission_status(lease) do
-    case RunAdmission.reservation_snapshot(lease) do
-      {:ok, %{status: status}} -> status
-      _ -> :unavailable
     end
   end
 

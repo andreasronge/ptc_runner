@@ -1,13 +1,14 @@
 defmodule PtcGateway.Domain do
   @moduledoc false
   use GenServer
-  use PtcRunner.Kernel.OwnerStatusRedaction
+  use PtcGateway.OwnerStatusRedaction
 
   alias PtcRunner.Kernel.{
     GatewayConfig,
     HostConfig,
     HostInstallation,
     InstallationCatalog,
+    MCPProtocol,
     RunAdmission,
     ServingTemplate,
     WarmProviderRuntime
@@ -24,6 +25,10 @@ defmodule PtcGateway.Domain do
   @doc "The warm runtime owner is the opaque authentication handle."
   def token_handle(owner), do: GenServer.call(owner, :token_handle)
 
+  @doc false
+  def shutdown(owner, drain_ms, cleanup_ms),
+    do: GenServer.call(owner, {:shutdown, drain_ms, cleanup_ms}, drain_ms + cleanup_ms + 5_000)
+
   @impl true
   def init({path, env_file}) do
     Process.flag(:trap_exit, true)
@@ -34,6 +39,9 @@ defmodule PtcGateway.Domain do
       warm: nil,
       listener: nil,
       request_admission: nil,
+      run_admission: nil,
+      audit: nil,
+      tools: %{},
       metadata: [],
       policy: nil
     }
@@ -132,11 +140,21 @@ defmodule PtcGateway.Domain do
       }
     }
 
-    if Enum.all?(schemas, &(encoded_size(&1) <= 65_536)) and
-         within_static_limit?(tools) and within_static_limit?(listing),
-       do: :ok,
-       else: {:error, :catalog_too_large}
+    cond do
+      not Enum.all?(tools, &valid_header_schema?/1) ->
+        {:error, :template_invalid}
+
+      Enum.all?(schemas, &(encoded_size(&1) <= 65_536)) and
+        within_static_limit?(tools) and within_static_limit?(listing) ->
+        :ok
+
+      true ->
+        {:error, :catalog_too_large}
+    end
   end
+
+  defp valid_header_schema?(tool),
+    do: match?({:ok, _parameters}, MCPProtocol.header_parameters(tool["inputSchema"]))
 
   @doc false
   def within_static_limit?(value), do: encoded_size(value) <= 4_194_304
@@ -171,8 +189,15 @@ defmodule PtcGateway.Domain do
 
   defp boot(config, tools, services, env_file, state) do
     case audit(config) do
-      {:ok, audit} -> start_run(config, tools, services, env_file, child(state, audit))
-      _ -> {:error, :audit_unavailable, state}
+      {:ok, audit} ->
+        start_run(config, tools, services, env_file, %{
+          child(state, audit)
+          | audit: audit,
+            tools: tools
+        })
+
+      _ ->
+        {:error, :audit_unavailable, state}
     end
   end
 
@@ -195,8 +220,15 @@ defmodule PtcGateway.Domain do
                max_waiting_provider_calls: admission["max_waiting_provider_calls"],
                env_file: env_file
              ) do
-          {:ok, warm} -> start_request_admission(config, %{child(state, warm) | warm: warm})
-          {:error, code} -> {:error, PtcGateway.StartupError.normalize(code), state}
+          {:ok, warm} ->
+            start_request_admission(config, %{
+              child(state, warm)
+              | warm: warm,
+                run_admission: run
+            })
+
+          {:error, code} ->
+            {:error, PtcGateway.StartupError.normalize(code), state}
         end
 
       _ ->
@@ -224,6 +256,9 @@ defmodule PtcGateway.Domain do
               listen: listen,
               warm: state.warm,
               tools: state.metadata,
+              tool_entries: state.tools,
+              run_admission: state.run_admission,
+              audit: state.audit,
               request_admission: state.request_admission},
            ip: ip,
            port: listen["port"],
@@ -254,8 +289,38 @@ defmodule PtcGateway.Domain do
 
   def handle_call(:token_handle, _, state), do: {:reply, state.warm, state}
 
+  def handle_call({:shutdown, drain_ms, cleanup_ms}, _from, state) do
+    if is_pid(state.listener) and Process.alive?(state.listener), do: stop(state.listener)
+
+    quiesced =
+      RunAdmission.quiesce(state.run_admission) == :ok and
+        WarmProviderRuntime.begin_drain(state.warm) == :ok
+
+    drain_deadline = System.monotonic_time(:millisecond) + drain_ms
+    drained = wait_for_admission(state.run_admission, drain_deadline)
+    if not drained, do: RunAdmission.cancel_all(state.run_admission)
+
+    cleanup_deadline = System.monotonic_time(:millisecond) + cleanup_ms
+    providers_clean = WarmProviderRuntime.drain(state.warm, cleanup_deadline) == :ok
+
+    admission_clean =
+      wait_for_admission(state.run_admission, cleanup_deadline) and
+        RunAdmission.shutdown_clean?(state.run_admission)
+
+    result =
+      if quiesced and drained and providers_clean and admission_clean,
+        do: :ok,
+        else: {:error, :uncertain_cleanup}
+
+    {:stop, :normal, result, %{state | listener: nil}}
+  end
+
   @impl true
-  def handle_info({:EXIT, pid, _}, %{listener: pid} = state), do: {:stop, :normal, state}
+  def handle_info({:EXIT, pid, _}, %{listener: pid} = state),
+    do: {:stop, :gateway_listener_failed, state}
+
+  def handle_info({:EXIT, pid, _reason}, %{audit: pid} = state),
+    do: {:stop, :gateway_child_failed, state}
 
   def handle_info({:EXIT, pid, reason}, state) do
     if is_pid(state.warm) and (pid in state.children or reason != :normal),
@@ -282,5 +347,24 @@ defmodule PtcGateway.Domain do
     GenServer.stop(pid, :shutdown)
   catch
     :exit, _ -> :ok
+  end
+
+  defp wait_for_admission(nil, _deadline), do: true
+
+  defp wait_for_admission(admission, deadline) do
+    case RunAdmission.snapshot(admission) do
+      {:ok, %{in_use: 0}} ->
+        true
+
+      _ ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          false
+        else
+          receive do
+          after
+            25 -> wait_for_admission(admission, deadline)
+          end
+        end
+    end
   end
 end

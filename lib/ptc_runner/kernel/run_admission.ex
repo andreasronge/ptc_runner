@@ -174,6 +174,17 @@ defmodule PtcRunner.Kernel.RunAdmission do
   @spec close(reservation()) :: :ok | {:error, :run_admission_unavailable}
   def close(reservation), do: cancel(reservation)
 
+  @doc false
+  @spec cancel_external(reservation()) :: :ok | {:error, :run_admission_unavailable}
+  def cancel_external({__MODULE__, host, ref}), do: call(host, {:cancel_external, ref})
+  def cancel_external(_), do: {:error, :run_admission_unavailable}
+
+  @doc false
+  def quiesce(host), do: call(host, :quiesce)
+
+  @doc false
+  def cancel_all(host), do: call(host, :cancel_all)
+
   @doc "Waits for the activated execution's sealed outcome and execution-owner cleanup."
   @spec await(execution()) :: {:ok, ExecutionOutcome.t()} | {:error, term()}
   def await({__MODULE__, caller, owner}) when caller == self(), do: await_execution(owner)
@@ -191,6 +202,15 @@ defmodule PtcRunner.Kernel.RunAdmission do
   @spec finish_publication(reservation(), boolean()) :: :ok | {:error, atom()}
   def finish_publication({__MODULE__, host, ref}, clean?),
     do: call(host, {:finish_publication, ref, clean?})
+
+  @doc "Atomically freezes the retained call's terminal admission state without releasing capacity."
+  @spec freeze_publication(reservation(), boolean()) :: :ok | {:error, atom()}
+  def freeze_publication({__MODULE__, host, ref}, clean?),
+    do: call(host, {:freeze_publication, ref, clean?})
+
+  @doc "Reports whether shutdown quiesced a previously healthy domain and all capacity is free."
+  @spec shutdown_clean?(pid()) :: boolean()
+  def shutdown_clean?(host), do: call(host, :shutdown_clean) == true
 
   @doc false
   def transfer(host, ref, ticket, caller), do: call(host, {:transfer, ref, ticket, caller})
@@ -291,15 +311,15 @@ defmodule PtcRunner.Kernel.RunAdmission do
   def handle_call(:snapshot, _, state) do
     state = fence_dead_owners(state)
 
-    {:reply, {:ok, %{capacity: state.capacity, in_use: in_use(state), status: state.status}},
-     state}
+    status = if state.status == :ready, do: :ready, else: :unavailable
+    {:reply, {:ok, %{capacity: state.capacity, in_use: in_use(state), status: status}}, state}
   end
 
   def handle_call({:reserve, deadline}, {caller, _}, state) do
     state = fence_dead_owners(state)
 
     cond do
-      state.status == :unavailable or not deadline_live?(deadline) or not Process.alive?(caller) ->
+      state.status != :ready or not deadline_live?(deadline) or not Process.alive?(caller) ->
         {:reply, {:error, :run_admission_unavailable}, state}
 
       in_use(state) >= state.capacity ->
@@ -349,6 +369,10 @@ defmodule PtcRunner.Kernel.RunAdmission do
     state = reap_dead_reservation_owner(state, ref)
 
     case state.reservations[ref] do
+      %{caller: ^caller, owner: nil, publication: :frozen} ->
+        next = drop_reservation(state, ref)
+        {:reply, :ok, %{next | status: if(clean?, do: next.status, else: :unavailable)}}
+
       %{caller: ^caller, owner: nil, publication: publication} = reservation
       when publication in [:held, :pending] ->
         reply =
@@ -369,6 +393,23 @@ defmodule PtcRunner.Kernel.RunAdmission do
           put_reservation(next, ref, %{reservation | publication: :discard, cancelled?: true})
 
         {:reply, :ok, %{next | status: :unavailable}}
+
+      _ ->
+        {:reply, {:error, :run_admission_unavailable}, state}
+    end
+  end
+
+  def handle_call({:freeze_publication, ref, clean?}, {caller, _}, state)
+      when is_boolean(clean?) do
+    state = reap_dead_reservation_owner(state, ref)
+
+    case state.reservations[ref] do
+      %{caller: ^caller, owner: nil, publication: publication} = reservation
+      when publication in [:held, :pending] ->
+        reply = publication_result(reservation, clean?)
+        next = put_reservation(state, ref, %{reservation | publication: :frozen})
+        fenced? = not clean? or reply == {:error, :call_cleanup_failed}
+        {:reply, reply, %{next | status: if(fenced?, do: :unavailable, else: next.status)}}
 
       _ ->
         {:reply, {:error, :run_admission_unavailable}, state}
@@ -423,6 +464,34 @@ defmodule PtcRunner.Kernel.RunAdmission do
     end
   end
 
+  def handle_call({:cancel_external, ref}, _from, state) do
+    case state.reservations[ref] do
+      %{cancelled?: false} -> {:reply, :ok, cancel_reservation(state, ref)}
+      _ -> {:reply, {:error, :run_admission_unavailable}, state}
+    end
+  end
+
+  def handle_call(:quiesce, _from, %{status: :ready} = state),
+    do: {:reply, :ok, %{state | status: :quiesced}}
+
+  def handle_call(:quiesce, _from, state),
+    do: {:reply, {:error, :run_admission_unavailable}, state}
+
+  def handle_call(:shutdown_clean, _from, state),
+    do: {:reply, state.status == :quiesced and in_use(state) == 0, state}
+
+  def handle_call(:cancel_all, _from, state) do
+    state = %{state | status: :unavailable}
+    Enum.each(Map.keys(state.owners), &send(&1, {:run_admission_cancel, self()}))
+
+    state =
+      Enum.reduce(Map.keys(state.reservations), state, fn ref, acc ->
+        cancel_reservation(acc, ref)
+      end)
+
+    {:reply, :ok, state}
+  end
+
   def handle_call(:admit, {owner, _}, state) do
     state = fence_dead_owners(state)
 
@@ -430,7 +499,7 @@ defmodule PtcRunner.Kernel.RunAdmission do
       Map.has_key?(state.owners, owner) or not Process.alive?(owner) ->
         {:reply, {:error, :run_admission_unavailable}, state}
 
-      state.status == :unavailable ->
+      state.status != :ready ->
         {:reply, {:error, :run_admission_unavailable}, state}
 
       in_use(state) >= state.capacity ->
@@ -458,8 +527,14 @@ defmodule PtcRunner.Kernel.RunAdmission do
     else
       next =
         Enum.reduce(state.reservations, state, fn
-          {key, %{monitor: ^ref, caller: ^owner}}, acc -> cancel_reservation(acc, key)
-          _, acc -> acc
+          {key, %{monitor: ^ref, caller: ^owner, publication: :frozen}}, acc ->
+            %{drop_reservation(acc, key) | status: :unavailable}
+
+          {key, %{monitor: ^ref, caller: ^owner}}, acc ->
+            cancel_reservation(acc, key)
+
+          _, acc ->
+            acc
         end)
 
       {:noreply, next}
@@ -509,7 +584,7 @@ defmodule PtcRunner.Kernel.RunAdmission do
   defp refuse_activation(state, ref) do
     reservation = state.reservations[ref]
 
-    if reservation.publication == :pending and state.status == :unavailable and
+    if reservation.publication == :pending and state.status != :ready and
          deadline_live?(reservation.deadline) and Process.alive?(reservation.caller) and
          not reservation.cancelled? do
       put_reservation(state, ref, %{reservation | admission_refused?: true})
@@ -521,6 +596,9 @@ defmodule PtcRunner.Kernel.RunAdmission do
   defp cancel_reservation(state, ref) do
     case state.reservations[ref] do
       nil ->
+        state
+
+      %{publication: :frozen} ->
         state
 
       %{owner: nil, publication: publication} = reservation
@@ -540,6 +618,15 @@ defmodule PtcRunner.Kernel.RunAdmission do
       reservation ->
         send(reservation.owner, {:run_admission_cancel, self()})
         put_reservation(state, ref, %{reservation | cancelled?: true})
+    end
+  end
+
+  defp publication_result(reservation, clean?) do
+    cond do
+      not clean? or reservation.cleanup_uncertain? -> {:error, :call_cleanup_failed}
+      reservation.admission_refused? -> {:error, :call_admission_refused}
+      reservation.cancelled? -> {:error, :call_cancelled}
+      true -> :ok
     end
   end
 
@@ -595,10 +682,17 @@ defmodule PtcRunner.Kernel.RunAdmission do
   defp fence_dead_owners(state) do
     state =
       Enum.reduce(state.reservations, state, fn {ref, reservation}, acc ->
-        if not deadline_live?(reservation.deadline) or
-             (is_nil(reservation.owner) and not Process.alive?(reservation.caller)),
-           do: cancel_reservation(acc, ref),
-           else: acc
+        cond do
+          reservation.publication == :frozen and not Process.alive?(reservation.caller) ->
+            %{drop_reservation(acc, ref) | status: :unavailable}
+
+          not deadline_live?(reservation.deadline) or
+              (is_nil(reservation.owner) and not Process.alive?(reservation.caller)) ->
+            cancel_reservation(acc, ref)
+
+          true ->
+            acc
+        end
       end)
 
     if Enum.any?(state.owners, fn {pid, _} -> not Process.alive?(pid) end),

@@ -375,6 +375,69 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
   end
 
   @tag :tmp_dir
+  test "terminal transformation and publication settle before retained audit", %{tmp_dir: dir} do
+    assert {:ok, template} = build(fixture(dir))
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+    parent = self()
+    {:ok, reservation} = ServingTemplate.reserve(template, %{"answer" => 1}, host)
+
+    outcome =
+      ServingCall.activate(reservation, %{
+        close_outcome: fn success ->
+          assert ServingOutcome.code(success) == :success
+          ServingOutcome.new(:invalid_result, true, :write)
+        end,
+        before_release: fn closed ->
+          assert ServingOutcome.code(closed) == :invalid_result
+          {:error, :publication_failed}
+        end,
+        before_release_audit: fn closed ->
+          assert ServingOutcome.code(closed) == :publication_failed
+          assert :ok = ServingTemplate.cancel_external(reservation)
+          assert {:ok, %{in_use: 1}} = RunAdmission.snapshot(host)
+          send(parent, :audited)
+          :ok
+        end
+      })
+
+    assert_received :audited
+    assert ServingOutcome.code(outcome) == :publication_failed
+    assert {:ok, %{in_use: 0, status: :unavailable}} = RunAdmission.snapshot(host)
+  end
+
+  @tag :tmp_dir
+  test "publication failure cannot replace cancellation or uncertain cleanup", %{tmp_dir: dir} do
+    assert {:ok, template} = build(fixture(dir))
+
+    for {terminal_code, clean?} <- [cancelled: true, cleanup_failed: false] do
+      host = start_supervised!({RunAdmission, max_concurrent_runs: 1}, id: make_ref())
+      {:ok, reservation} = ServingTemplate.reserve(template, %{"answer" => 1}, host)
+
+      outcome =
+        ServingCall.activate(reservation, %{
+          close_outcome: fn outcome ->
+            ServingOutcome.new(
+              terminal_code,
+              ServingOutcome.metadata(outcome).dispatched,
+              :write
+            )
+          end,
+          cleanup: fn authority ->
+            :ok = PublicationAuthority.abort(authority)
+            if clean?, do: :ok, else: {:error, :uncertain}
+          end,
+          before_release: fn _outcome -> {:error, :publication_failed} end,
+          before_release_audit: fn audited ->
+            assert ServingOutcome.code(audited) == terminal_code
+            :ok
+          end
+        })
+
+      assert ServingOutcome.code(outcome) == terminal_code
+    end
+  end
+
+  @tag :tmp_dir
   test "unused and foreign reservations cannot dispatch and release capacity", %{tmp_dir: dir} do
     assert {:ok, template} = build(fixture(dir))
     host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
@@ -711,7 +774,7 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
     {:messages, messages} = Process.info(host, :messages)
 
     {finishes, rest} =
-      Enum.split_with(messages, &match?({:"$gen_call", _, {:finish_publication, _, true}}, &1))
+      Enum.split_with(messages, &match?({:"$gen_call", _, {:freeze_publication, _, true}}, &1))
 
     :sys.replace_state(host, fn state ->
       for _ <- messages do
@@ -739,7 +802,7 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
 
   defp await_finish_message(host, deadline) do
     await_message(host, deadline, fn message ->
-      match?({:"$gen_call", _, {:finish_publication, _, true}}, message)
+      match?({:"$gen_call", _, {:freeze_publication, _, true}}, message)
     end)
   end
 

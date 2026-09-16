@@ -212,7 +212,7 @@ defmodule PtcRunner.MixProject do
       {:usage_rules, "~> 1.2", only: :dev, runtime: false},
       {:recon, "~> 2.5", only: [:dev, :test], runtime: false},
       {:benchee, "~> 1.3", only: [:dev, :test], runtime: false}
-    ] ++ viewer_dep()
+    ] ++ viewer_dep() ++ gateway_dep()
   end
 
   # Keep published and ordinary development builds on Hex while allowing an
@@ -281,6 +281,21 @@ defmodule PtcRunner.MixProject do
     if File.regular?(Path.join(viewer_path, "mix.exs")) and
          (Mix.env() in [:dev, :test] or Enum.any?(System.argv(), &(&1 == "release"))) do
       [{:ptc_viewer, path: "ptc_viewer", runtime: false}]
+    else
+      []
+    end
+  end
+
+  # Like the Viewer, the HTTP gateway is a release companion and must not start
+  # for ordinary ptc_runner commands. Its own project depends on ptc_runner only
+  # in dev/test, avoiding a production dependency cycle while retaining isolated
+  # sibling-project tests.
+  defp gateway_dep do
+    gateway_path = Path.expand("ptc_gateway", __DIR__)
+
+    if File.regular?(Path.join(gateway_path, "mix.exs")) and
+         (Mix.env() in [:dev, :test] or Enum.any?(System.argv(), &(&1 == "release"))) do
+      [{:ptc_gateway, path: "ptc_gateway", runtime: false}]
     else
       []
     end
@@ -373,7 +388,7 @@ defmodule PtcRunner.MixProject do
         # Both are `runtime: false`, so they are named here to travel with the
         # release at all. `:load` keeps them out of the boot start phase; the
         # provider activity boundary and `ptc viewer` start them explicitly.
-        applications: [req_llm: :load, ptc_viewer: :load],
+        applications: [req_llm: :load, ptc_viewer: :load, ptc_gateway: :load],
         overlays: ["rel/overlays"],
         steps: [:assemble, &copy_release_notices/1]
       ]

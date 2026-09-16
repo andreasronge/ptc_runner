@@ -13,6 +13,10 @@ scenarios with `--spec-version 2026-07-28`. It runs these scenarios:
   caller's Origin preserved and Host rewritten to the configured authority.
 - `caching`: `tools/list` checks run. Prompt, resource, and resource-template
   checks are excluded because those feature families are unsupported.
+- `http-header-validation`: all standard method/name header checks run.
+- `http-custom-header-server-validation`: all custom parameter projection,
+  Base64/literal decoding, omission, and mismatch checks run against the
+  annotated fixture tool.
 
 The exact excluded check IDs and reasons are:
 
@@ -27,14 +31,9 @@ The exact excluded check IDs and reasons are:
 | `caching:sep-2549-resources-list-caching-hints` | Resources are outside this tools-only profile. |
 | `caching:sep-2549-resources-templates-list-caching-hints` | Resource templates are outside this tools-only profile. |
 
-`http-header-validation` is deferred in full to #1922:
-the alpha.11 scenario reuses check IDs across `Mcp-Method` and the unsupported
-`tools/call`/`Mcp-Name` cases, so it cannot be partially baselined. This issue's
-raw HTTP tests independently cover method-header presence, mismatch, casing,
-OWS, duplication, and all eight critical-header duplicate cases.
-
-`http-custom-header-server-validation` is deferred to #1922 because it requires
-callable `x-mcp-header` tools. All other frozen server scenarios exercise
+All header-validation checks execute without a baseline. Raw HTTP boundary
+tests additionally cover duplication and the exact aggregate header ceilings.
+All other frozen server scenarios exercise
 unsupported tools/call, prompts, resources, completion, sessions/streams,
 server requests, tasks, or subscriptions and are outside this tools-only
 discovery/list milestone.

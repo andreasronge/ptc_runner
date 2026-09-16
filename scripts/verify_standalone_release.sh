@@ -12,6 +12,8 @@ release_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/ptc-runner-standalone-release.XXXX
 # belongs in the trap rather than beside the assertions, because any `set -e`
 # failure between spawn and stop would otherwise leave it holding a port.
 viewer_pid=""
+gateway_pid=""
+gateway_provider_pid=""
 
 # Never a bare `wait` after signalling: a shutdown regression is exactly what
 # this gate exists to catch, and an unbounded wait would turn it into a CI run
@@ -36,6 +38,20 @@ stop_viewer_process() {
 }
 
 cleanup() {
+  if [ -n "${gateway_cleanup_release:-}" ]; then
+    touch "$gateway_cleanup_release"
+  fi
+  if [ -n "$gateway_pid" ]; then
+    if ! kill -0 "$gateway_pid" 2> /dev/null; then
+      cat "$release_tmp_dir/gateway.stderr" >&2
+    fi
+    kill -TERM "$gateway_pid" 2> /dev/null || true
+    wait "$gateway_pid" 2> /dev/null || true
+  fi
+  if [ -n "$gateway_provider_pid" ]; then
+    kill -TERM "$gateway_provider_pid" 2> /dev/null || true
+    wait "$gateway_provider_pid" 2> /dev/null || true
+  fi
   if [ -n "$viewer_pid" ]; then
     stop_viewer_process || true
     wait "$viewer_pid" 2> /dev/null || true
@@ -522,6 +538,579 @@ if grep -q 'provider_application_unavailable' "$release_tmp_dir/provider.stderr"
   echo 'assembled release did not admit its command-owned optional provider application' >&2
   exit 1
 fi
+
+# Exercise the gateway through the packaged command, rather than through a
+# source-tree Mix task. This verifies the load-only companion boundary, health,
+# an SSE write call, durable private audit, and clean signal-driven shutdown.
+gateway_root="$release_tmp_dir/gateway"
+gateway_app="$gateway_root/application"
+gateway_audit="$gateway_root/audit"
+mkdir -p "$gateway_app"
+
+cat > "$gateway_app/main.clj" <<'EOF'
+(ns gateway.main)
+(defn run {:effect :write} [input] (return input))
+EOF
+
+cat > "$gateway_app/read.clj" <<'EOF'
+(ns gateway.read)
+(defn run {:effect :read} [input] (return input))
+EOF
+
+cat > "$gateway_app/schema.json" <<'EOF'
+{"type":"object","properties":{"query":{"type":"string","x-mcp-header":"Query"}},"required":["query"],"additionalProperties":false}
+EOF
+
+cat > "$gateway_app/ptc.json" <<'EOF'
+{
+  "version": 1,
+  "workflow": {
+    "components": [{"id": "gateway.main", "path": "main.clj"}],
+    "entry": "gateway.main/run"
+  },
+  "input": {"path": "missing.json"},
+  "contracts": {
+    "input_schema": {"path": "schema.json"},
+    "result_schema": {"path": "schema.json"}
+  }
+}
+EOF
+
+
+cat > "$gateway_app/read-ptc.json" <<'EOF'
+{
+  "version": 1,
+  "workflow": {
+    "components": [{"id": "gateway.read", "path": "read.clj"}],
+    "entry": "gateway.read/run"
+  },
+  "input": {"path": "missing.json"},
+  "contracts": {
+    "input_schema": {"path": "schema.json"},
+    "result_schema": {"path": "schema.json"}
+  }
+}
+EOF
+
+cat > "$gateway_app/provider-main.clj" <<'EOF'
+(ns gateway.provider-main "Provider-backed release probe." {:visibility :prompt})
+(defn run {:effect :write} [input]
+  (return (llm/request
+            {"messages" [{"role" "user" "content" (get input "city")}]})))
+EOF
+
+cat > "$gateway_app/provider-schema.json" <<'EOF'
+{"type":"object","properties":{"city":{"type":"string"},"delay_ms":{"type":"integer"}},"required":["city","delay_ms"],"additionalProperties":false}
+EOF
+
+cat > "$gateway_app/provider-result-schema.json" <<'EOF'
+{"type":"object"}
+EOF
+
+cat > "$gateway_app/provider-ptc.json" <<'EOF'
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "gateway.provider-main", "path": "provider-main.clj", "dependencies": ["llm"]},
+      {"library": "llm"}
+    ],
+    "entry": "gateway.provider-main/run"
+  },
+  "input": {"path": "missing.json"},
+  "contracts": {
+    "input_schema": {"path": "provider-schema.json"},
+    "result_schema": {"path": "provider-result-schema.json"}
+  },
+  "providers": {"workflow": [{"name": "model"}]},
+  "limits": {"run_duration_ms": 60000, "workflow_timeout_ms": 60000}
+}
+EOF
+
+gateway_digest="$("$release_root/bin/ptc_runner" eval '
+  [manifest] = System.argv()
+  {:ok, template} =
+    PtcRunner.Kernel.ServingTemplate.from_directory(
+      manifest,
+      PtcRunner.Kernel.Limits.installed_defaults()
+    )
+  IO.write(PtcRunner.Kernel.ServingTemplate.application_content_digest(template))
+' "$gateway_app/ptc.json")"
+
+gateway_read_digest="$("$release_root/bin/ptc_runner" eval '
+  [manifest] = System.argv()
+  {:ok, template} =
+    PtcRunner.Kernel.ServingTemplate.from_directory(
+      manifest,
+      PtcRunner.Kernel.Limits.installed_defaults()
+    )
+  IO.write(PtcRunner.Kernel.ServingTemplate.application_content_digest(template))
+' "$gateway_app/read-ptc.json")"
+
+gateway_port="$(python3 - <<'PYTHON'
+import socket
+with socket.socket() as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PYTHON
+)"
+
+gateway_provider_port="$(python3 - <<'PYTHON'
+import socket
+with socket.socket() as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PYTHON
+)"
+gateway_provider_dispatches="$release_tmp_dir/provider-dispatches"
+gateway_cleanup_started="$release_tmp_dir/cleanup-started"
+gateway_cleanup_release="$release_tmp_dir/cleanup-release"
+cat > "$release_tmp_dir/mcp-provider.py" <<'PYTHON'
+import json
+import sys
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, _format, *_args):
+        pass
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers["content-length"]))
+        with open(sys.argv[2], "a", encoding="utf-8") as dispatches:
+            dispatches.write("dispatch\n")
+            dispatches.flush()
+        time.sleep(30)
+        response = json.dumps({"error": "probe should have been cancelled"}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        try:
+            self.wfile.write(response)
+        except BrokenPipeError:
+            pass
+
+server = ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), Handler)
+with open(sys.argv[3], "w", encoding="utf-8"):
+    pass
+server.serve_forever()
+PYTHON
+python3 "$release_tmp_dir/mcp-provider.py" "$gateway_provider_port" \
+  "$gateway_provider_dispatches" "$release_tmp_dir/provider-ready" \
+  > "$release_tmp_dir/provider.stdout" 2> "$release_tmp_dir/provider.stderr" &
+gateway_provider_pid=$!
+provider_ready_deadline=$((SECONDS + 10))
+while [ ! -e "$release_tmp_dir/provider-ready" ] && [ "$SECONDS" -lt "$provider_ready_deadline" ]; do
+  kill -0 "$gateway_provider_pid" 2> /dev/null || break
+  sleep 0.05
+done
+test -e "$release_tmp_dir/provider-ready"
+
+cat > "$gateway_root/host.json" <<EOF
+{
+  "credentials": {
+    "gateway": {"env": "GATEWAY_RELEASE_TOKEN"},
+    "provider": {"env": "GATEWAY_PROVIDER_TOKEN"}
+  },
+  "install": {
+    "model": {
+      "source": "llm",
+      "installation_revision": "release-provider-v1",
+      "model": "openai-compat:http://127.0.0.1:$gateway_provider_port/v1|release-provider",
+      "credential": "provider",
+      "structured_output_mode": "unsupported",
+      "usage_guarantees": {"tokens": false, "cost_currency": null},
+      "params": {"max_tokens": 64}
+    }
+  }
+}
+EOF
+
+cat > "$gateway_root/credentials.env" <<'EOF'
+GATEWAY_RELEASE_TOKEN=release-gateway-token-0123456789abcdef
+GATEWAY_PROVIDER_TOKEN=release-provider-token
+EOF
+
+
+gateway_provider_digest="$("$release_root/bin/ptc_runner" eval '
+  [manifest, host_path] = System.argv()
+  {:ok, host} = PtcRunner.Kernel.HostConfig.load(host_path)
+  {:ok, catalog} = PtcRunner.Kernel.HostInstallation.catalog(host)
+  {:ok, template} =
+    PtcRunner.Kernel.ServingTemplate.from_directory(
+      manifest,
+      host.limits,
+      providers: catalog
+    )
+  IO.write(PtcRunner.Kernel.ServingTemplate.application_content_digest(template))
+' "$gateway_app/provider-ptc.json" "$gateway_root/host.json")"
+
+mix run -e '
+  [manifest, host, env_file, output] = System.argv()
+  {:ok, io} = File.open(output, [:write])
+  Process.group_leader(self(), io)
+  Mix.Tasks.Ptc.ProviderPins.run([manifest, "--host", host, "--env-file", env_file])
+  File.close(io)
+' -- "$gateway_app/provider-ptc.json" "$gateway_root/host.json" \
+  "$gateway_root/credentials.env" "$release_tmp_dir/provider-pins.json"
+gateway_installation_pins="$(python3 -c \
+  'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["installation_config_pins"],separators=(",",":")))' \
+  "$release_tmp_dir/provider-pins.json")"
+gateway_snapshot_pins="$(python3 -c \
+  'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["provider_snapshot_pins"],separators=(",",":")))' \
+  "$release_tmp_dir/provider-pins.json")"
+
+cat > "$gateway_root/gateway.json" <<EOF
+{
+  "version": 1,
+  "listen": {"address": "127.0.0.1", "port": $gateway_port, "path": "/mcp"},
+  "authentication": {"bearer": {"binding": "gateway"}},
+  "host": {"path": "host.json"},
+  "admission": {
+    "max_inflight_requests": 2,
+    "max_concurrent_runs": 1,
+    "max_active_provider_calls": 1,
+    "max_waiting_provider_calls": 0
+  },
+  "private_audit": {
+    "directory": "audit",
+    "max_file_bytes": 4096,
+    "max_retained_files": 2
+  },
+  "tools": [{
+    "name": "a",
+    "title": "Read",
+    "description": "Packaged read probe",
+    "application": {"manifest": "application/read-ptc.json"},
+    "expected_application_content_digest": "$gateway_read_digest",
+    "installation_config_pins": {},
+    "provider_snapshot_pins": {},
+    "allow_write": false
+  }, {
+    "name": "write",
+    "title": "Write",
+    "description": "Packaged write probe",
+    "application": {"manifest": "application/ptc.json"},
+    "expected_application_content_digest": "$gateway_digest",
+    "installation_config_pins": {},
+    "provider_snapshot_pins": {},
+    "allow_write": true
+  }, {
+    "name": "provider-write",
+    "title": "Provider write",
+    "description": "Packaged provider cancellation probe",
+    "application": {"manifest": "application/provider-ptc.json"},
+    "expected_application_content_digest": "$gateway_provider_digest",
+    "installation_config_pins": $gateway_installation_pins,
+    "provider_snapshot_pins": $gateway_snapshot_pins,
+    "allow_write": true
+  }]
+}
+EOF
+
+gateway_release_name="ptc_gateway_probe_$$"
+gateway_release_node="$gateway_release_name@127.0.0.1"
+gateway_release_cookie="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+export PTC_GATEWAY_PROBE_DISPATCHES="$gateway_provider_dispatches"
+export PTC_GATEWAY_PROBE_CLEANUP_STARTED="$gateway_cleanup_started"
+export PTC_GATEWAY_PROBE_CLEANUP_RELEASE="$gateway_cleanup_release"
+ERL_AFLAGS="-name $gateway_release_node -setcookie $gateway_release_cookie -kernel inet_dist_use_interface '{127,0,0,1}'" \
+  "$command_bin" gateway "$gateway_root/gateway.json" \
+  --env-file "$gateway_root/credentials.env" \
+  > "$release_tmp_dir/gateway.stdout" \
+  2> "$release_tmp_dir/gateway.stderr" &
+gateway_pid=$!
+
+python3 - "$gateway_port" <<'PYTHON'
+import http.client
+import json
+import sys
+import time
+
+port = int(sys.argv[1])
+deadline = time.monotonic() + 30
+while True:
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+        conn.request("GET", "/health/ready", headers={"Host": f"127.0.0.1:{port}"})
+        response = conn.getresponse()
+        if response.status == 200:
+            response.read()
+            break
+        response.read()
+    except OSError:
+        pass
+    if time.monotonic() >= deadline:
+        raise SystemExit("packaged gateway never became ready")
+    time.sleep(0.1)
+
+body = json.dumps({
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {
+        "_meta": {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientCapabilities": {},
+        },
+        "name": "write",
+        "arguments": {"query": "write"},
+    },
+}, separators=(",", ":"))
+conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+conn.request("POST", "/mcp", body=body, headers={
+    "Host": f"127.0.0.1:{port}",
+    "Authorization": "Bearer release-gateway-token-0123456789abcdef",
+    "Content-Type": "application/json",
+    "Accept": "application/json, text/event-stream",
+    "MCP-Protocol-Version": "2026-07-28",
+    "Mcp-Method": "tools/call",
+    "Mcp-Name": "write",
+    "Mcp-Param-Query": "write",
+})
+response = conn.getresponse()
+payload = response.read().decode()
+if response.status != 200 or '"isError":false' not in payload:
+    raise SystemExit(f"packaged gateway write failed: {response.status} {payload}")
+PYTHON
+
+# The pinned real MCP client must exercise the assembled release, not only the
+# source test server. It covers discover, list, read, write, and contract error
+# through the SDK's negotiated 2026-07-28 transport.
+npm --prefix "$project_root/ptc_gateway/test/support/mcp_conformance" \
+  ci --ignore-scripts --silent
+
+# Suspend the surviving audit owner after upstream dispatch. This creates a
+# deterministic post-disconnect cleanup barrier inside the assembled release:
+# the request worker can cancel, but its durable audit and run reservation
+# cannot finish until the SDK probe has observed overload and releases it.
+cat > "$release_tmp_dir/hold-audit.exs" <<'ELIXIR'
+spawn(fn ->
+  dispatches = System.fetch_env!("PTC_GATEWAY_PROBE_DISPATCHES")
+  started = System.fetch_env!("PTC_GATEWAY_PROBE_CLEANUP_STARTED")
+  release = System.fetch_env!("PTC_GATEWAY_PROBE_CLEANUP_RELEASE")
+  wait = fn wait, ready -> if ready.(), do: :ok, else: (Process.sleep(25); wait.(wait, ready)) end
+  wait.(wait, fn ->
+    case File.read(dispatches) do
+      {:ok, bytes} -> bytes != ""
+      _ -> false
+    end
+  end)
+  audit = Enum.find(Process.list(), fn pid ->
+    try do
+      :proc_lib.translate_initial_call(pid) == {PtcGateway.PrivateAudit, :init, 1}
+    catch
+      :exit, _ -> false
+    end
+  end)
+  true = is_pid(audit)
+  :ok = :sys.suspend(audit)
+  wait.(wait, fn ->
+    case Process.info(audit, :messages) do
+      {:messages, messages} ->
+        Enum.any?(messages, fn
+          {:'$gen_call', _from, {:append, %{"disconnected" => true}}} -> true
+          _ -> false
+        end)
+
+      _ ->
+        false
+    end
+  end)
+  :ok = File.write(started, "held\n")
+  wait.(wait, fn -> File.exists?(release) end)
+  :ok = :sys.resume(audit)
+end)
+ELIXIR
+ERL_AFLAGS="-name ptc_gateway_control_$$@127.0.0.1 -setcookie $gateway_release_cookie -kernel inet_dist_use_interface '{127,0,0,1}'" \
+  "$release_root/bin/ptc_runner" eval '
+    [node_name, path] = System.argv()
+    node = String.to_atom(node_name)
+    true = Node.connect(node)
+    {_result, _binding} = :erpc.call(node, Code, :eval_file, [path])
+  ' "$gateway_release_node" "$release_tmp_dir/hold-audit.exs"
+node "$project_root/ptc_gateway/test/support/mcp_conformance/client_journey.mjs" \
+  "http://127.0.0.1:$gateway_port/mcp" \
+  release-gateway-token-0123456789abcdef provider-write \
+  "$gateway_provider_dispatches" "$gateway_cleanup_started" "$gateway_cleanup_release" \
+  > "$release_tmp_dir/gateway-client.json"
+python3 - "$release_tmp_dir/gateway-client.json" <<'PYTHON'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    journey = json.load(stream)
+
+if journey["read"].get("isError") or journey["write"].get("isError"):
+    raise SystemExit("packaged MCP client read/write journey failed")
+if not journey["contractFailure"].get("isError"):
+    raise SystemExit("packaged MCP client contract failure was not a tool error")
+if journey["disconnectCancellation"] is not True:
+    raise SystemExit("pinned MCP client disconnect did not cancel its active call")
+PYTHON
+
+client_audit_deadline=$((SECONDS + 15))
+while [ "$(grep -h '"tool_name":"provider-write"' "$gateway_audit"/*.jsonl 2>/dev/null | wc -l)" -lt 1 ] \
+  && [ "$SECONDS" -lt "$client_audit_deadline" ]; do
+  sleep 0.1
+done
+test "$(grep -h '"tool_name":"provider-write"' "$gateway_audit"/*.jsonl | wc -l)" -eq 1
+test "$(wc -l < "$gateway_provider_dispatches")" -eq 1
+
+# Hold a real upstream MCP provider call in the assembled release, prove the
+# atomic run slot remains occupied, then disconnect the client and wait for the
+# durable write audit before continuing.
+python3 - "$gateway_port" "$gateway_audit" "$gateway_provider_dispatches" <<'PYTHON'
+import glob
+import http.client
+import json
+import socket
+import sys
+import time
+
+port = int(sys.argv[1])
+audit_dir = sys.argv[2]
+dispatch_path = sys.argv[3]
+body = json.dumps({
+    "jsonrpc": "2.0", "id": 91, "method": "tools/call",
+    "params": {
+        "_meta": {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientCapabilities": {},
+        },
+        "name": "provider-write",
+        "arguments": {"city": "nyc", "delay_ms": 30000},
+    },
+}, separators=(",", ":")).encode()
+request = (
+    f"POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
+    "Authorization: Bearer release-gateway-token-0123456789abcdef\r\n"
+    "Content-Type: application/json\r\nAccept: application/json, text/event-stream\r\n"
+    "MCP-Protocol-Version: 2026-07-28\r\nMcp-Method: tools/call\r\n"
+    "Mcp-Name: provider-write\r\n"
+    f"Content-Length: {len(body)}\r\n\r\n"
+).encode() + body
+
+client = socket.create_connection(("127.0.0.1", port), timeout=5)
+client.sendall(request)
+accepted = b""
+while b": accepted" not in accepted and len(accepted) < 16384:
+    accepted += client.recv(4096)
+if b"HTTP/1.1 200" not in accepted or b": accepted" not in accepted:
+    raise SystemExit(f"provider call was not committed before dispatch: {accepted!r}")
+
+deadline = time.monotonic() + 10
+while time.monotonic() < deadline:
+    with open(dispatch_path, encoding="utf-8") as stream:
+        if sum(1 for _ in stream) >= 2:
+            break
+    time.sleep(0.05)
+else:
+    raise SystemExit("packaged provider call never reached upstream dispatch")
+
+busy = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+busy.request("POST", "/mcp", body=body, headers={
+    "Host": f"127.0.0.1:{port}",
+    "Authorization": "Bearer release-gateway-token-0123456789abcdef",
+    "Content-Type": "application/json",
+    "Accept": "application/json, text/event-stream",
+    "MCP-Protocol-Version": "2026-07-28",
+    "Mcp-Method": "tools/call",
+    "Mcp-Name": "provider-write",
+})
+response = busy.getresponse()
+response.read()
+if response.status != 429:
+    raise SystemExit(f"provider call released admission early: {response.status}")
+client.close()
+
+deadline = time.monotonic() + 15
+while time.monotonic() < deadline:
+    records = []
+    for path in glob.glob(audit_dir + "/*.jsonl"):
+        with open(path, encoding="utf-8") as stream:
+            records.extend(json.loads(line) for line in stream if line.strip())
+    disconnected = [r for r in records if r["tool_name"] == "provider-write" and r["disconnected"]]
+    if len(disconnected) >= 2:
+        break
+    time.sleep(0.1)
+else:
+    raise SystemExit("disconnected packaged provider write was not audited")
+PYTHON
+
+grep -q '"tool_name":"write"' "$gateway_audit"/*.jsonl
+
+# Start another held provider call, then terminate the packaged gateway while
+# it is active. The gateway must drain, cancel, audit, clean provider/admission
+# owners, and preserve the resulting clean exit status.
+shutdown_audit_before="$(grep -h '"tool_name":"provider-write"' "$gateway_audit"/*.jsonl | wc -l)"
+shutdown_dispatch_before="$(wc -l < "$gateway_provider_dispatches")"
+python3 - "$gateway_port" <<'PYTHON' &
+import json
+import socket
+import sys
+
+port = int(sys.argv[1])
+body = json.dumps({
+    "jsonrpc": "2.0", "id": 92, "method": "tools/call",
+    "params": {
+        "_meta": {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientCapabilities": {},
+        },
+        "name": "provider-write",
+        "arguments": {"city": "nyc", "delay_ms": 30000},
+    },
+}, separators=(",", ":")).encode()
+request = (
+    f"POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
+    "Authorization: Bearer release-gateway-token-0123456789abcdef\r\n"
+    "Content-Type: application/json\r\nAccept: application/json, text/event-stream\r\n"
+    "MCP-Protocol-Version: 2026-07-28\r\nMcp-Method: tools/call\r\n"
+    "Mcp-Name: provider-write\r\n"
+    f"Content-Length: {len(body)}\r\n\r\n"
+).encode() + body
+client = socket.create_connection(("127.0.0.1", port), timeout=5)
+client.sendall(request)
+accepted = b""
+while b": accepted" not in accepted and len(accepted) < 16384:
+    accepted += client.recv(4096)
+if b": accepted" not in accepted:
+    raise SystemExit("shutdown provider call was not active")
+client.settimeout(None)
+while client.recv(4096):
+    pass
+PYTHON
+shutdown_client_pid=$!
+shutdown_deadline=$((SECONDS + 15))
+while [ "$(wc -l < "$gateway_provider_dispatches")" -le "$shutdown_dispatch_before" ] \
+  && [ "$SECONDS" -lt "$shutdown_deadline" ]; do
+  kill -0 "$shutdown_client_pid" 2> /dev/null || break
+  sleep 0.1
+done
+test "$(wc -l < "$gateway_provider_dispatches")" -gt "$shutdown_dispatch_before"
+shutdown_started=$SECONDS
+kill -TERM "$gateway_pid"
+set +e
+wait "$gateway_pid"
+gateway_status=$?
+wait "$shutdown_client_pid"
+shutdown_client_status=$?
+set -e
+gateway_pid=""
+if [ "$gateway_status" -ne 0 ]; then
+  echo "packaged gateway exited with status $gateway_status" >&2
+  cat "$release_tmp_dir/gateway.stderr" >&2
+  exit 1
+fi
+test "$shutdown_client_status" -eq 0
+test $((SECONDS - shutdown_started)) -ge 9
+test "$(grep -h '"tool_name":"provider-write"' "$gateway_audit"/*.jsonl | wc -l)" \
+  -eq $((shutdown_audit_before + 1))
+test ! -s "$release_tmp_dir/gateway.stdout"
 
 # The Viewer ships inside the release, so the gate proves the packaged command
 # actually serves rather than only that its application directory is present.

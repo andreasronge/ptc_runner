@@ -131,6 +131,9 @@ defmodule PtcRunner.Kernel.WarmProviderRuntime do
   def drain(owner, deadline),
     do: call(owner, {:drain, deadline}, {:error, :provider_cleanup_failed}, :infinity)
 
+  @doc false
+  def begin_drain(owner), do: call(owner, :begin_drain, {:error, :provider_cleanup_failed})
+
   @impl true
   def init(opts) do
     Process.flag(:trap_exit, true)
@@ -370,6 +373,14 @@ defmodule PtcRunner.Kernel.WarmProviderRuntime do
   def handle_call({:authenticate, token}, _, state),
     do: {:reply, CapturedCredentials.authenticate(state.credentials, token), state}
 
+  def handle_call(:begin_drain, _from, state) do
+    results = Enum.map(state.runtimes, fn {_, runtime} -> ProviderRuntime.quiesce(runtime) end)
+    clean = Enum.all?(results, &(&1 == :ok))
+
+    {:reply, if(clean, do: :ok, else: {:error, :provider_cleanup_failed}),
+     %{state | draining: true, fenced: state.fenced or not clean}}
+  end
+
   def handle_call({:drain, deadline}, _, state) when is_integer(deadline) do
     Enum.each(state.runtimes, fn {_, runtime} -> ProviderRuntime.quiesce(runtime) end)
 
@@ -382,7 +393,7 @@ defmodule PtcRunner.Kernel.WarmProviderRuntime do
     clean =
       Enum.all?(results, &(&1 == :ok)) and
         match?({:ok, %{active: 0, waiting: 0, status: :ready}}, provider) and
-        match?({:ok, %{in_use: 0, status: :ready}}, runs)
+        match?({:ok, %{in_use: 0}}, runs)
 
     clean = clean and stop_applications(state.applications)
 
