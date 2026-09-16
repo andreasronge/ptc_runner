@@ -64,6 +64,12 @@ payload against it returns a contract error inside an HTTP 200, and a test that
 only checks the status will not notice. Declare the properties through
 `GatewayFixture.fixture/3`'s `:schema` option.
 
+A write deployment cannot put its audit directory under the system temporary
+directory on macOS: the private audit refuses a symbolic link anywhere in the
+hierarchy and `$TMPDIR` reaches the user's folder through `/var`, which is one
+(#1985). The benchmark uses a project-local scratch directory; the gate uses
+ExUnit's `:tmp_dir`, which is already project-local.
+
 The default workflow returns its input unchanged, in microseconds. That is too
 fast to observe concurrently, which is what made the client-side reading
 useless. `:body` replaces it with something slow enough to overlap.

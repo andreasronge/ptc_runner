@@ -43,7 +43,7 @@ payload = %{"note" => String.duplicate("payload", 64)}
 
 # Project-local rather than the system temporary directory: the private audit
 # rejects a symbolic link anywhere in its hierarchy, and on macOS `$TMPDIR`
-# reaches the user's folder through `/var`, which is one.
+# reaches the user's folder through `/var`, which is one (#1985).
 scratch = Path.join(File.cwd!(), "tmp/gateway-bench")
 File.mkdir_p!(scratch)
 dir = Path.join(scratch, "read-#{System.unique_integer([:positive])}")
