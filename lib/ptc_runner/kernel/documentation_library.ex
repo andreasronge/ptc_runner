@@ -44,6 +44,7 @@ defmodule PtcRunner.Kernel.DocumentationLibrary do
     {"host-configuration", "docs/guides/host-configuration.md"},
     {"project-configuration", "docs/guides/project-configuration.md"},
     {"connecting-tools-with-mcp", "docs/guides/connecting-tools-with-mcp.md"},
+    {"serving-a-workflow-over-mcp", "docs/guides/serving-a-workflow-over-mcp.md"},
     {"running-and-debugging", "docs/guides/running-and-debugging.md"},
     {"self-improvement", "docs/guides/self-improvement.md"},
     {"evaluating-with-replay", "docs/guides/evaluating-with-replay.md"},
@@ -63,6 +64,7 @@ defmodule PtcRunner.Kernel.DocumentationLibrary do
     {"examples", "docs/reference/examples.md"},
     {"host", "docs/reference/host-installation.md"},
     {"mcp", "docs/reference/mcp.md"},
+    {"gateway", "docs/reference/gateway.md"},
     {"limits", "docs/kernel-limits-reference.md"},
     {"viewer", "docs/reference/viewer.md"},
     {"repl", "docs/reference/repl.md"},
@@ -75,6 +77,7 @@ defmodule PtcRunner.Kernel.DocumentationLibrary do
     {"schema-manifest", "priv/schemas/ptc-application-manifest.schema.json"},
     {"schema-project", "priv/schemas/ptc-project-config.schema.json"},
     {"schema-host", "priv/schemas/ptc-host-config.schema.json"},
+    {"schema-gateway", "priv/schemas/ptc-gateway-config.schema.json"},
     {"schema-mcp", "site/schemas/mcp-2026-07-28.schema.json"},
     {"schema-envelope", "priv/schemas/ptc-command-envelope-v4.schema.json"}
   ]

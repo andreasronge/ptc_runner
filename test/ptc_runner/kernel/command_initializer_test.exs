@@ -416,10 +416,12 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
 
     assert_received {:replaced_after, swapped}
 
-    # Nothing was written after the swap: the very next open is refused, rather
-    # than following the symlink and materializing the rest of the tree outside
-    # the staging directory.
-    assert List.last(drain_written()) == swapped
+    # Only the child that triggered the swap was written through that directory:
+    # the next open under it is refused, rather than following the symlink and
+    # materializing the rest of the tree outside the staging directory. The
+    # embedded tree is written in map order, so a sibling elsewhere may still
+    # follow it.
+    assert Enum.filter(drain_written(), &String.starts_with?(&1, "01-orders/")) == [swapped]
     refute File.exists?(target)
     assert File.ls!(escape) == []
   end

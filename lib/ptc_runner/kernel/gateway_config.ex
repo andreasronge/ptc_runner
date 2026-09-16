@@ -189,6 +189,7 @@ defmodule PtcRunner.Kernel.GatewayConfig do
     |> Map.merge(%{
       "$schema" => "https://json-schema.org/draft/2020-12/schema",
       "$id" => "https://ptc-runner.dev/schemas/ptc-gateway-config.schema.json",
+      "title" => "PtcRunner gateway configuration",
       "description" =>
         "Strict UTF-8 JSON, at most 1000000 bytes; duplicate object keys forbidden. String maxima are also byte maxima. Semantic rules are in the gateway reference."
     })

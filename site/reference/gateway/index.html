@@ -45,6 +45,7 @@
 <ul>
 <li><a href="/guides/using-models/">Use a model</a></li>
 <li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/serving-a-workflow-over-mcp/">Serve a workflow over MCP</a></li>
 <li><a href="/guides/building-agents/">Customize an agent</a></li>
 <li><a href="/guides/components-and-preludes/">Inspect and customize components</a></li>
 </ul>
@@ -100,7 +101,8 @@
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="gateway-configuration">Gateway configuration</h1><p>The loopback gateway exposes health checks and an authenticated MCP tool server.</p><p>Run the source command from <code class="inline">ptc_gateway/</code>:</p><pre><code class="sh language-sh">mix ptc.gateway /absolute/path/ptc-gateway.json --env-file /absolute/path/credentials.env</code></pre><p>The assembled standalone release provides the equivalent command:</p><pre><code class="sh language-sh">ptc gateway /absolute/path/ptc-gateway.json --env-file /absolute/path/credentials.env</code></pre><p>Remote clients need an authenticated tunnel to loopback. Native TLS, proxy
+<h1 id="gateway-configuration">Gateway configuration</h1><p>The loopback gateway exposes health checks and an authenticated MCP tool server.</p><p>Start it with the installed executable:</p><pre><code class="sh language-sh">ptc gateway /absolute/path/ptc-gateway.json --env-file /absolute/path/credentials.env</code></pre><p>A source checkout runs the equivalent <code class="inline">mix ptc.gateway</code> command from
+<code class="inline">ptc_gateway/</code>.</p><p>Remote clients need an authenticated tunnel to loopback. Native TLS, proxy
 trust, direct private-network binding, and container port publishing are not
 supported. Changing configuration, credentials, templates, or pins requires a
 whole-domain restart.</p><h2 id="version-1-contract">Version 1 contract</h2><p><code class="inline">priv/schemas/ptc-gateway-config.schema.json</code> is generated from
@@ -110,16 +112,12 @@ There is no implicit configuration search or implicit environment-file search.</
 command. It never runs the workflow and prints no credential or volatile
 provider content:</p><pre><code class="sh language-sh">mix ptc.provider_pins /absolute/path/app.json --host /absolute/path/host.json --env-file /absolute/path/credentials.env</code></pre><p>An application without providers prints exactly:</p><pre><code class="json language-json">{&quot;installation_config_pins&quot;:{},&quot;provider_snapshot_pins&quot;:{}}</code></pre><p>Provider-bearing output uses the same keys and <code class="inline">sha256:&lt;64 lowercase hex&gt;</code>
 values. Copy both complete maps into that tool's configuration. Obtain the
-application content pin from the root source project without running the
-workflow or resolving credentials:</p><pre><code class="sh language-sh">mix run -e '
-with {:ok, host} &lt;- PtcRunner.Kernel.HostConfig.load(&quot;/absolute/path/host.json&quot;),
-     {:ok, package, _} &lt;- PtcRunner.Kernel.ApplicationPackage.acquire_directory(
-       &quot;/absolute/path/app.json&quot;, installed_limits: host.limits, omit_input: true) do
-  IO.puts(&quot;sha256:&quot; &lt;&gt; package.application_content_digest)
-else
-  _ -&gt; IO.puts(:stderr, &quot;Application pin unavailable&quot;); System.halt(78)
-end'</code></pre><p>The command prints one line, <code class="inline">sha256:&lt;64 lowercase hex&gt;</code>. Copy it into
-<code class="inline">expected_application_content_digest</code>.</p><h2 id="private-audit-directory">Private audit directory</h2><p>Startup rejects symbolic links anywhere in the audit hierarchy and unsafe
+application content pin without running the workflow or resolving credentials:</p><pre><code class="sh language-sh">ptc validate /absolute/path/app.json --host-config /absolute/path/host.json</code></pre><p>The command prints one JSON object whose <code class="inline">application_content_digest</code> is that
+manifest's <code class="inline">sha256:&lt;64 lowercase hex&gt;</code> pin. Copy it into
+<code class="inline">expected_application_content_digest</code>. The value covers the application bytes
+alone, so it is stable across runtime versions, unlike the
+<code class="inline">effective_application_digest</code> printed beside it. Omit <code class="inline">--host-config</code> when the
+manifest selects no provider.</p><h2 id="private-audit-directory">Private audit directory</h2><p>Startup rejects symbolic links anywhere in the audit hierarchy and unsafe
 ownership or writable ancestry. It creates missing directories as 0700 and
 files as 0600 before writing any content. The private directory is exclusively
 locked for the owner's lifetime. After an unclean owner death, the retained

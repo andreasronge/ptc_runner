@@ -1,6 +1,8 @@
 (ns tutorial.orders "Deterministic order aggregation." {:visibility :prompt})
 
-(defn summarize [input]
+(defn summarize
+  {:signature "(input :map) -> :map" :effect :read}
+  [input]
   (let [orders (get input "orders")
         paid (filter #(= "paid" (get % "status")) orders)]
     (return

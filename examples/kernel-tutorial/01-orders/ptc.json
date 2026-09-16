@@ -7,5 +7,9 @@
     ],
     "entry": "tutorial.orders/summarize"
   },
-  "input": {"path": "orders.json"}
+  "input": {"path": "orders.json"},
+  "contracts": {
+    "input_schema": {"path": "input.schema.json"},
+    "result_schema": {"path": "result.schema.json"}
+  }
 }

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "order_count": {"type": "integer"},
+    "paid_count": {"type": "integer"},
+    "paid_total": {"type": "number"},
+    "pending_ids": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": ["order_count", "paid_count", "paid_total", "pending_ids"]
+}

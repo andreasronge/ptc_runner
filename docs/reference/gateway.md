@@ -2,17 +2,14 @@
 
 The loopback gateway exposes health checks and an authenticated MCP tool server.
 
-Run the source command from `ptc_gateway/`:
-
-```sh
-mix ptc.gateway /absolute/path/ptc-gateway.json --env-file /absolute/path/credentials.env
-```
-
-The assembled standalone release provides the equivalent command:
+Start it with the installed executable:
 
 ```sh
 ptc gateway /absolute/path/ptc-gateway.json --env-file /absolute/path/credentials.env
 ```
+
+A source checkout runs the equivalent `mix ptc.gateway` command from
+`ptc_gateway/`.
 
 Remote clients need an authenticated tunnel to loopback. Native TLS, proxy
 trust, direct private-network binding, and container port publishing are not
@@ -65,22 +62,18 @@ An application without providers prints exactly:
 
 Provider-bearing output uses the same keys and `sha256:<64 lowercase hex>`
 values. Copy both complete maps into that tool's configuration. Obtain the
-application content pin from the root source project without running the
-workflow or resolving credentials:
+application content pin without running the workflow or resolving credentials:
 
 ```sh
-mix run -e '
-with {:ok, host} <- PtcRunner.Kernel.HostConfig.load("/absolute/path/host.json"),
-     {:ok, package, _} <- PtcRunner.Kernel.ApplicationPackage.acquire_directory(
-       "/absolute/path/app.json", installed_limits: host.limits, omit_input: true) do
-  IO.puts("sha256:" <> package.application_content_digest)
-else
-  _ -> IO.puts(:stderr, "Application pin unavailable"); System.halt(78)
-end'
+ptc validate /absolute/path/app.json --host-config /absolute/path/host.json
 ```
 
-The command prints one line, `sha256:<64 lowercase hex>`. Copy it into
-`expected_application_content_digest`.
+The command prints one JSON object whose `application_content_digest` is that
+manifest's `sha256:<64 lowercase hex>` pin. Copy it into
+`expected_application_content_digest`. The value covers the application bytes
+alone, so it is stable across runtime versions, unlike the
+`effective_application_digest` printed beside it. Omit `--host-config` when the
+manifest selects no provider.
 
 ## Private audit directory
 

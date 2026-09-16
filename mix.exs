@@ -553,6 +553,7 @@ defmodule PtcRunner.MixProject do
           "docs/guides/host-configuration.md",
           "docs/guides/using-models.md",
           "docs/guides/connecting-tools-with-mcp.md",
+          "docs/guides/serving-a-workflow-over-mcp.md",
           "docs/guides/building-agents.md",
           "docs/guides/components-and-preludes.md",
           "docs/guides/designing-agent-workflows.md",
@@ -604,6 +605,7 @@ defmodule PtcRunner.MixProject do
         Build: [
           "docs/guides/using-models.md",
           "docs/guides/connecting-tools-with-mcp.md",
+          "docs/guides/serving-a-workflow-over-mcp.md",
           "docs/guides/building-agents.md",
           "docs/guides/components-and-preludes.md"
         ],
