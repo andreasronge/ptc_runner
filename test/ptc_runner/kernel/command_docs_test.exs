@@ -34,6 +34,14 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     end
   end
 
+  test "schema-envelope renders the compact published schema verbatim" do
+    assert {:ok, outcome} = CommandEngine.dispatch(["docs", "schema-envelope"])
+    assert {:stdout, rendered} = CommandRenderer.render(outcome)
+    assert rendered == page_content("schema-envelope")
+    assert byte_size(rendered) <= 130_000
+    assert Jason.decode!(rendered) == CommandContract.published_schema()
+  end
+
   test "search groups matches by ranked page and renders routable lines" do
     assert {:ok, %CommandOutcome{envelope: envelope} = outcome} =
              CommandEngine.dispatch(["docs", "--search", "result_schema"])
@@ -357,7 +365,8 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
   end
 
   test "docs outcomes satisfy the published envelope schema" do
-    assert {:ok, root} = CommandContract.envelope_schema_root()
+    assert {:ok, root} =
+             JSV.build(CommandContract.published_schema(), atoms: false, warnings: :silent)
 
     for argv <- [
           ["docs"],
@@ -413,7 +422,7 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
   end
 
   test "the envelope schema pins no documentation content" do
-    encoded = CommandContract.schema() |> Jason.encode!()
+    encoded = CommandContract.published_schema() |> Jason.encode!()
 
     # Titles, sizes, and bodies are derived from the shipped documents. Pinning
     # any of them here would make every documentation edit rebuild this

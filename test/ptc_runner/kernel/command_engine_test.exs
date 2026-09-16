@@ -4573,6 +4573,70 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     end
   end
 
+  test "published envelopes accept every catalog row, source kind, and subject variant" do
+    assert {:ok, internal_root} = CommandContract.envelope_schema_root()
+
+    assert {:ok, published_root} =
+             JSV.build(CommandContract.published_schema(), atoms: false, warnings: :silent)
+
+    template =
+      CommandOutcome.error(
+        :run,
+        CommandRunRef.encode(@zero_entropy),
+        CommandDiagnostic.new!(:arguments, :invalid_arguments)
+      ).envelope
+
+    for row <- DiagnosticCatalog.rows() do
+      envelope_template = published_envelope_template(template, row)
+
+      for kind <- [nil | DiagnosticCatalog.source_kinds(row.phase, row.code)],
+          subject <- published_subjects(row) do
+        rendered =
+          row
+          |> diagnostic_for_row()
+          |> CommandDiagnostic.to_map()
+          |> Map.put("source", published_source(kind))
+          |> Map.put("subject", subject)
+
+        envelope = %{envelope_template | "error" => rendered}
+        assert {:ok, _validated} = JSV.validate(envelope, internal_root, cast: false)
+        assert {:ok, _validated} = JSV.validate(envelope, published_root, cast: false)
+      end
+    end
+  end
+
+  test "published diagnostics remain closed and catalog-bounded" do
+    published = CommandContract.published_schema()
+
+    assert {:ok, root} =
+             JSV.build(
+               %{
+                 "$schema" => published["$schema"],
+                 "$defs" => published["$defs"],
+                 "$ref" => "#/$defs/diagnostic"
+               },
+               atoms: false,
+               warnings: :silent
+             )
+
+    valid =
+      DiagnosticCatalog.rows()
+      |> hd()
+      |> diagnostic_for_row()
+      |> CommandDiagnostic.to_map()
+
+    mutations = [
+      Map.put(valid, "code", "unknown"),
+      Map.put(valid, "phase", "unknown"),
+      Map.put(valid, "unknown", true),
+      Map.delete(valid, "message")
+    ]
+
+    for mutation <- mutations do
+      assert {:error, _reason} = JSV.validate(mutation, root, cast: false)
+    end
+  end
+
   test "run failures always carry their closed run-only fields" do
     diagnostic = CommandDiagnostic.new!(:arguments, :invalid_arguments)
     run_ref = CommandRunRef.encode(@zero_entropy)
@@ -9762,6 +9826,71 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       1_000 -> flunk("prepared-run consumer task did not exit")
     end
   end
+
+  defp published_envelope_template(template, row) do
+    mode =
+      Enum.find(
+        [
+          :run_unclassified,
+          :unknown,
+          :docs,
+          :init,
+          :validate,
+          :models,
+          :doctor,
+          :materialize,
+          :transcript
+        ],
+        &CommandContract.diagnostic_allowed?(&1, row.phase, row.code)
+      )
+
+    case mode do
+      :run_unclassified ->
+        template
+
+      nil ->
+        Map.put(template, "artifact_class", "normal")
+
+      command ->
+        template
+        |> Map.drop(~w(artifact_class artifact_state execution))
+        |> Map.put("command", Atom.to_string(command))
+    end
+  end
+
+  defp published_subjects(row) do
+    subjects =
+      for operation <- DiagnosticCatalog.subject_operations(row.phase, row.code),
+          occurrence <- published_occurrences(row, operation) do
+        {:ok, subject} = CommandSubject.provider("safe", operation, occurrence)
+        CommandSubject.to_map(subject)
+      end
+
+    case DiagnosticCatalog.subject_policy(row.phase, row.code) do
+      :required -> subjects
+      :optional -> [nil | subjects]
+      :forbidden -> [nil]
+    end
+  end
+
+  defp published_occurrences(row, operation) do
+    occurrences =
+      for destination <- [:workflow, :mission], do: %{destination: destination, index: 0}
+
+    case DiagnosticCatalog.subject_occurrence_policy(row.phase, row.code, operation) do
+      :required -> occurrences
+      :optional -> [nil | occurrences]
+      :forbidden -> [nil]
+    end
+  end
+
+  defp published_source(nil), do: nil
+
+  defp published_source(kind)
+       when kind in [:component, :input_contract, :result_contract, :phase_return_contract],
+       do: %{"kind" => Atom.to_string(kind), "name" => "main"}
+
+  defp published_source(kind), do: CommandSource.fixed(kind) |> CommandSource.to_map()
 
   defp manifest_error_path({:manifest_path, path, _reason}), do: path
 

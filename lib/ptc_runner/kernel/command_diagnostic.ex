@@ -24,9 +24,8 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   has no source because the provider subject already locates the slot. Every
   other message is the catalog literal.
 
-  `notes` is reserved and always empty: the published V4 envelope schema pins
-  it to `{"const": []}`, so a populated array would invalidate the envelope for
-  every strict V4 consumer. Reporting a rejected value against the bound it
+  `notes` is reserved and always empty: the strict internal V4 envelope contract
+  pins it to `{"const": []}`. Reporting a rejected value against the bound it
   broke is a later-version change, not a producer-side one.
   """
 
