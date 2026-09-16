@@ -812,12 +812,12 @@ cat > "$gateway_root/gateway.json" <<EOF
 EOF
 
 gateway_release_name="ptc_gateway_probe_$$"
-gateway_release_node="$gateway_release_name@$(hostname -s)"
-gateway_release_cookie="ptc_gateway_release_probe_$$"
+gateway_release_node="$gateway_release_name@127.0.0.1"
+gateway_release_cookie="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
 export PTC_GATEWAY_PROBE_DISPATCHES="$gateway_provider_dispatches"
 export PTC_GATEWAY_PROBE_CLEANUP_STARTED="$gateway_cleanup_started"
 export PTC_GATEWAY_PROBE_CLEANUP_RELEASE="$gateway_cleanup_release"
-ERL_AFLAGS="-sname $gateway_release_name -setcookie $gateway_release_cookie" \
+ERL_AFLAGS="-name $gateway_release_node -setcookie $gateway_release_cookie -kernel inet_dist_use_interface '{127,0,0,1}'" \
   "$command_bin" gateway "$gateway_root/gateway.json" \
   --env-file "$gateway_root/credentials.env" \
   > "$release_tmp_dir/gateway.stdout" \
@@ -908,12 +908,24 @@ spawn(fn ->
   end)
   true = is_pid(audit)
   :ok = :sys.suspend(audit)
+  wait.(wait, fn ->
+    case Process.info(audit, :messages) do
+      {:messages, messages} ->
+        Enum.any?(messages, fn
+          {:'$gen_call', _from, {:append, %{"disconnected" => true}}} -> true
+          _ -> false
+        end)
+
+      _ ->
+        false
+    end
+  end)
   :ok = File.write(started, "held\n")
   wait.(wait, fn -> File.exists?(release) end)
   :ok = :sys.resume(audit)
 end)
 ELIXIR
-ERL_AFLAGS="-sname ptc_gateway_control_$$ -setcookie $gateway_release_cookie" \
+ERL_AFLAGS="-name ptc_gateway_control_$$@127.0.0.1 -setcookie $gateway_release_cookie -kernel inet_dist_use_interface '{127,0,0,1}'" \
   "$release_root/bin/ptc_runner" eval '
     [node_name, path] = System.argv()
     node = String.to_atom(node_name)
