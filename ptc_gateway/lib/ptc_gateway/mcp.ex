@@ -6,6 +6,7 @@ defmodule PtcGateway.MCP do
   alias PtcRunner.Kernel.{
     DeterministicJSON,
     MCPProtocol,
+    RunAdmission,
     ServingOutcome,
     ServingTemplate,
     StrictJSON,
@@ -501,7 +502,7 @@ defmodule PtcGateway.MCP do
     else
       :invalid_params -> {:rpc, conn, 200, -32602, "Invalid Params", id, nil}
       :header_mismatch -> {:rpc, conn, 400, -32020, "Header mismatch", id, nil}
-      :unknown_tool -> {:rpc, conn, 404, -32602, "Invalid Params", id, nil}
+      :unknown_tool -> {:rpc, conn, 200, -32602, "Invalid Params", id, nil}
       _ -> {:rpc, conn, 503, -31998, "Server unavailable", id, nil}
     end
   end
@@ -582,14 +583,22 @@ defmodule PtcGateway.MCP do
         send(parent, {:reserved, self(), reservation})
 
         receive do
-          :activate ->
+          {:activate, request} ->
             outcome =
               case reservation do
-                {:ok, reserved} -> ServingTemplate.activate(reserved)
-                closed -> closed
+                {:ok, reserved} ->
+                  ServingTemplate.activate(reserved, %{
+                    before_release: fn terminal ->
+                      terminal_call(request, parent, name, template, terminal, started_at, opts)
+                    end
+                  })
+
+                closed ->
+                  _ = terminal_call(request, parent, name, template, closed, started_at, opts)
+                  closed
               end
 
-            send(parent, {:outcome, self(), outcome})
+            send(parent, {:done, self(), outcome})
 
           :close ->
             if match?({:ok, _}, reservation),
@@ -598,10 +607,10 @@ defmodule PtcGateway.MCP do
       end)
 
     receive do
-      {:reserved, ^owner, outcome} ->
-        case precommit_outcome(outcome) do
+      {:reserved, ^owner, reservation} ->
+        case precommit_outcome(reservation) do
           :reserved ->
-            commit_sse(conn, id, name, template, owner, monitor, started_at, opts)
+            commit_sse(conn, id, owner, monitor, reservation)
 
           {:error, status, code, message} ->
             send(owner, :close)
@@ -624,7 +633,7 @@ defmodule PtcGateway.MCP do
     end
   end
 
-  defp commit_sse(conn, id, name, template, owner, monitor, started_at, opts) do
+  defp commit_sse(conn, id, owner, monitor, reservation) do
     conn =
       conn
       |> put_resp_content_type("text/event-stream")
@@ -634,8 +643,8 @@ defmodule PtcGateway.MCP do
 
     case chunk(conn, ": accepted\n\n") do
       {:ok, conn} ->
-        send(owner, :activate)
-        await_outcome(conn, id, name, template, owner, monitor, started_at, opts)
+        send(owner, {:activate, self()})
+        await_outcome(conn, id, owner, monitor, reservation)
 
       {:error, _} ->
         send(owner, :close)
@@ -643,14 +652,20 @@ defmodule PtcGateway.MCP do
     end
   end
 
-  defp await_outcome(conn, id, name, template, owner, monitor, started_at, opts) do
+  defp await_outcome(conn, id, owner, monitor, reservation) do
     receive do
-      {:outcome, ^owner, outcome} ->
+      {:publish, ^owner, outcome} ->
+        encoded = bounded_call_response(id, outcome)
+
+        published? =
+          match?({:ok, _}, chunk(conn, ["event: message\n", "data: ", encoded, "\n\n"]))
+
+        send(owner, {:published, self(), published?})
         Process.demonitor(monitor, [:flush])
-        audit_result(opts[:audit], name, template, outcome, started_at, false)
-        response = %{"jsonrpc" => "2.0", "id" => id, "result" => tool_result(outcome)}
-        {:ok, encoded} = DeterministicJSON.encode(response)
-        _ = chunk(conn, ["event: message\n", "data: ", encoded, "\n\n"])
+        {:ok, {:stream, conn}}
+
+      {:done, ^owner, _outcome} ->
+        Process.demonitor(monitor, [:flush])
         {:ok, {:stream, conn}}
 
       {:DOWN, ^monitor, :process, ^owner, _reason} ->
@@ -659,12 +674,65 @@ defmodule PtcGateway.MCP do
       5_000 ->
         case chunk(conn, ": heartbeat\n\n") do
           {:ok, conn} ->
-            await_outcome(conn, id, name, template, owner, monitor, started_at, opts)
+            await_outcome(conn, id, owner, monitor, reservation)
 
           {:error, _} ->
-            Process.exit(owner, :disconnect)
+            if match?({:ok, _}, reservation),
+              do: reservation |> elem(1) |> RunAdmission.cancel_external()
+
+            send(owner, {:disconnected, self()})
             {:ok, {:stream, conn}}
         end
+    end
+  end
+
+  defp terminal_call(request, parent, name, template, outcome, started_at, opts) do
+    disconnected =
+      receive do
+        {:disconnected, ^request} -> true
+      after
+        0 -> false
+      end
+
+    with :ok <- audit_result(opts[:audit], name, template, outcome, started_at, disconnected) do
+      if disconnected do
+        :ok
+      else
+        send(parent, {:publish, self(), outcome})
+
+        receive do
+          {:published, ^request, true} -> :ok
+          {:published, ^request, false} -> {:error, :publication_failed}
+          {:disconnected, ^request} -> {:error, :publication_failed}
+        after
+          10_000 -> {:error, :publication_failed}
+        end
+      end
+    end
+  end
+
+  defp bounded_call_response(id, outcome) do
+    response = %{"jsonrpc" => "2.0", "id" => id, "result" => tool_result(outcome)}
+
+    case DeterministicJSON.encode(response) do
+      {:ok, encoded} when byte_size(encoded) <= @response_limit ->
+        encoded
+
+      _ ->
+        fallback = %{
+          "jsonrpc" => "2.0",
+          "id" => id,
+          "result" => %{
+            "resultType" => "complete",
+            "content" => [
+              %{"type" => "text", "text" => "Tool result exceeded the response limit"}
+            ],
+            "isError" => true
+          }
+        }
+
+        {:ok, encoded} = DeterministicJSON.encode(fallback)
+        encoded
     end
   end
 

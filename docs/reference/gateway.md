@@ -176,10 +176,11 @@ provider runtime, audit owner, and admissions have stopped cleanly.
 The official suite is pinned in
 `ptc_gateway/test/support/mcp_conformance/package.json` at
 `@modelcontextprotocol/conformance@0.2.0-alpha.11`. Applicable server scenario
-IDs are `server-stateless`, `tools-list`, `dns-rebinding-protection`, and `caching`.
+IDs are `server-stateless`, `tools-list`, `dns-rebinding-protection`, `caching`,
+`http-header-validation`, and `http-custom-header-server-validation`.
 The remaining listed server scenario IDs are
-excluded: `tools-call-*` and `http-custom-header-server-validation` require
-tool execution; `completion-complete`, `resources-*`, `prompts-*`, and
+excluded: `tools-call-*` require diagnostic tools and content families not
+provided by configured workflows; `completion-complete`, `resources-*`, `prompts-*`, and
 `sep-2164-resource-not-found` require unsupported feature families;
 `server-sse-multiple-streams` requires GET/session streams;
 `json-schema-2020-12` exercises a tool call; and `input-required-result-*`
@@ -187,16 +188,14 @@ requires server requests and multi-round tool execution. Neither this milestone
 nor the parent claims the complete server suite.
 
 The checked-in expected-failures baseline narrows mixed scenarios to this
-milestone. It excludes server-stateless checks requiring tool calls, response
+profile. It excludes server-stateless checks requiring diagnostic tools, response
 streams, logging tools, or optional server identity; caching checks for prompts
-and resources. The mixed `http-header-validation` scenario is deferred in full
-because its check IDs are reused across list and tool-call cases. The applicable
-discovery, listing, DNS, and cache checks still execute through the
-authenticated conformance proxy in the gateway CI gate. Gateway boundary
-tests independently enforce the applicable header scenario cases (missing,
-mismatched, case-insensitive, and case-mismatched method headers), every
-critical-header duplicate, and the exact parser and application header
-ceilings. Integration boundaries also exercise exact and excessive body,
+and resources. Both header-validation scenarios execute without a baseline,
+including Base64/literal custom parameter decoding and mismatch rejection.
+All applicable checks execute through the authenticated conformance proxy in
+the gateway CI gate. Gateway boundary tests additionally enforce every critical
+header duplicate and the exact parser and application header ceilings.
+Integration boundaries also exercise exact and excessive body,
 metadata, JSON depth/node, ID, normalized-schema, static-catalog, and encoded
 response sizes.
 

@@ -16,7 +16,10 @@ try {
   await client.connect(transport);
   const discover = client.getDiscoverResult();
   const listing = await client.listTools();
-  process.stdout.write(JSON.stringify({ discover, listing }));
+  const read = await client.callTool({ name: "a", arguments: { query: "read" } });
+  const write = await client.callTool({ name: "write", arguments: { query: "write" } });
+  const contractFailure = await client.callTool({ name: "a", arguments: { query: "invalid", extra: true } });
+  process.stdout.write(JSON.stringify({ discover, listing, read, write, contractFailure }));
 } finally {
   await client.close();
 }

@@ -499,24 +499,26 @@ defmodule PtcRunner.Kernel.MCPProtocol do
 
   @doc "Decodes the MCP plain/Base64-sentinel HTTP header representation."
   @spec decode_header(binary()) :: {:ok, binary()} | {:error, :mcp_protocol_error}
-  def decode_header("=?base64?" <> encoded) do
+  def decode_header("=?base64?" <> encoded = value) do
     with true <- String.ends_with?(encoded, "?="),
          payload <- binary_part(encoded, 0, byte_size(encoded) - 2),
          {:ok, decoded} <- Base.decode64(payload),
          true <- String.valid?(decoded) do
       {:ok, decoded}
     else
+      false -> decode_plain_header(value)
       _ -> {:error, :mcp_protocol_error}
     end
   end
 
-  def decode_header(value) when is_binary(value) do
+  def decode_header(value) when is_binary(value), do: decode_plain_header(value)
+  def decode_header(_value), do: {:error, :mcp_protocol_error}
+
+  defp decode_plain_header(value) do
     if plain_header_value?(value) and String.valid?(value),
       do: {:ok, value},
       else: {:error, :mcp_protocol_error}
   end
-
-  def decode_header(_value), do: {:error, :mcp_protocol_error}
 
   @spec normalize_tool_result(map(), map() | nil) ::
           {:ok, term()} | {:error, :mcp_domain_error | :mcp_invalid_result}

@@ -34,7 +34,9 @@ defmodule PtcGateway.ConformanceProxy do
       )
 
     conn =
-      Enum.reduce(response.headers, conn, fn {name, values}, acc ->
+      response.headers
+      |> Map.drop(["connection", "content-length", "transfer-encoding"])
+      |> Enum.reduce(conn, fn {name, values}, acc ->
         Enum.reduce(values, acc, &put_resp_header(&2, name, &1))
       end)
 

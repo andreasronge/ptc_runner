@@ -25,8 +25,8 @@ defmodule PtcGateway.ReleaseCLI do
 
     receive do
       {:signal, signal} when signal in [:sigterm, :sigint] ->
-        GenServer.stop(owner, :shutdown, 30_000)
-        System.halt(0)
+        status = if PtcGateway.Domain.shutdown(owner, 10_000, 10_000) == :ok, do: 0, else: 70
+        System.halt(status)
 
       {:DOWN, ^ref, :process, ^owner, :normal} ->
         System.halt(0)

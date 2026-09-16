@@ -138,17 +138,7 @@ defmodule PtcRunner.Kernel.ServingCall do
   defp execute(template, prepared, authority, lease, deadline, hooks) do
     result =
       try do
-        case activate_execution(template, lease, prepared, authority, deadline) do
-          {:ok, execution} ->
-            if hook = Map.get(hooks, :after_activation), do: hook.(execution)
-            collect(template, RunAdmission.await(execution), authority, hooks)
-
-          {:error, :run_admission_unavailable} ->
-            outcome(template, :admission_unavailable, false)
-
-          {:error, reason} ->
-            failure(template, reason)
-        end
+        run_execution(template, prepared, authority, lease, deadline, hooks)
       rescue
         _ -> outcome(template, :internal_error, :unknown)
       catch
@@ -158,9 +148,39 @@ defmodule PtcRunner.Kernel.ServingCall do
     prepared_clean? = PreparedRun.close(prepared) == :ok
     clean? = cleanup(authority, hooks) == :ok and prepared_clean?
 
+    terminal =
+      if clean?,
+        do: replace_expired(template, result, deadline),
+        else: outcome(template, :cleanup_failed, ServingOutcome.metadata(result).dispatched)
+
+    terminal_clean? =
+      case Map.get(hooks, :before_release) do
+        nil -> true
+        hook -> hook.(terminal) == :ok
+      end
+
+    clean? = clean? and terminal_clean?
+    finish(template, lease, deadline, result, terminal, clean?)
+  end
+
+  defp run_execution(template, prepared, authority, lease, deadline, hooks) do
+    case activate_execution(template, lease, prepared, authority, deadline) do
+      {:ok, execution} ->
+        if hook = Map.get(hooks, :after_activation), do: hook.(execution)
+        collect(template, RunAdmission.await(execution), authority, hooks)
+
+      {:error, :run_admission_unavailable} ->
+        outcome(template, :admission_unavailable, false)
+
+      {:error, reason} ->
+        failure(template, reason)
+    end
+  end
+
+  defp finish(template, lease, deadline, result, terminal, clean?) do
     case RunAdmission.finish_publication(lease, clean?) do
       :ok when clean? ->
-        replace_expired(template, result, deadline)
+        terminal
 
       {:error, :call_admission_refused} when clean? ->
         replace_expired(template, outcome(template, :admission_unavailable, false), deadline)

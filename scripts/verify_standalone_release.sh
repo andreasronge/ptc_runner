@@ -12,6 +12,7 @@ release_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/ptc-runner-standalone-release.XXXX
 # belongs in the trap rather than beside the assertions, because any `set -e`
 # failure between spawn and stop would otherwise leave it holding a port.
 viewer_pid=""
+gateway_pid=""
 
 # Never a bare `wait` after signalling: a shutdown regression is exactly what
 # this gate exists to catch, and an unbounded wait would turn it into a CI run
@@ -36,6 +37,10 @@ stop_viewer_process() {
 }
 
 cleanup() {
+  if [ -n "$gateway_pid" ]; then
+    kill -TERM "$gateway_pid" 2> /dev/null || true
+    wait "$gateway_pid" 2> /dev/null || true
+  fi
   if [ -n "$viewer_pid" ]; then
     stop_viewer_process || true
     wait "$viewer_pid" 2> /dev/null || true
@@ -522,6 +527,163 @@ if grep -q 'provider_application_unavailable' "$release_tmp_dir/provider.stderr"
   echo 'assembled release did not admit its command-owned optional provider application' >&2
   exit 1
 fi
+
+# Exercise the gateway through the packaged command, rather than through a
+# source-tree Mix task. This verifies the load-only companion boundary, health,
+# an SSE write call, durable private audit, and clean signal-driven shutdown.
+gateway_root="$release_tmp_dir/gateway"
+gateway_app="$gateway_root/application"
+gateway_audit="$gateway_root/audit"
+mkdir -p "$gateway_app"
+
+cat > "$gateway_app/main.clj" <<'EOF'
+(ns gateway.main)
+(defn run {:effect :write} [input] (return input))
+EOF
+
+cat > "$gateway_app/schema.json" <<'EOF'
+{"type":"object"}
+EOF
+
+cat > "$gateway_app/ptc.json" <<'EOF'
+{
+  "version": 1,
+  "workflow": {
+    "components": [{"id": "gateway.main", "path": "main.clj"}],
+    "entry": "gateway.main/run"
+  },
+  "input": {"path": "missing.json"},
+  "contracts": {
+    "input_schema": {"path": "schema.json"},
+    "result_schema": {"path": "schema.json"}
+  }
+}
+EOF
+
+gateway_digest="$("$release_root/bin/ptc_runner" eval '
+  [manifest] = System.argv()
+  {:ok, template} =
+    PtcRunner.Kernel.ServingTemplate.from_directory(
+      manifest,
+      PtcRunner.Kernel.Limits.installed_defaults()
+    )
+  IO.write(PtcRunner.Kernel.ServingTemplate.application_content_digest(template))
+' "$gateway_app/ptc.json")"
+
+gateway_port="$(python3 - <<'PYTHON'
+import socket
+with socket.socket() as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PYTHON
+)"
+
+cat > "$gateway_root/host.json" <<'EOF'
+{"credentials":{"gateway":{"env":"GATEWAY_RELEASE_TOKEN"}},"install":{}}
+EOF
+
+cat > "$gateway_root/credentials.env" <<'EOF'
+GATEWAY_RELEASE_TOKEN=release-gateway-token
+EOF
+
+cat > "$gateway_root/gateway.json" <<EOF
+{
+  "version": 1,
+  "listen": {"address": "127.0.0.1", "port": $gateway_port, "path": "/mcp"},
+  "authentication": {"bearer": {"binding": "gateway"}},
+  "host": {"path": "host.json"},
+  "admission": {
+    "max_inflight_requests": 2,
+    "max_concurrent_runs": 1,
+    "max_active_provider_calls": 1,
+    "max_waiting_provider_calls": 0
+  },
+  "private_audit": {
+    "directory": "audit",
+    "max_file_bytes": 4096,
+    "max_retained_files": 2
+  },
+  "tools": [{
+    "name": "write",
+    "title": "Write",
+    "description": "Packaged write probe",
+    "application": {"manifest": "application/ptc.json"},
+    "expected_application_content_digest": "$gateway_digest",
+    "installation_config_pins": {},
+    "provider_snapshot_pins": {},
+    "allow_write": true
+  }]
+}
+EOF
+
+"$command_bin" gateway "$gateway_root/gateway.json" \
+  --env-file "$gateway_root/credentials.env" \
+  > "$release_tmp_dir/gateway.stdout" \
+  2> "$release_tmp_dir/gateway.stderr" &
+gateway_pid=$!
+
+python3 - "$gateway_port" <<'PYTHON'
+import http.client
+import json
+import sys
+import time
+
+port = int(sys.argv[1])
+deadline = time.monotonic() + 30
+while True:
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+        conn.request("GET", "/health/ready", headers={"Host": f"127.0.0.1:{port}"})
+        response = conn.getresponse()
+        if response.status == 200:
+            response.read()
+            break
+        response.read()
+    except OSError:
+        pass
+    if time.monotonic() >= deadline:
+        raise SystemExit("packaged gateway never became ready")
+    time.sleep(0.1)
+
+body = json.dumps({
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {
+        "_meta": {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientCapabilities": {},
+        },
+        "name": "write",
+        "arguments": {},
+    },
+}, separators=(",", ":"))
+conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+conn.request("POST", "/mcp", body=body, headers={
+    "Host": f"127.0.0.1:{port}",
+    "Authorization": "Bearer release-gateway-token",
+    "Content-Type": "application/json",
+    "Accept": "application/json, text/event-stream",
+    "MCP-Protocol-Version": "2026-07-28",
+    "Mcp-Method": "tools/call",
+    "Mcp-Name": "write",
+})
+response = conn.getresponse()
+payload = response.read().decode()
+if response.status != 200 or '"isError":false' not in payload:
+    raise SystemExit(f"packaged gateway write failed: {response.status} {payload}")
+PYTHON
+
+grep -q '"tool_name":"write"' "$gateway_audit"/*.jsonl
+kill -TERM "$gateway_pid"
+set +e
+wait "$gateway_pid"
+gateway_status=$?
+set -e
+gateway_pid=""
+test "$gateway_status" -eq 0
+test ! -s "$release_tmp_dir/gateway.stdout"
+test ! -s "$release_tmp_dir/gateway.stderr"
 
 # The Viewer ships inside the release, so the gate proves the packaged command
 # actually serves rather than only that its application directory is present.

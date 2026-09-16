@@ -266,6 +266,11 @@ defmodule PtcRunner.Kernel.ServingTemplate do
           ServingOutcome.t()
   def activate(reservation), do: ServingCall.activate(reservation)
 
+  @doc false
+  @spec activate(reservation(), map()) :: ServingOutcome.t()
+  def activate(reservation, hooks) when is_map(hooks),
+    do: ServingCall.activate(reservation, hooks)
+
   @doc "Reserves and activates immediately for transports that need no commitment handshake."
   @spec call(t(), term(), pid(), integer() | :infinity) :: ServingOutcome.t()
   def call(template, input, admission, deadline \\ :infinity) do

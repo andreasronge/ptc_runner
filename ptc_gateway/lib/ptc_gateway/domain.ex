@@ -24,6 +24,10 @@ defmodule PtcGateway.Domain do
   @doc "The warm runtime owner is the opaque authentication handle."
   def token_handle(owner), do: GenServer.call(owner, :token_handle)
 
+  @doc false
+  def shutdown(owner, drain_ms, cleanup_ms),
+    do: GenServer.call(owner, {:shutdown, drain_ms, cleanup_ms}, drain_ms + cleanup_ms + 5_000)
+
   @impl true
   def init({path, env_file}) do
     Process.flag(:trap_exit, true)
@@ -274,8 +278,34 @@ defmodule PtcGateway.Domain do
 
   def handle_call(:token_handle, _, state), do: {:reply, state.warm, state}
 
+  def handle_call({:shutdown, drain_ms, cleanup_ms}, _from, state) do
+    if is_pid(state.listener) and Process.alive?(state.listener), do: stop(state.listener)
+
+    quiesced =
+      RunAdmission.quiesce(state.run_admission) == :ok and
+        WarmProviderRuntime.begin_drain(state.warm) == :ok
+
+    drain_deadline = System.monotonic_time(:millisecond) + drain_ms
+    drained = wait_for_admission(state.run_admission, drain_deadline)
+    if not drained, do: RunAdmission.cancel_all(state.run_admission)
+
+    cleanup_deadline = System.monotonic_time(:millisecond) + cleanup_ms
+    providers_clean = WarmProviderRuntime.drain(state.warm, cleanup_deadline) == :ok
+    admission_clean = wait_for_admission(state.run_admission, cleanup_deadline)
+
+    result =
+      if quiesced and providers_clean and admission_clean,
+        do: :ok,
+        else: {:error, :uncertain_cleanup}
+
+    {:stop, :normal, result, %{state | listener: nil}}
+  end
+
   @impl true
   def handle_info({:EXIT, pid, _}, %{listener: pid} = state), do: {:stop, :normal, state}
+
+  def handle_info({:EXIT, pid, _reason}, %{audit: pid} = state),
+    do: {:stop, :gateway_child_failed, state}
 
   def handle_info({:EXIT, pid, reason}, state) do
     if is_pid(state.warm) and (pid in state.children or reason != :normal),
@@ -302,5 +332,24 @@ defmodule PtcGateway.Domain do
     GenServer.stop(pid, :shutdown)
   catch
     :exit, _ -> :ok
+  end
+
+  defp wait_for_admission(nil, _deadline), do: true
+
+  defp wait_for_admission(admission, deadline) do
+    case RunAdmission.snapshot(admission) do
+      {:ok, %{in_use: 0}} ->
+        true
+
+      _ ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          false
+        else
+          receive do
+          after
+            25 -> wait_for_admission(admission, deadline)
+          end
+        end
+    end
   end
 end

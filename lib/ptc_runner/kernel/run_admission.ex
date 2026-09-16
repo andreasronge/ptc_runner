@@ -174,6 +174,17 @@ defmodule PtcRunner.Kernel.RunAdmission do
   @spec close(reservation()) :: :ok | {:error, :run_admission_unavailable}
   def close(reservation), do: cancel(reservation)
 
+  @doc false
+  @spec cancel_external(reservation()) :: :ok | {:error, :run_admission_unavailable}
+  def cancel_external({__MODULE__, host, ref}), do: call(host, {:cancel_external, ref})
+  def cancel_external(_), do: {:error, :run_admission_unavailable}
+
+  @doc false
+  def quiesce(host), do: call(host, :quiesce)
+
+  @doc false
+  def cancel_all(host), do: call(host, :cancel_all)
+
   @doc "Waits for the activated execution's sealed outcome and execution-owner cleanup."
   @spec await(execution()) :: {:ok, ExecutionOutcome.t()} | {:error, term()}
   def await({__MODULE__, caller, owner}) when caller == self(), do: await_execution(owner)
@@ -421,6 +432,28 @@ defmodule PtcRunner.Kernel.RunAdmission do
       _ ->
         {:reply, {:error, :run_admission_unavailable}, state}
     end
+  end
+
+  def handle_call({:cancel_external, ref}, _from, state) do
+    case state.reservations[ref] do
+      %{cancelled?: false} -> {:reply, :ok, cancel_reservation(state, ref)}
+      _ -> {:reply, {:error, :run_admission_unavailable}, state}
+    end
+  end
+
+  def handle_call(:quiesce, _from, state),
+    do: {:reply, :ok, %{state | status: :unavailable}}
+
+  def handle_call(:cancel_all, _from, state) do
+    state = %{state | status: :unavailable}
+    Enum.each(Map.keys(state.owners), &send(&1, {:run_admission_cancel, self()}))
+
+    state =
+      Enum.reduce(Map.keys(state.reservations), state, fn ref, acc ->
+        cancel_reservation(acc, ref)
+      end)
+
+    {:reply, :ok, state}
   end
 
   def handle_call(:admit, {owner, _}, state) do

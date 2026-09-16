@@ -138,6 +138,40 @@ defmodule PtcGatewayTest do
   end
 
   @tag :tmp_dir
+  test "private audit rotates full active files before durable append", %{tmp_dir: dir} do
+    config = %{
+      "directory" => Path.join(dir, "audit"),
+      "max_file_bytes" => 1024,
+      "max_retained_files" => 2
+    }
+
+    assert {:ok, owner} = PtcGateway.PrivateAudit.start_link(config)
+
+    for index <- 1..10 do
+      assert :ok = PtcGateway.PrivateAudit.append(owner, audit_record(index))
+    end
+
+    GenServer.stop(owner)
+
+    files =
+      config["directory"]
+      |> File.ls!()
+      |> Enum.filter(&String.ends_with?(&1, ".jsonl"))
+      |> Enum.sort()
+
+    assert length(files) == 2
+
+    records =
+      files
+      |> Enum.flat_map(fn file ->
+        Path.join(config["directory"], file) |> File.read!() |> String.split("\n", trim: true)
+      end)
+
+    assert length(records) in 2..6
+    assert records |> List.last() |> Jason.decode!() |> Map.fetch!("call_id") == "call-10"
+  end
+
+  @tag :tmp_dir
   test "write permission, audit readiness loss, and deterministic metadata", %{tmp_dir: dir} do
     {path, config} = fixture(dir, :write)
     assert {:error, :write_forbidden} = PtcGateway.start_link(path)
@@ -170,17 +204,11 @@ defmodule PtcGatewayTest do
     assert PtcGateway.Domain.metadata(owner) == metadata
     assert response(config, "/health/ready").status == 200
     audit = List.last(:sys.get_state(owner).children)
-    ref = Process.monitor(audit)
+    audit_ref = Process.monitor(audit)
+    owner_ref = Process.monitor(owner)
     Process.exit(audit, :kill)
-    assert_receive {:DOWN, ^ref, :process, ^audit, :killed}
-    # Serialize behind the domain's linked-exit handling before querying health.
-    _ = PtcGateway.Domain.metadata(owner)
-    assert response(config, "/health/ready").status == 503
-    assert response(config, "/health/live").status == 200
-    unavailable = mcp(config, "tools/list", 41)
-    assert unavailable.status == 503
-    assert unavailable.body["error"] == %{"code" => -31998, "message" => "Server unavailable"}
-    assert unavailable.body["id"] == 41
+    assert_receive {:DOWN, ^audit_ref, :process, ^audit, :killed}
+    assert_receive {:DOWN, ^owner_ref, :process, ^owner, :gateway_child_failed}
   end
 
   @tag :tmp_dir
@@ -538,6 +566,15 @@ defmodule PtcGatewayTest do
       )
 
     assert invalid.body["error"]["code"] == -32602
+
+    unknown =
+      mcp(config, "tools/call", 10,
+        params: %{"name" => "missing"},
+        headers: [{"mcp-name", "missing"}]
+      )
+
+    assert unknown.status == 200
+    assert unknown.body["error"]["code"] == -32602
   end
 
   @tag :tmp_dir
@@ -795,8 +832,81 @@ defmodule PtcGatewayTest do
 
   @tag :nightly
   @tag :tmp_dir
-  test "official MCP conformance discovery and listing subset", %{tmp_dir: dir} do
+  test "official MCP conformance tools and header subset", %{tmp_dir: dir} do
     {path, config} = fixture(dir)
+
+    schema = %{
+      "type" => "object",
+      "properties" => %{"query" => %{"type" => "string", "x-mcp-header" => "Query"}},
+      "required" => ["query"]
+    }
+
+    File.write!(Path.join(dir, "schema.json"), Jason.encode!(schema))
+
+    {:ok, template} =
+      ServingTemplate.from_directory(Path.join(dir, "app.json"), Limits.installed_defaults())
+
+    config =
+      update_in(config, ["tools"], fn tools ->
+        Enum.map(tools, fn tool ->
+          Map.put(
+            tool,
+            "expected_application_content_digest",
+            ServingTemplate.application_content_digest(template)
+          )
+        end)
+      end)
+
+    write_dir = Path.join(dir, "write-app")
+    File.mkdir_p!(write_dir)
+
+    File.write!(
+      Path.join(write_dir, "workflow.clj"),
+      "(ns app) (defn run {:effect :write} [input] (return input))"
+    )
+
+    File.write!(Path.join(write_dir, "schema.json"), Jason.encode!(schema))
+    write_manifest = Path.join(write_dir, "app.json")
+
+    File.write!(
+      write_manifest,
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [%{"id" => "app", "path" => "workflow.clj"}],
+          "entry" => "app/run"
+        },
+        "input" => %{"path" => "missing.json"},
+        "contracts" => %{
+          "input_schema" => %{"path" => "schema.json"},
+          "result_schema" => %{"path" => "schema.json"}
+        }
+      })
+    )
+
+    {:ok, write_template} =
+      ServingTemplate.from_directory(write_manifest, Limits.installed_defaults())
+
+    write_tool =
+      hd(config["tools"])
+      |> Map.put("name", "write")
+      |> Map.put("title", "Write")
+      |> Map.put("application", %{"manifest" => "write-app/app.json"})
+      |> Map.put(
+        "expected_application_content_digest",
+        ServingTemplate.application_content_digest(write_template)
+      )
+      |> Map.put("allow_write", true)
+
+    config =
+      config
+      |> Map.put("tools", config["tools"] ++ [write_tool])
+      |> Map.put("private_audit", %{
+        "directory" => "audit",
+        "max_file_bytes" => 4096,
+        "max_retained_files" => 2
+      })
+
     {:ok, socket} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
     {:ok, proxy_port} = :inet.port(socket)
     :gen_tcp.close(socket)
@@ -807,6 +917,15 @@ defmodule PtcGatewayTest do
     File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
     assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
     on_exit(fn -> stop(owner) end)
+
+    assert get_in(PtcGateway.Domain.metadata(owner), [
+             :tools,
+             Access.at(0),
+             "inputSchema",
+             "properties",
+             "query",
+             "x-mcp-header"
+           ]) == "Query"
 
     target_authority = "127.0.0.1:#{config["listen"]["port"]}"
 
@@ -828,7 +947,7 @@ defmodule PtcGatewayTest do
     executable = Path.expand("support/mcp_conformance/node_modules/.bin/conformance", __DIR__)
 
     for scenario <-
-          ~w(server-stateless tools-list dns-rebinding-protection caching) do
+          ~w(server-stateless tools-list dns-rebinding-protection caching http-header-validation http-custom-header-server-validation) do
       {output, status} =
         System.cmd(
           executable,
@@ -857,9 +976,20 @@ defmodule PtcGatewayTest do
       )
 
     assert status == 0, output
-    assert %{"discover" => discover, "listing" => listing} = Jason.decode!(output)
+
+    assert %{
+             "discover" => discover,
+             "listing" => listing,
+             "read" => read,
+             "write" => write,
+             "contractFailure" => failure
+           } = Jason.decode!(output)
+
     assert discover["supportedVersions"] == ["2026-07-28"]
     assert listing["tools"] == PtcGateway.Domain.metadata(owner).tools
+    assert read["isError"] == false
+    assert write["isError"] == false
+    assert failure["isError"] == true
   end
 
   @tag :tmp_dir
@@ -973,6 +1103,20 @@ defmodule PtcGatewayTest do
     path = Path.join(dir, "gateway.json")
     File.write!(path, Jason.encode!(config))
     {path, config}
+  end
+
+  defp audit_record(index) do
+    %{
+      "call_id" => "call-#{index}",
+      "tool_name" => String.duplicate("tool", 40),
+      "started_at" => "2026-09-16T00:00:00.000Z",
+      "ended_at" => "2026-09-16T00:00:01.000Z",
+      "outcome_code" => "success",
+      "dispatch_state" => "true",
+      "write_effects_may_have_occurred" => true,
+      "disconnected" => false,
+      "cleanup_status" => "complete"
+    }
   end
 
   defp response(config, path, opts \\ []) do
