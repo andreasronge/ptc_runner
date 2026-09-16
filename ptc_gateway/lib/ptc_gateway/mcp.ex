@@ -612,7 +612,7 @@ defmodule PtcGateway.MCP do
 
                 closed ->
                   closed = wire_outcome(id, template, closed)
-                  request_monitor = monitor_request(request, nil)
+                  request_monitor = monitor_request(request, self(), nil)
                   _ = publish_terminal(request, request_monitor, parent, closed)
                   send(request_monitor, :stop)
                   _ = audit_terminal(name, template, closed, started_at, opts)
@@ -649,7 +649,7 @@ defmodule PtcGateway.MCP do
   end
 
   defp activate_transport(reserved, id, request, parent, name, template, started_at, opts) do
-    request_monitor = monitor_request(request, reserved)
+    request_monitor = monitor_request(request, self(), reserved)
     close = &wire_outcome(id, template, &1)
     publish = &publish_terminal(request, request_monitor, parent, &1)
     audit = &audit_terminal(name, template, &1, started_at, opts)
@@ -672,13 +672,14 @@ defmodule PtcGateway.MCP do
     end
   end
 
-  defp monitor_request(request, reserved) do
+  defp monitor_request(request, worker, reserved) do
     spawn(fn ->
       reference = Process.monitor(request)
 
       receive do
         {:DOWN, ^reference, :process, ^request, _reason} ->
           if reserved, do: ServingTemplate.cancel_external(reserved)
+          send(worker, {:disconnected, request})
 
         :stop ->
           Process.demonitor(reference, [:flush])
