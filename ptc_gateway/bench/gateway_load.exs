@@ -41,7 +41,12 @@ admission = %{
 schema = %{"type" => "object", "properties" => %{"note" => %{"type" => "string"}}}
 payload = %{"note" => String.duplicate("payload", 64)}
 
-dir = Path.join(System.tmp_dir!(), "ptc-gateway-bench-#{System.unique_integer([:positive])}")
+# Project-local rather than the system temporary directory: the private audit
+# rejects a symbolic link anywhere in its hierarchy, and on macOS `$TMPDIR`
+# reaches the user's folder through `/var`, which is one.
+scratch = Path.join(File.cwd!(), "tmp/gateway-bench")
+File.mkdir_p!(scratch)
+dir = Path.join(scratch, "read-#{System.unique_integer([:positive])}")
 {path, config} = GatewayFixture.fixture(Path.join(dir, "deployment"), :read, schema: schema)
 config = Map.put(config, "admission", admission)
 File.write!(path, Jason.encode!(config))
@@ -69,9 +74,15 @@ defmodule Probe do
     latencies = GatewayLoad.latencies_ms(results)
     percentiles = GatewayLoad.percentiles(latencies, [50, 95, 99, 100])
 
+    admitted = results |> Enum.count(&(&1.status == 200))
+
     %{
       concurrency: concurrency,
       rps: calls * 1_000_000 / elapsed_us,
+      # Offered load counts refusals, which are cheap; only goodput says how
+      # much work the gateway actually did. Reporting the first as throughput
+      # makes a saturated endpoint look like a fast one.
+      goodput: admitted * 1_000_000 / elapsed_us,
       p50: percentiles[50],
       p95: percentiles[95],
       p99: percentiles[99],
@@ -88,7 +99,8 @@ defmodule Probe do
 
     IO.puts(
       pad("conc", 6) <>
-        pad("req/s", 10) <>
+        pad("req/s", 9) <>
+        pad("ok/s", 9) <>
         pad("p50 ms", 9) <>
         pad("p95 ms", 9) <>
         pad("p99 ms", 9) <> pad("max ms", 9) <> pad("leases", 8) <> "statuses"
@@ -97,7 +109,8 @@ defmodule Probe do
     Enum.each(rows, fn row ->
       IO.puts(
         pad(row.concurrency, 6) <>
-          pad(round(row.rps), 10) <>
+          pad(round(row.rps), 9) <>
+          pad(round(row.goodput), 9) <>
           pad(ms(row.p50), 9) <>
           pad(ms(row.p95), 9) <>
           pad(ms(row.p99), 9) <>
@@ -154,10 +167,10 @@ Probe.mailbox_table(call_rows)
 
 # Where the gateway stops scaling: the level after which throughput no longer
 # improves is the ceiling, and the mailbox column above says which owner it is.
-best = Enum.max_by(list_rows, & &1.rps)
+best = Enum.max_by(list_rows, & &1.goodput)
 
 IO.puts(
-  "\npeak tools/list throughput: #{round(best.rps)} req/s at concurrency #{best.concurrency}"
+  "\npeak tools/list goodput: #{round(best.goodput)} req/s at concurrency #{best.concurrency}"
 )
 
 # One connection carrying many calls, against one connection per call at the
@@ -177,6 +190,84 @@ IO.puts(
 
 IO.puts("one per call:        #{round(serial.rps)} req/s")
 
+# The write path adds one durable audit append per call, made from inside a
+# single owner while the call still holds its run capacity. If that append is
+# the ceiling, write throughput stops scaling where read throughput does not,
+# and the audit mailbox is where the queue shows.
+write_dir = Path.join(scratch, "write-#{System.unique_integer([:positive])}")
+
+{write_path, write_config} =
+  GatewayFixture.fixture(Path.join(write_dir, "deployment"), :write, schema: schema)
+
+write_config =
+  write_config |> Map.put("admission", admission) |> GatewayFixture.with_write_audit()
+
+File.write!(write_path, Jason.encode!(write_config))
+write_env = Path.join(write_dir, "credentials.env")
+File.write!(write_env, "GATEWAY_TEST_TOKEN=#{GatewayFixture.token()}\n")
+{:ok, write_owner} = PtcGateway.start_link(write_path, env_file: write_env)
+audit = GatewayLoad.audit_owner(write_owner)
+
+write_probes = [request_admission: GatewayLoad.request_admission(write_owner), audit: audit]
+
+write_rows =
+  Enum.map(levels, fn concurrency ->
+    Probe.measure(
+      write_config,
+      calls,
+      concurrency,
+      [arguments: payload],
+      write_probes,
+      write_owner
+    )
+  end)
+
+Probe.table("tools/call with allow_write — one durable audit append per call", write_rows)
+
+IO.puts("\naudit mailbox depth at each concurrency (peak / mean)")
+IO.puts(String.duplicate("-", 78))
+
+Enum.each(write_rows, fn row ->
+  depth = row.mailboxes[:audit]
+
+  IO.puts(
+    "#{String.pad_trailing("#{row.concurrency}", 6)}#{depth.peak} / #{Float.round(depth.mean, 2)}"
+  )
+end)
+
+# One append in isolation, for scale: the owner does `:file.write` then
+# `:file.sync`, so this is a durable round-trip and nothing else.
+record = %{
+  "call_id" => "bench",
+  "tool_name" => "a",
+  "started_at" => "2026-09-16T00:00:00.000Z",
+  "ended_at" => "2026-09-16T00:00:01.000Z",
+  "outcome_code" => "success",
+  "dispatch_state" => "true",
+  "write_effects_may_have_occurred" => false,
+  "disconnected" => false,
+  "cleanup_status" => "complete"
+}
+
+{append_us, :ok} =
+  :timer.tc(fn ->
+    Enum.each(1..200, fn index ->
+      :ok = PtcGateway.PrivateAudit.append(audit, %{record | "call_id" => "bench-#{index}"})
+    end)
+  end)
+
+read_peak = call_rows |> Enum.max_by(& &1.goodput) |> Map.get(:goodput)
+write_peak = write_rows |> Enum.max_by(& &1.goodput) |> Map.get(:goodput)
+append_ms = append_us / 200 / 1000
+
+IO.puts("\none durable audit append: #{Float.round(append_ms, 3)} ms")
+IO.puts("  serialized in one owner, so the write path cannot exceed")
+IO.puts("  #{round(1000 / append_ms)} calls/s however much run capacity is configured")
+IO.puts("peak read goodput:  #{round(read_peak)} calls/s")
+IO.puts("peak write goodput: #{round(write_peak)} calls/s")
+
+GenServer.stop(write_owner)
+
 IO.puts("\nresidue over #{4 * cycles} calls (fitted bytes per call)")
 IO.puts(String.duplicate("-", 78))
 
@@ -193,4 +284,4 @@ IO.puts("processes: #{leak.processes.before} -> #{leak.processes.after}")
 IO.puts("leases still held: #{GatewayLoad.inflight_leases(owner)}")
 
 GenServer.stop(owner)
-File.rm_rf!(dir)
+File.rm_rf!(scratch)

@@ -26,6 +26,10 @@ a time; everything here needs requests to overlap.
   per-call residue small enough to pass a single-cycle assertion is what
   accumulates over a host's lifetime. `PTC_GATEWAY_SOAK_CYCLES` sets the batch
   size.
+- **Write durability.** Every call that returned 200 has a matching record on
+  disk, with unique call IDs. Read back from the audit files rather than from
+  the owner: a record the owner believes it wrote and a record that survives the
+  process are different claims, and only the second is what an audit is for.
 
 ## Read a ceiling from the owner, never from the client
 
@@ -81,17 +85,54 @@ the owner that queues — `RequestAdmission` stays near zero throughout.
 Numbers are machine- and scheduler-specific, so a comparison is only meaningful
 against another run on the same machine. There is no committed baseline.
 
-## Operational properties this surfaced
+## The write path collapses under load, and adding capacity makes it worse
+
+Every write call appends one record to the private audit, durably, from inside a
+single owner — `:file.write` then `:file.sync` — and the call keeps its run
+capacity until that append returns. One append measures 0.44 ms, so the whole
+write path is serialized behind roughly 2,280 appends per second no matter what
+`max_concurrent_runs` says.
+
+What that produces is not a plateau. Goodput measured on a ten-scheduler
+darwin/arm64 machine, 200 calls per level:
+
+| concurrency | offered req/s | goodput req/s | refused | audit mailbox (peak/mean) |
+| --- | --- | --- | --- | --- |
+| 8 | 931 | 931 | 0% | 53 / 24 |
+| 16 | 1995 | 918 | 54% | 60 / 55 |
+| 32 | 2665 | 840 | 69% | 59 / 56 |
+| 64 | 3230 | 727 | 78% | 58 / 54 |
+
+Useful work *falls* as offered load rises. The audit queue deepens, every run in
+it holds its capacity while it waits, run capacity fills, and the overflow is
+refused rather than queued — so raising `max_concurrent_runs` admits more runs
+into the same queue and lowers goodput further. The read path over the same
+sweep plateaus at ~1,190 calls per second and refuses nothing.
+
+Read the offered column carefully: at concurrency 64 it looks like the write
+path is three times faster than the read path. It is counting refusals, which
+are cheap. Only the goodput column is throughput.
+
+## Other operational properties
 
 A request holds one of `max_inflight_requests` from before its body is read
-until the response completes, and Bandit waits 15 seconds for body bytes that
-never arrive. So `max_inflight_requests` clients that send perfect headers and
-no body starve the MCP endpoint for 15 seconds — while `/health/ready` keeps
-returning 200, because readiness reports on the warm runtime rather than on
-request admission. Both facts are asserted in
-`gateway_load_test.exs`; the loopback binding and the bearer requirement are
-what bound the exposure.
+until the response completes, so how long the transport waits for body bytes is
+how long one stalled client can hold a slot. That was 15 seconds — the default —
+and the raised timeout reached the client as `500 Internal Server Error` with
+`-32603`. It is now a two-second budget answered with HTTP 408
+`{"error":"request_timeout"}`. `max_inflight_requests` stalled clients still
+starve the endpoint for that budget, and `/health/ready` still stays 200
+throughout, because readiness reports on the warm runtime rather than on request
+admission. A peer that keeps dribbling bytes renews the budget by definition;
+the loopback binding and the bearer requirement are what bound that residue.
 
 Connection reuse is worth roughly four times the throughput of one connection
 per call at the same concurrency, so a client that opens a socket per tool call
 is paying more for TCP than for the workflow.
+
+The gateway itself is not the expensive part. A trivial `tools/call` spends
+0.79 ms on connection, parsing, authentication, admission and reservation, and
+4.36 ms on activation, the run and publication — and the same call made
+in-process through `ServingTemplate.call/3`, with no HTTP at all, costs 3.79 ms.
+`tools/list`, which is the whole request path minus the run, completes in
+0.47 ms and sustains ~6,700 per second.

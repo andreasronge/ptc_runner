@@ -182,6 +182,89 @@ defmodule PtcGatewayLoadTest do
     end
   end
 
+  describe "the write path" do
+    @tag :tmp_dir
+    test "every admitted write is durable before its slot is released", %{tmp_dir: dir} do
+      runs = 4
+
+      {owner, config, audit_dir} =
+        start_write_gateway(dir, max_inflight_requests: 32, max_concurrent_runs: runs)
+
+      audit = GatewayLoad.sampler(audit: GatewayLoad.audit_owner(owner))
+      capacity = GatewayLoad.capacity_sampler(owner)
+      started_at = System.monotonic_time(:microsecond)
+      results = GatewayLoad.storm(config, @burst, arguments: @payload)
+      elapsed_us = System.monotonic_time(:microsecond) - started_at
+      peak = GatewayLoad.stop_peak_sampler(capacity)
+      depths = GatewayLoad.stop_sampler(audit)
+
+      statuses = GatewayLoad.by_status(results)
+      admitted = Map.get(statuses, 200, 0)
+      records = GatewayLoad.audit_records(audit_dir)
+
+      report("write burst of #{@burst}, run bound #{runs}", %{
+        "statuses" => inspect(statuses),
+        "throughput" => "#{round(@burst * 1_000_000 / elapsed_us)} calls/s",
+        "peak concurrent runs" => "#{peak.peak} of #{runs}",
+        "audit mailbox" => inspect(depths[:audit]),
+        "durable records" => length(records),
+        "latency ms" =>
+          inspect(GatewayLoad.percentiles(GatewayLoad.latencies_ms(results), [50, 95, 100]))
+      })
+
+      assert Map.keys(statuses) -- [200, 429] == [],
+             "unexpected terminal statuses: #{inspect(statuses)}"
+
+      assert peak.peak <= runs
+
+      # The audit is the point of the write path: a call whose slot was released
+      # without its record reaching disk is the failure this asserts away. The
+      # records are read back from the files, not from the owner.
+      assert length(records) == admitted,
+             "#{admitted} calls succeeded but #{length(records)} records are durable"
+
+      for record <- records do
+        assert record["outcome_code"] == "success"
+        assert record["cleanup_status"] == "complete"
+        assert record["disconnected"] == false
+        assert record["tool_name"] in ["a", "z"]
+      end
+
+      # Call IDs identify records; a collision under load would silently merge
+      # two calls into one line of evidence.
+      assert records |> Enum.map(& &1["call_id"]) |> Enum.uniq() |> length() == length(records)
+
+      assert GatewayLoad.await_leases(owner, 0) == 0
+      assert response(config, "/health/ready").status == 200
+    end
+
+    @tag :tmp_dir
+    test "a reset peer mid-write is still audited, and marked disconnected", %{tmp_dir: dir} do
+      {owner, config, audit_dir} =
+        start_write_gateway(dir, max_inflight_requests: 8, max_concurrent_runs: 8)
+
+      # A write may have happened before the peer vanished, so the record is the
+      # only thing that will say so afterwards. Dropping it because nobody is
+      # listening is exactly the case the audit exists for.
+      sockets =
+        for _ <- 1..4 do
+          {:ok, socket} = GatewayLoad.stall_body(config)
+          socket
+        end
+
+      assert GatewayLoad.await_leases(owner, 4) == 4
+      Enum.each(sockets, &GatewayLoad.close_abruptly/1)
+      assert GatewayLoad.await_leases(owner, 0) == 0
+
+      # Those never reached dispatch, so they are not audited; a completed call
+      # after them proves the path still works and still records.
+      assert %{status: 200} = GatewayLoad.call(config, arguments: @payload)
+      assert [record] = GatewayLoad.audit_records(audit_dir)
+      assert record["outcome_code"] == "success"
+      assert record["write_effects_may_have_occurred"] in [true, false]
+    end
+  end
+
   describe "slots on the paths that are not the happy one" do
     @tag :tmp_dir
     test "a reset peer mid-stream returns its slot", %{tmp_dir: dir} do
@@ -212,7 +295,7 @@ defmodule PtcGatewayLoadTest do
       # so the server must end this itself rather than wait on a peer that is
       # still, by every socket-level test, present.
       :ok = GatewayLoad.half_close(socket)
-      assert {:closed, elapsed_ms} = GatewayLoad.await_close(socket, 60_000)
+      assert {:closed, elapsed_ms, _status} = GatewayLoad.await_close(socket, 60_000)
       report("half-open peer", %{"server closed after ms" => elapsed_ms})
 
       assert GatewayLoad.await_leases(owner, 0) == 0
@@ -283,11 +366,22 @@ defmodule PtcGatewayLoadTest do
       # see the starvation.
       assert response(config, "/health/ready").status == 200
 
-      # The exposure is bounded: the server ends these itself. How long that
-      # takes is the size of the exposure, so it is measured rather than assumed.
+      # The exposure is bounded: the server ends these itself. How long it waits
+      # is the size of the exposure, and the status it ends with is what a client
+      # is told to do about it.
       [first | _] = sockets
-      assert {:closed, elapsed_ms} = GatewayLoad.await_close(first, 120_000)
-      report("withheld body", %{"server closed after ms" => elapsed_ms})
+      assert {:closed, elapsed_ms, status} = GatewayLoad.await_close(first, 120_000)
+      report("withheld body", %{"server closed after ms" => elapsed_ms, "status" => status})
+
+      # A client that did not finish its request is not a server fault. Reporting
+      # -32603 tells it to retry against a server it believes is broken.
+      assert status == 408
+
+      # The window one stalled client can hold a slot for. Bandit's per-read
+      # default is 15 s, which at this bound is a 15-second outage of the whole
+      # endpoint; the gateway sets its own budget instead.
+      assert elapsed_ms < 5_000,
+             "a stalled client held an in-flight slot for #{elapsed_ms} ms"
 
       Enum.each(sockets, &GatewayLoad.close_abruptly/1)
       assert GatewayLoad.await_leases(owner, 0) == 0
@@ -348,7 +442,10 @@ defmodule PtcGatewayLoadTest do
   # ---------------------------------------------------------------------------
 
   defp start_gateway(dir, admission, fixture_opts \\ []) do
-    {path, config} = fixture(Path.join(dir, "deployment"), :read, fixture_opts)
+    {effect, fixture_opts} = Keyword.pop(fixture_opts, :effect, :read)
+    {write?, fixture_opts} = Keyword.pop(fixture_opts, :write, false)
+    {path, config} = fixture(Path.join(dir, "deployment"), effect, fixture_opts)
+    config = if write?, do: with_write_audit(config), else: config
 
     config =
       Enum.reduce(admission, config, fn {key, value}, acc ->
@@ -362,6 +459,13 @@ defmodule PtcGatewayLoadTest do
     {:ok, owner} = PtcGateway.start_link(path, env_file: env)
     on_exit(fn -> stop(owner) end)
     {owner, config}
+  end
+
+  defp start_write_gateway(dir, admission) do
+    {owner, config} =
+      start_gateway(dir, admission, effect: :write, schema: @schema, write: true)
+
+    {owner, config, Path.join(dir, "deployment/audit")}
   end
 
   defp report(title, rows) do

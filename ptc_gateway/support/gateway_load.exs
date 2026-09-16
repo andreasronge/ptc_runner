@@ -229,6 +229,32 @@ defmodule PtcGateway.TestSupport.GatewayLoad do
   @spec run_admission(pid()) :: pid()
   def run_admission(owner), do: :sys.get_state(owner).run_admission
 
+  @doc "The gateway's private-audit owner, or `nil` when no tool may write."
+  @spec audit_owner(pid()) :: pid() | nil
+  def audit_owner(owner), do: :sys.get_state(owner).audit
+
+  @doc """
+  Every durable audit record written so far, oldest file first.
+
+  Read from the files rather than from the owner: a record the owner believes it
+  wrote and a record that survives the process are different claims, and only the
+  second one is what the audit is for.
+  """
+  @spec audit_records(binary()) :: [map()]
+  def audit_records(directory) do
+    directory
+    |> File.ls!()
+    |> Enum.sort()
+    |> Enum.map(&Path.join(directory, &1))
+    # The owner keeps its exclusive lock in this directory too, and it is not a
+    # record file. Reading regular files only also keeps this honest if the
+    # layout grows something else.
+    |> Enum.filter(&match?({:ok, %File.Stat{type: :regular}}, File.stat(&1)))
+    |> Enum.flat_map(fn path ->
+      path |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
+    end)
+  end
+
   @doc """
   Starts a sampler over `RunAdmission`'s own snapshot: the authoritative
   concurrent-run reading.
@@ -356,12 +382,20 @@ defmodule PtcGateway.TestSupport.GatewayLoad do
     end
   end
 
-  @doc "Milliseconds until the server closed the connection, or `:open` at the deadline."
-  @spec await_close(:gen_tcp.socket(), pos_integer()) :: {:closed, float()} | :open
+  @doc """
+  Waits for the server to close the connection, returning how long it took and
+  what it said before closing.
+
+  The status matters as much as the timing: a server that ends a stalled request
+  is doing the right thing, and a server that ends it by calling the client's
+  incomplete request an internal error is not.
+  """
+  @spec await_close(:gen_tcp.socket(), pos_integer()) ::
+          {:closed, float(), pos_integer() | nil} | :open
   def await_close(socket, timeout_ms) do
     started_at = now()
     deadline = started_at + timeout_ms * 1_000
-    drain_until_closed(socket, started_at, deadline)
+    drain_until_closed(socket, started_at, deadline, "")
   end
 
   @doc "Closes with a reset rather than a graceful shutdown: the peer vanishes mid-stream."
@@ -633,18 +667,15 @@ defmodule PtcGateway.TestSupport.GatewayLoad do
   defp ok_or_nil({:ok, value}), do: value
   defp ok_or_nil(_), do: nil
 
-  defp drain_until_closed(socket, started_at, deadline) do
-    cond do
-      now() >= deadline ->
-        :open
-
-      true ->
-        case :gen_tcp.recv(socket, 0, @recv_timeout_ms) do
-          {:ok, _chunk} -> drain_until_closed(socket, started_at, deadline)
-          {:error, :timeout} -> drain_until_closed(socket, started_at, deadline)
-          {:error, :closed} -> {:closed, (now() - started_at) / 1_000}
-          {:error, _reason} -> {:closed, (now() - started_at) / 1_000}
-        end
+  defp drain_until_closed(socket, started_at, deadline, buffer) do
+    if now() >= deadline do
+      :open
+    else
+      case :gen_tcp.recv(socket, 0, @recv_timeout_ms) do
+        {:ok, chunk} -> drain_until_closed(socket, started_at, deadline, buffer <> chunk)
+        {:error, :timeout} -> drain_until_closed(socket, started_at, deadline, buffer)
+        {:error, _reason} -> {:closed, (now() - started_at) / 1_000, status_of(buffer)}
+      end
     end
   end
 

@@ -157,6 +157,26 @@ defmodule PtcGateway.TestSupport.GatewayFixture do
     )
   end
 
+  @doc """
+  Turns a read deployment's configuration into a write one: `allow_write` on
+  every tool and the private audit directory that a write tool then requires.
+
+  `max_file_bytes` and `max_retained_files` default high enough that rotation
+  does not interleave with whatever the caller is measuring; a rotation case
+  passes its own.
+  """
+  def with_write_audit(config, opts \\ []) do
+    audit = %{
+      "directory" => Keyword.get(opts, :directory, "audit"),
+      "max_file_bytes" => Keyword.get(opts, :max_file_bytes, 16_777_216),
+      "max_retained_files" => Keyword.get(opts, :max_retained_files, 8)
+    }
+
+    config
+    |> Map.put("private_audit", audit)
+    |> update_in(["tools"], &Enum.map(&1, fn tool -> Map.put(tool, "allow_write", true) end))
+  end
+
   @doc "Stops a gateway owner that may already have exited."
   def stop(pid) do
     if Process.alive?(pid), do: GenServer.stop(pid)
