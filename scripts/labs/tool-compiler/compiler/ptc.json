@@ -4,22 +4,22 @@
   "workflow": {
     "components": [
       {
-        "id": "lab.agent",
+        "id": "lab.compiler",
         "path": "agent.clj",
         "dependencies": [
-          "kernel"
+          "agent.core"
         ]
       },
       {
-        "library": "kernel"
+        "library": "agent.core"
       }
     ],
-    "entry": "lab.agent/run"
+    "entry": "lab.compiler/run"
   },
   "input": {
     "value": {
-      "task": "compiled",
-      "url": "http://127.0.0.1/unset"
+      "learn_url": "http://127.0.0.1/unset",
+      "holdout_url": "http://127.0.0.1/unset"
     }
   },
   "contracts": {
@@ -31,6 +31,11 @@
     }
   },
   "providers": {
+    "workflow": [
+      {
+        "name": "model"
+      }
+    ],
     "mission": [
       {
         "name": "web"
@@ -41,20 +46,18 @@
     "default": {
       "components": [
         {
-          "id": "lab.web",
-          "path": "web.clj"
+          "id": "lab.probe",
+          "path": "probe.clj"
         }
       ],
-      "data": {
-        "recipe": {
-          "author_selector": "span",
-          "container": "article",
-          "text_selector": "p"
-        }
-      },
+      "data": {},
       "providers": [
         "web"
       ]
     }
+  },
+  "limits": {
+    "run_duration_ms": 900000,
+    "workflow_timeout_ms": 600000
   }
 }

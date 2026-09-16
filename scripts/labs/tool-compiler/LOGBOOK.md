@@ -122,3 +122,56 @@ command.
   `examples/adaptive-web-parser` does.
 - Arm A's `/ledger` now ends on `run_duration_ms` 120000 rather than the turn
   limit. Both are legitimate Arm A outcomes and the harness records which.
+
+## 2026-09-16 — Arm C compiles a recipe, and it passes the gate
+
+`compiler/` is a ptc workflow. Its mission exposes two probes and nothing else:
+`read-text`, to learn what records a page contains, and `try-recipes`, to apply
+candidate selectors. It returns a recipe as data. `compile.mjs` writes that
+recipe into `compiled/ptc.json` mission data, and the compiled arm is then
+re-verified independently: the compiler's own claim is not trusted.
+
+**It worked.** The discovered recipe, verified on all three pages:
+
+```json
+{"container": "article", "text_selector": "p", "author_selector": "span"}
+```
+
+| stage | tool calls | model calls | input tokens | micro USD | correct |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Arm A, per pass over 3 pages | 61 | 59 | 196,098 | 5,527 | 0/3 |
+| Arm C, once | 101 | 11 | 52,859 | 2,615 | — |
+| Arm B, per pass over 3 pages | 12 | 0 | 0 | 0 | 3/3 |
+
+Compiling costs under half of a single passthrough pass and every pass after it
+is free of model cost, so it repays in less than one use while turning a task
+the raw tools never completed into one that always completes.
+
+The compiler found a **more general** recipe than the hand-written one
+(`article`/`p`/`span` rather than `article.entry`/`p.words`/`span.speaker`). It
+passes because the nav decoy sits outside any `article` and the filler rows sit
+outside one too. It is also more fragile than the hand-written version against
+pages that put other prose inside an article, which is an argument for the
+accept gate covering more held-out shapes rather than for trusting the model.
+
+### Batching the probe was the unlock
+
+The first attempt opened and captured a page per candidate: 35 page loads for 30
+candidates, and the run died with its `limit-exceeded` event itself dropped by
+trace retention. Replacing `try-recipe` with `try-recipes`, which applies many
+candidates to one immutable snapshot, moved the ratio to 10 page loads for 81
+candidates. That is the whole PTC argument appearing inside the compiler: one
+program, many tool calls, one page load.
+
+### Friction worth reporting
+
+- Two separate ceilings default to 120000 ms and are raised separately:
+  `limits.run_duration_ms` and `limits.workflow_timeout_ms`. Raising the first
+  and re-running only bought the second error.
+- `--inspect FILE` accepts any filename, but `ptc transcript` requires the
+  canonical `<run_ref>.ptcins` under `--inspection`, and refuses when `--traces`,
+  `--inspection` and `--private-output` are not physically separate directories.
+  Three refusals before the first useful read.
+- A run that drops trace events cannot be certified by `ptc transcript` at all,
+  and the dropped set included the one `limit-exceeded` event that explained the
+  failure. The envelope's `execution.usage` was the only surviving account.

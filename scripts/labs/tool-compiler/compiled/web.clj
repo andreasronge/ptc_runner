@@ -1,26 +1,22 @@
 (ns lab.web
-  "One compiled tool. The recipe is pinned data, so a call costs four page
-  round trips and no model turns."
+  "One generic extraction tool. The recipe is mission data, so compiling a new
+  domain means writing a data block, never generating source."
   {:visibility :prompt})
 
 (defn- value! [response]
   (if (= :ok (get response :status)) (get response :value) (fail response)))
 
-(def recipe
-  {"container" "article.entry"
-   "fields" [{"name" "text" "selector" "p.words"}
-             {"name" "author" "selector" "span.speaker"}]})
-
 (defn quotations
-  "Return every quotation on one page as {text, author} records."
+  "Return every record on one page, using the compiled recipe."
   {:signature "(url :string) -> {records [{text :string, author :string}]}" :effect :read}
   [url]
   (let [handle (get (value! (tool/web.open {"url" url})) "handle_id")
         snapshot (value! (tool/web.capture {"handle_id" handle}))
         extracted (value! (tool/web.extract
                             {"snapshot_id" (get snapshot "snapshot_id")
-                             "container" (get recipe "container")
-                             "fields" (get recipe "fields")
+                             "container" (get data/recipe "container")
+                             "fields" [{"name" "text" "selector" (get data/recipe "text_selector")}
+                                       {"name" "author" "selector" (get data/recipe "author_selector")}]
                              "limit" 20}))]
     (value! (tool/web.close {"handle_id" handle}))
     {"records" (get extracted "records")}))
