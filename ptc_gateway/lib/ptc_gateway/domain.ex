@@ -27,7 +27,16 @@ defmodule PtcGateway.Domain do
   @impl true
   def init({path, env_file}) do
     Process.flag(:trap_exit, true)
-    state = %{catalog: nil, children: [], warm: nil, listener: nil, metadata: [], policy: nil}
+
+    state = %{
+      catalog: nil,
+      children: [],
+      warm: nil,
+      listener: nil,
+      request_admission: nil,
+      metadata: [],
+      policy: nil
+    }
 
     case configure(path, env_file, state) do
       {:ok, ready} ->
@@ -51,6 +60,7 @@ defmodule PtcGateway.Domain do
       }
 
       with {:ok, tools, metadata} <- templates(config["tools"], host, catalog),
+           :ok <- static_catalog(metadata),
            {:ok, services} <- HostInstallation.runtime_services(host) do
         boot(config, tools, services, env_file, %{state | metadata: metadata})
       else
@@ -90,11 +100,12 @@ defmodule PtcGateway.Domain do
           }
 
           safe = %{
-            name: entry["name"],
-            title: entry["title"],
-            description: entry["description"],
-            effect: ServingTemplate.effect(template),
-            application_content_digest: ServingTemplate.application_content_digest(template)
+            "name" => entry["name"],
+            "title" => entry["title"],
+            "description" => entry["description"],
+            "inputSchema" => ServingTemplate.input_schema(template),
+            "outputSchema" => ServingTemplate.output_schema(template),
+            "annotations" => %{"readOnlyHint" => ServingTemplate.effect(template) == :read}
           }
 
           {:cont,
@@ -105,6 +116,36 @@ defmodule PtcGateway.Domain do
           {:halt, {:error, code}}
       end
     end)
+  end
+
+  defp static_catalog(tools) do
+    schemas = Enum.flat_map(tools, &[&1["inputSchema"], &1["outputSchema"]])
+
+    listing = %{
+      "jsonrpc" => "2.0",
+      "id" => String.duplicate(<<0>>, 256),
+      "result" => %{
+        "resultType" => "complete",
+        "tools" => tools,
+        "ttlMs" => 0,
+        "cacheScope" => "private"
+      }
+    }
+
+    if Enum.all?(schemas, &(encoded_size(&1) <= 65_536)) and
+         within_static_limit?(tools) and within_static_limit?(listing),
+       do: :ok,
+       else: {:error, :catalog_too_large}
+  end
+
+  @doc false
+  def within_static_limit?(value), do: encoded_size(value) <= 4_194_304
+
+  defp encoded_size(value) do
+    case PtcRunner.Kernel.DeterministicJSON.encode(value) do
+      {:ok, bytes} -> byte_size(bytes)
+      _ -> 4_194_305
+    end
   end
 
   defp template(entry, host, catalog) do
@@ -154,9 +195,19 @@ defmodule PtcGateway.Domain do
                max_waiting_provider_calls: admission["max_waiting_provider_calls"],
                env_file: env_file
              ) do
-          {:ok, warm} -> listen(config, %{child(state, warm) | warm: warm})
+          {:ok, warm} -> start_request_admission(config, %{child(state, warm) | warm: warm})
           {:error, code} -> {:error, PtcGateway.StartupError.normalize(code), state}
         end
+
+      _ ->
+        {:error, :run_admission_unavailable, state}
+    end
+  end
+
+  defp start_request_admission(config, state) do
+    case PtcGateway.RequestAdmission.start_link(config["admission"]["max_inflight_requests"]) do
+      {:ok, admission} ->
+        listen(config, %{child(state, admission) | request_admission: admission})
 
       _ ->
         {:error, :run_admission_unavailable, state}
@@ -168,7 +219,12 @@ defmodule PtcGateway.Domain do
     ip = if listen["address"] == "::1", do: {0, 0, 0, 0, 0, 0, 0, 1}, else: {127, 0, 0, 1}
 
     case Bandit.start_link(
-           plug: {PtcGateway.Health, listen: listen, warm: state.warm},
+           plug:
+             {PtcGateway.Router,
+              listen: listen,
+              warm: state.warm,
+              tools: state.metadata,
+              request_admission: state.request_admission},
            ip: ip,
            port: listen["port"],
            startup_log: false,
@@ -176,6 +232,11 @@ defmodule PtcGateway.Domain do
              log_protocol_errors: false,
              log_exceptions_with_status_codes: [],
              log_client_closures: false
+           ],
+           http_1_options: [
+             max_request_line_length: 8_192,
+             max_header_length: 8_192,
+             max_header_count: 64
            ],
            http_2_options: [enabled: false]
          ) do

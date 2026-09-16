@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/conformance": "0.2.0-alpha.11"
+  }
+}

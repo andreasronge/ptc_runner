@@ -1,10 +1,9 @@
 # Gateway configuration
 
-The loopback gateway loads one fixed set of applications and exposes health
-checks.
+The loopback gateway exposes health checks, authenticated MCP discovery, and a
+fixed tool catalog.
 
-MCP discovery, request-header authentication, execution, and standalone release
-integration are separate delivery steps.
+Tool execution and standalone release integration are separate delivery steps.
 
 Run the source command from `ptc_gateway/`:
 
@@ -33,8 +32,8 @@ There is no implicit configuration search or implicit environment-file search.
 | Origins | `listen.allowed_origins` defaults to `[]`; at most 128 unique HTTP(S) serialized origins, each at most 2048 bytes. No userinfo, path, query, fragment, whitespace, escapes, uppercase host, or explicit default port. |
 | Authority | Every request requires exactly the configured literal listener authority, including its port except port 80; IPv6 uses brackets. No proxy headers are trusted. |
 | Bearer | `authentication.bearer.binding` names a host credential bound to an environment variable or a file. A literal host credential is refused, so neither document carries the bearer value. Capture enforces 32–4096 ASCII bytes in HTTP bearer-token grammar. |
-| Admission | `max_inflight_requests`, `max_concurrent_runs`, and `max_active_provider_calls` each require 1–65535; `max_waiting_provider_calls` requires 0–65535. The request limit is supplied to the future MCP transport. |
-| Tools | 1–128 entries, unique names matching `[a-zA-Z0-9_.-]{1,128}`, validated in name order. Titles require 1–256 bytes; descriptions 1–4096. |
+| Admission | `max_inflight_requests`, `max_concurrent_runs`, and `max_active_provider_calls` each require 1–65535; `max_waiting_provider_calls` requires 0–65535. Each authenticated request reserves one in-flight slot before body reading and holds it through response completion. |
+| Tools | 1–128 entries, unique names matching `[a-zA-Z0-9_.-]{1,128}`, validated in UTF-8 name-byte order. Titles require 1–256 bytes; descriptions 1–4096. Each normalized schema is at most 64 KiB and the encoded static catalog at most 4 MiB. |
 | Application | `application.manifest` names one manifest file, at most 1024 bytes. The serving constructor requires object input/output contracts and a validated read/write effect. |
 | Event policy | `events.policy` must be `normal`, which is what an omitted `events` section or field already means. A `private` policy refuses the constructor ahead of the content-digest and write-permission checks and is reported as `template_invalid`. A served run opens no trace destination and publishes no artifact, so the private destination that policy requires does not exist; neither holding the endpoint nor `allow_write` authorizes one. To serve such an application, set its manifest policy to `normal` and record the new content pin. |
 | Write permission | `allow_write` defaults to false. A compiled write effect requires true; permission never changes the compiled effect. |
@@ -116,6 +115,68 @@ run admission and provider-call admission. Saturation stays ready; required
 runtime loss or fencing makes readiness permanently false while liveness
 continues. Invalid static startup configuration prevents listener binding.
 
+## MCP discovery and listing
+
+`POST /mcp` accepts only MCP revision `2026-07-28` methods
+`server/discover` and `tools/list`. It is stateless: `Mcp-Session-Id` and
+`Last-Event-ID` are ignored and no session header is returned. Other HTTP
+methods return 405, and unsupported MCP methods return HTTP 404 with JSON-RPC
+`-32601`.
+
+Requests require the exact listener authority, an allowed or absent `Origin`,
+one bearer authorization, `Content-Type: application/json` (optionally with a
+UTF-8 charset), and an `Accept` value that admits both `application/json` and
+`text/event-stream` at nonzero quality. Critical headers may occur only once.
+Authorization permits outer HTTP OWS but requires one or more SP bytes between
+the case-insensitive `Bearer` scheme and token. Authentication precedes content
+and body parsing. Limits are an 8 KiB HTTP/1 request line, 64 headers, 32 KiB
+of decoded header-name plus header-value bytes, 8 KiB per complete HTTP/1 header field line, 2 MiB body,
+64 KiB decoded `_meta`, JSON depth 64 and 100,000 nodes. String IDs contain
+1–256 UTF-8 bytes; integer IDs are in the interoperable safe range.
+
+Every request has object `params._meta` fields
+`io.modelcontextprotocol/protocolVersion` and
+`io.modelcontextprotocol/clientCapabilities`, with optional schema-shaped
+`io.modelcontextprotocol/clientInfo`. `MCP-Protocol-Version` and `Mcp-Method`
+must match the body. `Mcp-Name` is forbidden for these methods. Responses are
+deterministic JSON, at most 4 MiB, and use `Cache-Control: no-store`.
+Missing or malformed required metadata returns HTTP 400 JSON-RPC `-32602`.
+Admission saturation returns HTTP 429 `-31999`; an unavailable or fenced
+runtime returns HTTP 503 `-31998`.
+
+Discovery advertises the fixed revision and static tool capability. Listing
+returns every configured tool in UTF-8 name-byte order with its configured
+name, title and description, exact normalized input/output schemas, and only
+the compiler-derived `annotations.readOnlyHint`. A cursor, unknown parameter,
+or malformed method parameters returns HTTP 200 JSON-RPC `-32602`.
+
+The official suite is pinned in
+`ptc_gateway/test/support/mcp_conformance/package.json` at
+`@modelcontextprotocol/conformance@0.2.0-alpha.11`. Applicable server scenario
+IDs are `server-stateless`, `tools-list`, `dns-rebinding-protection`, and `caching`.
+The remaining listed server scenario IDs are
+excluded: `tools-call-*` and `http-custom-header-server-validation` require
+tool execution; `completion-complete`, `resources-*`, `prompts-*`, and
+`sep-2164-resource-not-found` require unsupported feature families;
+`server-sse-multiple-streams` requires GET/session streams;
+`json-schema-2020-12` exercises a tool call; and `input-required-result-*`
+requires server requests and multi-round tool execution. Neither this milestone
+nor the parent claims the complete server suite.
+
+The checked-in expected-failures baseline narrows mixed scenarios to this
+milestone. It excludes server-stateless checks requiring tool calls, response
+streams, logging tools, or optional server identity; caching checks for prompts
+and resources. The mixed `http-header-validation` scenario is deferred in full
+because its check IDs are reused across list and tool-call cases. The applicable
+discovery, listing, DNS, and cache checks still execute through the
+authenticated conformance proxy in the gateway CI gate. Gateway boundary
+tests independently enforce the applicable header scenario cases (missing,
+mismatched, case-insensitive, and case-mismatched method headers), every
+critical-header duplicate, and the exact parser and application header
+ceilings. Integration boundaries also exercise exact and excessive body,
+metadata, JSON depth/node, ID, normalized-schema, static-catalog, and encoded
+response sizes.
+
 ## Startup failures
 
 Only the first error is returned. Precedence is document read/JSON, structural
@@ -130,7 +191,7 @@ credentials, causes or stack traces belong in startup diagnostics.
 
 The finite catalog is `config_unavailable`, `duplicate_json_key`,
 `config_invalid`, `origin_invalid`, `tool_name_duplicate`, `audit_invalid`,
-`host_invalid`, `template_invalid`, `application_content_digest_mismatch`,
+`host_invalid`, `template_invalid`, `catalog_too_large`, `application_content_digest_mismatch`,
 `write_forbidden`, `audit_unavailable`, `run_admission_unavailable`,
 `credential_unavailable`, `installation_pin_mismatch`, `provider_pin_mismatch`,
 `provider_pin_unavailable`, `provider_admission_unavailable`,
