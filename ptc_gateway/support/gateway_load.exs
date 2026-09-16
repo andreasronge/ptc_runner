@@ -300,6 +300,13 @@ defmodule PtcGateway.TestSupport.GatewayLoad do
   Read from the files rather than from the owner: a record the owner believes it
   wrote and a record that survives the process are different claims, and only the
   second one is what the audit is for.
+
+  Call it only once the calls it is meant to cover have released their run
+  capacity — `await_run_capacity/3`, or a storm that has fully returned. A write
+  is durable *before* capacity is released, so that ordering is what makes a
+  single read sufficient; reading while an append is in flight can see a partial
+  line. A malformed line raises rather than being skipped, because a record that
+  quietly disappears from a durability count is the failure this is checking for.
   """
   @spec audit_records(binary()) :: [map()]
   def audit_records(directory) do
@@ -371,6 +378,30 @@ defmodule PtcGateway.TestSupport.GatewayLoad do
       {:peak, ^sampler, peak, samples} -> %{peak: peak, samples: samples}
     after
       5_000 -> %{peak: 0, samples: 0}
+    end
+  end
+
+  @doc """
+  How much run capacity is held right now, by the owner's own accounting.
+
+  The audit record of a dispatched write is durable before its capacity is
+  released, so capacity back at zero is the synchronization point for reading
+  audit files — and asserting on it is asserting that documented ordering.
+  """
+  @spec run_capacity_in_use(pid()) :: non_neg_integer()
+  def run_capacity_in_use(owner), do: owner |> run_admission() |> in_use()
+
+  @doc "Polls until run capacity reaches `expected`, returning the last reading if it never does."
+  @spec await_run_capacity(pid(), non_neg_integer(), pos_integer()) :: non_neg_integer()
+  def await_run_capacity(owner, expected, timeout_ms \\ 30_000) do
+    admission = run_admission(owner)
+    poll_capacity(admission, expected, now() + timeout_ms * 1_000)
+  end
+
+  defp poll_capacity(admission, expected, deadline) do
+    case in_use(admission) do
+      ^expected -> expected
+      other -> if now() >= deadline, do: other, else: poll_capacity(admission, expected, deadline)
     end
   end
 

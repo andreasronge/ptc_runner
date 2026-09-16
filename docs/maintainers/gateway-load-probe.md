@@ -22,10 +22,15 @@ a time; everything here needs requests to overlap.
 - **Slot return.** Every path that is not the happy one: saturation, a reset
   peer, a half-open peer, a reused connection, and a client that never finishes
   its request.
-- **Residue.** A fitted byte slope over four batches of calls, because a
-  per-call residue small enough to pass a single-cycle assertion is what
-  accumulates over a host's lifetime. `PTC_GATEWAY_SOAK_CYCLES` sets the batch
-  size.
+- **Residue.** Tiered, because the metrics are not equally quiet. The process
+  count returning exactly to its starting value is the gate that matters and has
+  no noise at all. `:binary` and `:ets` carry a fitted byte slope against a
+  512-byte threshold; their spread was within ±60 bytes per call over thirteen
+  runs. `:processes` and `:total` are reported and gated on nothing: their
+  run-to-run spread on this workload is about 7,600 bytes per call, so any
+  threshold stable enough not to flake would be far too coarse to catch a real
+  leak. A gate that has to sit above its own noise floor is not a gate.
+  `PTC_GATEWAY_SOAK_CYCLES` sets the batch size.
 - **Write durability.** Every call that returned 200 has a matching record on
   disk, with unique call IDs. Read back from the audit files rather than from
   the owner: a record the owner believes it wrote and a record that survives the

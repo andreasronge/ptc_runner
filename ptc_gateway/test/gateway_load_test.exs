@@ -207,6 +207,10 @@ defmodule PtcGatewayLoadTest do
 
       statuses = GatewayLoad.by_status(results)
       admitted = Map.get(statuses, 200, 0)
+
+      # Every call has returned and every slot is back, so no append is in
+      # flight and one read sees the complete set.
+      assert GatewayLoad.await_run_capacity(owner, 0) == 0
       records = GatewayLoad.audit_records(audit_dir)
 
       report("write burst of #{@burst}, run bound #{runs}", %{
@@ -267,8 +271,13 @@ defmodule PtcGatewayLoadTest do
       # enough that the disconnect lands between the SSE commit and publication.
       assert :accepted = GatewayLoad.disconnect_mid_run(config, timeout_ms: 60_000)
 
-      records = await_records(audit_dir, 1)
-      assert [record] = records
+      # The record is durable before run capacity is released, so waiting for
+      # capacity is both the synchronization and an assertion of that ordering.
+      # Polling the file instead would race the append and could read a partial
+      # line, and seeing bytes would not have proved the sync returned.
+      assert GatewayLoad.await_run_capacity(owner, 0) == 0
+
+      assert [record] = GatewayLoad.audit_records(audit_dir)
       assert record["disconnected"] == true
       assert record["tool_name"] == "a"
       assert record["cleanup_status"] == "complete"
@@ -276,7 +285,8 @@ defmodule PtcGatewayLoadTest do
       # The gateway survives it: the slot came back and the next call is served.
       assert GatewayLoad.await_leases(owner, 0) == 0
       assert %{status: 200} = GatewayLoad.call(config, timeout_ms: 60_000)
-      assert length(await_records(audit_dir, 2)) == 2
+      assert GatewayLoad.await_run_capacity(owner, 0) == 0
+      assert length(GatewayLoad.audit_records(audit_dir)) == 2
     end
   end
 
@@ -463,16 +473,27 @@ defmodule PtcGatewayLoadTest do
         "processes" => "#{report.processes.before} -> #{report.processes.after}"
       })
 
-      # A call creates a Bandit connection process, a serving worker, a request
-      # monitor and a run; all of them are transient. The threshold is the
-      # measured drift envelope between batch endpoints on this workload, set
-      # well below the cost of retaining any one of those per call — a bare
-      # process is already ~2.7 KB.
-      for metric <- [:total, :processes, :binary, :ets] do
+      # Exact, and the gate that matters. A call creates a Bandit connection
+      # process, a serving worker, a request monitor and a run; all are
+      # transient, so a leaked one shows here with no noise at all. Across every
+      # run measured this returned to its starting value exactly.
+      assert report.processes.after == report.processes.before,
+             "process count moved #{report.processes.before} -> #{report.processes.after}"
+
+      # Thresholded, on the two metrics quiet enough to carry a threshold: their
+      # fitted slope stayed within +-60 bytes per call across thirteen runs, so
+      # 512 leaves room for drift while still catching a retained binary.
+      for metric <- [:binary, :ets] do
         assert report.slopes[metric] < 512,
                "#{metric} grew #{Float.round(report.slopes[metric], 1)} bytes per call"
       end
 
+      # `:processes` and `:total` are reported and gated on nothing. Their
+      # run-to-run spread on this workload is about 7,600 bytes per call --
+      # VM-wide process memory moves with whatever else the node is doing -- so
+      # any threshold stable enough not to flake would be far too coarse to
+      # catch a real leak. The exact process-count assertion above is what
+      # covers that failure instead.
       assert GatewayLoad.await_leases(owner, 0) == 0
       assert response(config, "/health/ready").status == 200
     end
@@ -504,24 +525,6 @@ defmodule PtcGatewayLoadTest do
     opts = Keyword.merge([effect: :write, schema: @schema, write: true], fixture_opts)
     {owner, config} = start_gateway(dir, admission, opts)
     {owner, config, Path.join(dir, "deployment/audit")}
-  end
-
-  # The audit append happens after the client is gone, so a record is expected
-  # rather than already present. Bounded by wall clock for the same reason
-  # `await_leases/3` is: a retry count is a budget in machine speed.
-  defp await_records(directory, expected, timeout_ms \\ 10_000) do
-    deadline = System.monotonic_time(:millisecond) + timeout_ms
-    await_records(directory, expected, deadline, [])
-  end
-
-  defp await_records(directory, expected, deadline, _last) do
-    records = GatewayLoad.audit_records(directory)
-
-    cond do
-      length(records) >= expected -> records
-      System.monotonic_time(:millisecond) >= deadline -> records
-      true -> await_records(directory, expected, deadline, records)
-    end
   end
 
   defp report(title, rows) do
