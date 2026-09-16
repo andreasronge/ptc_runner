@@ -38,6 +38,9 @@ stop_viewer_process() {
 }
 
 cleanup() {
+  if [ -n "${gateway_cleanup_release:-}" ]; then
+    touch "$gateway_cleanup_release"
+  fi
   if [ -n "$gateway_pid" ]; then
     if ! kill -0 "$gateway_pid" 2> /dev/null; then
       cat "$release_tmp_dir/gateway.stderr" >&2
@@ -660,6 +663,8 @@ with socket.socket() as sock:
 PYTHON
 )"
 gateway_provider_dispatches="$release_tmp_dir/provider-dispatches"
+gateway_cleanup_started="$release_tmp_dir/cleanup-started"
+gateway_cleanup_release="$release_tmp_dir/cleanup-release"
 cat > "$release_tmp_dir/mcp-provider.py" <<'PYTHON'
 import json
 import sys
@@ -806,7 +811,14 @@ cat > "$gateway_root/gateway.json" <<EOF
 }
 EOF
 
-"$command_bin" gateway "$gateway_root/gateway.json" \
+gateway_release_name="ptc_gateway_probe_$$"
+gateway_release_node="$gateway_release_name@$(hostname -s)"
+gateway_release_cookie="ptc_gateway_release_probe_$$"
+export PTC_GATEWAY_PROBE_DISPATCHES="$gateway_provider_dispatches"
+export PTC_GATEWAY_PROBE_CLEANUP_STARTED="$gateway_cleanup_started"
+export PTC_GATEWAY_PROBE_CLEANUP_RELEASE="$gateway_cleanup_release"
+ERL_AFLAGS="-sname $gateway_release_name -setcookie $gateway_release_cookie" \
+  "$command_bin" gateway "$gateway_root/gateway.json" \
   --env-file "$gateway_root/credentials.env" \
   > "$release_tmp_dir/gateway.stdout" \
   2> "$release_tmp_dir/gateway.stderr" &
@@ -870,10 +882,48 @@ PYTHON
 # through the SDK's negotiated 2026-07-28 transport.
 npm --prefix "$project_root/ptc_gateway/test/support/mcp_conformance" \
   ci --ignore-scripts --silent
+
+# Suspend the surviving audit owner after upstream dispatch. This creates a
+# deterministic post-disconnect cleanup barrier inside the assembled release:
+# the request worker can cancel, but its durable audit and run reservation
+# cannot finish until the SDK probe has observed overload and releases it.
+cat > "$release_tmp_dir/hold-audit.exs" <<'ELIXIR'
+spawn(fn ->
+  dispatches = System.fetch_env!("PTC_GATEWAY_PROBE_DISPATCHES")
+  started = System.fetch_env!("PTC_GATEWAY_PROBE_CLEANUP_STARTED")
+  release = System.fetch_env!("PTC_GATEWAY_PROBE_CLEANUP_RELEASE")
+  wait = fn wait, ready -> if ready.(), do: :ok, else: (Process.sleep(25); wait.(wait, ready)) end
+  wait.(wait, fn ->
+    case File.read(dispatches) do
+      {:ok, bytes} -> bytes != ""
+      _ -> false
+    end
+  end)
+  audit = Enum.find(Process.list(), fn pid ->
+    try do
+      :proc_lib.translate_initial_call(pid) == {PtcGateway.PrivateAudit, :init, 1}
+    catch
+      :exit, _ -> false
+    end
+  end)
+  true = is_pid(audit)
+  :ok = :sys.suspend(audit)
+  :ok = File.write(started, "held\n")
+  wait.(wait, fn -> File.exists?(release) end)
+  :ok = :sys.resume(audit)
+end)
+ELIXIR
+ERL_AFLAGS="-sname ptc_gateway_control_$$ -setcookie $gateway_release_cookie" \
+  "$release_root/bin/ptc_runner" eval '
+    [node_name, path] = System.argv()
+    node = String.to_atom(node_name)
+    true = Node.connect(node)
+    {_result, _binding} = :erpc.call(node, Code, :eval_file, [path])
+  ' "$gateway_release_node" "$release_tmp_dir/hold-audit.exs"
 node "$project_root/ptc_gateway/test/support/mcp_conformance/client_journey.mjs" \
   "http://127.0.0.1:$gateway_port/mcp" \
   release-gateway-token-0123456789abcdef provider-write \
-  "$gateway_provider_dispatches" \
+  "$gateway_provider_dispatches" "$gateway_cleanup_started" "$gateway_cleanup_release" \
   > "$release_tmp_dir/gateway-client.json"
 python3 - "$release_tmp_dir/gateway-client.json" <<'PYTHON'
 import json
@@ -1018,6 +1068,7 @@ while b": accepted" not in accepted and len(accepted) < 16384:
     accepted += client.recv(4096)
 if b": accepted" not in accepted:
     raise SystemExit("shutdown provider call was not active")
+client.settimeout(None)
 while client.recv(4096):
     pass
 PYTHON

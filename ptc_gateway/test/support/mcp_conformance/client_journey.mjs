@@ -2,9 +2,9 @@ import {
   Client,
   StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 
-const [url, token, disconnectTool, dispatchPath] = process.argv.slice(2);
+const [url, token, disconnectTool, dispatchPath, cleanupStartedPath, cleanupReleasePath] = process.argv.slice(2);
 const client = new Client(
   { name: "ptc-gateway-interoperability", version: "1.0.0" },
   { versionNegotiation: { mode: { pin: "2026-07-28" } } },
@@ -38,6 +38,25 @@ try {
       await new Promise(resolve => setTimeout(resolve, 50));
     }
     controller.abort();
+    if (cleanupStartedPath) {
+      const cleanupDeadline = Date.now() + 10000;
+      while (!(await readFile(cleanupStartedPath).then(() => true).catch(() => false))) {
+        if (Date.now() >= cleanupDeadline) throw new Error("disconnected call did not reach its held audit cleanup");
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      let overloaded = false;
+      let overloadDetail;
+      try {
+        const result = await client.callTool({ name: "a", arguments: { query: "blocked" } });
+        overloadDetail = result;
+        overloaded = result.isError === true;
+      } catch (error) {
+        overloadDetail = String(error);
+        overloaded = error?.code === -31999 || String(error).includes("Server busy");
+      }
+      if (!overloaded) throw new Error(`admission was released while disconnected-call cleanup was held: ${JSON.stringify(overloadDetail)}`);
+      await writeFile(cleanupReleasePath, "release\n");
+    }
     try {
       const cancelled = await pending;
       disconnectCancellation = cancelled.isError === true;
