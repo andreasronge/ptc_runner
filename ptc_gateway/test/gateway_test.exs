@@ -3,6 +3,8 @@ defmodule PtcGatewayTest do
   alias PtcRunner.Kernel.{GatewayConfig, Limits, ServingTemplate, WarmProviderRuntime}
 
   @token String.duplicate("a", 32)
+  @authority_uid 4_294_967_294
+  @foreign_uid 65_534
   setup do
     Process.flag(:trap_exit, true)
     :ok
@@ -170,6 +172,52 @@ defmodule PtcGatewayTest do
 
     assert {:error, :audit_unavailable} =
              PtcGateway.PrivateAudit.start_link(%{config | "directory" => Path.join(dir, "link")})
+  end
+
+  test "private audit resolves safe ancestors and creates missing nested directories" do
+    root = Path.join(System.tmp_dir!(), "ptc-gateway-audit-#{System.unique_integer([:positive])}")
+    target = Path.join(root, "target")
+    linked = Path.join(root, "linked")
+    directory = Path.join([linked, "missing", "audit"])
+    on_exit(fn -> File.rm_rf!(root) end)
+
+    File.mkdir_p!(target)
+    File.chmod!(target, 0o700)
+    File.ln_s!(target, linked)
+
+    assert {:ok, owner} = PtcGateway.PrivateAudit.start_link(audit_config(directory))
+    GenServer.stop(owner)
+    assert Bitwise.band(File.stat!(Path.join(target, "missing")).mode, 0o777) == 0o700
+    assert Bitwise.band(File.stat!(directory).mode, 0o777) == 0o700
+  end
+
+  @tag :tmp_dir
+  test "private audit delegates unsafe ancestor ownership and modes", %{tmp_dir: dir} do
+    replaceable = Path.join(dir, "replaceable")
+    File.mkdir!(replaceable)
+    File.chmod!(replaceable, 0o777)
+
+    assert {:error, :audit_unavailable} =
+             PtcGateway.PrivateAudit.start_link(audit_config(Path.join(replaceable, "audit")))
+
+    bin = Path.join(dir, "authority-bin")
+    id = Path.join(bin, "id")
+    foreign = Path.join(dir, "foreign")
+    original_path = System.fetch_env!("PATH")
+    File.mkdir!(bin)
+    File.mkdir!(foreign)
+
+    if File.stat!(foreign, time: :posix).uid == 0,
+      do: :ok = File.chown(foreign, @foreign_uid)
+
+    File.ln_s!(System.find_executable("mkdir"), Path.join(bin, "mkdir"))
+    File.write!(id, "#!/bin/sh\nprintf '#{@authority_uid}\\n'\n")
+    File.chmod!(id, 0o700)
+    System.put_env("PATH", bin)
+    on_exit(fn -> System.put_env("PATH", original_path) end)
+
+    assert {:error, :audit_unavailable} =
+             PtcGateway.PrivateAudit.start_link(audit_config(Path.join(foreign, "audit")))
   end
 
   @tag :tmp_dir
@@ -1288,6 +1336,14 @@ defmodule PtcGatewayTest do
     path = Path.join(dir, "gateway.json")
     File.write!(path, Jason.encode!(config))
     {path, config}
+  end
+
+  defp audit_config(directory) do
+    %{
+      "directory" => directory,
+      "max_file_bytes" => 1024,
+      "max_retained_files" => 2
+    }
   end
 
   defp audit_record(index) do

@@ -2,12 +2,13 @@ defmodule PtcGateway.PrivateAudit do
   @moduledoc """
   Opaque owner for a private bounded append-only audit spool.
 
-  Startup rejects links throughout the hierarchy, validates ownership, creates
-  missing directories owner-only, and durably opens a new 0600 file before
-  pruning oldest closed files down to the retention bound. A startup that fails
-  after opening its replacement removes it. A create/append/sync probe finishes before
-  startup returns. The probe is removed; active files contain no invented audit
-  record. Files use increasing numeric names and are never truncated.
+  Startup resolves and validates the directory ancestry, rejects a linked audit
+  directory, creates missing directories owner-only, and durably opens a new
+  0600 file before pruning oldest closed files down to the retention bound. A
+  startup that fails after opening its replacement removes it. A
+  create/append/sync probe finishes before startup returns. The probe is
+  removed; active files contain no invented audit record. Files use increasing
+  numeric names and are never truncated.
   The directory is exclusively locked for this owner's lifetime. Per-call
   records, fencing and shutdown policy belong to the execution integration.
   """
@@ -59,7 +60,7 @@ defmodule PtcGateway.PrivateAudit do
 
   defp hierarchy(path) do
     with :ok <- hierarchy(Path.dirname(path)) do
-      case File.lstat(path) do
+      case File.stat(path) do
         {:ok, %{type: :directory}} -> :ok
         {:error, :enoent} -> PrivateDirectory.create(path)
         _ -> {:error, :audit_unavailable}

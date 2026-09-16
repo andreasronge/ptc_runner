@@ -77,11 +77,14 @@ manifest selects no provider.
 
 ## Private audit directory
 
-Startup rejects symbolic links anywhere in the audit hierarchy and unsafe
-ownership or writable ancestry. It creates missing directories as 0700 and
-files as 0600 before writing any content. The private directory is exclusively
-locked for the owner's lifetime. After an unclean owner death, the retained
-lock requires you to stop the old process before removing it.
+Startup resolves the audit ancestry, and every resolved ancestor must be a
+directory owned by you or root and not group- or world-writable unless
+sticky. This makes `/tmp` and the default `TMPDIR` usable locations. The audit
+directory itself must not be a symbolic link. Startup creates missing
+directories as 0700 and files as 0600 before writing any content. The private
+directory is exclusively locked for the owner's lifetime. After an unclean
+owner death, the retained lock requires you to stop the old process before
+removing it.
 
 Each startup durably opens a new numbered file and separately appends and
 flushes a temporary probe before readiness. The probe is then removed. Only
