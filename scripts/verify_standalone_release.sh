@@ -652,7 +652,14 @@ with socket.socket() as sock:
 PYTHON
 )"
 
-gateway_provider_port=11434
+gateway_provider_port="$(python3 - <<'PYTHON'
+import socket
+with socket.socket() as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PYTHON
+)"
+gateway_provider_dispatches="$release_tmp_dir/provider-dispatches"
 cat > "$release_tmp_dir/mcp-provider.py" <<'PYTHON'
 import json
 import sys
@@ -667,6 +674,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         self.rfile.read(int(self.headers["content-length"]))
+        with open(sys.argv[2], "a", encoding="utf-8") as dispatches:
+            dispatches.write("dispatch\n")
+            dispatches.flush()
         time.sleep(30)
         response = json.dumps({"error": "probe should have been cancelled"}).encode()
         self.send_response(200)
@@ -678,11 +688,21 @@ class Handler(BaseHTTPRequestHandler):
         except BrokenPipeError:
             pass
 
-ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).serve_forever()
+server = ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), Handler)
+with open(sys.argv[3], "w", encoding="utf-8"):
+    pass
+server.serve_forever()
 PYTHON
 python3 "$release_tmp_dir/mcp-provider.py" "$gateway_provider_port" \
+  "$gateway_provider_dispatches" "$release_tmp_dir/provider-ready" \
   > "$release_tmp_dir/provider.stdout" 2> "$release_tmp_dir/provider.stderr" &
 gateway_provider_pid=$!
+provider_ready_deadline=$((SECONDS + 10))
+while [ ! -e "$release_tmp_dir/provider-ready" ] && [ "$SECONDS" -lt "$provider_ready_deadline" ]; do
+  kill -0 "$gateway_provider_pid" 2> /dev/null || break
+  sleep 0.05
+done
+test -e "$release_tmp_dir/provider-ready"
 
 cat > "$gateway_root/host.json" <<EOF
 {
@@ -694,7 +714,7 @@ cat > "$gateway_root/host.json" <<EOF
     "model": {
       "source": "llm",
       "installation_revision": "release-provider-v1",
-      "model": "ollama:release-provider",
+      "model": "openai-compat:http://127.0.0.1:$gateway_provider_port/v1|release-provider",
       "credential": "provider",
       "structured_output_mode": "unsupported",
       "usage_guarantees": {"tokens": false, "cost_currency": null},
@@ -852,7 +872,8 @@ npm --prefix "$project_root/ptc_gateway/test/support/mcp_conformance" \
   ci --ignore-scripts --silent
 node "$project_root/ptc_gateway/test/support/mcp_conformance/client_journey.mjs" \
   "http://127.0.0.1:$gateway_port/mcp" \
-  release-gateway-token-0123456789abcdef \
+  release-gateway-token-0123456789abcdef provider-write \
+  "$gateway_provider_dispatches" \
   > "$release_tmp_dir/gateway-client.json"
 python3 - "$release_tmp_dir/gateway-client.json" <<'PYTHON'
 import json
@@ -865,12 +886,22 @@ if journey["read"].get("isError") or journey["write"].get("isError"):
     raise SystemExit("packaged MCP client read/write journey failed")
 if not journey["contractFailure"].get("isError"):
     raise SystemExit("packaged MCP client contract failure was not a tool error")
+if journey["disconnectCancellation"] is not True:
+    raise SystemExit("pinned MCP client disconnect did not cancel its active call")
 PYTHON
+
+client_audit_deadline=$((SECONDS + 15))
+while [ "$(grep -h '"tool_name":"provider-write"' "$gateway_audit"/*.jsonl 2>/dev/null | wc -l)" -lt 1 ] \
+  && [ "$SECONDS" -lt "$client_audit_deadline" ]; do
+  sleep 0.1
+done
+test "$(grep -h '"tool_name":"provider-write"' "$gateway_audit"/*.jsonl | wc -l)" -eq 1
+test "$(wc -l < "$gateway_provider_dispatches")" -eq 1
 
 # Hold a real upstream MCP provider call in the assembled release, prove the
 # atomic run slot remains occupied, then disconnect the client and wait for the
 # durable write audit before continuing.
-python3 - "$gateway_port" "$gateway_audit" <<'PYTHON'
+python3 - "$gateway_port" "$gateway_audit" "$gateway_provider_dispatches" <<'PYTHON'
 import glob
 import http.client
 import json
@@ -880,6 +911,7 @@ import time
 
 port = int(sys.argv[1])
 audit_dir = sys.argv[2]
+dispatch_path = sys.argv[3]
 body = json.dumps({
     "jsonrpc": "2.0", "id": 91, "method": "tools/call",
     "params": {
@@ -908,6 +940,15 @@ while b": accepted" not in accepted and len(accepted) < 16384:
 if b"HTTP/1.1 200" not in accepted or b": accepted" not in accepted:
     raise SystemExit(f"provider call was not committed before dispatch: {accepted!r}")
 
+deadline = time.monotonic() + 10
+while time.monotonic() < deadline:
+    with open(dispatch_path, encoding="utf-8") as stream:
+        if sum(1 for _ in stream) >= 2:
+            break
+    time.sleep(0.05)
+else:
+    raise SystemExit("packaged provider call never reached upstream dispatch")
+
 busy = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
 busy.request("POST", "/mcp", body=body, headers={
     "Host": f"127.0.0.1:{port}",
@@ -930,7 +971,8 @@ while time.monotonic() < deadline:
     for path in glob.glob(audit_dir + "/*.jsonl"):
         with open(path, encoding="utf-8") as stream:
             records.extend(json.loads(line) for line in stream if line.strip())
-    if any(r["tool_name"] == "provider-write" and r["disconnected"] for r in records):
+    disconnected = [r for r in records if r["tool_name"] == "provider-write" and r["disconnected"]]
+    if len(disconnected) >= 2:
         break
     time.sleep(0.1)
 else:
@@ -942,14 +984,14 @@ grep -q '"tool_name":"write"' "$gateway_audit"/*.jsonl
 # Start another held provider call, then terminate the packaged gateway while
 # it is active. The gateway must drain, cancel, audit, clean provider/admission
 # owners, and preserve the resulting clean exit status.
-shutdown_ready="$release_tmp_dir/gateway-shutdown-ready"
-python3 - "$gateway_port" "$shutdown_ready" <<'PYTHON' &
+shutdown_audit_before="$(grep -h '"tool_name":"provider-write"' "$gateway_audit"/*.jsonl | wc -l)"
+shutdown_dispatch_before="$(wc -l < "$gateway_provider_dispatches")"
+python3 - "$gateway_port" <<'PYTHON' &
 import json
 import socket
 import sys
 
 port = int(sys.argv[1])
-ready = sys.argv[2]
 body = json.dumps({
     "jsonrpc": "2.0", "id": 92, "method": "tools/call",
     "params": {
@@ -976,17 +1018,18 @@ while b": accepted" not in accepted and len(accepted) < 16384:
     accepted += client.recv(4096)
 if b": accepted" not in accepted:
     raise SystemExit("shutdown provider call was not active")
-open(ready, "w", encoding="utf-8").close()
 while client.recv(4096):
     pass
 PYTHON
 shutdown_client_pid=$!
 shutdown_deadline=$((SECONDS + 15))
-while [ ! -e "$shutdown_ready" ] && [ "$SECONDS" -lt "$shutdown_deadline" ]; do
+while [ "$(wc -l < "$gateway_provider_dispatches")" -le "$shutdown_dispatch_before" ] \
+  && [ "$SECONDS" -lt "$shutdown_deadline" ]; do
   kill -0 "$shutdown_client_pid" 2> /dev/null || break
   sleep 0.1
 done
-test -e "$shutdown_ready"
+test "$(wc -l < "$gateway_provider_dispatches")" -gt "$shutdown_dispatch_before"
+shutdown_started=$SECONDS
 kill -TERM "$gateway_pid"
 set +e
 wait "$gateway_pid"
@@ -1001,7 +1044,9 @@ if [ "$gateway_status" -ne 0 ]; then
   exit 1
 fi
 test "$shutdown_client_status" -eq 0
-grep -q '"tool_name":"provider-write"' "$gateway_audit"/*.jsonl
+test $((SECONDS - shutdown_started)) -ge 9
+test "$(grep -h '"tool_name":"provider-write"' "$gateway_audit"/*.jsonl | wc -l)" \
+  -eq $((shutdown_audit_before + 1))
 test ! -s "$release_tmp_dir/gateway.stdout"
 
 # The Viewer ships inside the release, so the gate proves the packaged command
