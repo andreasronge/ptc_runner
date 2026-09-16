@@ -639,6 +639,9 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
 
           {^port, _message} ->
             drain_closed_port(port, monitor, deadline_ms)
+
+          {:EXIT, ^port, _reason} ->
+            drain_closed_port(port, monitor, deadline_ms)
         after
           min(remaining_ms, 100) ->
             drain_closed_port(port, monitor, deadline_ms)
@@ -680,6 +683,7 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
   defp flush_queued_port_messages(port, remaining) do
     receive do
       {^port, _message} -> flush_queued_port_messages(port, remaining - 1)
+      {:EXIT, ^port, _reason} -> flush_queued_port_messages(port, remaining - 1)
     after
       0 -> :ok
     end
