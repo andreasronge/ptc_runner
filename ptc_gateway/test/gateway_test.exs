@@ -1341,8 +1341,28 @@ defmodule PtcGatewayTest do
     # rather than its timeout -- and equally not an internal error.
     headers = GatewayLoad.raw_headers(config)
     chunked = headers ++ [{"transfer-encoding", "chunked"}]
-    assert GatewayLoad.raw(config, chunked, "ZZZZ\r\nnope\r\n") =~ "400 Bad Request"
-    assert GatewayLoad.raw(config, chunked, "ZZZZ\r\nnope\r\n") =~ ~s({"error":"request_invalid"})
+    malformed = GatewayLoad.raw(config, chunked, "ZZZZ\r\nnope\r\n")
+    assert malformed =~ "400 Bad Request"
+    assert malformed =~ ~s({"error":"request_invalid"})
+
+    # The same malformed body on a connection the client wants kept alive. This
+    # closes promptly with or without the branch's own `connection: close`,
+    # because a connection whose framing is broken cannot be reused and the
+    # transport ends it either way -- measured by removing the header, which
+    # this case does not notice. The 408 branch is the opposite: without the
+    # header there, a keep-alive peer lingers 17 s. So this asserts the property
+    # a future change could break -- that a desynchronized connection is never
+    # reused -- rather than the header, which is belt-and-braces here.
+    kept = GatewayLoad.raw_headers(config, connection: "keep-alive")
+    kept_chunked = kept ++ [{"transfer-encoding", "chunked"}]
+
+    {elapsed_us, kept_response} =
+      :timer.tc(fn -> GatewayLoad.raw(config, kept_chunked, "ZZZZ\r\nnope\r\n") end)
+
+    assert kept_response =~ "400 Bad Request"
+
+    assert elapsed_us < 5_000_000,
+           "a keep-alive connection lingered #{div(elapsed_us, 1000)} ms after its 400"
 
     unsupported = headers ++ [{"transfer-encoding", "gzip"}]
     body = GatewayLoad.list_body()

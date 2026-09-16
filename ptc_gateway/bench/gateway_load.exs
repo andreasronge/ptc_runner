@@ -47,8 +47,21 @@ payload = %{"note" => String.duplicate("payload", 64)}
 # Unique per invocation, and only this directory is removed at the end: a
 # shared root would let two concurrent probes delete each other's live
 # deployments and audit files.
-scratch = Path.join(File.cwd!(), "tmp/gateway-bench-#{System.unique_integer([:positive])}")
-File.mkdir_p!(scratch)
+#
+# `System.unique_integer/1` counts within one BEAM, and each invocation is its
+# own BEAM, so two of them would happily pick the same number. The OS process
+# identifier separates concurrent runs and the timestamp separates a rerun that
+# inherited a recycled one. `File.mkdir!/1` rather than `mkdir_p!/1` so a
+# collision raises here instead of two probes quietly sharing a directory.
+File.mkdir_p!(Path.join(File.cwd!(), "tmp"))
+
+scratch =
+  Path.join(
+    File.cwd!(),
+    "tmp/gateway-bench-#{System.pid()}-#{System.system_time(:nanosecond)}"
+  )
+
+File.mkdir!(scratch)
 dir = Path.join(scratch, "read")
 {path, config} = GatewayFixture.fixture(Path.join(dir, "deployment"), :read, schema: schema)
 config = Map.put(config, "admission", admission)
