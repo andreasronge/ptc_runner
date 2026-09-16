@@ -6,7 +6,6 @@ defmodule PtcGateway.MCP do
   alias PtcRunner.Kernel.{
     DeterministicJSON,
     MCPProtocol,
-    RunAdmission,
     ServingOutcome,
     ServingTemplate,
     StrictJSON,
@@ -587,18 +586,16 @@ defmodule PtcGateway.MCP do
             outcome =
               case reservation do
                 {:ok, reserved} ->
-                  hooks = %{
-                    close_outcome: &wire_outcome(id, template, &1),
-                    before_release: &publish_terminal(request, parent, &1),
-                    before_release_audit: fn terminal ->
-                      audit_terminal(name, template, terminal, started_at, opts)
-                    end
-                  }
-
-                  hooks =
-                    Map.merge(hooks, Map.take(opts[:serving_hooks] || %{}, [:after_activation]))
-
-                  ServingTemplate.activate(reserved, hooks)
+                  activate_transport(
+                    reserved,
+                    id,
+                    request,
+                    parent,
+                    name,
+                    template,
+                    started_at,
+                    opts
+                  )
 
                 closed ->
                   closed = wire_outcome(id, template, closed)
@@ -629,6 +626,25 @@ defmodule PtcGateway.MCP do
       5_000 ->
         Process.exit(owner, :kill)
         {:rpc, conn, 503, -31998, "Server unavailable", id, nil}
+    end
+  end
+
+  defp activate_transport(reserved, id, request, parent, name, template, started_at, opts) do
+    close = &wire_outcome(id, template, &1)
+    publish = &publish_terminal(request, parent, &1)
+    audit = &audit_terminal(name, template, &1, started_at, opts)
+
+    case opts[:serving_hooks] do
+      nil ->
+        ServingTemplate.activate_transport(reserved, close, publish, audit)
+
+      hooks ->
+        ServingTemplate.activate(reserved, %{
+          close_outcome: close,
+          before_release: publish,
+          before_release_audit: audit,
+          after_activation: hooks[:after_activation]
+        })
     end
   end
 
@@ -681,18 +697,32 @@ defmodule PtcGateway.MCP do
         {:ok, {:stream, conn}}
     after
       5_000 ->
-        case chunk(conn, ": heartbeat\n\n") do
-          {:ok, conn} ->
-            await_outcome(conn, id, owner, monitor, reservation)
-
-          {:error, _} ->
-            if match?({:ok, _}, reservation),
-              do: reservation |> elem(1) |> RunAdmission.cancel_external()
-
-            send(owner, {:disconnected, self()})
-            {:ok, {:stream, conn}}
+        if connection_down?(conn) do
+          disconnect(conn, owner, reservation)
+        else
+          case chunk(conn, ": heartbeat\n\n") do
+            {:ok, conn} -> await_outcome(conn, id, owner, monitor, reservation)
+            {:error, _} -> disconnect(conn, owner, reservation)
+          end
         end
     end
+  end
+
+  defp connection_down?(%{adapter: {Bandit.Adapter, %{transport: %{socket: socket}}}}) do
+    case ThousandIsland.Socket.recv(socket, 0, 0) do
+      {:error, reason} when reason in [:timeout, :eagain] -> false
+      _ -> true
+    end
+  end
+
+  defp connection_down?(_conn), do: false
+
+  defp disconnect(conn, owner, reservation) do
+    if match?({:ok, _}, reservation),
+      do: reservation |> elem(1) |> ServingTemplate.cancel_external()
+
+    send(owner, {:disconnected, self()})
+    {:ok, {:stream, conn}}
   end
 
   defp publish_terminal(request, parent, outcome) do
@@ -722,7 +752,7 @@ defmodule PtcGateway.MCP do
 
   defp mark_disconnected do
     Process.put(:ptc_gateway_disconnected, true)
-    {:error, :publication_failed}
+    :ok
   end
 
   defp audit_terminal(name, template, outcome, started_at, opts) do

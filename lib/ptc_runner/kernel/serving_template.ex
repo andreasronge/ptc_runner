@@ -271,6 +271,36 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   def activate(reservation, hooks) when is_map(hooks),
     do: ServingCall.activate(reservation, hooks)
 
+  @doc """
+  Activates a reserved transport call and retains admission through terminal publication and audit.
+
+  `close_outcome` may replace the execution outcome with a bounded wire-safe
+  outcome. `publish` performs the transport's one terminal publication and
+  returns `:ok` when publication or a positively observed disconnect is clean.
+  Admission then atomically freezes cancellation, deadline and cleanup state;
+  `audit` receives that final outcome and must durably finish before capacity
+  is released. Any callback failure closes as uncertain cleanup and fences new
+  admission.
+  """
+  @spec activate_transport(
+          reservation(),
+          (ServingOutcome.t() -> ServingOutcome.t()),
+          (ServingOutcome.t() -> :ok | {:error, term()}),
+          (ServingOutcome.t() -> :ok | {:error, term()})
+        ) :: ServingOutcome.t()
+  def activate_transport(reservation, close_outcome, publish, audit)
+      when is_function(close_outcome, 1) and is_function(publish, 1) and is_function(audit, 1) do
+    ServingCall.activate(reservation, %{
+      close_outcome: close_outcome,
+      before_release: publish,
+      before_release_audit: audit
+    })
+  end
+
+  @doc "Requests cancellation of a transport-owned reservation after client disconnect."
+  @spec cancel_external(reservation()) :: :ok | {:error, :run_admission_unavailable}
+  def cancel_external(reservation), do: ServingCall.cancel_external(reservation)
+
   @doc "Reserves and activates immediately for transports that need no commitment handshake."
   @spec call(t(), term(), pid(), integer() | :infinity) :: ServingOutcome.t()
   def call(template, input, admission, deadline \\ :infinity) do

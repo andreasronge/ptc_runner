@@ -5,6 +5,10 @@ defmodule PtcGateway.ReleaseCLI do
   def main(arguments) do
     reference = make_ref()
 
+    if :erl_signal_handler in :gen_event.which_handlers(:erl_signal_server) do
+      :ok = :gen_event.delete_handler(:erl_signal_server, :erl_signal_handler, :gateway)
+    end
+
     :ok =
       :gen_event.add_handler(
         :erl_signal_server,

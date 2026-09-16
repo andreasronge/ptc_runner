@@ -393,7 +393,7 @@ defmodule PtcRunner.Kernel.WarmProviderRuntime do
     clean =
       Enum.all?(results, &(&1 == :ok)) and
         match?({:ok, %{active: 0, waiting: 0, status: :ready}}, provider) and
-        match?({:ok, %{in_use: 0, status: status}} when status in [:ready, :unavailable], runs)
+        match?({:ok, %{in_use: 0}}, runs)
 
     clean = clean and stop_applications(state.applications)
 

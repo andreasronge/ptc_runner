@@ -302,7 +302,10 @@ defmodule PtcGateway.Domain do
 
     cleanup_deadline = System.monotonic_time(:millisecond) + cleanup_ms
     providers_clean = WarmProviderRuntime.drain(state.warm, cleanup_deadline) == :ok
-    admission_clean = wait_for_admission(state.run_admission, cleanup_deadline)
+
+    admission_clean =
+      wait_for_admission(state.run_admission, cleanup_deadline) and
+        RunAdmission.shutdown_clean?(state.run_admission)
 
     result =
       if quiesced and drained and providers_clean and admission_clean,

@@ -741,7 +741,7 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
     {:messages, messages} = Process.info(host, :messages)
 
     {finishes, rest} =
-      Enum.split_with(messages, &match?({:"$gen_call", _, {:finish_publication, _, true}}, &1))
+      Enum.split_with(messages, &match?({:"$gen_call", _, {:freeze_publication, _, true}}, &1))
 
     :sys.replace_state(host, fn state ->
       for _ <- messages do
@@ -769,7 +769,7 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
 
   defp await_finish_message(host, deadline) do
     await_message(host, deadline, fn message ->
-      match?({:"$gen_call", _, {:finish_publication, _, true}}, message)
+      match?({:"$gen_call", _, {:freeze_publication, _, true}}, message)
     end)
   end
 

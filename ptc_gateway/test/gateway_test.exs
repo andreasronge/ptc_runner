@@ -58,6 +58,18 @@ defmodule PtcGatewayTest do
   end
 
   @tag :tmp_dir
+  test "staged shutdown never clears an earlier admission fence", %{tmp_dir: dir} do
+    {path, _config} = fixture(dir)
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    run_admission = :sys.get_state(owner).run_admission
+    assert :ok = PtcRunner.Kernel.RunAdmission.cancel_all(run_admission)
+    assert {:error, :uncertain_cleanup} = PtcGateway.Domain.shutdown(owner, 100, 1_000)
+    refute Process.alive?(owner)
+  end
+
+  @tag :tmp_dir
   test "invalid configuration never binds and errors stay closed", %{tmp_dir: dir} do
     {path, config} = fixture(dir)
 
@@ -271,6 +283,23 @@ defmodule PtcGatewayTest do
     }
 
     _config = rewrite_schema_config(path, config, invalid, 2)
+    assert {:error, :template_invalid} = PtcGateway.start_link(path, env_file: env)
+  end
+
+  @tag :tmp_dir
+  test "private event policy wins before a stale content digest", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    manifest_path = Path.join(dir, "app.json")
+
+    manifest_path
+    |> File.read!()
+    |> Jason.decode!()
+    |> Map.put("events", %{"policy" => "private"})
+    |> then(&File.write!(manifest_path, Jason.encode!(&1)))
+
+    File.write!(path, Jason.encode!(config))
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
     assert {:error, :template_invalid} = PtcGateway.start_link(path, env_file: env)
   end
 
@@ -734,7 +763,7 @@ defmodule PtcGatewayTest do
 
     send(worker, :release_execution)
     assert_receive {:audit_waiting, audit_worker, outcome, true}, 10_000
-    assert PtcRunner.Kernel.ServingOutcome.code(outcome) == :success
+    assert PtcRunner.Kernel.ServingOutcome.code(outcome) == :cancelled
     assert {:ok, %{in_use: 1}} = PtcRunner.Kernel.RunAdmission.snapshot(state.run_admission)
 
     busy =
@@ -756,7 +785,7 @@ defmodule PtcGatewayTest do
       end)
 
     assert record["disconnected"] == true
-    assert record["outcome_code"] == "success"
+    assert record["outcome_code"] == "cancelled"
   end
 
   @tag :tmp_dir

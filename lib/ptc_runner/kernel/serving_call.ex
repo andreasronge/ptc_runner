@@ -71,6 +71,10 @@ defmodule PtcRunner.Kernel.ServingCall do
 
   def close(_), do: {:error, :run_admission_unavailable}
 
+  @doc false
+  def cancel_external({__MODULE__, _, _, lease, _, _}), do: RunAdmission.cancel_external(lease)
+  def cancel_external(_), do: {:error, :run_admission_unavailable}
+
   @spec activate(reservation()) :: ServingOutcome.t()
   def activate(reservation), do: activate(reservation, %{})
 
@@ -155,15 +159,14 @@ defmodule PtcRunner.Kernel.ServingCall do
 
     terminal = close_outcome(hooks, terminal)
     publication_clean? = run_terminal_hook(hooks, :before_release, terminal)
-
-    terminal =
-      if publication_clean?,
-        do: terminal,
-        else: outcome(template, :cleanup_failed, ServingOutcome.metadata(terminal).dispatched)
-
+    settlement = RunAdmission.freeze_publication(lease, clean? and publication_clean?)
+    terminal = settled_outcome(template, terminal, settlement, deadline)
     audit_clean? = run_terminal_hook(hooks, :before_release_audit, terminal)
-    clean? = clean? and publication_clean? and audit_clean?
-    finish(template, lease, deadline, result, terminal, clean?)
+    release = RunAdmission.finish_publication(lease, audit_clean?)
+
+    if audit_clean? and release == :ok,
+      do: terminal,
+      else: outcome(template, :cleanup_failed, ServingOutcome.metadata(terminal).dispatched)
   end
 
   defp close_outcome(hooks, terminal) do
@@ -194,33 +197,22 @@ defmodule PtcRunner.Kernel.ServingCall do
     end
   end
 
-  defp finish(template, lease, deadline, result, terminal, clean?) do
-    case RunAdmission.finish_publication(lease, clean?) do
-      :ok when clean? ->
+  defp settled_outcome(template, terminal, settlement, deadline) do
+    case settlement do
+      :ok ->
         terminal
 
-      {:error, :call_admission_refused} when clean? ->
+      {:error, :call_admission_refused} ->
         replace_expired(template, outcome(template, :admission_unavailable, false), deadline)
 
       {:error, :call_cleanup_failed} ->
-        outcome(template, :cleanup_failed, ServingOutcome.metadata(result).dispatched)
+        outcome(template, :cleanup_failed, ServingOutcome.metadata(terminal).dispatched)
 
-      {:error, :call_cancelled} when clean? ->
-        outcome(template, :cancelled, ServingOutcome.metadata(result).dispatched)
+      {:error, :call_cancelled} ->
+        outcome(template, :cancelled, ServingOutcome.metadata(terminal).dispatched)
 
       _ ->
-        RunAdmission.close(lease)
-
-        case admission_status(lease) do
-          :unavailable ->
-            outcome(template, :cleanup_failed, ServingOutcome.metadata(result).dispatched)
-
-          _ when not clean? ->
-            outcome(template, :cleanup_failed, ServingOutcome.metadata(result).dispatched)
-
-          _ ->
-            replace_expired(template, result, deadline)
-        end
+        outcome(template, :cleanup_failed, ServingOutcome.metadata(terminal).dispatched)
     end
   end
 
@@ -274,13 +266,6 @@ defmodule PtcRunner.Kernel.ServingCall do
 
       error ->
         error
-    end
-  end
-
-  defp admission_status(lease) do
-    case RunAdmission.reservation_snapshot(lease) do
-      {:ok, %{status: status}} -> status
-      _ -> :unavailable
     end
   end
 
