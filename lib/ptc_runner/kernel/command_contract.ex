@@ -212,10 +212,12 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   Unlike `schema/0`, this document validates diagnostic fields without preserving
   the internal correlation between each catalog code and its exact rendered values.
+  Shared subject shapes and command variants remain mutually exclusive: capacity
+  envelopes are excluded from the broader classified-error branch after publishing.
   """
   @spec published_schema() :: map()
   def published_schema do
-    published = replace_diagnostic_unions(schema())
+    published = schema() |> replace_diagnostic_unions() |> disjoint_published_run_errors()
 
     Map.update!(published, "$defs", fn definitions ->
       Map.merge(definitions, published_diagnostic_definitions())
@@ -1446,6 +1448,31 @@ defmodule PtcRunner.Kernel.CommandContract do
     }
   end
 
+  # Relaxing diagnostic codes makes the capacity branch a subset of the ordinary
+  # classified branch. Keep the top-level oneOf exclusive without dropping either
+  # builder's shapes or restoring per-code correlations in the published contract.
+  defp disjoint_published_run_errors(schema) do
+    classified =
+      (@artifact_states -- @recovery_artifact_states)
+      |> run_classified_error_envelope("classified_diagnostic")
+      |> replace_diagnostic_unions()
+
+    capacity =
+      "capacity_diagnostic"
+      |> run_capacity_error_envelope()
+      |> replace_diagnostic_unions()
+
+    schema
+    |> Map.update!("oneOf", fn branches ->
+      Enum.map(branches, fn
+        ^classified -> Map.put(classified, "not", ref("capacity_envelope"))
+        ^capacity -> ref("capacity_envelope")
+        branch -> branch
+      end)
+    end)
+    |> put_in(["$defs", "capacity_envelope"], capacity)
+  end
+
   defp published_diagnostic_definitions do
     rows = DiagnosticCatalog.rows()
     diagnostic_members = diagnostic_schema()["oneOf"]
@@ -1489,6 +1516,14 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp schema_branches(%{"oneOf" => branches} = schema) when map_size(schema) == 1,
     do: Enum.flat_map(branches, &schema_branches/1)
+
+  # An optional occurrence overlaps the same operation's null-only subject.
+  # Split it before deduplication so each subject matches exactly one branch.
+  defp schema_branches(
+         %{"properties" => %{"occurrence" => %{"oneOf" => _} = occurrence}} = schema
+       ) do
+    Enum.map(schema_branches(occurrence), &put_in(schema, ["properties", "occurrence"], &1))
+  end
 
   defp schema_branches(schema), do: [schema]
 

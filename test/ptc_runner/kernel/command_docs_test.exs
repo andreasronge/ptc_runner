@@ -34,6 +34,14 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     end
   end
 
+  test "schema-envelope renders the compact published schema verbatim" do
+    assert {:ok, outcome} = CommandEngine.dispatch(["docs", "schema-envelope"])
+    assert {:stdout, rendered} = CommandRenderer.render(outcome)
+    assert rendered == page_content("schema-envelope")
+    assert byte_size(rendered) <= 130_000
+    assert Jason.decode!(rendered) == CommandContract.published_schema()
+  end
+
   test "search groups matches by ranked page and renders routable lines" do
     assert {:ok, %CommandOutcome{envelope: envelope} = outcome} =
              CommandEngine.dispatch(["docs", "--search", "result_schema"])
