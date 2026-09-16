@@ -12,12 +12,15 @@ defmodule PtcGateway.PrivateAudit do
   records, fencing and shutdown policy belong to the execution integration.
   """
   use GenServer
-  use PtcRunner.Kernel.OwnerStatusRedaction
+  use PtcGateway.OwnerStatusRedaction
   alias PtcRunner.Kernel.PrivateDirectory
   import Bitwise
 
   @spec start_link(map()) :: GenServer.on_start()
   def start_link(config), do: GenServer.start_link(__MODULE__, config)
+
+  @spec append(pid(), map()) :: :ok | {:error, :audit_unavailable}
+  def append(owner, record), do: GenServer.call(owner, {:append, record}, :infinity)
   @doc false
   def child_spec(config),
     do: %{id: __MODULE__, start: {__MODULE__, :start_link, [config]}, restart: :temporary}
@@ -175,6 +178,40 @@ defmodule PtcGateway.PrivateAudit do
       end
     end)
   end
+
+  @impl true
+  def handle_call({:append, record}, _from, state) do
+    result =
+      with true <- audit_record?(record),
+           {:ok, encoded} <- PtcRunner.Kernel.DeterministicJSON.encode(record),
+           {:ok, %{size: size}} <- File.stat(state.path),
+           true <- size + byte_size(encoded) + 1 <= state.config["max_file_bytes"],
+           :ok <- :file.write(state.io, [encoded, "\n"]),
+           :ok <- :file.sync(state.io) do
+        :ok
+      else
+        _ -> {:error, :audit_unavailable}
+      end
+
+    case result do
+      :ok -> {:reply, :ok, state}
+      error -> {:stop, :audit_unavailable, error, state}
+    end
+  end
+
+  defp audit_record?(record) when is_map(record) do
+    Map.keys(record) |> Enum.sort() ==
+      Enum.sort(
+        ~w(call_id tool_name started_at ended_at outcome_code dispatch_state write_effects_may_have_occurred disconnected cleanup_status)
+      ) and
+      is_binary(record["call_id"]) and is_binary(record["tool_name"]) and
+      is_binary(record["started_at"]) and is_binary(record["ended_at"]) and
+      is_binary(record["outcome_code"]) and is_binary(record["dispatch_state"]) and
+      is_boolean(record["write_effects_may_have_occurred"]) and
+      is_boolean(record["disconnected"]) and is_binary(record["cleanup_status"])
+  end
+
+  defp audit_record?(_record), do: false
 
   @impl true
   def terminate(_, state) do

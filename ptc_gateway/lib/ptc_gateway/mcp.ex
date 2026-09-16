@@ -2,7 +2,15 @@ defmodule PtcGateway.MCP do
   @moduledoc "Strict, stateless MCP 2026-07-28 discovery and static listing boundary."
   @behaviour Plug
   import Plug.Conn
-  alias PtcRunner.Kernel.{DeterministicJSON, StrictJSON, WarmProviderRuntime}
+
+  alias PtcRunner.Kernel.{
+    DeterministicJSON,
+    MCPProtocol,
+    ServingOutcome,
+    ServingTemplate,
+    StrictJSON,
+    WarmProviderRuntime
+  }
 
   @revision "2026-07-28"
   @body_limit 2_097_152
@@ -54,7 +62,10 @@ defmodule PtcGateway.MCP do
          {:ok, id, method, params} <- envelope(request, conn),
          :ok <- valid_metadata(conn, id, method, params),
          {:ok, result} <- dispatch(conn, id, method, params, opts) do
-      json_reply(conn, 200, %{"jsonrpc" => "2.0", "id" => id, "result" => result})
+      case result do
+        {:stream, streamed} -> streamed
+        value -> json_reply(conn, 200, %{"jsonrpc" => "2.0", "id" => id, "result" => value})
+      end
     else
       {:fixed, conn, status, value, headers} ->
         fixed_reply(conn, status, value, headers)
@@ -339,7 +350,7 @@ defmodule PtcGateway.MCP do
         {:rpc, conn, 400, -32602, "Invalid Params", id, nil}
 
       single(conn, "mcp-protocol-version") != version or single(conn, "mcp-method") != method or
-          get_req_header(conn, "mcp-name") != [] ->
+          (method != "tools/call" and get_req_header(conn, "mcp-name") != []) ->
         {:rpc, conn, 400, -32020, "Header mismatch", id, nil}
 
       version != @revision ->
@@ -456,6 +467,8 @@ defmodule PtcGateway.MCP do
     list_tools(conn, id, params, opts)
   end
 
+  defp dispatch(conn, id, "tools/call", params, opts), do: call_tool(conn, id, params, opts)
+
   defp dispatch(conn, id, _method, _params, _opts),
     do: {:rpc, conn, 404, -32601, "Method not found", id, nil}
 
@@ -475,6 +488,240 @@ defmodule PtcGateway.MCP do
            "ttlMs" => 0,
            "cacheScope" => "private"
          }}
+    end
+  end
+
+  defp call_tool(conn, id, params, opts) do
+    with {:ok, name, arguments} <- call_params(params),
+         :ok <- call_name_header(conn, name),
+         {:ok, %{template: raw_template}} <- fetch_tool(opts[:tool_entries], name),
+         :ok <- parameter_headers(conn, ServingTemplate.input_schema(raw_template), arguments),
+         {:ok, template} <- WarmProviderRuntime.template(opts[:warm], name) do
+      execute_sse(conn, id, name, arguments, template, opts)
+    else
+      :invalid_params -> {:rpc, conn, 200, -32602, "Invalid Params", id, nil}
+      :header_mismatch -> {:rpc, conn, 400, -32020, "Header mismatch", id, nil}
+      :unknown_tool -> {:rpc, conn, 404, -32602, "Invalid Params", id, nil}
+      _ -> {:rpc, conn, 503, -31998, "Server unavailable", id, nil}
+    end
+  end
+
+  defp call_params(params) do
+    allowed = ["_meta", "arguments", "name"]
+
+    if Enum.all?(Map.keys(params), &(&1 in allowed)) and is_binary(params["name"]) and
+         byte_size(params["name"]) in 1..128 and
+         (not Map.has_key?(params, "arguments") or is_map(params["arguments"])) do
+      {:ok, params["name"], Map.get(params, "arguments", %{})}
+    else
+      :invalid_params
+    end
+  end
+
+  defp call_name_header(conn, name) do
+    case get_req_header(conn, "mcp-name") do
+      [value] ->
+        case MCPProtocol.decode_header(trim_ows(value)) do
+          {:ok, ^name} -> :ok
+          _ -> :header_mismatch
+        end
+
+      _ ->
+        :header_mismatch
+    end
+  end
+
+  defp fetch_tool(tools, name) do
+    case Map.fetch(tools, name) do
+      {:ok, tool} -> {:ok, tool}
+      :error -> :unknown_tool
+    end
+  end
+
+  defp parameter_headers(conn, schema, arguments) do
+    with {:ok, parameters} <- MCPProtocol.header_parameters(schema),
+         {:ok, expected} <- MCPProtocol.header_values(parameters, arguments),
+         true <- exact_parameter_headers?(conn, expected) do
+      :ok
+    else
+      _ -> :header_mismatch
+    end
+  end
+
+  defp exact_parameter_headers?(conn, expected) do
+    actual =
+      Enum.filter(conn.req_headers, fn {name, _} -> String.starts_with?(name, "mcp-param-") end)
+
+    length(actual) == length(expected) and
+      Enum.all?(expected, fn {name, expected_value} ->
+        values =
+          for {actual_name, value} <- actual, actual_name == String.downcase(name), do: value
+
+        case values do
+          [value] ->
+            with {:ok, decoded} <- MCPProtocol.decode_header(trim_ows(value)),
+                 {:ok, expected_decoded} <- MCPProtocol.decode_header(expected_value) do
+              decoded == expected_decoded
+            else
+              _ -> false
+            end
+
+          _ ->
+            false
+        end
+      end)
+  end
+
+  defp execute_sse(conn, id, name, arguments, template, opts) do
+    parent = self()
+    started_at = DateTime.utc_now() |> DateTime.truncate(:millisecond)
+
+    {owner, monitor} =
+      spawn_monitor(fn ->
+        reservation = ServingTemplate.reserve(template, arguments, opts[:run_admission])
+        send(parent, {:reserved, self(), reservation})
+
+        receive do
+          :activate ->
+            outcome =
+              case reservation do
+                {:ok, reserved} -> ServingTemplate.activate(reserved)
+                closed -> closed
+              end
+
+            send(parent, {:outcome, self(), outcome})
+
+          :close ->
+            if match?({:ok, _}, reservation),
+              do: reservation |> elem(1) |> ServingTemplate.close()
+        end
+      end)
+
+    receive do
+      {:reserved, ^owner, outcome} ->
+        case precommit_outcome(outcome) do
+          :reserved ->
+            commit_sse(conn, id, name, template, owner, monitor, started_at, opts)
+
+          {:error, status, code, message} ->
+            send(owner, :close)
+            {:rpc, conn, status, code, message, id, nil}
+        end
+    after
+      5_000 ->
+        Process.exit(owner, :kill)
+        {:rpc, conn, 503, -31998, "Server unavailable", id, nil}
+    end
+  end
+
+  defp precommit_outcome({:ok, _}), do: :reserved
+
+  defp precommit_outcome(outcome) do
+    case ServingOutcome.code(outcome) do
+      :busy -> {:error, 429, -31999, "Server busy"}
+      :invalid_input -> :reserved
+      _ -> {:error, 503, -31998, "Server unavailable"}
+    end
+  end
+
+  defp commit_sse(conn, id, name, template, owner, monitor, started_at, opts) do
+    conn =
+      conn
+      |> put_resp_content_type("text/event-stream")
+      |> put_resp_header("cache-control", "no-store")
+      |> put_resp_header("mcp-protocol-version", @revision)
+      |> send_chunked(200)
+
+    case chunk(conn, ": accepted\n\n") do
+      {:ok, conn} ->
+        send(owner, :activate)
+        await_outcome(conn, id, name, template, owner, monitor, started_at, opts)
+
+      {:error, _} ->
+        send(owner, :close)
+        {:ok, {:stream, conn}}
+    end
+  end
+
+  defp await_outcome(conn, id, name, template, owner, monitor, started_at, opts) do
+    receive do
+      {:outcome, ^owner, outcome} ->
+        Process.demonitor(monitor, [:flush])
+        audit_result(opts[:audit], name, template, outcome, started_at, false)
+        response = %{"jsonrpc" => "2.0", "id" => id, "result" => tool_result(outcome)}
+        {:ok, encoded} = DeterministicJSON.encode(response)
+        _ = chunk(conn, ["event: message\n", "data: ", encoded, "\n\n"])
+        {:ok, {:stream, conn}}
+
+      {:DOWN, ^monitor, :process, ^owner, _reason} ->
+        {:ok, {:stream, conn}}
+    after
+      5_000 ->
+        case chunk(conn, ": heartbeat\n\n") do
+          {:ok, conn} ->
+            await_outcome(conn, id, name, template, owner, monitor, started_at, opts)
+
+          {:error, _} ->
+            Process.exit(owner, :disconnect)
+            {:ok, {:stream, conn}}
+        end
+    end
+  end
+
+  defp tool_result(outcome) do
+    metadata = ServingOutcome.metadata(outcome)
+
+    case {ServingOutcome.code(outcome), ServingOutcome.value(outcome)} do
+      {:success, {:ok, value}} ->
+        {:ok, encoded} = DeterministicJSON.encode(value)
+
+        %{
+          "resultType" => "complete",
+          "content" => [%{"type" => "text", "text" => encoded}],
+          "structuredContent" => value,
+          "isError" => false
+        }
+
+      _ ->
+        text =
+          if metadata.write_effects_possible,
+            do: "Operation may have changed data; do not retry automatically",
+            else: error_text(ServingOutcome.code(outcome))
+
+        %{
+          "resultType" => "complete",
+          "content" => [%{"type" => "text", "text" => text}],
+          "isError" => true
+        }
+    end
+  end
+
+  defp error_text(:invalid_input), do: "Tool input did not satisfy its contract"
+  defp error_text(:cancelled), do: "Tool execution was cancelled"
+  defp error_text(_), do: "Tool execution failed"
+
+  defp audit_result(nil, _name, _template, _outcome, _started_at, _disconnected), do: :ok
+
+  defp audit_result(audit, name, template, outcome, started_at, disconnected) do
+    if ServingTemplate.effect(template) == :write and
+         ServingOutcome.metadata(outcome).dispatched != false do
+      metadata = ServingOutcome.metadata(outcome)
+
+      PtcGateway.PrivateAudit.append(audit, %{
+        "call_id" => Base.encode16(:crypto.strong_rand_bytes(16), case: :lower),
+        "tool_name" => name,
+        "started_at" => DateTime.to_iso8601(started_at),
+        "ended_at" =>
+          DateTime.utc_now() |> DateTime.truncate(:millisecond) |> DateTime.to_iso8601(),
+        "outcome_code" => Atom.to_string(ServingOutcome.code(outcome)),
+        "dispatch_state" => to_string(metadata.dispatched),
+        "write_effects_may_have_occurred" => metadata.write_effects_possible,
+        "disconnected" => disconnected,
+        "cleanup_status" =>
+          if(ServingOutcome.code(outcome) == :cleanup_failed, do: "uncertain", else: "complete")
+      })
+    else
+      :ok
     end
   end
 

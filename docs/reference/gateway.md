@@ -1,14 +1,17 @@
 # Gateway configuration
 
-The loopback gateway exposes health checks, authenticated MCP discovery, and a
-fixed tool catalog.
-
-Tool execution and standalone release integration are separate delivery steps.
+The loopback gateway exposes health checks and an authenticated MCP tool server.
 
 Run the source command from `ptc_gateway/`:
 
 ```sh
 mix ptc.gateway /absolute/path/ptc-gateway.json --env-file /absolute/path/credentials.env
+```
+
+The assembled standalone release provides the equivalent command:
+
+```sh
+ptc gateway /absolute/path/ptc-gateway.json --env-file /absolute/path/credentials.env
 ```
 
 Remote clients need an authenticated tunnel to loopback. Native TLS, proxy
@@ -95,8 +98,10 @@ next startup. A startup that fails after opening its replacement removes it
 again, so a failed start leaves no empty file counting against that bound.
 Active files are never truncated. Unexpected files, hard links, oversized files
 or wrong permissions refuse startup. There
-is no HTTP audit-reading endpoint. Per-call redacted records and execution
-failure fencing belong to the execution integration.
+is no HTTP audit-reading endpoint. Every dispatched write durably appends one
+bounded record before run admission is released. It contains only the call ID,
+tool name, start/end times, closed outcome and dispatch state, write uncertainty,
+disconnect flag, and cleanup status.
 
 ## Health
 
@@ -115,10 +120,10 @@ run admission and provider-call admission. Saturation stays ready; required
 runtime loss or fencing makes readiness permanently false while liveness
 continues. Invalid static startup configuration prevents listener binding.
 
-## MCP discovery and listing
+## MCP discovery, listing, and calls
 
 `POST /mcp` accepts only MCP revision `2026-07-28` methods
-`server/discover` and `tools/list`. It is stateless: `Mcp-Session-Id` and
+`server/discover`, `tools/list`, and `tools/call`. It is stateless: `Mcp-Session-Id` and
 `Last-Event-ID` are ignored and no session header is returned. Other HTTP
 methods return 405, and unsupported MCP methods return HTTP 404 with JSON-RPC
 `-32601`.
@@ -149,6 +154,24 @@ returns every configured tool in UTF-8 name-byte order with its configured
 name, title and description, exact normalized input/output schemas, and only
 the compiler-derived `annotations.readOnlyHint`. A cursor, unknown parameter,
 or malformed method parameters returns HTTP 200 JSON-RPC `-32602`.
+
+A call accepts only `name`, optional object `arguments` (default `{}`), and the
+required `_meta`. Exactly one `Mcp-Name` must decode to the body name. Schema
+leaves annotated with `x-mcp-header` require exactly matching `Mcp-Param-*`
+headers; duplicate, missing, unexpected, malformed, and mismatched headers return
+`-32020`. Unknown call fields return `-32602`.
+
+After validating a known call, the gateway atomically reserves run admission,
+commits HTTP 200 `text/event-stream`, and only then activates execution. It emits
+one final `message` event and closes. While silent it writes an SSE comment at
+most every five seconds to detect a disconnected client. Success returns
+deterministic JSON in both `structuredContent` and its exact text encoding.
+Execution-domain failures return a complete tool error. A write failure with
+possible effects uses exactly `Operation may have changed data; do not retry
+automatically`; the gateway makes no retry or transaction claim.
+
+SIGINT and SIGTERM stop the gateway owner and exit zero only after its listener,
+provider runtime, audit owner, and admissions have stopped cleanly.
 
 The official suite is pinned in
 `ptc_gateway/test/support/mcp_conformance/package.json` at

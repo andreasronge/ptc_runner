@@ -37,6 +37,16 @@ defmodule PtcRunner.StandaloneCLI do
 
   @doc false
   @spec main([binary()]) :: no_return()
+  def main(["gateway" | arguments]) do
+    case Application.ensure_all_started(:ptc_gateway) do
+      # The companion is intentionally absent from Hex-only builds and present
+      # only in assembled releases, so this call must remain dynamically bound.
+      # credo:disable-for-next-line Credo.Check.Refactor.Apply
+      {:ok, _} -> apply(PtcGateway.ReleaseCLI, :main, [arguments])
+      {:error, _} -> System.halt(70)
+    end
+  end
+
   def main(argv) do
     # Standalone commands terminate by signal instead of OTP's graceful stop.
     :ok = :os.set_signal(:sigterm, :default)

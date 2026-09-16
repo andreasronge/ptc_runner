@@ -497,6 +497,89 @@ defmodule PtcGatewayTest do
   end
 
   @tag :tmp_dir
+  test "tools/call commits SSE and executes the selected template", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+
+    call =
+      mcp(config, "tools/call", 7,
+        params: %{"name" => "a", "arguments" => %{}},
+        headers: [{"mcp-name", "a"}]
+      )
+
+    assert call.status == 200, inspect(call)
+    assert ["text/event-stream; charset=utf-8"] = call.headers["content-type"]
+    assert call.headers["mcp-protocol-version"] == ["2026-07-28"]
+    assert [_, event, ""] = String.split(call.body, "\n\n")
+    assert ["event: message", payload] = String.split(event, "\n")
+    assert "data: " <> json = payload
+    assert %{"id" => 7, "result" => result} = Jason.decode!(json)
+    assert result["resultType"] == "complete"
+    assert result["structuredContent"] == %{}
+    assert result["content"] == [%{"type" => "text", "text" => ~s({})}]
+    assert result["isError"] == false
+
+    mismatch =
+      mcp(config, "tools/call", 8,
+        params: %{"name" => "a"},
+        headers: [{"mcp-name", "z"}]
+      )
+
+    assert mismatch.status == 400
+    assert mismatch.body["error"]["code"] == -32020
+
+    invalid =
+      mcp(config, "tools/call", 9,
+        params: %{"name" => "a", "requestState" => "forbidden"},
+        headers: [{"mcp-name", "a"}]
+      )
+
+    assert invalid.body["error"]["code"] == -32602
+  end
+
+  @tag :tmp_dir
+  test "a dispatched write durably appends the bounded private audit record", %{tmp_dir: dir} do
+    {path, config} = fixture(dir, :write)
+    audit_dir = Path.join(dir, "audit")
+
+    config =
+      config
+      |> Map.put("private_audit", %{
+        "directory" => "audit",
+        "max_file_bytes" => 4096,
+        "max_retained_files" => 2
+      })
+      |> update_in(["tools"], &Enum.map(&1, fn tool -> Map.put(tool, "allow_write", true) end))
+
+    File.write!(path, Jason.encode!(config))
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+
+    assert mcp(config, "tools/call", 10,
+             params: %{"name" => "a"},
+             headers: [{"mcp-name", "a"}]
+           ).status == 200
+
+    [file] = audit_dir |> File.ls!() |> Enum.filter(&String.ends_with?(&1, ".jsonl"))
+    [line] = Path.join(audit_dir, file) |> File.read!() |> String.split("\n", trim: true)
+    record = Jason.decode!(line)
+    assert record["tool_name"] == "a"
+    assert record["outcome_code"] == "success"
+    assert record["dispatch_state"] == "true"
+    assert record["write_effects_may_have_occurred"] == true
+
+    assert Map.keys(record) |> Enum.sort() ==
+             Enum.sort(
+               ~w(call_id cleanup_status disconnected dispatch_state ended_at outcome_code started_at tool_name write_effects_may_have_occurred)
+             )
+  end
+
+  @tag :tmp_dir
   test "MCP critical headers and aggregate header bounds are enforced", %{tmp_dir: dir} do
     {path, config} = fixture(dir)
 

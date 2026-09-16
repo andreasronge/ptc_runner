@@ -1,7 +1,7 @@
 defmodule PtcGateway.Domain do
   @moduledoc false
   use GenServer
-  use PtcRunner.Kernel.OwnerStatusRedaction
+  use PtcGateway.OwnerStatusRedaction
 
   alias PtcRunner.Kernel.{
     GatewayConfig,
@@ -34,6 +34,9 @@ defmodule PtcGateway.Domain do
       warm: nil,
       listener: nil,
       request_admission: nil,
+      run_admission: nil,
+      audit: nil,
+      tools: %{},
       metadata: [],
       policy: nil
     }
@@ -171,8 +174,15 @@ defmodule PtcGateway.Domain do
 
   defp boot(config, tools, services, env_file, state) do
     case audit(config) do
-      {:ok, audit} -> start_run(config, tools, services, env_file, child(state, audit))
-      _ -> {:error, :audit_unavailable, state}
+      {:ok, audit} ->
+        start_run(config, tools, services, env_file, %{
+          child(state, audit)
+          | audit: audit,
+            tools: tools
+        })
+
+      _ ->
+        {:error, :audit_unavailable, state}
     end
   end
 
@@ -195,8 +205,15 @@ defmodule PtcGateway.Domain do
                max_waiting_provider_calls: admission["max_waiting_provider_calls"],
                env_file: env_file
              ) do
-          {:ok, warm} -> start_request_admission(config, %{child(state, warm) | warm: warm})
-          {:error, code} -> {:error, PtcGateway.StartupError.normalize(code), state}
+          {:ok, warm} ->
+            start_request_admission(config, %{
+              child(state, warm)
+              | warm: warm,
+                run_admission: run
+            })
+
+          {:error, code} ->
+            {:error, PtcGateway.StartupError.normalize(code), state}
         end
 
       _ ->
@@ -224,6 +241,9 @@ defmodule PtcGateway.Domain do
               listen: listen,
               warm: state.warm,
               tools: state.metadata,
+              tool_entries: state.tools,
+              run_admission: state.run_admission,
+              audit: state.audit,
               request_admission: state.request_admission},
            ip: ip,
            port: listen["port"],
