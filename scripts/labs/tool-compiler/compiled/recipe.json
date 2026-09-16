@@ -1,0 +1,7 @@
+{
+  "container": "article.entry",
+  "fields": [
+    {"name": "text", "selector": "p.words"},
+    {"name": "author", "selector": "span.speaker"}
+  ]
+}

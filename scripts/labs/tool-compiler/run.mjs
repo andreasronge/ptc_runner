@@ -107,9 +107,11 @@ try {
   const hostPath = join(output, "ptc-host.json");
   await writeFile(hostPath, JSON.stringify(host, null, 2), { mode: 0o600 });
 
+  const arms = (process.env.ARMS ?? "passthrough,compiled").split(",");
   const results = [];
+  for (const arm of arms)
   for (const path of Object.keys(expected)) {
-    const name = path.slice(1);
+    const name = `${arm}-${path.slice(1)}`;
     const inputPath = join(output, `${name}-input.json`);
     const resultPath = join(output, `${name}-result.json`);
     const envelopePath = join(output, `${name}-envelope.json`);
@@ -129,7 +131,7 @@ try {
         process.env.PTC ?? "ptc",
         [
           "run",
-          "passthrough/ptc.json",
+          `${arm}/ptc.json`,
           "--host-config",
           hostPath,
           "--input",
@@ -165,6 +167,7 @@ try {
 
     const measured = usageOf(envelope);
     results.push({
+      arm,
       page: path,
       status: envelope.status ?? status,
       failure: envelope?.result?.error?.code ?? envelope?.error?.code ?? null,
@@ -178,16 +181,21 @@ try {
   }
 
   await writeFile(
-    join(directory, "arm-a-results.json"),
+    join(directory, "results.json"),
     `${JSON.stringify(results, null, 2)}\n`,
     { mode: 0o600 },
   );
 
-  process.stdout.write("\nArm A: model orchestrates the raw page tools\n\n");
+  const titles = {
+    passthrough: "Arm A: the model orchestrates the raw page tools",
+    compiled: "Arm B: one compiled tool, no model in the loop",
+  };
+  for (const arm of arms) {
+  process.stdout.write(`\n${titles[arm] ?? arm}\n\n`);
   process.stdout.write(
     "page        status  calls  model  in_tokens  out_tokens  micro_usd  refus  records  correct\n",
   );
-  for (const row of results) {
+  for (const row of results.filter((r) => r.arm === arm)) {
     process.stdout.write(
       [
         row.page.padEnd(11),
@@ -203,8 +211,28 @@ try {
       ].join("") + "\n",
     );
   }
-  process.stdout.write(`\nby tool: ${JSON.stringify(results.map((r) => r.by_tool))}\n`);
-  process.stdout.write(`written: ${join(directory, "arm-a-results.json")}\n`);
+  }
+  const total = (arm, key) =>
+    results
+      .filter((r) => r.arm === arm)
+      .reduce((sum, r) => sum + (r[key] ?? 0), 0);
+  const right = (arm) =>
+    results.filter((r) => r.arm === arm && r.correct).length;
+  process.stdout.write("\ntotals\n\n");
+  process.stdout.write("arm          calls  model  in_tokens  micro_usd  correct\n");
+  for (const arm of arms) {
+    process.stdout.write(
+      [
+        arm.padEnd(13),
+        String(total(arm, "page_tool_calls")).padStart(5),
+        String(total(arm, "model_requests")).padStart(7),
+        String(total(arm, "input_tokens")).padStart(11),
+        String(total(arm, "micro_usd")).padStart(11),
+        `${right(arm)}/${results.filter((r) => r.arm === arm).length}`.padStart(9),
+      ].join("") + "\n",
+    );
+  }
+  process.stdout.write(`written: ${join(directory, "results.json")}\n`);
 } catch (error) {
   failure = error;
 } finally {
