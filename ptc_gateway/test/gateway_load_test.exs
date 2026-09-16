@@ -116,7 +116,8 @@ defmodule PtcGatewayLoadTest do
       # That the bound was *reached* is proved by the refusals rather than by
       # the sampler: run capacity is #{@burst} here, so nothing but a full lease
       # table can produce a 429.
-      assert statuses[429] > 0, "the burst never saturated, so the bound was not exercised"
+      assert Map.get(statuses, 429, 0) > 0,
+             "the burst never saturated, so the bound was not exercised"
 
       # Every admitted call produced its real result, not an empty stream and
       # not a contract error wearing an HTTP 200.
@@ -169,9 +170,15 @@ defmodule PtcGatewayLoadTest do
       # With no waiting queue for execution capacity the overflow is refused
       # rather than delayed, and in-flight capacity is 32 against a burst of 16,
       # so every one of these refusals is run capacity and nothing else.
-      assert statuses[429] > 0, "run capacity never filled, so the bound was not exercised"
-      assert statuses[200] >= 1
-      assert client_peak <= runs
+      assert Map.get(statuses, 429, 0) > 0,
+             "run capacity never filled, so the bound was not exercised"
+
+      assert Map.get(statuses, 200, 0) >= 1
+
+      # `client_peak` is reported above and gated on nothing. It is recorded
+      # when a client task was scheduled to read, so under a burst it can exceed
+      # a bound the server never exceeded; asserting on it would make this gate
+      # depend on the scheduler.
 
       for result <- results, result.status == 200 do
         assert get_in(result.result, ["result", "structuredContent"]) == %{"sum" => @slow_sum}
@@ -217,6 +224,13 @@ defmodule PtcGatewayLoadTest do
 
       assert peak.peak <= runs
 
+      # Without these two, the durability assertion below reads `0 == 0` on a
+      # burst where nothing was admitted, and every record check is skipped.
+      assert admitted >= 1, "no write was admitted, so durability was not exercised"
+
+      assert peak.peak >= 2,
+             "write capacity peaked at #{peak.peak}: the burst never ran two writes at once"
+
       # The audit is the point of the write path: a call whose slot was released
       # without its record reaching disk is the failure this asserts away. The
       # records are read back from the files, not from the owner.
@@ -239,29 +253,30 @@ defmodule PtcGatewayLoadTest do
     end
 
     @tag :tmp_dir
-    test "a reset peer mid-write is still audited, and marked disconnected", %{tmp_dir: dir} do
+    test "a peer that vanishes mid-run is still audited, and marked disconnected", %{
+      tmp_dir: dir
+    } do
       {owner, config, audit_dir} =
-        start_write_gateway(dir, max_inflight_requests: 8, max_concurrent_runs: 8)
+        start_write_gateway(dir, [max_inflight_requests: 8, max_concurrent_runs: 8],
+          body: @slow_body
+        )
 
-      # A write may have happened before the peer vanished, so the record is the
-      # only thing that will say so afterwards. Dropping it because nobody is
-      # listening is exactly the case the audit exists for.
-      sockets =
-        for _ <- 1..4 do
-          {:ok, socket} = GatewayLoad.stall_body(config)
-          socket
-        end
+      # The run has to still be running when the peer goes, or this proves
+      # nothing about execution: a write may already have happened and the audit
+      # record is the only thing that will ever say so. The workload is slow
+      # enough that the disconnect lands between the SSE commit and publication.
+      assert :accepted = GatewayLoad.disconnect_mid_run(config, timeout_ms: 60_000)
 
-      assert GatewayLoad.await_leases(owner, 4) == 4
-      Enum.each(sockets, &GatewayLoad.close_abruptly/1)
+      records = await_records(audit_dir, 1)
+      assert [record] = records
+      assert record["disconnected"] == true
+      assert record["tool_name"] == "a"
+      assert record["cleanup_status"] == "complete"
+
+      # The gateway survives it: the slot came back and the next call is served.
       assert GatewayLoad.await_leases(owner, 0) == 0
-
-      # Those never reached dispatch, so they are not audited; a completed call
-      # after them proves the path still works and still records.
-      assert %{status: 200} = GatewayLoad.call(config, arguments: @payload)
-      assert [record] = GatewayLoad.audit_records(audit_dir)
-      assert record["outcome_code"] == "success"
-      assert record["write_effects_may_have_occurred"] in [true, false]
+      assert %{status: 200} = GatewayLoad.call(config, timeout_ms: 60_000)
+      assert length(await_records(audit_dir, 2)) == 2
     end
   end
 
@@ -389,6 +404,30 @@ defmodule PtcGatewayLoadTest do
     end
 
     @tag :tmp_dir
+    test "a keep-alive peer that stops sending is closed on the same budget", %{tmp_dir: dir} do
+      {owner, config} =
+        start_gateway(dir, [max_inflight_requests: 4, max_concurrent_runs: 4], schema: @schema)
+
+      # Without `connection: close` from the client, the reply alone does not end
+      # the exchange: the transport is left to drain a body that never arrives,
+      # on its own default timeout rather than this one. The slot returns either
+      # way, so only the socket's lifetime shows the difference.
+      {:ok, socket} = GatewayLoad.stall_body(config, connection: "keep-alive")
+      assert GatewayLoad.await_leases(owner, 1) == 1
+
+      assert {:closed, elapsed_ms, status} = GatewayLoad.await_close(socket, 60_000)
+      report("withheld body, keep-alive", %{"closed after ms" => elapsed_ms, "status" => status})
+
+      assert status == 408
+
+      assert elapsed_ms < 5_000,
+             "a keep-alive connection lingered #{elapsed_ms} ms after its 408"
+
+      assert GatewayLoad.await_leases(owner, 0) == 0
+      assert %{status: 200} = GatewayLoad.call(config, arguments: @payload)
+    end
+
+    @tag :tmp_dir
     test "withholding the headers costs a socket and no slot", %{tmp_dir: dir} do
       {owner, config} = start_gateway(dir, max_inflight_requests: 2, max_concurrent_runs: 2)
 
@@ -461,11 +500,28 @@ defmodule PtcGatewayLoadTest do
     {owner, config}
   end
 
-  defp start_write_gateway(dir, admission) do
-    {owner, config} =
-      start_gateway(dir, admission, effect: :write, schema: @schema, write: true)
-
+  defp start_write_gateway(dir, admission, fixture_opts \\ []) do
+    opts = Keyword.merge([effect: :write, schema: @schema, write: true], fixture_opts)
+    {owner, config} = start_gateway(dir, admission, opts)
     {owner, config, Path.join(dir, "deployment/audit")}
+  end
+
+  # The audit append happens after the client is gone, so a record is expected
+  # rather than already present. Bounded by wall clock for the same reason
+  # `await_leases/3` is: a retry count is a budget in machine speed.
+  defp await_records(directory, expected, timeout_ms \\ 10_000) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    await_records(directory, expected, deadline, [])
+  end
+
+  defp await_records(directory, expected, deadline, _last) do
+    records = GatewayLoad.audit_records(directory)
+
+    cond do
+      length(records) >= expected -> records
+      System.monotonic_time(:millisecond) >= deadline -> records
+      true -> await_records(directory, expected, deadline, records)
+    end
   end
 
   defp report(title, rows) do

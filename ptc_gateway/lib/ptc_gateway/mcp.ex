@@ -345,10 +345,16 @@ defmodule PtcGateway.MCP do
   # stops sending becomes `:request_timeout`, a malformed transfer encoding a bad
   # request. Without this clause the module's outer rescue answers both with
   # -32603, telling a client that its own unfinished request was a server fault.
+  #
+  # Both close the connection. The body was not read and the raise discarded the
+  # adapter state that knew how much of it had been, so leaving the connection
+  # open asks the transport to drain an unread body on its own default timeout —
+  # which is the wait this budget exists to bound, reintroduced after the reply.
   defp incomplete_body(conn, %{plug_status: :request_timeout}),
-    do: {:fixed, conn, 408, "request_timeout", []}
+    do: {:fixed, conn, 408, "request_timeout", [{"connection", "close"}]}
 
-  defp incomplete_body(conn, _error), do: {:fixed, conn, 400, "request_invalid", []}
+  defp incomplete_body(conn, _error),
+    do: {:fixed, conn, 400, "request_invalid", [{"connection", "close"}]}
 
   defp decode(body, conn) do
     case StrictJSON.decode(body, max_depth: 64, max_nodes: 100_000) do

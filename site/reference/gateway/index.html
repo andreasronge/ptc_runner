@@ -156,7 +156,8 @@ of decoded header-name plus header-value bytes, 8 KiB per complete HTTP/1 header
 1–256 UTF-8 bytes; integer IDs are in the interoperable safe range. A body read
 waits at most two seconds for the next bytes: a peer that stops sending gets
 HTTP 408 <code class="inline">{&quot;error&quot;:&quot;request_timeout&quot;}</code> and an unreadable body HTTP 400
-<code class="inline">{&quot;error&quot;:&quot;request_invalid&quot;}</code>. Neither is reported as an internal error.</p><p>Every request has object <code class="inline">params._meta</code> fields
+<code class="inline">{&quot;error&quot;:&quot;request_invalid&quot;}</code>. Neither is reported as an internal error, and
+both close the connection rather than leave an unread body to drain.</p><p>Every request has object <code class="inline">params._meta</code> fields
 <code class="inline">io.modelcontextprotocol/protocolVersion</code> and
 <code class="inline">io.modelcontextprotocol/clientCapabilities</code>, with optional schema-shaped
 <code class="inline">io.modelcontextprotocol/clientInfo</code>. <code class="inline">MCP-Protocol-Version</code> and <code class="inline">Mcp-Method</code>

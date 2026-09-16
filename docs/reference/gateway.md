@@ -136,7 +136,8 @@ of decoded header-name plus header-value bytes, 8 KiB per complete HTTP/1 header
 1–256 UTF-8 bytes; integer IDs are in the interoperable safe range. A body read
 waits at most two seconds for the next bytes: a peer that stops sending gets
 HTTP 408 `{"error":"request_timeout"}` and an unreadable body HTTP 400
-`{"error":"request_invalid"}`. Neither is reported as an internal error.
+`{"error":"request_invalid"}`. Neither is reported as an internal error, and
+both close the connection rather than leave an unread body to drain.
 
 Every request has object `params._meta` fields
 `io.modelcontextprotocol/protocolVersion` and

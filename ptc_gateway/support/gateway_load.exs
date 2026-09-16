@@ -410,6 +410,44 @@ defmodule PtcGateway.TestSupport.GatewayLoad do
   def half_close(socket), do: :gen_tcp.shutdown(socket, :write)
 
   @doc """
+  Sends a complete call, waits until the server has committed its stream, and
+  then vanishes without reading the outcome.
+
+  `stall_body/2` disconnects a request that never reached dispatch, which proves
+  something about admission and nothing about execution. This one has been
+  reserved, has committed SSE and is running when the peer disappears — the only
+  state in which a write may already have happened and only the audit record will
+  say so. Returns `:accepted` once the commit was observed.
+  """
+  @spec disconnect_mid_run(map(), keyword()) :: :accepted | {:error, term()}
+  def disconnect_mid_run(config, opts \\ []) do
+    with {:ok, socket} <- connect(config) do
+      :ok = :gen_tcp.send(socket, request_bytes(config, opts))
+      deadline = now() + Keyword.get(opts, :timeout_ms, 30_000) * 1_000
+      result = await_marker(socket, ": accepted", "", deadline)
+      close_abruptly(socket)
+      result
+    end
+  end
+
+  defp await_marker(socket, marker, buffer, deadline) do
+    cond do
+      String.contains?(buffer, marker) ->
+        :accepted
+
+      now() >= deadline ->
+        {:error, :never_committed}
+
+      true ->
+        case :gen_tcp.recv(socket, 0, @recv_timeout_ms) do
+          {:ok, chunk} -> await_marker(socket, marker, buffer <> chunk, deadline)
+          {:error, :timeout} -> await_marker(socket, marker, buffer, deadline)
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  @doc """
   Sends `count` sequential calls down one connection and returns each status.
 
   A lease is per request and a socket is not, so a reused connection must return
