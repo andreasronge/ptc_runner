@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   use GenServer
   use PtcRunner.Kernel.OwnerStatusRedaction
 
+  alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.ConnectivityResult
   alias PtcRunner.Kernel.EventSink
@@ -268,6 +269,8 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
   @impl GenServer
   def init({:admitted, host, admission_request, prepared, authority, caller, token, execution}) do
+    :ok = Attestation.enable_validation_cache()
+
     case acquire_admission(host, admission_request) do
       :ok ->
         {:ok,
@@ -284,7 +287,10 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     end
   end
 
-  def init(args), do: initialize(args, nil)
+  def init(args) do
+    :ok = Attestation.enable_validation_cache()
+    initialize(args, nil)
+  end
 
   defp acquire_admission(host, :admit), do: RunAdmission.admit(host)
 
@@ -568,7 +574,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
         {worker_pid, worker_ref} =
           spawn_monitor(fn ->
             execution_result =
-              LiveStatus.with_target(initial.live_status, fn ->
+              with_cached_live_status(initial.live_status, fn ->
                 complete_operation(built, operation)
               end)
 
@@ -692,7 +698,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
             end
 
             execution_result =
-              LiveStatus.with_target(initial.live_status, fn ->
+              with_cached_live_status(initial.live_status, fn ->
                 with :ok <- held do
                   execute_providers(
                     initial.prepared,
@@ -750,6 +756,10 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
   defp complete_operation(%{publication_lease: lease} = built, :run),
     do: RunBuilder.execute_built_claimed(built, lease)
+
+  defp with_cached_live_status(target, fun) do
+    Attestation.with_validation_cache(fn -> LiveStatus.with_target(target, fun) end)
+  end
 
   defp finish_or_wait(%{waiter: nil} = state), do: {:noreply, state}
 

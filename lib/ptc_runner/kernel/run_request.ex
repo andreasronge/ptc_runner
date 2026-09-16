@@ -43,13 +43,15 @@ defmodule PtcRunner.Kernel.RunRequest do
   @spec valid?(term()) :: boolean()
   @doc "Checks the request and all nested construction attestations."
   def valid?(%__MODULE__{attestation: attestation} = request) do
-    Enum.sort(Map.keys(request)) == @field_keys and
-      ApplicationPackage.valid?(request.package) and
-      ExecutionInput.valid?(request.input) and
-      ExecutionPolicy.valid?(request.policy) and
-      input_matches_package?(request.input, request.package) and
-      policy_matches_package?(request.policy, request.package) and
-      Attestation.valid?(__MODULE__, payload(request), attestation)
+    Attestation.valid_value?(__MODULE__, request, attestation, fn ->
+      Enum.sort(Map.keys(request)) == @field_keys and
+        ApplicationPackage.valid?(request.package) and
+        ExecutionInput.valid?(request.input) and
+        ExecutionPolicy.valid?(request.policy) and
+        input_matches_package?(request.input, request.package) and
+        policy_matches_package?(request.policy, request.package) and
+        Attestation.valid?(__MODULE__, payload(request), attestation)
+    end)
   end
 
   def valid?(_request), do: false

@@ -17,6 +17,7 @@ many concurrent multi-turn sessions).
 | `lisp_throughput.exs` | Per-program latency: parse / analyze / full run; per-archetype; latency under `parallel:` load | Benchee |
 | `lisp_profile.exs` | Function-level call_time + call_count, aggregated across the per-run sandbox processes | OTP `:tprof` |
 | `lisp_concurrency.exs` | Aggregate throughput vs concurrency; scheduler microstate; GC pressure | `:msacc` + `:erlang.statistics` |
+| `serving_template.exs` | Provider-free `ServingTemplate.call/4` latency before any HTTP; optional whole-path profile | wall clock / OTP `:tprof` |
 
 ## Running
 
@@ -29,6 +30,8 @@ mix run bench/prelude_bundle.exs            # PTC_PRELUDE_BENCH_SAMPLES defaults
 mix run bench/lisp_throughput.exs
 mix run bench/lisp_profile.exs              # PROFILE_ITERS env var (default 3000)
 mix run bench/lisp_concurrency.exs
+mix run bench/serving_template.exs
+PTC_SERVING_PROFILE=1 PROFILE_ITERS=200 mix run bench/serving_template.exs
 ```
 
 `mix run` prunes the OTP `tools` / `runtime_tools` apps from the code

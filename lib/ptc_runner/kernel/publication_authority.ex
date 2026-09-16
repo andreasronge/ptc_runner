@@ -165,9 +165,11 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
 
   @doc false
   @spec valid?(term()) :: boolean()
-  def valid?(%__MODULE__{attestation: attestation} = authority),
-    do:
+  def valid?(%__MODULE__{attestation: attestation} = authority) do
+    Attestation.valid_value?(__MODULE__, authority, attestation, fn ->
       fields_valid?(authority) and Attestation.valid?(__MODULE__, payload(authority), attestation)
+    end)
+  end
 
   def valid?(_authority), do: false
 

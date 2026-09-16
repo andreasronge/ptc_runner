@@ -235,11 +235,13 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
 
   @spec valid?(term()) :: boolean()
   @doc "Checks the package's in-VM construction attestation."
-  def valid?(%__MODULE__{attestation: attestation} = package),
-    do:
+  def valid?(%__MODULE__{attestation: attestation} = package) do
+    Attestation.valid_value?(__MODULE__, package, attestation, fn ->
       Enum.sort(Map.keys(package)) == @field_keys and
         package.ptc_semantic_revision == SemanticRevision.current() and
         Attestation.valid?(__MODULE__, payload(package), attestation)
+    end)
+  end
 
   def valid?(_package), do: false
 
