@@ -1,6 +1,8 @@
 defmodule PtcGatewayTest do
   use ExUnit.Case, async: false
   import PtcGateway.TestSupport.GatewayFixture
+
+  alias PtcGateway.TestSupport.GatewayLoad
   alias PtcRunner.Kernel.{GatewayConfig, Limits, ServingTemplate, WarmProviderRuntime}
 
   @token PtcGateway.TestSupport.GatewayFixture.token()
@@ -1306,6 +1308,50 @@ defmodule PtcGatewayTest do
     assert read["isError"] == false
     assert write["isError"] == false
     assert failure["isError"] == true
+  end
+
+  # ~4 s of deliberate waiting, so it is skipped only on the fast pre-commit
+  # path. It still runs in pre-push and CI, which is the point: the timeout
+  # budget it covers has no other regression case outside the :soak module,
+  # and :soak runs in neither.
+  @tag :slow
+  @tag :tmp_dir
+  test "an incomplete body is the client's timeout, never an internal error", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+
+    # Headers promising a body that never arrives. The transport's own default
+    # is 15 s, and the raise reaches the outer rescue as -32603 unless the body
+    # read both bounds itself and maps its failure.
+    {:ok, stalled} = GatewayLoad.stall_body(config)
+    assert {:closed, elapsed_ms, 408} = GatewayLoad.await_close(stalled, 30_000)
+    assert elapsed_ms < 5_000, "an incomplete body held its slot for #{elapsed_ms} ms"
+
+    # The same on a connection the client wants kept alive. Without an explicit
+    # close the transport is then left to drain the unread body on its own
+    # default, which reintroduces the wait after the reply.
+    {:ok, keepalive} = GatewayLoad.stall_body(config, connection: "keep-alive")
+    assert {:closed, keepalive_ms, 408} = GatewayLoad.await_close(keepalive, 30_000)
+    assert keepalive_ms < 5_000, "a keep-alive connection lingered #{keepalive_ms} ms"
+
+    # A body that is framed, but framed wrongly, is the client's bad request
+    # rather than its timeout -- and equally not an internal error.
+    headers = GatewayLoad.raw_headers(config)
+    chunked = headers ++ [{"transfer-encoding", "chunked"}]
+    assert GatewayLoad.raw(config, chunked, "ZZZZ\r\nnope\r\n") =~ "400 Bad Request"
+    assert GatewayLoad.raw(config, chunked, "ZZZZ\r\nnope\r\n") =~ ~s({"error":"request_invalid"})
+
+    unsupported = headers ++ [{"transfer-encoding", "gzip"}]
+    body = GatewayLoad.list_body()
+    assert GatewayLoad.raw(config, unsupported, body) =~ "400 Bad Request"
+
+    # The same framing done right still works, so none of the above is the
+    # gateway simply refusing everything that is not content-length.
+    correct = headers ++ [{"content-length", Integer.to_string(byte_size(body))}]
+    assert GatewayLoad.raw(config, correct, body) =~ "200 OK"
   end
 
   @tag :tmp_dir

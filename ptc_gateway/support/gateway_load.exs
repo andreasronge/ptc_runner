@@ -127,13 +127,30 @@ defmodule PtcGateway.TestSupport.GatewayLoad do
   @doc """
   Runs `count` calls at `concurrency` and returns every timeline.
 
-  `concurrency: count` makes it a burst, which is what proves a ceiling;
-  a lower value makes it sustained load, which is what measures throughput.
+  `concurrency: count` makes it a burst, which is what proves a ceiling; a lower
+  value makes it sustained load, which is what measures throughput.
+
+  A burst synchronizes its starts, and has to. `Task.async_stream/3` bounds how
+  many run at once but still launches them one after another, so against a call
+  that completes in milliseconds the first workers can finish before the last
+  ones have connected. The bound is then never reached, and an assertion that
+  the burst saturated becomes a statement about the scheduler. Each worker
+  therefore connects first, reports ready, and sends only once every worker has,
+  which puts connection setup outside the burst where it belongs.
+
+  Sustained load wants the opposite and gets no barrier. `:barrier` overrides
+  the choice.
   """
   @spec storm(map(), pos_integer(), keyword()) :: [call_result()]
   def storm(config, count, opts \\ []) do
     concurrency = Keyword.get(opts, :concurrency, count)
 
+    if Keyword.get(opts, :barrier, concurrency >= count),
+      do: burst(config, count, opts),
+      else: sustained(config, count, concurrency, opts)
+  end
+
+  defp sustained(config, count, concurrency, opts) do
     1..count
     |> Task.async_stream(fn _ -> call(config, opts) end,
       max_concurrency: concurrency,
@@ -141,6 +158,50 @@ defmodule PtcGateway.TestSupport.GatewayLoad do
       timeout: :infinity
     )
     |> Enum.map(fn {:ok, result} -> result end)
+  end
+
+  defp burst(config, count, opts) do
+    coordinator = self()
+
+    tasks =
+      Enum.map(1..count, fn _ -> Task.async(fn -> at_barrier(config, opts, coordinator) end) end)
+
+    await_ready(count)
+    Enum.each(tasks, &send(&1.pid, :go))
+    Task.await_many(tasks, :infinity)
+  end
+
+  # A worker that cannot connect still reports ready, so one refused connection
+  # releases the barrier with everyone else rather than stalling the storm; its
+  # own result carries the error.
+  defp at_barrier(config, opts, coordinator) do
+    connected = connect(config)
+    send(coordinator, :ready)
+    receive do: (:go -> :ok)
+
+    case connected do
+      {:ok, socket} ->
+        deadline = now() + Keyword.get(opts, :timeout_ms, 30_000) * 1_000
+        sent_at = now()
+        :ok = :gen_tcp.send(socket, request_bytes(config, opts))
+        result = collect(socket, blank(sent_at), "", deadline)
+        :gen_tcp.close(socket)
+        result
+
+      {:error, reason} ->
+        at = now()
+        %{blank(at) | closed_at: at, error: {:connect, reason}}
+    end
+  end
+
+  defp await_ready(0), do: :ok
+
+  defp await_ready(remaining) do
+    receive do
+      :ready -> await_ready(remaining - 1)
+    after
+      30_000 -> :ok
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -379,6 +440,70 @@ defmodule PtcGateway.TestSupport.GatewayLoad do
     with {:ok, socket} <- connect(config) do
       :ok = :gen_tcp.send(socket, ["POST /mcp HTTP/1.1\r\n", "host: ", authority(config), "\r\n"])
       {:ok, socket}
+    end
+  end
+
+  @doc """
+  Sends one request built from literal header lines and body bytes, and returns
+  the whole response.
+
+  For the framings the well-formed clients cannot express: a body delimited by
+  something other than `content-length`, or delimited wrongly on purpose. The
+  caller supplies every header, so nothing is appended behind its back — a
+  `content-length` added quietly beside a `transfer-encoding` is a protocol
+  error the transport rejects before the code under test ever runs.
+  """
+  @spec raw(map(), [{binary(), binary()}], iodata()) :: binary()
+  def raw(config, headers, body) do
+    {:ok, socket} = connect(config)
+
+    request = [
+      "POST /mcp HTTP/1.1\r\n",
+      Enum.map(headers, fn {name, value} -> [name, ": ", value, "\r\n"] end),
+      "\r\n",
+      body
+    ]
+
+    :ok = :gen_tcp.send(socket, request)
+    response = read_to_close(socket, "", now() + 20_000_000)
+    :gen_tcp.close(socket)
+    response
+  end
+
+  @doc """
+  The headers a `raw/3` case starts from: complete, authenticated and
+  well-formed apart from whatever that case overrides or adds. Framing headers
+  are deliberately absent, because framing is what these cases are about.
+  """
+  @spec raw_headers(map(), keyword()) :: [{binary(), binary()}]
+  def raw_headers(config, opts \\ []) do
+    [
+      {"host", authority(config)},
+      {"authorization",
+       "Bearer #{Keyword.get(opts, :token, PtcGateway.TestSupport.GatewayFixture.token())}"},
+      {"content-type", "application/json"},
+      {"accept", "application/json, text/event-stream"},
+      {"mcp-protocol-version", @revision},
+      {"mcp-method", Keyword.get(opts, :method, "tools/list")},
+      # One-shot: without this a successful reply is keep-alive and `raw/3` reads
+      # until its own deadline rather than until the exchange is over.
+      {"connection", Keyword.get(opts, :connection, "close")}
+    ]
+  end
+
+  @doc "A complete, valid `tools/list` request body."
+  @spec list_body() :: binary()
+  def list_body, do: body_bytes(method: "tools/list")
+
+  defp read_to_close(socket, buffer, deadline) do
+    if now() >= deadline do
+      buffer
+    else
+      case :gen_tcp.recv(socket, 0, @recv_timeout_ms) do
+        {:ok, chunk} -> read_to_close(socket, buffer <> chunk, deadline)
+        {:error, :timeout} -> read_to_close(socket, buffer, deadline)
+        {:error, _reason} -> buffer
+      end
     end
   end
 
