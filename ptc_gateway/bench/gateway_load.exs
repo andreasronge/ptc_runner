@@ -44,9 +44,12 @@ payload = %{"note" => String.duplicate("payload", 64)}
 # Project-local rather than the system temporary directory: the private audit
 # rejects a symbolic link anywhere in its hierarchy, and on macOS `$TMPDIR`
 # reaches the user's folder through `/var`, which is one (#1985).
-scratch = Path.join(File.cwd!(), "tmp/gateway-bench")
+# Unique per invocation, and only this directory is removed at the end: a
+# shared root would let two concurrent probes delete each other's live
+# deployments and audit files.
+scratch = Path.join(File.cwd!(), "tmp/gateway-bench-#{System.unique_integer([:positive])}")
 File.mkdir_p!(scratch)
-dir = Path.join(scratch, "read-#{System.unique_integer([:positive])}")
+dir = Path.join(scratch, "read")
 {path, config} = GatewayFixture.fixture(Path.join(dir, "deployment"), :read, schema: schema)
 config = Map.put(config, "admission", admission)
 File.write!(path, Jason.encode!(config))
@@ -194,7 +197,7 @@ IO.puts("one per call:        #{round(serial.rps)} req/s")
 # single owner while the call still holds its run capacity. If that append is
 # the ceiling, write throughput stops scaling where read throughput does not,
 # and the audit mailbox is where the queue shows.
-write_dir = Path.join(scratch, "write-#{System.unique_integer([:positive])}")
+write_dir = Path.join(scratch, "write")
 
 {write_path, write_config} =
   GatewayFixture.fixture(Path.join(write_dir, "deployment"), :write, schema: schema)

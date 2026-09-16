@@ -320,8 +320,19 @@ defmodule PtcGatewayLoadTest do
       # so the server must end this itself rather than wait on a peer that is
       # still, by every socket-level test, present.
       :ok = GatewayLoad.half_close(socket)
-      assert {:closed, elapsed_ms, _status} = GatewayLoad.await_close(socket, 60_000)
-      report("half-open peer", %{"server closed after ms" => elapsed_ms})
+      assert {:closed, elapsed_ms, status} = GatewayLoad.await_close(socket, 60_000)
+      report("half-open peer", %{"server closed after ms" => elapsed_ms, "status" => status})
+
+      # No reply reaches a peer that closed its write side: the transport ends
+      # the connection on the read failure whatever the plug returns, so the
+      # 408/400 contract does not extend here. Asserting the absence keeps that
+      # from being mistaken for a status this test forgot to check -- an earlier
+      # version ignored it entirely.
+      assert status == nil, "a half-closed peer received #{status}"
+
+      # It is ended immediately rather than after the body budget: the read
+      # fails at once instead of waiting for bytes that are not coming.
+      assert elapsed_ms < 1_000, "a half-closed peer waited #{elapsed_ms} ms"
 
       assert GatewayLoad.await_leases(owner, 0) == 0
       assert %{status: 200} = GatewayLoad.call(config, arguments: @payload)

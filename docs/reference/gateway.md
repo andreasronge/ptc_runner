@@ -137,7 +137,9 @@ of decoded header-name plus header-value bytes, 8 KiB per complete HTTP/1 header
 waits at most two seconds for the next bytes: a peer that stops sending gets
 HTTP 408 `{"error":"request_timeout"}` and an unreadable body HTTP 400
 `{"error":"request_invalid"}`. Neither is reported as an internal error, and
-both close the connection rather than leave an unread body to drain.
+both close the connection rather than leave an unread body to drain. A peer
+that closes its own write side mid-body receives no reply at all: the read
+fails immediately and the connection ends.
 
 Every request has object `params._meta` fields
 `io.modelcontextprotocol/protocolVersion` and
