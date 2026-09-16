@@ -16,6 +16,18 @@ defmodule PtcGateway.MCP do
   @body_limit 2_097_152
   @response_limit 4_194_304
   @safe_integer 9_007_199_254_740_991
+  @call_result_schema_path Path.expand(
+                             "../../../site/schemas/mcp-2026-07-28.schema.json",
+                             __DIR__
+                           )
+  @external_resource @call_result_schema_path
+  @mcp_schema @call_result_schema_path |> File.read!() |> Jason.decode!()
+  @call_result_schema %{
+    "$schema" => @mcp_schema["$schema"],
+    "$defs" => @mcp_schema["$defs"],
+    "$ref" => "#/$defs/CallToolResultResponse"
+  }
+  @call_result_validator JSV.build!(@call_result_schema, atoms: false, warnings: :silent)
 
   @impl true
   def init(opts), do: opts
@@ -745,7 +757,7 @@ defmodule PtcGateway.MCP do
         {:published, ^request, false} -> mark_disconnected()
         {:disconnected, ^request} -> mark_disconnected()
       after
-        10_000 -> mark_disconnected()
+        10_000 -> {:error, :publication_timeout}
       end
     end
   end
@@ -767,20 +779,19 @@ defmodule PtcGateway.MCP do
         outcome
 
       :too_large ->
-        metadata = ServingOutcome.metadata(outcome)
-        ServingOutcome.new(:invalid_result, metadata.dispatched, ServingTemplate.effect(template))
+        ServingTemplate.invalid_result(template, outcome)
     end
   end
 
   defp encode_call_response(id, outcome) do
     response = %{"jsonrpc" => "2.0", "id" => id, "result" => tool_result(outcome)}
 
-    case DeterministicJSON.encode(response) do
-      {:ok, encoded} when byte_size(encoded) <= @response_limit ->
-        {:ok, encoded}
-
-      _ ->
-        :too_large
+    with {:ok, _} <- JSV.validate(response, @call_result_validator, cast: false),
+         {:ok, encoded} when byte_size(encoded) <= @response_limit <-
+           DeterministicJSON.encode(response) do
+      {:ok, encoded}
+    else
+      _ -> :too_large
     end
   end
 

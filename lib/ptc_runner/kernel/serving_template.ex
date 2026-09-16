@@ -224,6 +224,16 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   @spec effect(t()) :: :read | :write
   def effect(%__MODULE__{effect: effect}), do: effect
 
+  @doc "Returns an invalid-result outcome preserving the call's dispatch metadata."
+  @spec invalid_result(t(), ServingOutcome.t()) :: ServingOutcome.t()
+  def invalid_result(%__MODULE__{} = template, outcome) do
+    ServingOutcome.new(
+      :invalid_result,
+      ServingOutcome.metadata(outcome).dispatched,
+      template.effect
+    )
+  end
+
   @doc "Returns content identity, independent of selected input and effective hosting policy."
   @spec application_content_digest(t()) :: binary()
   def application_content_digest(%__MODULE__{package: package}),

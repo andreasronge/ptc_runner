@@ -499,7 +499,7 @@ defmodule PtcRunner.Kernel.RunAdmission do
       Map.has_key?(state.owners, owner) or not Process.alive?(owner) ->
         {:reply, {:error, :run_admission_unavailable}, state}
 
-      state.status == :unavailable ->
+      state.status != :ready ->
         {:reply, {:error, :run_admission_unavailable}, state}
 
       in_use(state) >= state.capacity ->
@@ -527,8 +527,14 @@ defmodule PtcRunner.Kernel.RunAdmission do
     else
       next =
         Enum.reduce(state.reservations, state, fn
-          {key, %{monitor: ^ref, caller: ^owner}}, acc -> cancel_reservation(acc, key)
-          _, acc -> acc
+          {key, %{monitor: ^ref, caller: ^owner, publication: :frozen}}, acc ->
+            %{drop_reservation(acc, key) | status: :unavailable}
+
+          {key, %{monitor: ^ref, caller: ^owner}}, acc ->
+            cancel_reservation(acc, key)
+
+          _, acc ->
+            acc
         end)
 
       {:noreply, next}
@@ -592,6 +598,9 @@ defmodule PtcRunner.Kernel.RunAdmission do
       nil ->
         state
 
+      %{publication: :frozen} ->
+        state
+
       %{owner: nil, publication: publication} = reservation
       when publication in [:held, :pending] ->
         if Process.alive?(reservation.caller) do
@@ -602,9 +611,6 @@ defmodule PtcRunner.Kernel.RunAdmission do
 
       %{owner: nil} ->
         drop_reservation(state, ref)
-
-      %{publication: :frozen} ->
-        state
 
       %{cancelled?: true} ->
         state
@@ -676,10 +682,17 @@ defmodule PtcRunner.Kernel.RunAdmission do
   defp fence_dead_owners(state) do
     state =
       Enum.reduce(state.reservations, state, fn {ref, reservation}, acc ->
-        if not deadline_live?(reservation.deadline) or
-             (is_nil(reservation.owner) and not Process.alive?(reservation.caller)),
-           do: cancel_reservation(acc, ref),
-           else: acc
+        cond do
+          reservation.publication == :frozen and not Process.alive?(reservation.caller) ->
+            %{drop_reservation(acc, ref) | status: :unavailable}
+
+          not deadline_live?(reservation.deadline) or
+              (is_nil(reservation.owner) and not Process.alive?(reservation.caller)) ->
+            cancel_reservation(acc, ref)
+
+          true ->
+            acc
+        end
       end)
 
     if Enum.any?(state.owners, fn {pid, _} -> not Process.alive?(pid) end),

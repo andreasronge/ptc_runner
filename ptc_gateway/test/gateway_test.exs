@@ -70,6 +70,19 @@ defmodule PtcGatewayTest do
   end
 
   @tag :tmp_dir
+  test "unexpected listener exit is an unsuccessful domain exit", %{tmp_dir: dir} do
+    {path, _config} = fixture(dir)
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    Process.unlink(owner)
+    monitor = Process.monitor(owner)
+    listener = :sys.get_state(owner).listener
+    Process.exit(listener, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^owner, :gateway_listener_failed}, 2_000
+  end
+
+  @tag :tmp_dir
   test "invalid configuration never binds and errors stay closed", %{tmp_dir: dir} do
     {path, config} = fixture(dir)
 

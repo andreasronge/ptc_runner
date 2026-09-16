@@ -316,7 +316,8 @@ defmodule PtcGateway.Domain do
   end
 
   @impl true
-  def handle_info({:EXIT, pid, _}, %{listener: pid} = state), do: {:stop, :normal, state}
+  def handle_info({:EXIT, pid, _}, %{listener: pid} = state),
+    do: {:stop, :gateway_listener_failed, state}
 
   def handle_info({:EXIT, pid, _reason}, %{audit: pid} = state),
     do: {:stop, :gateway_child_failed, state}

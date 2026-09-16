@@ -392,7 +392,8 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
           {:error, :publication_failed}
         end,
         before_release_audit: fn closed ->
-          assert ServingOutcome.code(closed) == :cleanup_failed
+          assert ServingOutcome.code(closed) == :publication_failed
+          assert :ok = ServingTemplate.cancel_external(reservation)
           assert {:ok, %{in_use: 1}} = RunAdmission.snapshot(host)
           send(parent, :audited)
           :ok
@@ -400,7 +401,7 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
       })
 
     assert_received :audited
-    assert ServingOutcome.code(outcome) == :cleanup_failed
+    assert ServingOutcome.code(outcome) == :publication_failed
     assert {:ok, %{in_use: 0, status: :unavailable}} = RunAdmission.snapshot(host)
   end
 

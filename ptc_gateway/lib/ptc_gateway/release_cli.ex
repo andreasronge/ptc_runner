@@ -3,6 +3,17 @@ defmodule PtcGateway.ReleaseCLI do
 
   @spec main([binary()]) :: no_return()
   def main(arguments) do
+    reference = install_signal_handler()
+    {opts, paths, invalid} = OptionParser.parse(arguments, strict: [env_file: :string])
+
+    case {paths, invalid} do
+      {[path], []} -> run(path, opts, reference)
+      _ -> fail(:config_invalid)
+    end
+  end
+
+  @doc false
+  def install_signal_handler do
     reference = make_ref()
 
     if :erl_signal_handler in :gen_event.which_handlers(:erl_signal_server) do
@@ -17,11 +28,22 @@ defmodule PtcGateway.ReleaseCLI do
       )
 
     :ok = :os.set_signal(:sigterm, :handle)
-    {opts, paths, invalid} = OptionParser.parse(arguments, strict: [env_file: :string])
+    reference
+  end
 
-    case {paths, invalid} do
-      {[path], []} -> run(path, opts, reference)
-      _ -> fail(:config_invalid)
+  @doc false
+  def await_status(owner, reference) do
+    ref = Process.monitor(owner)
+
+    receive do
+      {:gateway_signal, ^reference, :sigterm} ->
+        if PtcGateway.Domain.shutdown(owner, 10_000, 10_000) == :ok, do: 0, else: 70
+
+      {:DOWN, ^ref, :process, ^owner, :normal} ->
+        0
+
+      {:DOWN, ^ref, :process, ^owner, _reason} ->
+        70
     end
   end
 
@@ -33,19 +55,7 @@ defmodule PtcGateway.ReleaseCLI do
   end
 
   defp wait(owner, reference) do
-    ref = Process.monitor(owner)
-
-    receive do
-      {:gateway_signal, ^reference, :sigterm} ->
-        status = if PtcGateway.Domain.shutdown(owner, 10_000, 10_000) == :ok, do: 0, else: 70
-        System.halt(status)
-
-      {:DOWN, ^ref, :process, ^owner, :normal} ->
-        System.halt(0)
-
-      {:DOWN, ^ref, :process, ^owner, _reason} ->
-        System.halt(70)
-    end
+    System.halt(await_status(owner, reference))
   end
 
   defp fail(code) do

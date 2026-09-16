@@ -23,11 +23,8 @@ defmodule Mix.Tasks.Ptc.Gateway do
 
     case result do
       {:ok, owner} ->
-        ref = Process.monitor(owner)
-
-        receive do
-          {:DOWN, ^ref, :process, ^owner, _} -> :ok
-        end
+        reference = PtcGateway.ReleaseCLI.install_signal_handler()
+        System.halt(PtcGateway.ReleaseCLI.await_status(owner, reference))
 
       {:error, code} ->
         IO.puts(:stderr, PtcGateway.StartupError.encode(code))

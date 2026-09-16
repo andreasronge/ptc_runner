@@ -158,11 +158,17 @@ defmodule PtcRunner.Kernel.ServingCall do
         else: outcome(template, :cleanup_failed, ServingOutcome.metadata(result).dispatched)
 
     terminal = close_outcome(hooks, terminal)
-    publication_clean? = run_terminal_hook(hooks, :before_release, terminal)
-    settlement = RunAdmission.freeze_publication(lease, clean? and publication_clean?)
+    settlement = RunAdmission.freeze_publication(lease, clean?)
     terminal = settled_outcome(template, terminal, settlement, deadline)
+    publication_clean? = run_terminal_hook(hooks, :before_release, terminal)
+
+    terminal =
+      if publication_clean?,
+        do: terminal,
+        else: outcome(template, :publication_failed, ServingOutcome.metadata(terminal).dispatched)
+
     audit_clean? = run_terminal_hook(hooks, :before_release_audit, terminal)
-    release = RunAdmission.finish_publication(lease, audit_clean?)
+    release = RunAdmission.finish_publication(lease, audit_clean? and publication_clean?)
 
     if audit_clean? and release == :ok,
       do: terminal,
