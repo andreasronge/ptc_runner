@@ -19,6 +19,14 @@ belongs in guides or retained specifications.
   tracks the unfinished private-sink, overflow, real-pagination, and
   cache-usage journeys.
 
+## Research direction
+
+- [`reproducible-prelude-search.md`](reproducible-prelude-search.md) defines
+  the toy harness and experiment ladder for checked self-improvement:
+  planted defects in small preludes, recorded executions as evidence,
+  parallel candidate search selected by a held-out check, and the runtime
+  records each experiment pulls in.
+
 ## Future, trigger-gated
 
 - [`future/incident-evidence-compiler.md`](future/incident-evidence-compiler.md)
