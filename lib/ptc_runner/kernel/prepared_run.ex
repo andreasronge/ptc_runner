@@ -154,34 +154,36 @@ defmodule PtcRunner.Kernel.PreparedRun do
   def inactive_valid?(_prepared), do: false
 
   defp sealed_valid?(%__MODULE__{attestation: attestation} = prepared) do
-    Enum.sort(Map.keys(prepared)) == @field_keys and
-      ServingRequest.request_valid?(prepared.request) and
-      bundle_matches?(
-        prepared.workflow_bundle,
-        prepared.request.package.workflow_components
-      ) and
-      mission_bundles_matches?(
-        prepared.mission_bundles,
-        prepared.request.package.missions
-      ) and
-      entry_callable?(prepared.workflow_bundle, prepared.request.package.entry) and
-      prepared.entry_source == expected_entry_source(prepared.request) and
-      sealed_metadata_valid?(
-        prepared.request,
-        prepared.workflow_bundle,
-        prepared.mission_bundles,
-        Map.take(prepared, [
-          :provider_declarations,
-          :installation_config_digests,
-          :effective_data_class,
-          :effective_flow,
-          :effective_event_policy,
-          :effective_application_projection,
-          :effective_application_digest,
-          :post_selection_context
-        ])
-      ) and
-      Attestation.valid?(__MODULE__, payload(prepared), attestation)
+    Attestation.valid_value?(__MODULE__, prepared, attestation, fn ->
+      Enum.sort(Map.keys(prepared)) == @field_keys and
+        ServingRequest.request_valid?(prepared.request) and
+        bundle_matches?(
+          prepared.workflow_bundle,
+          prepared.request.package.workflow_components
+        ) and
+        mission_bundles_matches?(
+          prepared.mission_bundles,
+          prepared.request.package.missions
+        ) and
+        entry_callable?(prepared.workflow_bundle, prepared.request.package.entry) and
+        prepared.entry_source == expected_entry_source(prepared.request) and
+        sealed_metadata_valid?(
+          prepared.request,
+          prepared.workflow_bundle,
+          prepared.mission_bundles,
+          Map.take(prepared, [
+            :provider_declarations,
+            :installation_config_digests,
+            :effective_data_class,
+            :effective_flow,
+            :effective_event_policy,
+            :effective_application_projection,
+            :effective_application_digest,
+            :post_selection_context
+          ])
+        ) and
+        Attestation.valid?(__MODULE__, payload(prepared), attestation)
+    end)
   end
 
   @doc false

@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.ServingCall do
   commitment or add per-call policy overrides.
   """
   alias PtcRunner.Kernel.ArtifactPublisher
+  alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.ExecutionInput
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.ExecutionPolicy
@@ -79,8 +80,13 @@ defmodule PtcRunner.Kernel.ServingCall do
   def activate(reservation), do: activate(reservation, %{})
 
   @doc false
-  def activate({__MODULE__, template, input, lease, deadline, caller}, hooks)
-      when caller == self() do
+  def activate(reservation, hooks) when is_map(hooks),
+    do: Attestation.with_validation_cache(fn -> do_activate(reservation, hooks) end)
+
+  def activate(_, _), do: ServingOutcome.new(:internal_error, false, :write)
+
+  defp do_activate({__MODULE__, template, input, lease, deadline, caller}, hooks)
+       when caller == self() do
     case RunAdmission.retain_publication(lease) do
       :ok ->
         if hook = Map.get(hooks, :after_retention), do: hook.()
@@ -91,7 +97,7 @@ defmodule PtcRunner.Kernel.ServingCall do
     end
   end
 
-  def activate(_, _), do: ServingOutcome.new(:internal_error, false, :write)
+  defp do_activate(_, _), do: ServingOutcome.new(:internal_error, false, :write)
 
   defp activate_owned(template, input, lease, deadline, hooks) do
     case prepare(template, input) do

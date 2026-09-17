@@ -96,10 +96,13 @@ defmodule PtcRunner.Kernel.ExecutionOutcome do
   end
 
   @spec valid?(term()) :: boolean()
-  def valid?(%__MODULE__{attestation: attestation} = outcome),
-    do:
-      fields_valid?(outcome) and
-        Attestation.valid?(__MODULE__, payload(outcome), attestation)
+  def valid?(%__MODULE__{attestation: attestation} = outcome) do
+    validate = fn ->
+      fields_valid?(outcome) and Attestation.valid?(__MODULE__, payload(outcome), attestation)
+    end
+
+    Attestation.valid_value?(__MODULE__, outcome, attestation, validate)
+  end
 
   def valid?(_outcome), do: false
 
