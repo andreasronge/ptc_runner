@@ -668,11 +668,14 @@ defmodule PtcGatewayTest do
     File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
     assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
     on_exit(fn -> stop(owner) end)
+    run_admission = :sys.get_state(owner).run_admission
 
     assert mcp(config, "tools/call", 10,
              params: %{"name" => "a"},
              headers: [{"mcp-name", "a"}]
            ).status == 200
+
+    assert :ok = await_run_release(run_admission, 100)
 
     [file] = audit_dir |> File.ls!() |> Enum.filter(&String.ends_with?(&1, ".jsonl"))
     [line] = Path.join(audit_dir, file) |> File.read!() |> String.split("\n", trim: true)
@@ -799,6 +802,85 @@ defmodule PtcGatewayTest do
 
     assert record["disconnected"] == true
     assert record["outcome_code"] == "cancelled"
+  end
+
+  @tag :tmp_dir
+  @tag timeout: 30_000
+  test "sequential tools/call is refused by run admission while prior cleanup is held", %{
+    tmp_dir: dir
+  } do
+    {path, config} = fixture(dir)
+    config = put_in(config, ["admission", "max_concurrent_runs"], 1)
+    File.write!(path, Jason.encode!(config))
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+    state = :sys.get_state(owner)
+    parent = self()
+
+    {:ok, socket} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
+    {:ok, port} = :inet.port(socket)
+    :gen_tcp.close(socket)
+    listen = %{config["listen"] | "port" => port}
+    config = put_in(config, ["listen", "port"], port)
+
+    assert {:ok, listener} =
+             Bandit.start_link(
+               plug:
+                 {PtcGateway.Router,
+                  listen: listen,
+                  warm: state.warm,
+                  tools: state.metadata,
+                  tool_entries: state.tools,
+                  run_admission: state.run_admission,
+                  audit: state.audit,
+                  request_admission: state.request_admission,
+                  serving_hooks: %{
+                    before_audit: fn outcome, disconnected ->
+                      send(parent, {:audit_waiting, self(), outcome, disconnected})
+                      receive do: (:release_audit -> :ok)
+                    end
+                  }},
+               ip: {127, 0, 0, 1},
+               port: port,
+               startup_log: false,
+               http_2_options: [enabled: false]
+             )
+
+    on_exit(fn -> stop(listener) end)
+
+    first =
+      mcp(config, "tools/call", 20,
+        params: %{"name" => "a", "arguments" => %{}},
+        headers: [{"mcp-name", "a"}]
+      )
+
+    assert first.status == 200, inspect(first)
+    assert_receive {:audit_waiting, audit_worker, outcome, false}, 2_000
+    assert PtcRunner.Kernel.ServingOutcome.code(outcome) == :success
+    assert {:ok, %{in_use: 1}} = PtcRunner.Kernel.RunAdmission.snapshot(state.run_admission)
+
+    request = :sys.get_state(state.request_admission)
+    assert map_size(request.leases) < request.maximum
+
+    busy =
+      mcp(config, "tools/call", 21,
+        params: %{"name" => "a", "arguments" => %{}},
+        headers: [{"mcp-name", "a"}]
+      )
+
+    assert busy.status == 429
+
+    assert busy.body == %{
+             "jsonrpc" => "2.0",
+             "id" => 21,
+             "error" => %{"code" => -31999, "message" => "Server busy"}
+           }
+
+    assert {:ok, %{in_use: 1}} = PtcRunner.Kernel.RunAdmission.snapshot(state.run_admission)
+    send(audit_worker, :release_audit)
+    assert :ok = await_run_release(state.run_admission, 100)
   end
 
   @tag :tmp_dir
