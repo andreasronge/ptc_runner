@@ -117,11 +117,14 @@ manifest's <code class="inline">sha256:&lt;64 lowercase hex&gt;</code> pin. Copy
 <code class="inline">expected_application_content_digest</code>. The value covers the application bytes
 alone, so it is stable across runtime versions, unlike the
 <code class="inline">effective_application_digest</code> printed beside it. Omit <code class="inline">--host-config</code> when the
-manifest selects no provider.</p><h2 id="private-audit-directory">Private audit directory</h2><p>Startup rejects symbolic links anywhere in the audit hierarchy and unsafe
-ownership or writable ancestry. It creates missing directories as 0700 and
-files as 0600 before writing any content. The private directory is exclusively
-locked for the owner's lifetime. After an unclean owner death, the retained
-lock requires you to stop the old process before removing it.</p><p>Each startup durably opens a new numbered file and separately appends and
+manifest selects no provider.</p><h2 id="private-audit-directory">Private audit directory</h2><p>Startup resolves the audit ancestry, and every resolved ancestor must be a
+directory owned by you or root and not group- or world-writable unless
+sticky. This makes <code class="inline">/tmp</code> and the default <code class="inline">TMPDIR</code> usable locations. The audit
+directory itself must not be a symbolic link. Startup creates missing
+directories as 0700 and files as 0600 before writing any content. The private
+directory is exclusively locked for the owner's lifetime. After an unclean
+owner death, the retained lock requires you to stop the old process before
+removing it.</p><p>Each startup durably opens a new numbered file and separately appends and
 flushes a temporary probe before readiness. The probe is then removed. Only
 after the replacement is durable may retention remove closed files, oldest
 first, so narrowing <code class="inline">max_retained_files</code> prunes down to the new bound on the
