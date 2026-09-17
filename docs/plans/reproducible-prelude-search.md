@@ -1,7 +1,7 @@
 # Reproducible prelude search: a toy harness for checked self-improvement
 
-Status: draft, 2026-09-17. No tracking issue yet. Worktree
-`plan/reproducible-prelude-search`.
+Status: draft, 2026-09-17. Phase 0 is #1995; Phase 1 is #1996 (deepseek) with
+#1997 (gemini-3.8-flash) as its fallback. Plan PR #1994.
 
 ## The claim under test
 
@@ -222,10 +222,9 @@ its stop rule is a result, not a failure, and closes the line it tested.
 
 ## Open decisions
 
-- Which cheap model runs the live experiments, and whether one seed set is
-  shared across all experiments or resampled per experiment.
-- Whether a tracking issue opens now or after Phase 0 produces its first
-  numbers.
+- Whether one seed set is shared across all experiments or resampled per
+  experiment. Decided 2026-09-17: deepseek-v4-flash first, gemini-3.8-flash
+  only if the deepseek report is inadequate (#1997 states the threshold).
 - Whether runtime change 1 records the input under the normal or the private
   data class. The value can be private under `--private-input`, which argues
   for the private class only.
