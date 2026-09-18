@@ -20,6 +20,7 @@ page holds whether a program is driven by that console or by a person.
 docs/research/README.md                          this index
 docs/research/<program>.md                       the program document
 docs/research/reports/<program>/<nnn>-<slug>.md  one report per experiment
+docs/research/reports/<program>/<nnn>.json       the result file the report's numbers come from
 scripts/labs/<program>/                          the harness, when the program has one
 ```
 
@@ -27,12 +28,17 @@ scripts/labs/<program>/                          the harness, when the program h
 
 Sections in order: **Question**; **Hypotheses** (id, sentence, metric, null
 model, tolerance, state `open`/`supported`/`refuted`/`dropped`); **Budget and
-limits**; **Stop rules**; **Ledger**; **Backlog**; **Runtime wants**.
+limits**; **Stop rules**; **Ledger**; **Backlog**; **Pending proposals**;
+**Runtime wants**.
 
 The document carries no authority. Budgets and permissions come from an
 approved run in the console, or from the maintainer filing an issue by hand.
-The ledger is written by whoever judged the experiment, never by the
-experiment's own author.
+A ledger row exists only for an experiment whose branch is tagged and whose
+result file exists; the verdict is computed from the result file against the
+hypothesis's null model and tolerance, and from the method review, never
+from the experiment's own author. Backlog entries are `<program>/b<nn>`;
+their `after` column is an ordering preference between entries, separate
+from native GitHub issue dependencies.
 
 ## Experiment ids, kinds, and verdicts
 
@@ -92,9 +98,11 @@ context, never required. It states:
 - **Conditions**: matrix, seeds, model, this experiment's budget, its
   early-stop metric, and its wall-clock cap. Budget is enforced before each
   spend, not checked afterwards.
-- **Deliverable**: the report at its path with the header above; for
-  `measure`, replay fixtures on the branch, consolidated to one file per
-  condition; for `change`, the candidate diff and a baseline-versus-candidate
+- **Deliverable**: the report at its path with the header above and the
+  result file beside it, written by the harness with one entry per
+  hypothesis (`metric`, `observed`, `baseline`, and the condition values);
+  for `measure`, replay fixtures on the branch, consolidated to one file
+  per condition; for `change`, the candidate diff and a baseline-versus-candidate
   table; for `explore`, candidate backlog entries with evidence.
 - **Prior results** it builds on, by experiment id.
 - **Pull request**: title `experiment(<program>): <slug>`, label
