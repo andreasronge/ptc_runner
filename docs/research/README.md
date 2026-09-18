@@ -57,7 +57,7 @@ an ordinary issue with a reproduction, never a research pull request.
 
 The experiment's branch is retained on the remote and tagged
 `research/<program>/<nnn>` at its final commit; that tag is the reproducible
-record and it is never deleted. Only the report file reaches main. Fixtures,
+record and it is never deleted. Only the report and the result file reach main. Fixtures,
 harness changes, and candidate diffs stay on the branch. A harness change a
 second experiment needs is an ordinary issue and an ordinary pull request.
 

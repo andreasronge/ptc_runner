@@ -15,7 +15,7 @@ the model never saw, at a cost that single-shot repair cannot match?
 
 | id | hypothesis | metric | null model | tolerance | state |
 | --- | --- | --- | --- | --- | --- |
-| H0 | A recorded run re-executes byte-equal from its frozen bundle and its input | fraction of re-executions equal | none | 100% | supported (`prelude-search/000`) |
+| H0 | A recorded run re-executes byte-equal from its frozen bundle and its input | fraction of re-executions equal | none; the claim is exactly 1 | 0 | open until `prelude-search/000` is migrated |
 | H1 | K parallel candidates with a held-out check beat single-shot repair at equal per-candidate budget | held-out pass rate | independent sampling: 1 − (1 − p₁)ᴷ where p₁ is the single-shot rate | ±3 points | open |
 | H2 | Feedback from a failed check beats more width at equal tokens | held-out pass rate per dollar | H1's K=4 result at the same spend | ±3 points | open |
 | H3 | A helper the model wrote on one subject lowers cost on an unseen subject | cost per solved instance | the same run without the helper | ±10% | open |
