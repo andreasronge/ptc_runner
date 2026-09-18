@@ -206,7 +206,7 @@ defmodule PtcRunner.MixProject do
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:earmark_parser, "~> 1.4.44", only: [:dev, :test], runtime: false},
-      {:req_llm, "~> 1.20", optional: true, runtime: false},
+      {:req_llm, "~> 1.24", optional: true, runtime: false},
       {:ptc_llm_http, "== 0.1.0", only: [:dev, :test], runtime: false},
       launcher_dep(),
       {:usage_rules, "~> 1.2", only: :dev, runtime: false},
