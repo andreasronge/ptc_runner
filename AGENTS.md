@@ -63,7 +63,10 @@ labels, and an open issue carries at most one of them. Remove the legacy
 `needs-review`, `ready-for-implementation`, `needs-clarification`,
 `needs-breakdown`, and `needs-maintainer-input` labels from any issue you
 update. A dependency is the canonical `Blocked by #<number>` line in the issue
-body. An assignee marks the issue as taken.
+body; record the same ordering as a native GitHub issue dependency so the
+console can order admission. An assignee marks the issue as taken. A research
+experiment issue also carries the `experiment` label and follows the shape in
+`docs/research/README.md`; its pull request is never merged.
 
 ## Documentation
 
@@ -75,6 +78,9 @@ body. An assignee marks the issue as taken.
   gets at most a link.
 - Which layer owns what (module docs, guides, references, specifications,
   plans) is in `docs/maintainers/documentation.md`.
+- Research programs, their reports, and what an experiment may merge are
+  in `docs/research/README.md`. Only a report reaches main; the experiment's
+  branch is retained and tagged.
 
 ## Commands
 

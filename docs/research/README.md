@@ -1,0 +1,105 @@
+# Research programs
+
+A research program is one question with hypotheses, a budget, stop rules, a
+ledger of finished experiments, and a backlog of candidate experiments. Most
+of the work an experiment produces is never merged: only its report reaches
+this directory. The design of the loop that runs programs, and the console
+side that will drive it, is in the PtcManager research-steward plan
+(`docs/plans/research-steward.md` in that repository). Everything on this
+page holds whether a program is driven by that console or by a person.
+
+## Programs
+
+| Program | Question | Status |
+| --- | --- | --- |
+| [prelude-search](prelude-search.md) | Does bounded search over model-written candidates, selected by a check against recorded executions, produce repairs that hold on unseen executions at a cost single-shot repair cannot match? | active |
+
+## Layout
+
+```text
+docs/research/README.md                          this index
+docs/research/<program>.md                       the program document
+docs/research/reports/<program>/<nnn>-<slug>.md  one report per experiment
+scripts/labs/<program>/                          the harness, when the program has one
+```
+
+## The program document
+
+Sections in order: **Question**; **Hypotheses** (id, sentence, metric, null
+model, tolerance, state `open`/`supported`/`refuted`/`dropped`); **Budget and
+limits**; **Stop rules**; **Ledger**; **Backlog**; **Runtime wants**.
+
+The document carries no authority. Budgets and permissions come from an
+approved run in the console, or from the maintainer filing an issue by hand.
+The ledger is written by whoever judged the experiment, never by the
+experiment's own author.
+
+## Experiment ids, kinds, and verdicts
+
+An experiment is `<program>/<nnn>`. Its kind is `measure` (run a harness),
+`change` (alter the runtime or a shipped prelude as a candidate and measure
+it against main on the same replay fixtures; the candidate never merges
+through the experiment), or `explore` (read code, traces, or literature and
+produce backlog candidates with evidence; no measurement).
+
+A verdict is `supports`, `refutes`, `inconclusive`, `invalid` (a method
+defect of medium or higher severity makes the numbers unusable), or
+`stopped`. A `change` that earns its change, and every runtime want, becomes
+an ordinary issue with a reproduction, never a research pull request.
+
+## What merges
+
+The experiment's branch is retained on the remote and tagged
+`research/<program>/<nnn>` at its final commit; that tag is the reproducible
+record and it is never deleted. Only the report file reaches main. Fixtures,
+harness changes, and candidate diffs stay on the branch. A harness change a
+second experiment needs is an ordinary issue and an ordinary pull request.
+
+## The report
+
+Every report starts with this header so results are searchable with `rg`
+without parsing prose:
+
+```yaml
+program: prelude-search
+experiment: prelude-search/001
+issue: 1996
+tag: research/prelude-search/001
+kinds: [measure]
+hypotheses: [H1]
+model: openrouter:deepseek/deepseek-v4-flash
+replay: scripts/labs/prelude-search/fixtures/deepseek-v4-flash/
+tags: [sampling, held-out-check, deepseek]
+```
+
+The header carries no verdict and no cost; those are ledger columns. The body
+holds what the issue asked for: conditions, metric tables, the comparison
+with the hypothesis's null model, verbatim examples, failure modes with
+counts, and a **runtime wants** section listing what the experiment needed
+from the runtime and had to work around.
+
+To find prior results: `rg -l 'hypotheses: \[.*H1' docs/research/reports/`
+for a hypothesis, `rg -l 'tags: .*deepseek' docs/research/reports/` for a
+tag, and the program's ledger for verdicts and cost.
+
+## The experiment issue
+
+An experiment issue is self-contained; the program document is linked for
+context, never required. It states:
+
+- **Program and hypotheses**, by id and sentence.
+- **Kind**, one of the three above.
+- **Conditions**: matrix, seeds, model, this experiment's budget, its
+  early-stop metric, and its wall-clock cap. Budget is enforced before each
+  spend, not checked afterwards.
+- **Deliverable**: the report at its path with the header above; for
+  `measure`, replay fixtures on the branch, consolidated to one file per
+  condition; for `change`, the candidate diff and a baseline-versus-candidate
+  table; for `explore`, candidate backlog entries with evidence.
+- **Prior results** it builds on, by experiment id.
+- **Pull request**: title `experiment(<program>): <slug>`, label
+  `experiment`, body `Artifact for #<issue>`. It is never merged; it exists
+  for the method review and the tag.
+
+Prompts inside a harness stay domain-blind per the repository rules; the
+subjects a harness studies are data.
