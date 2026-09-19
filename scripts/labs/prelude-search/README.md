@@ -102,6 +102,13 @@ that quoted observed values match the cited visible examples, not that the
 model's reasoning follows from them. Form accuracy requires the exact planted
 fragment; empty text and arbitrary containing functions do not count.
 
+Every model case also retains a canonical trace under `traces/` and renames its
+inspection artifact to the correlated run reference. If a command or fixture
+export fails, the harness stops normally after writing the completed prefix to
+`results.json`, the available fixture index, and `summary.json`. The summary
+names the failed case and unresolved reservation; it does not add a scored row
+or invent usage for that case.
+
 Replay in another new directory using the retained per-case fixture index:
 
 ```console
@@ -109,6 +116,12 @@ mix run scripts/labs/prelude-search/run.exs --phase 1 --instances 1 \
   --subject intervals --replay --fixtures /tmp/prelude-pilot/fixtures \
   --budget-microusd 500000 --output /tmp/prelude-pilot-replay
 ```
+
+For a stopped experiment, add `--partial-replay` to replay only the indexed
+prefix. This mode is valid only with `--replay`; it stops at the first missing
+fixture with `partial_replay_complete` rather than treating the unrecorded case
+as a new experiment failure. The declared instance and budget bounds still
+apply.
 
 Keep the same seeds, subjects, and instance count. Fixtures preserve successful
 usage and classified provider failures. Compare candidate outcomes and reported

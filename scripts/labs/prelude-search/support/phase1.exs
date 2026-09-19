@@ -24,6 +24,8 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
   def run(opts) do
     output = opts |> Keyword.fetch!(:output) |> Path.expand()
     replay? = Keyword.get(opts, :replay, false)
+    partial_replay? = Keyword.get(opts, :partial_replay, false)
+    command_runner = Keyword.get(opts, :command_runner, &run_command/1)
     subjects = Keyword.get(opts, :subjects, PreludeSearch.subjects())
     instances = Keyword.get(opts, :instances, 20)
     budget = Keyword.get(opts, :budget_microusd, 5_000_000)
@@ -31,6 +33,8 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
 
     if instances < 1 or instances > 100 or budget < @case_cap,
       do: raise("invalid experiment limits")
+
+    if partial_replay? and not replay?, do: raise("partial replay requires --replay")
 
     if File.exists?(output), do: raise("experiment output must be a new directory")
     :ok = prepare_output(output)
@@ -69,65 +73,77 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
           condition <- @experiments,
           do: {subject, index, condition}
 
-    {results, spent, reason} =
-      Enum.reduce_while(cases, {[], 0, nil}, fn {subject, index, {experiment, candidates, turns}},
-                                                {rows, spent, _} ->
-        if spent + @case_cap > budget do
-          {:halt, {rows, spent, "budget_reservation"}}
-        else
-          instance = PreludeSearch.instance(subject, seed + index)
-
-          File.write!(
-            Path.join(output, "reservation.json"),
-            pretty_json(%{
-              spent_microusd: spent,
-              reserved_microusd: @case_cap,
-              subject: subject,
-              instance: index,
-              condition: experiment
-            })
-          )
-
-          result =
-            run_case(
-              output,
-              instance,
-              index,
-              experiment,
-              candidates,
-              turns,
-              replay?,
-              fixture_root
-            )
-
-          cost = get_in(result, ["usage", "llm_spend", "total_cost", "microunits"])
-          next = [result | rows]
-          File.write!(Path.join(output, "results.json"), pretty_json(Enum.reverse(next)))
-
-          if is_integer(cost) do
-            {:cont, {next, spent + cost, nil}}
+    {results, spent, reason, failed_case} =
+      Enum.reduce_while(cases, {[], 0, nil, nil}, fn
+        {subject, index, {experiment, candidates, turns}}, {rows, spent, _, _} ->
+          if spent + @case_cap > budget do
+            {:halt, {rows, spent, "budget_reservation", nil}}
           else
-            {:halt, {next, spent + @case_cap, "missing_usage_reserved_at_ceiling"}}
+            if partial_replay? and not replay_fixture?(fixture_root, subject, index, experiment) do
+              {:halt, {rows, spent, "partial_replay_complete", nil}}
+            else
+              instance = PreludeSearch.instance(subject, seed + index)
+
+              File.write!(
+                Path.join(output, "reservation.json"),
+                pretty_json(%{
+                  spent_microusd: spent,
+                  reserved_microusd: @case_cap,
+                  subject: subject,
+                  instance: index,
+                  condition: experiment
+                })
+              )
+
+              case run_case_safely(fn ->
+                     run_case(
+                       output,
+                       instance,
+                       index,
+                       experiment,
+                       candidates,
+                       turns,
+                       replay?,
+                       fixture_root,
+                       command_runner
+                     )
+                   end) do
+                {:ok, result} ->
+                  cost = get_in(result, ["usage", "llm_spend", "total_cost", "microunits"])
+                  next = [result | rows]
+                  File.write!(Path.join(output, "results.json"), pretty_json(Enum.reverse(next)))
+
+                  if is_integer(cost) do
+                    {:cont, {next, spent + cost, nil}}
+                  else
+                    {:halt, {next, spent + @case_cap, "missing_usage_reserved_at_ceiling", nil}}
+                  end
+
+                {:error, message} ->
+                  failed = %{
+                    subject: subject,
+                    instance: index,
+                    condition: experiment,
+                    error: message,
+                    artifacts: Path.join("runs", case_slug(subject, index, experiment))
+                  }
+
+                  {:halt, {rows, spent + @case_cap, "case_failed", failed}}
+              end
+            end
           end
-        end
       end)
 
     results = Enum.reverse(results)
 
-    if not replay? do
-      fixtures = fixture_root |> Path.join("*.jsonl") |> Path.wildcard() |> Enum.sort()
+    if not replay?, do: write_fixture_index(fixture_root)
 
-      index =
-        Enum.map(fixtures, fn path ->
-          %{
-            file: Path.basename(path),
-            sha256: :crypto.hash(:sha256, File.read!(path)) |> Base.encode16(case: :lower)
-          }
-        end)
+    reservation =
+      if reason in ["case_failed", "missing_usage_reserved_at_ceiling"] do
+        output |> Path.join("reservation.json") |> File.read!() |> Jason.decode!()
+      end
 
-      File.mkdir_p!(fixture_root)
-      File.write!(Path.join(fixture_root, "index.json"), pretty_json(index))
-    end
+    File.write!(Path.join(output, "results.json"), pretty_json(results))
 
     File.write!(
       Path.join(output, "summary.json"),
@@ -136,6 +152,8 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
         comparisons: Statistics.compare(results, "E1 three-turn", ["E2 K=2", "E2 K=4"]),
         spent_or_reserved_microusd: spent,
         stop_reason: reason,
+        failed_case: failed_case,
+        unresolved_reservation: reservation,
         conclusion: "pilot; no automatic hypothesis verdict"
       })
     )
@@ -181,10 +199,10 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
          candidates,
          turns,
          replay?,
-         fixture_root
+         fixture_root,
+         command_runner
        ) do
-    slug =
-      "#{instance.subject}-#{instance_index}-#{String.replace(experiment, ~r/[^A-Za-z0-9]+/, "-")}"
+    slug = case_slug(instance.subject, instance_index, experiment)
 
     app_dir = Path.join([output, "runs", slug])
     :ok = File.mkdir_p(app_dir)
@@ -208,30 +226,31 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
     result_path = Path.join(app_dir, "result.json")
     envelope_path = Path.join(app_dir, "envelope.json")
     inspection_path = Path.join(app_dir, "run.ptcins")
+    trace_dir = Path.join([output, "traces", slug])
+    File.mkdir_p!(trace_dir)
 
     started = System.monotonic_time(:millisecond)
 
     {console, status} =
-      System.cmd(
-        System.find_executable("mix"),
-        [
-          "ptc",
-          "run",
-          Path.join(app_dir, "ptc.json"),
-          "--host-config",
-          Path.join(app_dir, "ptc-host.json"),
-          "--private-output",
-          result_path,
-          "--inspect",
-          inspection_path,
-          "--envelope",
-          envelope_path
-        ],
-        stderr_to_stdout: true,
-        env: [{"MIX_QUIET", "1"}]
-      )
+      command_runner.([
+        "ptc",
+        "run",
+        Path.join(app_dir, "ptc.json"),
+        "--host-config",
+        Path.join(app_dir, "ptc-host.json"),
+        "--private-output",
+        result_path,
+        "--inspect",
+        inspection_path,
+        "--trace-dir",
+        trace_dir,
+        "--envelope",
+        envelope_path
+      ])
 
     wall_ms = System.monotonic_time(:millisecond) - started
+
+    inspection_path = correlate_inspection(inspection_path, envelope_path)
 
     if status != 0 do
       raise "phase 1 run failed for #{slug}:\n#{console}"
@@ -552,6 +571,65 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
   end
 
   defp pretty_json(value), do: Jason.encode_to_iodata!(value, pretty: true)
+
+  defp run_command(args) do
+    System.cmd(System.find_executable("mix"), args,
+      stderr_to_stdout: true,
+      env: [{"MIX_QUIET", "1"}]
+    )
+  end
+
+  defp correlate_inspection(inspection_path, envelope_path) do
+    with true <- File.regular?(inspection_path),
+         {:ok, encoded} <- File.read(envelope_path),
+         {:ok, %{"run_ref" => run_ref}} when is_binary(run_ref) <- Jason.decode(encoded) do
+      correlated = Path.join(Path.dirname(inspection_path), run_ref <> ".ptcins")
+      File.rename!(inspection_path, correlated)
+      correlated
+    else
+      _ -> inspection_path
+    end
+  end
+
+  defp run_case_safely(fun) do
+    {:ok, fun.()}
+  rescue
+    exception -> {:error, Exception.message(exception)}
+  catch
+    kind, reason -> {:error, Exception.format_banner(kind, reason)}
+  end
+
+  defp case_slug(subject, index, experiment) do
+    "#{subject}-#{index}-#{String.replace(experiment, ~r/[^A-Za-z0-9]+/, "-")}"
+  end
+
+  defp replay_fixture?(fixture_root, subject, index, experiment) do
+    fixture = case_slug(subject, index, experiment) <> ".jsonl"
+
+    with {:ok, encoded} <- File.read(Path.join(fixture_root, "index.json")),
+         {:ok, entries} <- Jason.decode(encoded) do
+      Enum.any?(entries, &(&1["file"] == fixture))
+    else
+      _ -> false
+    end
+  end
+
+  defp write_fixture_index(fixture_root) do
+    index =
+      fixture_root
+      |> Path.join("*.jsonl")
+      |> Path.wildcard()
+      |> Enum.sort()
+      |> Enum.map(fn path ->
+        %{
+          file: Path.basename(path),
+          sha256: :crypto.hash(:sha256, File.read!(path)) |> Base.encode16(case: :lower)
+        }
+      end)
+
+    File.mkdir_p!(fixture_root)
+    File.write!(Path.join(fixture_root, "index.json"), pretty_json(index))
+  end
 
   defp function_correct?(name, subject, truth), do: name in [truth, "lab.#{subject}/#{truth}"]
 

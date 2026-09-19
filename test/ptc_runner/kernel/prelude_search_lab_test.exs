@@ -1,10 +1,12 @@
 defmodule PtcRunner.Kernel.PreludeSearchLabTest do
   use ExUnit.Case, async: false
 
+  alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.LLMReplay
   alias PtcRunner.Labs.PreludeSearch
   alias PtcRunner.Labs.PreludeSearch.Phase1
   alias PtcRunner.Labs.PreludeSearch.Statistics
+  alias PtcRunner.MixCommandAdapter
 
   @moduletag :nightly
 
@@ -72,6 +74,126 @@ defmodule PtcRunner.Kernel.PreludeSearchLabTest do
         Phase1.replay_outcome(%{"status" => "error", "kind" => kind, "reason" => reason})
       end
     end
+  end
+
+  @tag :tmp_dir
+  @tag timeout: 30_000
+  test "Phase 1 finalizes an injected Kernel timeout with analyzable evidence", %{tmp_dir: root} do
+    output = Path.join(root, "stopped")
+    previous = Application.get_env(:ptc_runner, :llm_adapter)
+
+    Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.TestSupport.HostLLMAdapter)
+    Application.put_env(:ptc_runner, :host_llm_test_owner, self())
+    Application.put_env(:ptc_runner, :host_llm_test_block, true)
+
+    on_exit(fn ->
+      Application.put_env(:ptc_runner, :llm_adapter, previous)
+      Application.delete_env(:ptc_runner, :host_llm_test_owner)
+      Application.delete_env(:ptc_runner, :host_llm_test_block)
+    end)
+
+    runner = fn args ->
+      args = tl(args)
+      envelope_path = args |> Enum.drop_while(&(&1 != "--envelope")) |> Enum.at(1)
+      envelope_index = Enum.find_index(args, &(&1 == "--envelope"))
+      args = List.delete_at(args, envelope_index) |> List.delete_at(envelope_index)
+      manifest_path = Enum.at(args, 1)
+      host_path = args |> Enum.drop_while(&(&1 != "--host-config")) |> Enum.at(1)
+      manifest = manifest_path |> File.read!() |> Jason.decode!()
+      host = host_path |> File.read!() |> Jason.decode!()
+
+      manifest =
+        manifest
+        |> put_in(["limits", "workflow_timeout_ms"], 1_000)
+        |> update_in(["limits"], &Map.drop(&1, ["llm_cost_microusd", "llm_total_tokens"]))
+
+      host =
+        host
+        |> put_in(["credentials", "openrouter_key"], %{"literal" => "unused-test-secret"})
+        |> update_in(["limits"], &Map.drop(&1, ["llm_cost_microusd", "llm_total_tokens"]))
+
+      File.write!(manifest_path, Jason.encode!(manifest))
+      File.write!(host_path, Jason.encode!(host))
+
+      case CommandEngine.dispatch(args) do
+        {:ok, outcome} ->
+          File.write!(envelope_path, Jason.encode!(outcome.envelope))
+          {"", 0}
+
+        {:error, outcome} ->
+          File.write!(envelope_path, Jason.encode!(outcome.envelope))
+          {get_in(outcome.envelope, ["error", "message"]), outcome.exit_status}
+      end
+    end
+
+    assert [] =
+             Phase1.run(
+               output: output,
+               subjects: ["intervals"],
+               instances: 1,
+               budget_microusd: 100_000,
+               command_runner: runner
+             )
+
+    summary = output |> Path.join("summary.json") |> File.read!() |> Jason.decode!()
+    assert summary["stop_reason"] == "case_failed"
+    assert summary["failed_case"]["condition"] == "E1 one-turn"
+    assert summary["unresolved_reservation"]["reserved_microusd"] == 100_000
+    assert File.read!(Path.join(output, "results.json")) |> Jason.decode!() == []
+    assert File.regular?(Path.join(output, "fixtures/index.json"))
+
+    envelope_path = Path.join(output, "runs/intervals-0-E1-one-turn/envelope.json")
+    assert File.regular?(envelope_path), inspect(summary)
+
+    envelope =
+      envelope_path
+      |> File.read!()
+      |> Jason.decode!()
+
+    run_ref = envelope["run_ref"]
+    traces = Path.join(output, "traces/intervals-0-E1-one-turn")
+    inspection = Path.join(output, "runs/intervals-0-E1-one-turn")
+
+    assert get_in(envelope, ["artifact_state", "trace"]) == "written", inspect(envelope)
+    assert [_trace] = Path.wildcard(Path.join(traces, "*.jsonl"))
+
+    assert %{exit_status: 0} =
+             MixCommandAdapter.execute([
+               "repl",
+               "--profile",
+               "private-run-analysis-v2",
+               "--run",
+               run_ref,
+               "--resource",
+               "traces=#{traces}",
+               "--resource",
+               "inspection=#{inspection}",
+               "--private-unattended",
+               "--format",
+               "jsonl",
+               "-e",
+               "(analysis/runs {})"
+             ])
+
+    replay_output = Path.join(root, "partial-replay")
+
+    assert [] =
+             Phase1.run(
+               output: replay_output,
+               subjects: ["intervals"],
+               instances: 1,
+               budget_microusd: 100_000,
+               replay: true,
+               partial_replay: true,
+               fixtures: Path.join(output, "fixtures")
+             )
+
+    replay_summary =
+      replay_output |> Path.join("summary.json") |> File.read!() |> Jason.decode!()
+
+    assert replay_summary["stop_reason"] == "partial_replay_complete"
+    assert replay_summary["failed_case"] == nil
+    refute File.exists?(Path.join(replay_output, "reservation.json"))
   end
 
   test "parallel proposals have distinct replay identities with the same visible evidence" do

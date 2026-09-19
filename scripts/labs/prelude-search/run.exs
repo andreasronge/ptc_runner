@@ -12,6 +12,7 @@ Code.require_file("support/phase1.exs", directory)
       instances: :integer,
       budget_microusd: :integer,
       replay: :boolean,
+      partial_replay: :boolean,
       fixtures: :string,
       replay_artifacts: :string,
       subject: :string,
