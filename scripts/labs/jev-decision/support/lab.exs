@@ -58,7 +58,59 @@ defmodule PtcRunner.Examples.JevDecisionLab do
          "instructions" "Does this require action today?"}}}))
   """
 
+  @refund_triage_program ~S"""
+  (let [decision
+        (decision/request
+          {"state"
+           {"tickets"
+            [{"id" "T-1001"
+              "subject" "Refund for duplicate charge"
+              "body" "Charged twice for the March invoice, please refund one."}
+             {"id" "T-1002"
+              "subject" "Dashboard is down"
+              "body" "Our whole team gets a 502 on the dashboard since this morning."}
+             {"id" "T-1003"
+              "subject" "How do I export CSV?"
+              "body" "Looking for the export button described in the docs."}
+             {"id" "T-1004"
+              "subject" "Refund policy question"
+              "body" "Considering a downgrade; does the refund cover unused months?"}
+             {"id" "T-1005"
+              "subject" "API returns 500 on upload"
+              "body" "Uploads over 10 MB fail with a 500 since yesterday."}
+             {"id" "T-1006"
+              "subject" "Password reset loop"
+              "body" "Reset email link keeps sending me back to the login page."}]}
+           "questions"
+           {"T-1001" {"type" "boolean" "instructions" "Does ticket T-1001 ask about a refund?"}
+            "T-1002" {"type" "boolean" "instructions" "Does ticket T-1002 ask about a refund?"}
+            "T-1003" {"type" "boolean" "instructions" "Does ticket T-1003 ask about a refund?"}
+            "T-1004" {"type" "boolean" "instructions" "Does ticket T-1004 ask about a refund?"}
+            "T-1005" {"type" "boolean" "instructions" "Does ticket T-1005 ask about a refund?"}
+            "T-1006" {"type" "boolean" "instructions" "Does ticket T-1006 ask about a refund?"}}})
+        answers (get decision "answers")
+        ticket-ids ["T-1001" "T-1002" "T-1003" "T-1004" "T-1005" "T-1006"]
+        refund-ids
+        (->> ticket-ids
+             (filter (fn [ticket-id]
+                       (>= (get-in answers [ticket-id "probability"]) 0.5)))
+             vec)]
+    (return
+      {"refund_ticket_ids" refund-ids
+       "decisions" answers
+       "model" (get decision "model")
+       "usage" (get decision "usage")}))
+  """
+
   def run(opts \\ []) when is_list(opts) do
+    run_program(@program, opts, "jev-decision-lab")
+  end
+
+  def run_refund_triage(opts \\ []) when is_list(opts) do
+    run_program(@refund_triage_program, opts, "jev-refund-triage-lab")
+  end
+
+  defp run_program(program, opts, run_id) do
     with {:ok, capability} <- capability(opts),
          {:ok, component} <- decision_component(),
          {:ok, bundle} <- Kernel.compile_bundle([component]),
@@ -67,7 +119,7 @@ defmodule PtcRunner.Examples.JevDecisionLab do
          {:ok, mission} <- MissionEnvironment.new([]),
          {:ok, limits} <-
            Limits.new(run_duration_ms: 60_000, workflow_timeout_ms: 45_000),
-         {:ok, sink} <- EventSink.start(:normal, limits, run_id: "jev-decision-lab"),
+         {:ok, sink} <- EventSink.start(:normal, limits, run_id: run_id),
          {:ok, config} <-
            RunConfig.new(
              workflow_environment: workflow,
@@ -76,7 +128,7 @@ defmodule PtcRunner.Examples.JevDecisionLab do
              limits: limits,
              event_sink: sink
            ) do
-      Kernel.run(@program, config)
+      Kernel.run(program, config)
     end
   end
 

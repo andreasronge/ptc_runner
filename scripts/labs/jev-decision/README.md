@@ -1,49 +1,72 @@
-# Jev decision lab
+# Classify support tickets with Jev
 
-This lab runs a batched Jev evaluation through the PtcRunner Kernel. Its local
-`decision/request` prelude wraps a read-only `decision-request` capability. The
-host pins `typesafe/jev-1.13`, owns the OpenRouter credential, converts the
-provider's `noul` wire type to a provider-neutral `boolean`, and returns the
-resolved model, named answers, confidence/probability data, and usage.
+Run one practical Jev decision from PTC-Lisp and get the refund-related ticket
+IDs together with the probability behind every classification.
 
-From the repository root:
+This source-checkout lab adapts `examples/support-triage/01-one-question`.
+Add `OPENROUTER_API_KEY` to the repository `.env`, then run:
 
 ```sh
 set -a
 source .env
 set +a
+mix run scripts/labs/jev-decision/run-refund-triage.exs
+```
+
+The live result on 2026-09-19 selected the two refund tickets:
+
+```json
+{
+  "model": "typesafe/jev-1.13-20260917",
+  "refund_ticket_ids": ["T-1001", "T-1004"],
+  "usage": {
+    "cost": 0.000028014,
+    "input_tokens": 667,
+    "output_tokens": 130
+  }
+}
+```
+
+The command also prints all six boolean decisions. Jev assigned `0.99`
+probability to each returned ticket and `0.01` to each remaining ticket in
+that run. Probabilities, token use, cost, and the resolved model may change.
+
+## Follow the program
+
+[`decision.clj`](decision.clj) defines the small PTC-Lisp API:
+
+```clojure
+(decision/request {"state" state "questions" questions})
+```
+
+The refund workflow in [`support/lab.exs`](support/lab.exs) sends the six
+tickets as state and asks one named boolean question for each ticket. All six
+questions travel in one request. It then keeps answers whose probability is at
+least `0.5`:
+
+```clojure
+(->> ticket-ids
+     (filter (fn [ticket-id]
+               (>= (get-in answers [ticket-id "probability"]) 0.5)))
+     vec)
+```
+
+Jev owns the fuzzy text classification. PTC-Lisp owns the visible threshold
+and result shape. This differs from the original support-triage example, where
+a chat model writes a program that searches the tickets.
+
+## Inspect the broader response shapes
+
+Run the companion probe to see choice, score, and boolean answers together:
+
+```sh
 mix run scripts/labs/jev-decision/run.exs
 ```
 
-The example submits choice, score, and boolean questions in one request. It
-prints only the normalized result; the API key and raw provider response never
-cross into Lisp.
+The host pins `typesafe/jev-1.13`, keeps the credential outside Lisp, and
+normalizes OpenRouter's `noul` wire response to `boolean` plus `probability`.
 
-## Observed live result
-
-On 2026-09-19, OpenRouter resolved the pinned alias to
-`typesafe/jev-1.13-20260917`. In the bundled support-ticket example it selected
-`billing` with confidence `1.0`, scored severity `1.33` with confidence `0.6`,
-and assigned `0.88` probability to same-day urgency. The batched call used 415
-input tokens and 68 output tokens and reported a cost of `$0.00001743`.
-
-## Boundary recommendation
-
-Keep decisions separate from `llm/request`. That existing function represents
-generation: messages, tools, text, and structured output. Jev evaluates state
-against several named questions and returns calibrated answers rather than a
-generated message. Reusing `llm/request` would require a second incompatible
-request and response contract behind one name.
-
-The thin prelude is still worthwhile. `decision/request` gives PTC-Lisp a
-stable, discoverable namespace while the host capability owns model selection,
-authentication, validation, and provider adaptation. Once a ReqLLM release
-contains its merged OpenRouter evaluation adapter, the callback can replace the
-temporary direct `Req.post/2` call with `ReqLLM.evaluate/4`; the Lisp API and
-normalized result can remain unchanged.
-
-This is intentionally a lab, not a production provider installation. The
-direct callback does not yet participate in PtcRunner's LLM admission,
-reservation, replay, cost-budget, deadline, or private-inspection policies.
-Those contracts should be designed before exposing decision models through a
-host manifest.
+This remains a lab. `decision-request` is not yet a host-config provider, and
+it does not yet participate in LLM replay, cost budgets, or admission. The
+recommended product boundary is a separate `decision/request` prelude that
+shares those host policies with `llm/request`.
