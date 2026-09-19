@@ -1,0 +1,5 @@
+{
+  "completed_cases": 32,
+  "stop_reason": "in_progress_snapshot",
+  "provenance": "Snapshot metadata only; the live recording is continuing. No observations were generated or scored by this snapshot."
+}

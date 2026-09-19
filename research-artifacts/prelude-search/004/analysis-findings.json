@@ -1,0 +1,23 @@
+{
+  "run_ref": "cmd-15eb5hp054jngg1xb9q6bn1p18",
+  "case": "intervals-0-E2-K-2",
+  "source": "private-run-analysis-v2",
+  "observation": "Both mission evaluations failed on the final allowed turn. Generated sources, complete model exchanges and generic evaluation_error activity are retained, but detailed mission evaluator diagnostics are absent from the private capture.",
+  "counts": {
+    "model_exchanges": 2,
+    "generated_sources": 2,
+    "turns": 2,
+    "execution_errors": 0,
+    "capability_calls": 0,
+    "explicit_failure_values": 0
+  },
+  "runtime_followup": "https://github.com/andreasronge/ptc_runner/issues/2021",
+  "measurement_effect": "None identified: failed-attempt outcomes, candidate absence and model usage remain recorded and replayable. This is a navigation/diagnostic limitation.",
+  "queries": [
+    "capture-counts-invocation.json",
+    "failure-analysis-invocation.json",
+    "outcome-analysis-invocation.json",
+    "turn-analysis-invocation.json",
+    "activity-analysis-invocation.json"
+  ]
+}

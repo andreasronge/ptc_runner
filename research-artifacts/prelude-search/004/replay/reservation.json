@@ -1,0 +1,9 @@
+{
+  "mode": "replay",
+  "instance": 13,
+  "subject": "intervals",
+  "condition": "E1 one-turn",
+  "spent_microusd": 0,
+  "replayed_cost_microusd": 69123,
+  "reserved_microusd": 0
+}

@@ -1,0 +1,71 @@
+{
+  "run_id": "cmd-2tbr5gbc125jrh9mswnqgr56zn",
+  "terminal_reason": "model_output_truncated",
+  "llm_spend": {
+    "input": 17116,
+    "output": 40501,
+    "state": "available",
+    "total_cost": {
+      "currency": "USD",
+      "microunits": 3524
+    }
+  },
+  "calls": [
+    {
+      "input_sequence": 14,
+      "duration_ms": 101869,
+      "finish_reason": "tool_calls",
+      "tokens": {
+        "cache_creation": 0,
+        "cache_read": 4096,
+        "input": 4975,
+        "output": 14205,
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1202
+        }
+      },
+      "output_limit": null
+    },
+    {
+      "input_sequence": 17,
+      "duration_ms": 71461,
+      "finish_reason": "tool_calls",
+      "tokens": {
+        "cache_creation": 0,
+        "cache_read": 4096,
+        "input": 5648,
+        "output": 9912,
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 886
+        }
+      },
+      "output_limit": null
+    },
+    {
+      "input_sequence": 21,
+      "duration_ms": 120250,
+      "finish_reason": "length",
+      "tokens": {
+        "cache_creation": 0,
+        "cache_read": 4096,
+        "input": 6493,
+        "output": 16384,
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1436
+        }
+      },
+      "output_limit": {
+        "bindings": [
+          "application_limit",
+          "installation_param"
+        ],
+        "name": "max_tokens",
+        "value": 16384
+      }
+    }
+  ],
+  "reservation_policy": "Retain full 100000 microusd failed-case reservation despite recovered known usage; no automatic restart."
+}

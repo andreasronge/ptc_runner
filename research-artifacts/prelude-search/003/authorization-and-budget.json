@@ -1,0 +1,8 @@
+{
+  "experiment": "prelude-search/003",
+  "kind": "deadline_calibration",
+  "authorization": "https://github.com/andreasronge/ptc_runner/issues/1996#issuecomment-5744271571",
+  "corrective_allowance_microusd": 5000000,
+  "prior_spent_or_reserved_microusd": 310574,
+  "recording_cap_microusd": 400000
+}

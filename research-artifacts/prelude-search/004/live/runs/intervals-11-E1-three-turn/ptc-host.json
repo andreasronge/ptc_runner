@@ -1,0 +1,39 @@
+{
+  "credentials": {
+    "openrouter_key": {
+      "env": "OPENROUTER_API_KEY"
+    }
+  },
+  "install": {
+    "deepseek": {
+      "cache": false,
+      "ceilings": {
+        "request_timeout_ms": 300000
+      },
+      "credential": "openrouter_key",
+      "installation_revision": "prelude-search-deepseek-v2-300000",
+      "model": "openrouter:deepseek/deepseek-v4-flash",
+      "params": {
+        "max_tokens": 16384
+      },
+      "reservation_tariff": {
+        "currency": "USD",
+        "id": "openrouter-model-pricing-v1"
+      },
+      "source": "llm",
+      "structured_output_mode": "json_schema",
+      "usage_guarantees": {
+        "cost_currency": "USD",
+        "tokens": true
+      }
+    }
+  },
+  "limits": {
+    "llm_cost_microusd": 100000,
+    "llm_request_timeout_ms": 300000,
+    "llm_total_tokens": 320000,
+    "parallel_timeout_ms": 330000,
+    "run_duration_ms": 960000,
+    "workflow_timeout_ms": 960000
+  }
+}

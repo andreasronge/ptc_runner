@@ -1,0 +1,50 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "candidate_source": {
+      "type": "string"
+    },
+    "diagnosis": {
+      "additionalProperties": false,
+      "properties": {
+        "cited_executions": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "index": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "observed_json": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "index",
+              "observed_json"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "form": {
+          "type": "string"
+        },
+        "function": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "function",
+        "form",
+        "cited_executions"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "diagnosis",
+    "candidate_source"
+  ],
+  "type": "object"
+}

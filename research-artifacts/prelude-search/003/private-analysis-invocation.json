@@ -1,0 +1,23 @@
+[
+  "mise",
+  "exec",
+  "--",
+  "mix",
+  "ptc",
+  "repl",
+  "--profile",
+  "private-run-analysis-v2",
+  "--private-unattended",
+  "--run",
+  "cmd-0d3zvyjyjyyfbmegjzrn5x4axd",
+  "--resource",
+  "traces=/tmp/ptc-prelude-search-recordings/003/live/runs/intervals-0-E1-one-turn/traces",
+  "--resource",
+  "inspection=/tmp/ptc-prelude-search-recordings/003/live/runs/intervals-0-E1-one-turn/inspection",
+  "--session-trace-dir",
+  "/tmp/ptc-prelude-search-recordings/003/analysis-sessions",
+  "--format",
+  "jsonl",
+  "-e",
+  "(keys (first (get (analysis/read \"cmd-0d3zvyjyjyyfbmegjzrn5x4axd\" {\"collection\" \"model_exchanges\" \"limit\" 10}) \"items\")))"
+]

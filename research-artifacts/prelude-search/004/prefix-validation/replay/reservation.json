@@ -1,0 +1,9 @@
+{
+  "mode": "replay",
+  "instance": 7,
+  "subject": "intervals",
+  "condition": "E2 K=4",
+  "spent_microusd": 0,
+  "replayed_cost_microusd": 39816,
+  "reserved_microusd": 0
+}

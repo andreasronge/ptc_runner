@@ -1,0 +1,130 @@
+[
+  {
+    "file": "intervals-0-E1-one-turn.jsonl",
+    "sha256": "4572419b7858eca58cd89e885db935fbd2d13b73c0e88c95fa9c27b51bce25ae"
+  },
+  {
+    "file": "intervals-0-E1-three-turn.jsonl",
+    "sha256": "6863cc15264f75966fa3d79c7c7938ec790d0411138e16c168e5bead1078608e"
+  },
+  {
+    "file": "intervals-0-E2-K-2.jsonl",
+    "sha256": "6a0049b62636bd18ce9309b86cf2f9c4ab6ccc872cb5cdbd42c36c88b1775aa5"
+  },
+  {
+    "file": "intervals-0-E2-K-4.jsonl",
+    "sha256": "d6a963e3733fc97fe67becfb9de3ca3ee462d666a7a1536a8ec03f362b5cde67"
+  },
+  {
+    "file": "intervals-1-E1-one-turn.jsonl",
+    "sha256": "bc3a6fa0a2d4abafa74faeb93534b5456ff9d8e5556c6415fbba37c301e81972"
+  },
+  {
+    "file": "intervals-1-E1-three-turn.jsonl",
+    "sha256": "5f6daa31d2c46fa97196093d293d6a3f993c3783f2f18238f2d5cc23f0cf83fa"
+  },
+  {
+    "file": "intervals-1-E2-K-2.jsonl",
+    "sha256": "4c4f235b9bf4a7d7293a4d28698ea47abffc77c24e87340c4b54e078ccc165c5"
+  },
+  {
+    "file": "intervals-1-E2-K-4.jsonl",
+    "sha256": "6e7e1cafe2672076daa10fdfb5507363cce2d155d8460b515890075ae0ef006c"
+  },
+  {
+    "file": "intervals-2-E1-one-turn.jsonl",
+    "sha256": "2e3f241c4b67c49dc19eb83c0c31227d3da46fa64610c5c462472406bcffd02b"
+  },
+  {
+    "file": "intervals-2-E1-three-turn.jsonl",
+    "sha256": "ed86853576867b3399ccc032121172b83aa84147a3101ce866081bf749267575"
+  },
+  {
+    "file": "intervals-2-E2-K-2.jsonl",
+    "sha256": "8d05c560d5d821725d8a0db688b2a1ac37a5a9b8f15b924fe871794dd889631c"
+  },
+  {
+    "file": "intervals-2-E2-K-4.jsonl",
+    "sha256": "c12d7d0d4fb7f63b865827298e07339f95966db2e42a68487c6db3bfd8dfedd8"
+  },
+  {
+    "file": "intervals-3-E1-one-turn.jsonl",
+    "sha256": "b5c1e61ecb5acda93261f33ab807943ec04ffd889101eeff50ca53ad42379f37"
+  },
+  {
+    "file": "intervals-3-E1-three-turn.jsonl",
+    "sha256": "08d364a38a4c7678406b54830d9235fef528b48e3abaa8ae291ec786700810fb"
+  },
+  {
+    "file": "intervals-3-E2-K-2.jsonl",
+    "sha256": "52a76a0ac53f83b8be325f1463caffa31f7107e411fa6f1e4400642a8ea43365"
+  },
+  {
+    "file": "intervals-3-E2-K-4.jsonl",
+    "sha256": "346726f5303f4009cc5f8b396ad590a51c5ba974f24406d74f2d4ee9eeb318e7"
+  },
+  {
+    "file": "intervals-4-E1-one-turn.jsonl",
+    "sha256": "c9662b66cb2d4507868ed3957ec3b8e956de459a021315dce66a0e6fb5be255a"
+  },
+  {
+    "file": "intervals-4-E1-three-turn.jsonl",
+    "sha256": "3940d13a466493a86fb81739bd9b261bf39a3e12a51092cf68d5d4706a0a58fa"
+  },
+  {
+    "file": "intervals-4-E2-K-2.jsonl",
+    "sha256": "804bfd399e540fdbcf56c140b200d75c4e493e78330b27e9a2f7f5eccb3dde55"
+  },
+  {
+    "file": "intervals-4-E2-K-4.jsonl",
+    "sha256": "6652c255ff5c2bc6f66af120c6bd5a8a7198a145fd76394e813ffa262abdc1f2"
+  },
+  {
+    "file": "intervals-5-E1-one-turn.jsonl",
+    "sha256": "5ea03a386e0b0fd9293e13e8980b9dfb5cc8c916bcca0e04914c7718f5262ef5"
+  },
+  {
+    "file": "intervals-5-E1-three-turn.jsonl",
+    "sha256": "038b425a8d33d4117b5fa426181e687276c698ceaa74bc6a3e486f8fdb2e6813"
+  },
+  {
+    "file": "intervals-5-E2-K-2.jsonl",
+    "sha256": "23057611ea6e125a65c488e7aaec9df909cd5986501191a7dabb04237d247615"
+  },
+  {
+    "file": "intervals-5-E2-K-4.jsonl",
+    "sha256": "bc452e258f151a8d5d1889057113b7f71944f6268c989fb1845deb839e3fd23f"
+  },
+  {
+    "file": "intervals-6-E1-one-turn.jsonl",
+    "sha256": "5ebb91cab1999c6171456db1bf8067cfd78cdcccc89481cc0c5b89d5cc4b8e6b"
+  },
+  {
+    "file": "intervals-6-E1-three-turn.jsonl",
+    "sha256": "7bcfad607a5492c37d37c38a5b3daf23558f37a660b93a00d07f7079df1ab535"
+  },
+  {
+    "file": "intervals-6-E2-K-2.jsonl",
+    "sha256": "2c5130e6cbf2d5b77428c72b751ffb0a30ee1795604416b8ceb2b1ee53f176e5"
+  },
+  {
+    "file": "intervals-6-E2-K-4.jsonl",
+    "sha256": "3c4e3ee5e2456865c852bd362eb160709a9d797100709b77ac57e926b881d079"
+  },
+  {
+    "file": "intervals-7-E1-one-turn.jsonl",
+    "sha256": "1bfb0fa5b9fa160eb0ef4baf821a9669f843480eb5889fdd00d935e8a04beec5"
+  },
+  {
+    "file": "intervals-7-E1-three-turn.jsonl",
+    "sha256": "0259dda675839b12470172df01d2bc4bd6c5c1abe8dca6a5fa810b9b135db822"
+  },
+  {
+    "file": "intervals-7-E2-K-2.jsonl",
+    "sha256": "9a3f57006acc37c50d26bac5e17bc5f65c089b474d678f6b93490c63643a0cf7"
+  },
+  {
+    "file": "intervals-7-E2-K-4.jsonl",
+    "sha256": "ca321641f290de3452a8ac90ef5f506c0cd943abacb5b65d090f0de26e78b756"
+  }
+]

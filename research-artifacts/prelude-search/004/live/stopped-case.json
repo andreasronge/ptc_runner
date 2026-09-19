@@ -1,0 +1,7 @@
+{
+  "error": "phase 1 run failed for intervals-13-E1-three-turn:\n** (Mix) error: execution/model_output_truncated: provider/deepseek/execution: model output for alias deepseek was truncated without producing a usable run_ptc_lisp call; the request used max_tokens 16384 from the application limit llm_request_output_tokens and installation params.max_tokens. Raise limits.llm_request_output_tokens in the application manifest and its installed host ceiling if lower and raise params.max_tokens for that host installation if the model supports a larger output, or reduce the requested output (run_ref: cmd-2tbr5gbc125jrh9mswnqgr56zn)\n",
+  "instance": 13,
+  "subject": "intervals",
+  "condition": "E1 three-turn",
+  "reserved_microusd": 100000
+}

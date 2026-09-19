@@ -1,0 +1,24 @@
+{
+  "completed_cases_verified": 32,
+  "comparison_fields": [
+    "experiment",
+    "subject",
+    "seed",
+    "ground_truth",
+    "candidates",
+    "solved",
+    "winner",
+    "selection",
+    "usage.llm_spend"
+  ],
+  "equal": true,
+  "excluded_fields": [
+    "run_ref",
+    "wall_ms",
+    "console",
+    "non-model run bookkeeping"
+  ],
+  "stopped_case_replayed": false,
+  "full_matrix_replayed": false,
+  "replay_new_spend_microusd": 0
+}

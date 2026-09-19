@@ -1,0 +1,18 @@
+[
+  {
+    "file": "intervals-0-E1-one-turn.jsonl",
+    "sha256": "a5f996f8b51b4e18d73796fb211b80bf320df72bdfc896b52b9b52caf9a3f6ca"
+  },
+  {
+    "file": "intervals-0-E1-three-turn.jsonl",
+    "sha256": "473ec06b580e035ab32698510724b6f063498155a0c5d5dcb3f65e35ff860036"
+  },
+  {
+    "file": "intervals-0-E2-K-2.jsonl",
+    "sha256": "63184606e281f2852ab2cc3762455de86dc6c76c607663946189bc04e58ed549"
+  },
+  {
+    "file": "intervals-0-E2-K-4.jsonl",
+    "sha256": "bbd0cff71b839a9933d074ca5ccb69fb5e9c5738e7b8e49f00ee18879993c4fb"
+  }
+]

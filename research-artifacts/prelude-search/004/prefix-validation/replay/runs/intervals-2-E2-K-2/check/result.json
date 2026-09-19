@@ -1,0 +1,18 @@
+{
+  "final_pass": true,
+  "selected": 0,
+  "selection": [
+    {
+      "index": 0,
+      "mission": "candidate-0",
+      "passed": true,
+      "valid": true
+    },
+    {
+      "index": 1,
+      "mission": "candidate-1",
+      "passed": false,
+      "valid": false
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+[
+  "mise",
+  "exec",
+  "--",
+  "mix",
+  "ptc",
+  "repl",
+  "--profile",
+  "private-run-analysis-v2",
+  "--private-unattended",
+  "--run",
+  "cmd-15eb5hp054jngg1xb9q6bn1p18",
+  "--resource",
+  "traces=/tmp/ptc-prelude-search-recordings/004/live/runs/intervals-0-E2-K-2/traces",
+  "--resource",
+  "inspection=/tmp/ptc-prelude-search-recordings/004/live/runs/intervals-0-E2-K-2/inspection",
+  "--session-trace-dir",
+  "/tmp/ptc-prelude-search-recordings/004/analysis-sessions",
+  "--format",
+  "jsonl",
+  "-e",
+  "(map (fn [x] (select-keys x [\"status\" \"error\"])) (get-in (analysis/open \"cmd-15eb5hp054jngg1xb9q6bn1p18\") [\"result\" \"value\"]))"
+]

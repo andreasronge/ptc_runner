@@ -1,0 +1,9 @@
+{
+  "mode": "live",
+  "instance": 13,
+  "subject": "intervals",
+  "condition": "E1 three-turn",
+  "spent_microusd": 69916,
+  "replayed_cost_microusd": null,
+  "reserved_microusd": 100000
+}

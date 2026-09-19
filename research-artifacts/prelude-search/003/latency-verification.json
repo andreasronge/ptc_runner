@@ -1,0 +1,12 @@
+{
+  "run_ref": "cmd-0d3zvyjyjyyfbmegjzrn5x4axd",
+  "source": "private-run-analysis-v2/model_exchanges",
+  "exchanges": [
+    {
+      "complete?": true,
+      "input_timestamp": "2026-09-19T18:29:20.062826Z",
+      "output_timestamp": "2026-09-19T18:31:25.961202Z",
+      "duration_ms": 125898
+    }
+  ]
+}

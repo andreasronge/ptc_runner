@@ -1,0 +1,8 @@
+{
+  "experiment": "prelude-search/004",
+  "kind": "corrective_e1_e2_pilot",
+  "authorization": "https://github.com/andreasronge/ptc_runner/issues/1996#issuecomment-5744271571",
+  "corrective_allowance_microusd": 5000000,
+  "prior_spent_or_reserved_microusd": 316438,
+  "recording_cap_microusd": 4683562
+}

@@ -1,0 +1,46 @@
+{
+  "input": {
+    "value": {}
+  },
+  "limits": {
+    "subordinate_evaluations": 128
+  },
+  "missions": {
+    "candidate-0": {
+      "components": [
+        {
+          "id": "lab.intervals",
+          "path": "candidate-0.clj"
+        }
+      ]
+    },
+    "candidate-3": {
+      "components": [
+        {
+          "id": "lab.intervals",
+          "path": "candidate-3.clj"
+        }
+      ]
+    }
+  },
+  "providers": {
+    "mission": [],
+    "workflow": []
+  },
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "dependencies": [
+          "kernel"
+        ],
+        "id": "lab.check",
+        "path": "check.clj"
+      },
+      {
+        "library": "kernel"
+      }
+    ],
+    "entry": "lab.check/run"
+  }
+}

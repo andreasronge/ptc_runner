@@ -1,0 +1,2624 @@
+{
+  "contracts": {
+    "phase_return_schemas": {
+      "repair": {
+        "path": "repair.schema.json"
+      }
+    }
+  },
+  "events": {
+    "policy": "private"
+  },
+  "input": {
+    "path": "input.json"
+  },
+  "labels": {
+    "name": "prelude-search-phase-1"
+  },
+  "limits": {
+    "evaluation_timeout_ms": 120000,
+    "llm_cost_microusd": 100000,
+    "llm_request_output_tokens": 16384,
+    "llm_request_timeout_ms": 300000,
+    "llm_total_tokens": 320000,
+    "parallel_timeout_ms": 330000,
+    "run_duration_ms": 960000,
+    "subordinate_evaluations": 16,
+    "subordinate_source_checks": 8,
+    "workflow_timeout_ms": 960000
+  },
+  "missions": {
+    "repair-0": {
+      "components": [],
+      "data": {
+        "params": {
+          "candidate_index": 0,
+          "source": "(ns lab.intervals \"Interval merging subject with configurable adjacency tolerance.\" {:visibility :prompt})\n\n(defn- ordered\n  \"Put one interval into ascending endpoint order.\"\n  [interval]\n  (let [start (get interval \"start\")\n        finish (get interval \"end\")]\n    (if (<= start finish)\n      {\"start\" start \"end\" finish}\n      {\"start\" finish \"end\" start})))\n\n(defn- touches?\n  \"Return true when the next interval is within tolerance.\"\n  [current next tolerance]\n  (<= (get next \"start\")\n      (+ (get current \"end\") tolerance)))\n\n(defn- extend\n  \"Extend a merged interval without moving its start.\"\n  [current next]\n  {\"end\" (get current \"start\")\n   \"start\" (max (get current \"end\") (get next \"end\"))})\n\n(defn- merge-ordered\n  \"Merge an already sorted sequence.\"\n  [intervals tolerance]\n  (reduce\n    (fn [merged interval]\n      (if (empty? merged)\n        [interval]\n        (let [current (last merged)]\n          (if (touches? current interval tolerance)\n            (conj (vec (butlast merged)) (extend current interval))\n            (conj merged interval)))))\n    []\n    intervals))\n\n(defn merge-with-tolerance\n  \"Normalise and merge intervals whose gap is no greater than tolerance.\"\n  {:signature \"(input :map) -> :map\"}\n  [input]\n  (let [tolerance (get input \"tolerance\" 0)\n        intervals (map ordered (get input \"intervals\" []))\n        sorted (sort-by #(get % \"start\") intervals)]\n    (return {\"intervals\" (merge-ordered sorted tolerance)})))\n",
+          "task": "Repair the supplied component using its source, contract, and visible executions.\nReturn diagnosis and candidate_source. The diagnosis names the function and exact\nfaulty source fragment, and cites executions with their index and observed_json (the observed value encoded as JSON text).\ncandidate_source is the complete component. Do not print or inspect data/params;\nits value is included below. Use run_ptc_lisp to return the requested object.\n",
+          "visible_executions": [
+            {
+              "index": 0,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261038,
+                    "start": 20261041
+                  },
+                  {
+                    "end": 20261036,
+                    "start": 20261033
+                  },
+                  {
+                    "end": 20261039,
+                    "start": 20261037
+                  }
+                ]
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261036,
+                    "start": 20261033
+                  },
+                  {
+                    "end": 20261037,
+                    "start": 20261041
+                  }
+                ]
+              }
+            },
+            {
+              "index": 1,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261058,
+                    "start": 20261061
+                  },
+                  {
+                    "end": 20261056,
+                    "start": 20261053
+                  },
+                  {
+                    "end": 20261059,
+                    "start": 20261058
+                  }
+                ],
+                "tolerance": 0
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261056,
+                    "start": 20261053
+                  },
+                  {
+                    "end": 20261058,
+                    "start": 20261061
+                  }
+                ]
+              }
+            },
+            {
+              "index": 2,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261078,
+                    "start": 20261081
+                  },
+                  {
+                    "end": 20261076,
+                    "start": 20261073
+                  },
+                  {
+                    "end": 20261079,
+                    "start": 20261079
+                  }
+                ],
+                "tolerance": 1
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261076,
+                    "start": 20261073
+                  },
+                  {
+                    "end": 20261078,
+                    "start": 20261081
+                  }
+                ]
+              }
+            },
+            {
+              "index": 3,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261098,
+                    "start": 20261101
+                  },
+                  {
+                    "end": 20261096,
+                    "start": 20261093
+                  },
+                  {
+                    "end": 20261099,
+                    "start": 20261096
+                  }
+                ],
+                "tolerance": 2
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261093,
+                    "start": 20261099
+                  },
+                  {
+                    "end": 20261101,
+                    "start": 20261098
+                  }
+                ]
+              }
+            },
+            {
+              "index": 4,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261118,
+                    "start": 20261121
+                  },
+                  {
+                    "end": 20261116,
+                    "start": 20261113
+                  },
+                  {
+                    "end": 20261119,
+                    "start": 20261117
+                  }
+                ],
+                "tolerance": 0
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261116,
+                    "start": 20261113
+                  },
+                  {
+                    "end": 20261117,
+                    "start": 20261121
+                  }
+                ]
+              }
+            },
+            {
+              "index": 5,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261138,
+                    "start": 20261141
+                  },
+                  {
+                    "end": 20261136,
+                    "start": 20261133
+                  },
+                  {
+                    "end": 20261139,
+                    "start": 20261138
+                  }
+                ]
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261136,
+                    "start": 20261133
+                  },
+                  {
+                    "end": 20261138,
+                    "start": 20261141
+                  }
+                ]
+              }
+            },
+            {
+              "index": 6,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261158,
+                    "start": 20261161
+                  },
+                  {
+                    "end": 20261156,
+                    "start": 20261153
+                  },
+                  {
+                    "end": 20261159,
+                    "start": 20261159
+                  }
+                ],
+                "tolerance": 2
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261153,
+                    "start": 20261161
+                  },
+                  {
+                    "end": 20261159,
+                    "start": 20261159
+                  }
+                ]
+              }
+            },
+            {
+              "index": 7,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261178,
+                    "start": 20261181
+                  },
+                  {
+                    "end": 20261176,
+                    "start": 20261173
+                  },
+                  {
+                    "end": 20261179,
+                    "start": 20261176
+                  }
+                ],
+                "tolerance": 0
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261173,
+                    "start": 20261179
+                  },
+                  {
+                    "end": 20261181,
+                    "start": 20261178
+                  }
+                ]
+              }
+            },
+            {
+              "index": 8,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261198,
+                    "start": 20261201
+                  },
+                  {
+                    "end": 20261196,
+                    "start": 20261193
+                  },
+                  {
+                    "end": 20261199,
+                    "start": 20261197
+                  }
+                ],
+                "tolerance": 1
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261193,
+                    "start": 20261199
+                  },
+                  {
+                    "end": 20261201,
+                    "start": 20261198
+                  }
+                ]
+              }
+            },
+            {
+              "index": 9,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261218,
+                    "start": 20261221
+                  },
+                  {
+                    "end": 20261216,
+                    "start": 20261213
+                  },
+                  {
+                    "end": 20261219,
+                    "start": 20261218
+                  }
+                ],
+                "tolerance": 2
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261213,
+                    "start": 20261221
+                  },
+                  {
+                    "end": 20261219,
+                    "start": 20261218
+                  }
+                ]
+              }
+            },
+            {
+              "index": 10,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261238,
+                    "start": 20261241
+                  },
+                  {
+                    "end": 20261236,
+                    "start": 20261233
+                  },
+                  {
+                    "end": 20261239,
+                    "start": 20261239
+                  }
+                ]
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261236,
+                    "start": 20261233
+                  },
+                  {
+                    "end": 20261238,
+                    "start": 20261241
+                  }
+                ]
+              }
+            },
+            {
+              "index": 11,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261258,
+                    "start": 20261261
+                  },
+                  {
+                    "end": 20261256,
+                    "start": 20261253
+                  },
+                  {
+                    "end": 20261259,
+                    "start": 20261256
+                  }
+                ],
+                "tolerance": 1
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261253,
+                    "start": 20261259
+                  },
+                  {
+                    "end": 20261261,
+                    "start": 20261258
+                  }
+                ]
+              }
+            },
+            {
+              "index": 12,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261278,
+                    "start": 20261281
+                  },
+                  {
+                    "end": 20261276,
+                    "start": 20261273
+                  },
+                  {
+                    "end": 20261279,
+                    "start": 20261277
+                  }
+                ],
+                "tolerance": 2
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261273,
+                    "start": 20261279
+                  },
+                  {
+                    "end": 20261281,
+                    "start": 20261278
+                  }
+                ]
+              }
+            },
+            {
+              "index": 13,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261298,
+                    "start": 20261301
+                  },
+                  {
+                    "end": 20261296,
+                    "start": 20261293
+                  },
+                  {
+                    "end": 20261299,
+                    "start": 20261298
+                  }
+                ],
+                "tolerance": 0
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261296,
+                    "start": 20261293
+                  },
+                  {
+                    "end": 20261298,
+                    "start": 20261301
+                  }
+                ]
+              }
+            },
+            {
+              "index": 14,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261318,
+                    "start": 20261321
+                  },
+                  {
+                    "end": 20261316,
+                    "start": 20261313
+                  },
+                  {
+                    "end": 20261319,
+                    "start": 20261319
+                  }
+                ],
+                "tolerance": 1
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261316,
+                    "start": 20261313
+                  },
+                  {
+                    "end": 20261318,
+                    "start": 20261321
+                  }
+                ]
+              }
+            },
+            {
+              "index": 15,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261338,
+                    "start": 20261341
+                  },
+                  {
+                    "end": 20261336,
+                    "start": 20261333
+                  },
+                  {
+                    "end": 20261339,
+                    "start": 20261336
+                  }
+                ]
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261333,
+                    "start": 20261339
+                  },
+                  {
+                    "end": 20261341,
+                    "start": 20261338
+                  }
+                ]
+              }
+            },
+            {
+              "index": 16,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261358,
+                    "start": 20261361
+                  },
+                  {
+                    "end": 20261356,
+                    "start": 20261353
+                  },
+                  {
+                    "end": 20261359,
+                    "start": 20261357
+                  }
+                ],
+                "tolerance": 0
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261356,
+                    "start": 20261353
+                  },
+                  {
+                    "end": 20261357,
+                    "start": 20261361
+                  }
+                ]
+              }
+            },
+            {
+              "index": 17,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261378,
+                    "start": 20261381
+                  },
+                  {
+                    "end": 20261376,
+                    "start": 20261373
+                  },
+                  {
+                    "end": 20261379,
+                    "start": 20261378
+                  }
+                ],
+                "tolerance": 1
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261376,
+                    "start": 20261373
+                  },
+                  {
+                    "end": 20261378,
+                    "start": 20261381
+                  }
+                ]
+              }
+            },
+            {
+              "index": 18,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261398,
+                    "start": 20261401
+                  },
+                  {
+                    "end": 20261396,
+                    "start": 20261393
+                  },
+                  {
+                    "end": 20261399,
+                    "start": 20261399
+                  }
+                ],
+                "tolerance": 2
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261393,
+                    "start": 20261401
+                  },
+                  {
+                    "end": 20261399,
+                    "start": 20261399
+                  }
+                ]
+              }
+            },
+            {
+              "index": 19,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261418,
+                    "start": 20261421
+                  },
+                  {
+                    "end": 20261416,
+                    "start": 20261413
+                  },
+                  {
+                    "end": 20261419,
+                    "start": 20261416
+                  }
+                ],
+                "tolerance": 0
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261413,
+                    "start": 20261419
+                  },
+                  {
+                    "end": 20261421,
+                    "start": 20261418
+                  }
+                ]
+              }
+            },
+            {
+              "index": 20,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261438,
+                    "start": 20261441
+                  },
+                  {
+                    "end": 20261436,
+                    "start": 20261433
+                  },
+                  {
+                    "end": 20261439,
+                    "start": 20261437
+                  }
+                ]
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261436,
+                    "start": 20261433
+                  },
+                  {
+                    "end": 20261437,
+                    "start": 20261441
+                  }
+                ]
+              }
+            },
+            {
+              "index": 21,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261458,
+                    "start": 20261461
+                  },
+                  {
+                    "end": 20261456,
+                    "start": 20261453
+                  },
+                  {
+                    "end": 20261459,
+                    "start": 20261458
+                  }
+                ],
+                "tolerance": 2
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261453,
+                    "start": 20261461
+                  },
+                  {
+                    "end": 20261459,
+                    "start": 20261458
+                  }
+                ]
+              }
+            },
+            {
+              "index": 22,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261478,
+                    "start": 20261481
+                  },
+                  {
+                    "end": 20261476,
+                    "start": 20261473
+                  },
+                  {
+                    "end": 20261479,
+                    "start": 20261479
+                  }
+                ],
+                "tolerance": 0
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261476,
+                    "start": 20261473
+                  },
+                  {
+                    "end": 20261478,
+                    "start": 20261481
+                  }
+                ]
+              }
+            },
+            {
+              "index": 23,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261498,
+                    "start": 20261501
+                  },
+                  {
+                    "end": 20261496,
+                    "start": 20261493
+                  },
+                  {
+                    "end": 20261499,
+                    "start": 20261496
+                  }
+                ],
+                "tolerance": 1
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261493,
+                    "start": 20261499
+                  },
+                  {
+                    "end": 20261501,
+                    "start": 20261498
+                  }
+                ]
+              }
+            },
+            {
+              "index": 24,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261518,
+                    "start": 20261521
+                  },
+                  {
+                    "end": 20261516,
+                    "start": 20261513
+                  },
+                  {
+                    "end": 20261519,
+                    "start": 20261517
+                  }
+                ],
+                "tolerance": 2
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261513,
+                    "start": 20261519
+                  },
+                  {
+                    "end": 20261521,
+                    "start": 20261518
+                  }
+                ]
+              }
+            },
+            {
+              "index": 25,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261538,
+                    "start": 20261541
+                  },
+                  {
+                    "end": 20261536,
+                    "start": 20261533
+                  },
+                  {
+                    "end": 20261539,
+                    "start": 20261538
+                  }
+                ]
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261536,
+                    "start": 20261533
+                  },
+                  {
+                    "end": 20261538,
+                    "start": 20261541
+                  }
+                ]
+              }
+            },
+            {
+              "index": 26,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261558,
+                    "start": 20261561
+                  },
+                  {
+                    "end": 20261556,
+                    "start": 20261553
+                  },
+                  {
+                    "end": 20261559,
+                    "start": 20261559
+                  }
+                ],
+                "tolerance": 1
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261556,
+                    "start": 20261553
+                  },
+                  {
+                    "end": 20261558,
+                    "start": 20261561
+                  }
+                ]
+              }
+            },
+            {
+              "index": 27,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261578,
+                    "start": 20261581
+                  },
+                  {
+                    "end": 20261576,
+                    "start": 20261573
+                  },
+                  {
+                    "end": 20261579,
+                    "start": 20261576
+                  }
+                ],
+                "tolerance": 2
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261573,
+                    "start": 20261579
+                  },
+                  {
+                    "end": 20261581,
+                    "start": 20261578
+                  }
+                ]
+              }
+            },
+            {
+              "index": 28,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261598,
+                    "start": 20261601
+                  },
+                  {
+                    "end": 20261596,
+                    "start": 20261593
+                  },
+                  {
+                    "end": 20261599,
+                    "start": 20261597
+                  }
+                ],
+                "tolerance": 0
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261596,
+                    "start": 20261593
+                  },
+                  {
+                    "end": 20261597,
+                    "start": 20261601
+                  }
+                ]
+              }
+            },
+            {
+              "index": 29,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261618,
+                    "start": 20261621
+                  },
+                  {
+                    "end": 20261616,
+                    "start": 20261613
+                  },
+                  {
+                    "end": 20261619,
+                    "start": 20261618
+                  }
+                ],
+                "tolerance": 1
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261616,
+                    "start": 20261613
+                  },
+                  {
+                    "end": 20261618,
+                    "start": 20261621
+                  }
+                ]
+              }
+            },
+            {
+              "index": 30,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261638,
+                    "start": 20261641
+                  },
+                  {
+                    "end": 20261636,
+                    "start": 20261633
+                  },
+                  {
+                    "end": 20261639,
+                    "start": 20261639
+                  }
+                ]
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261636,
+                    "start": 20261633
+                  },
+                  {
+                    "end": 20261638,
+                    "start": 20261641
+                  }
+                ]
+              }
+            },
+            {
+              "index": 31,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261658,
+                    "start": 20261661
+                  },
+                  {
+                    "end": 20261656,
+                    "start": 20261653
+                  },
+                  {
+                    "end": 20261659,
+                    "start": 20261656
+                  }
+                ],
+                "tolerance": 0
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261653,
+                    "start": 20261659
+                  },
+                  {
+                    "end": 20261661,
+                    "start": 20261658
+                  }
+                ]
+              }
+            },
+            {
+              "index": 32,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261678,
+                    "start": 20261681
+                  },
+                  {
+                    "end": 20261676,
+                    "start": 20261673
+                  },
+                  {
+                    "end": 20261679,
+                    "start": 20261677
+                  }
+                ],
+                "tolerance": 1
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261673,
+                    "start": 20261679
+                  },
+                  {
+                    "end": 20261681,
+                    "start": 20261678
+                  }
+                ]
+              }
+            },
+            {
+              "index": 33,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261698,
+                    "start": 20261701
+                  },
+                  {
+                    "end": 20261696,
+                    "start": 20261693
+                  },
+                  {
+                    "end": 20261699,
+                    "start": 20261698
+                  }
+                ],
+                "tolerance": 2
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261693,
+                    "start": 20261701
+                  },
+                  {
+                    "end": 20261699,
+                    "start": 20261698
+                  }
+                ]
+              }
+            },
+            {
+              "index": 34,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261718,
+                    "start": 20261721
+                  },
+                  {
+                    "end": 20261716,
+                    "start": 20261713
+                  },
+                  {
+                    "end": 20261719,
+                    "start": 20261719
+                  }
+                ],
+                "tolerance": 0
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261716,
+                    "start": 20261713
+                  },
+                  {
+                    "end": 20261718,
+                    "start": 20261721
+                  }
+                ]
+              }
+            },
+            {
+              "index": 35,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261738,
+                    "start": 20261741
+                  },
+                  {
+                    "end": 20261736,
+                    "start": 20261733
+                  },
+                  {
+                    "end": 20261739,
+                    "start": 20261736
+                  }
+                ]
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261733,
+                    "start": 20261739
+                  },
+                  {
+                    "end": 20261741,
+                    "start": 20261738
+                  }
+                ]
+              }
+            },
+            {
+              "index": 36,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261758,
+                    "start": 20261761
+                  },
+                  {
+                    "end": 20261756,
+                    "start": 20261753
+                  },
+                  {
+                    "end": 20261759,
+                    "start": 20261757
+                  }
+                ],
+                "tolerance": 2
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261753,
+                    "start": 20261759
+                  },
+                  {
+                    "end": 20261761,
+                    "start": 20261758
+                  }
+                ]
+              }
+            },
+            {
+              "index": 37,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261778,
+                    "start": 20261781
+                  },
+                  {
+                    "end": 20261776,
+                    "start": 20261773
+                  },
+                  {
+                    "end": 20261779,
+                    "start": 20261778
+                  }
+                ],
+                "tolerance": 0
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261776,
+                    "start": 20261773
+                  },
+                  {
+                    "end": 20261778,
+                    "start": 20261781
+                  }
+                ]
+              }
+            },
+            {
+              "index": 38,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261798,
+                    "start": 20261801
+                  },
+                  {
+                    "end": 20261796,
+                    "start": 20261793
+                  },
+                  {
+                    "end": 20261799,
+                    "start": 20261799
+                  }
+                ],
+                "tolerance": 1
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261796,
+                    "start": 20261793
+                  },
+                  {
+                    "end": 20261798,
+                    "start": 20261801
+                  }
+                ]
+              }
+            },
+            {
+              "index": 39,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261818,
+                    "start": 20261821
+                  },
+                  {
+                    "end": 20261816,
+                    "start": 20261813
+                  },
+                  {
+                    "end": 20261819,
+                    "start": 20261816
+                  }
+                ],
+                "tolerance": 2
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261813,
+                    "start": 20261819
+                  },
+                  {
+                    "end": 20261821,
+                    "start": 20261818
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "repair-1": {
+      "components": [],
+      "data": {
+        "params": {
+          "candidate_index": 1,
+          "source": "(ns lab.intervals \"Interval merging subject with configurable adjacency tolerance.\" {:visibility :prompt})\n\n(defn- ordered\n  \"Put one interval into ascending endpoint order.\"\n  [interval]\n  (let [start (get interval \"start\")\n        finish (get interval \"end\")]\n    (if (<= start finish)\n      {\"start\" start \"end\" finish}\n      {\"start\" finish \"end\" start})))\n\n(defn- touches?\n  \"Return true when the next interval is within tolerance.\"\n  [current next tolerance]\n  (<= (get next \"start\")\n      (+ (get current \"end\") tolerance)))\n\n(defn- extend\n  \"Extend a merged interval without moving its start.\"\n  [current next]\n  {\"end\" (get current \"start\")\n   \"start\" (max (get current \"end\") (get next \"end\"))})\n\n(defn- merge-ordered\n  \"Merge an already sorted sequence.\"\n  [intervals tolerance]\n  (reduce\n    (fn [merged interval]\n      (if (empty? merged)\n        [interval]\n        (let [current (last merged)]\n          (if (touches? current interval tolerance)\n            (conj (vec (butlast merged)) (extend current interval))\n            (conj merged interval)))))\n    []\n    intervals))\n\n(defn merge-with-tolerance\n  \"Normalise and merge intervals whose gap is no greater than tolerance.\"\n  {:signature \"(input :map) -> :map\"}\n  [input]\n  (let [tolerance (get input \"tolerance\" 0)\n        intervals (map ordered (get input \"intervals\" []))\n        sorted (sort-by #(get % \"start\") intervals)]\n    (return {\"intervals\" (merge-ordered sorted tolerance)})))\n",
+          "task": "Repair the supplied component using its source, contract, and visible executions.\nReturn diagnosis and candidate_source. The diagnosis names the function and exact\nfaulty source fragment, and cites executions with their index and observed_json (the observed value encoded as JSON text).\ncandidate_source is the complete component. Do not print or inspect data/params;\nits value is included below. Use run_ptc_lisp to return the requested object.\n",
+          "visible_executions": [
+            {
+              "index": 0,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261038,
+                    "start": 20261041
+                  },
+                  {
+                    "end": 20261036,
+                    "start": 20261033
+                  },
+                  {
+                    "end": 20261039,
+                    "start": 20261037
+                  }
+                ]
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261036,
+                    "start": 20261033
+                  },
+                  {
+                    "end": 20261037,
+                    "start": 20261041
+                  }
+                ]
+              }
+            },
+            {
+              "index": 1,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261058,
+                    "start": 20261061
+                  },
+                  {
+                    "end": 20261056,
+                    "start": 20261053
+                  },
+                  {
+                    "end": 20261059,
+                    "start": 20261058
+                  }
+                ],
+                "tolerance": 0
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261056,
+                    "start": 20261053
+                  },
+                  {
+                    "end": 20261058,
+                    "start": 20261061
+                  }
+                ]
+              }
+            },
+            {
+              "index": 2,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261078,
+                    "start": 20261081
+                  },
+                  {
+                    "end": 20261076,
+                    "start": 20261073
+                  },
+                  {
+                    "end": 20261079,
+                    "start": 20261079
+                  }
+                ],
+                "tolerance": 1
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261076,
+                    "start": 20261073
+                  },
+                  {
+                    "end": 20261078,
+                    "start": 20261081
+                  }
+                ]
+              }
+            },
+            {
+              "index": 3,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261098,
+                    "start": 20261101
+                  },
+                  {
+                    "end": 20261096,
+                    "start": 20261093
+                  },
+                  {
+                    "end": 20261099,
+                    "start": 20261096
+                  }
+                ],
+                "tolerance": 2
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261093,
+                    "start": 20261099
+                  },
+                  {
+                    "end": 20261101,
+                    "start": 20261098
+                  }
+                ]
+              }
+            },
+            {
+              "index": 4,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261118,
+                    "start": 20261121
+                  },
+                  {
+                    "end": 20261116,
+                    "start": 20261113
+                  },
+                  {
+                    "end": 20261119,
+                    "start": 20261117
+                  }
+                ],
+                "tolerance": 0
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261116,
+                    "start": 20261113
+                  },
+                  {
+                    "end": 20261117,
+                    "start": 20261121
+                  }
+                ]
+              }
+            },
+            {
+              "index": 5,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261138,
+                    "start": 20261141
+                  },
+                  {
+                    "end": 20261136,
+                    "start": 20261133
+                  },
+                  {
+                    "end": 20261139,
+                    "start": 20261138
+                  }
+                ]
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261136,
+                    "start": 20261133
+                  },
+                  {
+                    "end": 20261138,
+                    "start": 20261141
+                  }
+                ]
+              }
+            },
+            {
+              "index": 6,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261158,
+                    "start": 20261161
+                  },
+                  {
+                    "end": 20261156,
+                    "start": 20261153
+                  },
+                  {
+                    "end": 20261159,
+                    "start": 20261159
+                  }
+                ],
+                "tolerance": 2
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261153,
+                    "start": 20261161
+                  },
+                  {
+                    "end": 20261159,
+                    "start": 20261159
+                  }
+                ]
+              }
+            },
+            {
+              "index": 7,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261178,
+                    "start": 20261181
+                  },
+                  {
+                    "end": 20261176,
+                    "start": 20261173
+                  },
+                  {
+                    "end": 20261179,
+                    "start": 20261176
+                  }
+                ],
+                "tolerance": 0
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261173,
+                    "start": 20261179
+                  },
+                  {
+                    "end": 20261181,
+                    "start": 20261178
+                  }
+                ]
+              }
+            },
+            {
+              "index": 8,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261198,
+                    "start": 20261201
+                  },
+                  {
+                    "end": 20261196,
+                    "start": 20261193
+                  },
+                  {
+                    "end": 20261199,
+                    "start": 20261197
+                  }
+                ],
+                "tolerance": 1
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261193,
+                    "start": 20261199
+                  },
+                  {
+                    "end": 20261201,
+                    "start": 20261198
+                  }
+                ]
+              }
+            },
+            {
+              "index": 9,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261218,
+                    "start": 20261221
+                  },
+                  {
+                    "end": 20261216,
+                    "start": 20261213
+                  },
+                  {
+                    "end": 20261219,
+                    "start": 20261218
+                  }
+                ],
+                "tolerance": 2
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261213,
+                    "start": 20261221
+                  },
+                  {
+                    "end": 20261219,
+                    "start": 20261218
+                  }
+                ]
+              }
+            },
+            {
+              "index": 10,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261238,
+                    "start": 20261241
+                  },
+                  {
+                    "end": 20261236,
+                    "start": 20261233
+                  },
+                  {
+                    "end": 20261239,
+                    "start": 20261239
+                  }
+                ]
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261236,
+                    "start": 20261233
+                  },
+                  {
+                    "end": 20261238,
+                    "start": 20261241
+                  }
+                ]
+              }
+            },
+            {
+              "index": 11,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261258,
+                    "start": 20261261
+                  },
+                  {
+                    "end": 20261256,
+                    "start": 20261253
+                  },
+                  {
+                    "end": 20261259,
+                    "start": 20261256
+                  }
+                ],
+                "tolerance": 1
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261253,
+                    "start": 20261259
+                  },
+                  {
+                    "end": 20261261,
+                    "start": 20261258
+                  }
+                ]
+              }
+            },
+            {
+              "index": 12,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261278,
+                    "start": 20261281
+                  },
+                  {
+                    "end": 20261276,
+                    "start": 20261273
+                  },
+                  {
+                    "end": 20261279,
+                    "start": 20261277
+                  }
+                ],
+                "tolerance": 2
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261273,
+                    "start": 20261279
+                  },
+                  {
+                    "end": 20261281,
+                    "start": 20261278
+                  }
+                ]
+              }
+            },
+            {
+              "index": 13,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261298,
+                    "start": 20261301
+                  },
+                  {
+                    "end": 20261296,
+                    "start": 20261293
+                  },
+                  {
+                    "end": 20261299,
+                    "start": 20261298
+                  }
+                ],
+                "tolerance": 0
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261296,
+                    "start": 20261293
+                  },
+                  {
+                    "end": 20261298,
+                    "start": 20261301
+                  }
+                ]
+              }
+            },
+            {
+              "index": 14,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261318,
+                    "start": 20261321
+                  },
+                  {
+                    "end": 20261316,
+                    "start": 20261313
+                  },
+                  {
+                    "end": 20261319,
+                    "start": 20261319
+                  }
+                ],
+                "tolerance": 1
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261316,
+                    "start": 20261313
+                  },
+                  {
+                    "end": 20261318,
+                    "start": 20261321
+                  }
+                ]
+              }
+            },
+            {
+              "index": 15,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261338,
+                    "start": 20261341
+                  },
+                  {
+                    "end": 20261336,
+                    "start": 20261333
+                  },
+                  {
+                    "end": 20261339,
+                    "start": 20261336
+                  }
+                ]
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261333,
+                    "start": 20261339
+                  },
+                  {
+                    "end": 20261341,
+                    "start": 20261338
+                  }
+                ]
+              }
+            },
+            {
+              "index": 16,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261358,
+                    "start": 20261361
+                  },
+                  {
+                    "end": 20261356,
+                    "start": 20261353
+                  },
+                  {
+                    "end": 20261359,
+                    "start": 20261357
+                  }
+                ],
+                "tolerance": 0
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261356,
+                    "start": 20261353
+                  },
+                  {
+                    "end": 20261357,
+                    "start": 20261361
+                  }
+                ]
+              }
+            },
+            {
+              "index": 17,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261378,
+                    "start": 20261381
+                  },
+                  {
+                    "end": 20261376,
+                    "start": 20261373
+                  },
+                  {
+                    "end": 20261379,
+                    "start": 20261378
+                  }
+                ],
+                "tolerance": 1
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261376,
+                    "start": 20261373
+                  },
+                  {
+                    "end": 20261378,
+                    "start": 20261381
+                  }
+                ]
+              }
+            },
+            {
+              "index": 18,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261398,
+                    "start": 20261401
+                  },
+                  {
+                    "end": 20261396,
+                    "start": 20261393
+                  },
+                  {
+                    "end": 20261399,
+                    "start": 20261399
+                  }
+                ],
+                "tolerance": 2
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261393,
+                    "start": 20261401
+                  },
+                  {
+                    "end": 20261399,
+                    "start": 20261399
+                  }
+                ]
+              }
+            },
+            {
+              "index": 19,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261418,
+                    "start": 20261421
+                  },
+                  {
+                    "end": 20261416,
+                    "start": 20261413
+                  },
+                  {
+                    "end": 20261419,
+                    "start": 20261416
+                  }
+                ],
+                "tolerance": 0
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261413,
+                    "start": 20261419
+                  },
+                  {
+                    "end": 20261421,
+                    "start": 20261418
+                  }
+                ]
+              }
+            },
+            {
+              "index": 20,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261438,
+                    "start": 20261441
+                  },
+                  {
+                    "end": 20261436,
+                    "start": 20261433
+                  },
+                  {
+                    "end": 20261439,
+                    "start": 20261437
+                  }
+                ]
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261436,
+                    "start": 20261433
+                  },
+                  {
+                    "end": 20261437,
+                    "start": 20261441
+                  }
+                ]
+              }
+            },
+            {
+              "index": 21,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261458,
+                    "start": 20261461
+                  },
+                  {
+                    "end": 20261456,
+                    "start": 20261453
+                  },
+                  {
+                    "end": 20261459,
+                    "start": 20261458
+                  }
+                ],
+                "tolerance": 2
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261453,
+                    "start": 20261461
+                  },
+                  {
+                    "end": 20261459,
+                    "start": 20261458
+                  }
+                ]
+              }
+            },
+            {
+              "index": 22,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261478,
+                    "start": 20261481
+                  },
+                  {
+                    "end": 20261476,
+                    "start": 20261473
+                  },
+                  {
+                    "end": 20261479,
+                    "start": 20261479
+                  }
+                ],
+                "tolerance": 0
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261476,
+                    "start": 20261473
+                  },
+                  {
+                    "end": 20261478,
+                    "start": 20261481
+                  }
+                ]
+              }
+            },
+            {
+              "index": 23,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261498,
+                    "start": 20261501
+                  },
+                  {
+                    "end": 20261496,
+                    "start": 20261493
+                  },
+                  {
+                    "end": 20261499,
+                    "start": 20261496
+                  }
+                ],
+                "tolerance": 1
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261493,
+                    "start": 20261499
+                  },
+                  {
+                    "end": 20261501,
+                    "start": 20261498
+                  }
+                ]
+              }
+            },
+            {
+              "index": 24,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261518,
+                    "start": 20261521
+                  },
+                  {
+                    "end": 20261516,
+                    "start": 20261513
+                  },
+                  {
+                    "end": 20261519,
+                    "start": 20261517
+                  }
+                ],
+                "tolerance": 2
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261513,
+                    "start": 20261519
+                  },
+                  {
+                    "end": 20261521,
+                    "start": 20261518
+                  }
+                ]
+              }
+            },
+            {
+              "index": 25,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261538,
+                    "start": 20261541
+                  },
+                  {
+                    "end": 20261536,
+                    "start": 20261533
+                  },
+                  {
+                    "end": 20261539,
+                    "start": 20261538
+                  }
+                ]
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261536,
+                    "start": 20261533
+                  },
+                  {
+                    "end": 20261538,
+                    "start": 20261541
+                  }
+                ]
+              }
+            },
+            {
+              "index": 26,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261558,
+                    "start": 20261561
+                  },
+                  {
+                    "end": 20261556,
+                    "start": 20261553
+                  },
+                  {
+                    "end": 20261559,
+                    "start": 20261559
+                  }
+                ],
+                "tolerance": 1
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261556,
+                    "start": 20261553
+                  },
+                  {
+                    "end": 20261558,
+                    "start": 20261561
+                  }
+                ]
+              }
+            },
+            {
+              "index": 27,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261578,
+                    "start": 20261581
+                  },
+                  {
+                    "end": 20261576,
+                    "start": 20261573
+                  },
+                  {
+                    "end": 20261579,
+                    "start": 20261576
+                  }
+                ],
+                "tolerance": 2
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261573,
+                    "start": 20261579
+                  },
+                  {
+                    "end": 20261581,
+                    "start": 20261578
+                  }
+                ]
+              }
+            },
+            {
+              "index": 28,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261598,
+                    "start": 20261601
+                  },
+                  {
+                    "end": 20261596,
+                    "start": 20261593
+                  },
+                  {
+                    "end": 20261599,
+                    "start": 20261597
+                  }
+                ],
+                "tolerance": 0
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261596,
+                    "start": 20261593
+                  },
+                  {
+                    "end": 20261597,
+                    "start": 20261601
+                  }
+                ]
+              }
+            },
+            {
+              "index": 29,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261618,
+                    "start": 20261621
+                  },
+                  {
+                    "end": 20261616,
+                    "start": 20261613
+                  },
+                  {
+                    "end": 20261619,
+                    "start": 20261618
+                  }
+                ],
+                "tolerance": 1
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261616,
+                    "start": 20261613
+                  },
+                  {
+                    "end": 20261618,
+                    "start": 20261621
+                  }
+                ]
+              }
+            },
+            {
+              "index": 30,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261638,
+                    "start": 20261641
+                  },
+                  {
+                    "end": 20261636,
+                    "start": 20261633
+                  },
+                  {
+                    "end": 20261639,
+                    "start": 20261639
+                  }
+                ]
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261636,
+                    "start": 20261633
+                  },
+                  {
+                    "end": 20261638,
+                    "start": 20261641
+                  }
+                ]
+              }
+            },
+            {
+              "index": 31,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261658,
+                    "start": 20261661
+                  },
+                  {
+                    "end": 20261656,
+                    "start": 20261653
+                  },
+                  {
+                    "end": 20261659,
+                    "start": 20261656
+                  }
+                ],
+                "tolerance": 0
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261653,
+                    "start": 20261659
+                  },
+                  {
+                    "end": 20261661,
+                    "start": 20261658
+                  }
+                ]
+              }
+            },
+            {
+              "index": 32,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261678,
+                    "start": 20261681
+                  },
+                  {
+                    "end": 20261676,
+                    "start": 20261673
+                  },
+                  {
+                    "end": 20261679,
+                    "start": 20261677
+                  }
+                ],
+                "tolerance": 1
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261673,
+                    "start": 20261679
+                  },
+                  {
+                    "end": 20261681,
+                    "start": 20261678
+                  }
+                ]
+              }
+            },
+            {
+              "index": 33,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261698,
+                    "start": 20261701
+                  },
+                  {
+                    "end": 20261696,
+                    "start": 20261693
+                  },
+                  {
+                    "end": 20261699,
+                    "start": 20261698
+                  }
+                ],
+                "tolerance": 2
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261693,
+                    "start": 20261701
+                  },
+                  {
+                    "end": 20261699,
+                    "start": 20261698
+                  }
+                ]
+              }
+            },
+            {
+              "index": 34,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261718,
+                    "start": 20261721
+                  },
+                  {
+                    "end": 20261716,
+                    "start": 20261713
+                  },
+                  {
+                    "end": 20261719,
+                    "start": 20261719
+                  }
+                ],
+                "tolerance": 0
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261716,
+                    "start": 20261713
+                  },
+                  {
+                    "end": 20261718,
+                    "start": 20261721
+                  }
+                ]
+              }
+            },
+            {
+              "index": 35,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261738,
+                    "start": 20261741
+                  },
+                  {
+                    "end": 20261736,
+                    "start": 20261733
+                  },
+                  {
+                    "end": 20261739,
+                    "start": 20261736
+                  }
+                ]
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261733,
+                    "start": 20261739
+                  },
+                  {
+                    "end": 20261741,
+                    "start": 20261738
+                  }
+                ]
+              }
+            },
+            {
+              "index": 36,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261758,
+                    "start": 20261761
+                  },
+                  {
+                    "end": 20261756,
+                    "start": 20261753
+                  },
+                  {
+                    "end": 20261759,
+                    "start": 20261757
+                  }
+                ],
+                "tolerance": 2
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261753,
+                    "start": 20261759
+                  },
+                  {
+                    "end": 20261761,
+                    "start": 20261758
+                  }
+                ]
+              }
+            },
+            {
+              "index": 37,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261778,
+                    "start": 20261781
+                  },
+                  {
+                    "end": 20261776,
+                    "start": 20261773
+                  },
+                  {
+                    "end": 20261779,
+                    "start": 20261778
+                  }
+                ],
+                "tolerance": 0
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261776,
+                    "start": 20261773
+                  },
+                  {
+                    "end": 20261778,
+                    "start": 20261781
+                  }
+                ]
+              }
+            },
+            {
+              "index": 38,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261798,
+                    "start": 20261801
+                  },
+                  {
+                    "end": 20261796,
+                    "start": 20261793
+                  },
+                  {
+                    "end": 20261799,
+                    "start": 20261799
+                  }
+                ],
+                "tolerance": 1
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261796,
+                    "start": 20261793
+                  },
+                  {
+                    "end": 20261798,
+                    "start": 20261801
+                  }
+                ]
+              }
+            },
+            {
+              "index": 39,
+              "input": {
+                "intervals": [
+                  {
+                    "end": 20261818,
+                    "start": 20261821
+                  },
+                  {
+                    "end": 20261816,
+                    "start": 20261813
+                  },
+                  {
+                    "end": 20261819,
+                    "start": 20261816
+                  }
+                ],
+                "tolerance": 2
+              },
+              "observed": {
+                "intervals": [
+                  {
+                    "end": 20261813,
+                    "start": 20261819
+                  },
+                  {
+                    "end": 20261821,
+                    "start": 20261818
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "providers": {
+    "mission": [],
+    "workflow": [
+      {
+        "name": "deepseek"
+      }
+    ]
+  },
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "dependencies": [
+          "agent.core"
+        ],
+        "id": "lab.search",
+        "path": "workflow.clj"
+      },
+      {
+        "library": "agent.core"
+      }
+    ],
+    "entry": "lab.search/run"
+  }
+}

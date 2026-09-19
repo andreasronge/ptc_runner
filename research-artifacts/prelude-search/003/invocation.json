@@ -1,0 +1,31 @@
+{
+  "command": [
+    "mise",
+    "exec",
+    "--",
+    "mix",
+    "run",
+    "scripts/labs/prelude-search/run.exs",
+    "--phase",
+    "1",
+    "--instances",
+    "1",
+    "--seed",
+    "20261020",
+    "--budget-microusd",
+    "400000",
+    "--request-timeout-ms",
+    "300000",
+    "--output",
+    "/tmp/ptc-prelude-search-recordings/003/live",
+    "--subject",
+    "intervals"
+  ],
+  "source_commit": "608c2a92d17a58164357d2d99f0cd201f5d8de7c",
+  "started_at": "2026-09-19T18:29:10.601934+00:00",
+  "experiment": "003",
+  "budget_microusd": 400000,
+  "request_timeout_ms": 300000,
+  "automatic_retries": 0,
+  "authorization": "https://github.com/andreasronge/ptc_runner/issues/1996#issuecomment-5744271571"
+}

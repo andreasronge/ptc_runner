@@ -1,0 +1,5 @@
+{
+  "completed_cases": 32,
+  "source_results_sha256": "f2e40f898d59b5d992efaa243eaca0a44b903511131c84b21bd361ab8c863d7c",
+  "purpose": "Mid-run network-free replay validation; not an additional experiment"
+}
