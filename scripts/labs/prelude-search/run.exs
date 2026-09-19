@@ -12,6 +12,8 @@ Code.require_file("support/phase1.exs", directory)
       instances: :integer,
       budget_microusd: :integer,
       replay: :boolean,
+      partial_replay: :boolean,
+      request_timeout_ms: :integer,
       fixtures: :string,
       replay_artifacts: :string,
       subject: :string,
@@ -47,6 +49,10 @@ if Keyword.get(options, :phase) == 1 do
 
   IO.puts(Jason.encode!(PtcRunner.Labs.PreludeSearch.Phase1.report(results), pretty: true))
   IO.puts("Artifacts: #{output}")
+  summary = output |> Path.join("summary.json") |> File.read!() |> Jason.decode!()
+
+  if summary["stop_reason"],
+    do: raise("experiment stopped: #{summary["stop_reason"]}; evidence finalized in #{output}")
 else
   {:ok, results} =
     case Keyword.fetch(options, :replay_artifacts) do

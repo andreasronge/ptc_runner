@@ -616,6 +616,61 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
             }} = ReqLLMAdapter.call(put_test_http_options(target, plug), invocation)
   end
 
+  test "authorized long deadlines reach the HTTP transport without the legacy default cap" do
+    assert {:ok, target, _, _} =
+             ReqLLMAdapter.prepare_model(
+               "openrouter:deepseek/deepseek-v4-flash-0731",
+               Requirements.interim(%{max_tokens: 64})
+             )
+
+    target = %{
+      target
+      | request_options:
+          Map.put(target.request_options || target.exact_options, :req_http_options,
+            adapter: PtcRunner.TestSupport.HTTPTimeoutProbe
+          )
+    }
+
+    {:ok, invocation} =
+      Invocation.new(
+        %{messages: [%{role: :user, content: "hi"}]},
+        false,
+        "test",
+        System.monotonic_time(:millisecond) + 300_000
+      )
+
+    assert {:ok, _} = ReqLLMAdapter.call(target, invocation)
+    assert_receive {:transport_timeout, timeout}
+    assert timeout > 120_000 and timeout <= 300_000
+  end
+
+  test "long deadlines survive Bedrock and Vertex chat and object request construction" do
+    {:ok, schema} =
+      ReqLLM.Schema.compile(%{
+        "type" => "object",
+        "properties" => %{"ok" => %{"type" => "boolean"}},
+        "required" => ["ok"]
+      })
+
+    for {provider, model, credentials} <- [
+          {ReqLLM.Providers.AmazonBedrock, "amazon_bedrock:anthropic.claude-sonnet-4-6",
+           [region: "us-east-1", api_key: "test"]},
+          {ReqLLM.Providers.GoogleVertex, "google_vertex:gemini-2.5-flash",
+           [project_id: "test", access_token: "test"]}
+        ],
+        operation <- [:chat, :object],
+        {overrides, expected} <- [
+          {[], 300_000},
+          {[receive_timeout: 7_000], 7_000},
+          {[req_http_options: [receive_timeout: 5_000]], 5_000}
+        ] do
+      {:ok, opts} = ReqLLMAdapter.request_deadline_opts(credentials ++ overrides, 301_000, 1_000)
+      opts = if operation == :object, do: Keyword.put(opts, :compiled_schema, schema), else: opts
+      assert {:ok, request} = provider.prepare_request(operation, model, "hi", opts)
+      assert request.options[:receive_timeout] == expected, "#{provider}/#{operation}"
+    end
+  end
+
   test "absolute requester deadline clamps inherited Finch checkout timeout" do
     opts = [receive_timeout: 10_000, req_http_options: [finch: [pool_timeout: :infinity]]]
     assert {:ok, bounded} = ReqLLMAdapter.request_deadline_opts(opts, 1_050, 1_000)

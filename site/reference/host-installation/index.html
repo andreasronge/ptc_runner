@@ -224,7 +224,9 @@ the installation ceiling. Changing <code class="inline">ceilings.request_timeout
 before admission and enforces it through the provider worker and structured
 output validation. When that LLM clock wins over the enclosing run or workflow
 clocks, the public result is retryable <code class="inline">timeout/llm_request_timeout</code>. Replay
-installations do not carry this deadline.</p><pre><code class="json language-json">&quot;deepseek&quot;: {
+installations do not carry this deadline. The HTTP receive and connection-pool
+timeouts follow the remaining deadline; they do not impose a separate 120-second
+cap. An explicitly shorter transport timeout still applies.</p><pre><code class="json language-json">&quot;deepseek&quot;: {
   &quot;source&quot;: &quot;llm&quot;,
   &quot;structured_output_mode&quot;: &quot;unsupported&quot;,
   &quot;usage_guarantees&quot;: {&quot;tokens&quot;: true, &quot;cost_currency&quot;: &quot;USD&quot;},
