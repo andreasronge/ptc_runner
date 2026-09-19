@@ -892,8 +892,9 @@ defmodule PtcRunner.Kernel.Runner do
 
   defp maybe_put_terminal_limit(
          stopped_data,
-         {:error, %Error{kind: :limit_exceeded, details: details}}
-       ) do
+         {:error, %Error{kind: kind, reason: reason, details: details}}
+       )
+       when kind == :limit_exceeded or reason == :runtime_limit_exceeded do
     Map.merge(stopped_data, RuntimeLimitDiagnostic.retain_terminal_details(details))
   end
 
