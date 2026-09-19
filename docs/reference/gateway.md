@@ -32,7 +32,7 @@ There is no implicit configuration search or implicit environment-file search.
 | Origins | `listen.allowed_origins` defaults to `[]`; at most 128 unique HTTP(S) serialized origins, each at most 2048 bytes. No userinfo, path, query, fragment, whitespace, escapes, uppercase host, or explicit default port. |
 | Authority | Every request requires exactly the configured literal listener authority, including its port except port 80; IPv6 uses brackets. No proxy headers are trusted. |
 | Bearer | `authentication.bearer.binding` names a host credential bound to an environment variable or a file. A literal host credential is refused, so neither document carries the bearer value. Capture enforces 32–4096 ASCII bytes in HTTP bearer-token grammar. |
-| Admission | `max_inflight_requests`, `max_concurrent_runs`, and `max_active_provider_calls` each require 1–65535; `max_waiting_provider_calls` requires 0–65535. Each authenticated request reserves one in-flight slot before body reading and holds it through response completion. |
+| Admission | `max_inflight_requests`, `max_concurrent_runs`, and `max_active_provider_calls` each require 1–65535; `max_waiting_provider_calls` requires 0–65535. Each authenticated request reserves one in-flight slot before body reading and holds it through response completion, so a peer that stops sending its body holds a slot until the two-second body-read budget expires. |
 | Tools | 1–128 entries, unique names matching `[a-zA-Z0-9_.-]{1,128}`, validated in UTF-8 name-byte order. Titles require 1–256 bytes; descriptions 1–4096. Each normalized schema is at most 64 KiB and the encoded static catalog at most 4 MiB. |
 | Application | `application.manifest` names one manifest file, at most 1024 bytes. The serving constructor requires object input/output contracts and a validated read/write effect. |
 | Event policy | `events.policy` must be `normal`, which is what an omitted `events` section or field already means. A `private` policy refuses the constructor ahead of the content-digest and write-permission checks and is reported as `template_invalid`. A served run opens no trace destination and publishes no artifact, so the private destination that policy requires does not exist; neither holding the endpoint nor `allow_write` authorizes one. To serve such an application, set its manifest policy to `normal` and record the new content pin. |
@@ -133,7 +133,13 @@ the case-insensitive `Bearer` scheme and token. Authentication precedes content
 and body parsing. Limits are an 8 KiB HTTP/1 request line, 64 headers, 32 KiB
 of decoded header-name plus header-value bytes, 8 KiB per complete HTTP/1 header field line, 2 MiB body,
 64 KiB decoded `_meta`, JSON depth 64 and 100,000 nodes. String IDs contain
-1–256 UTF-8 bytes; integer IDs are in the interoperable safe range.
+1–256 UTF-8 bytes; integer IDs are in the interoperable safe range. A body read
+waits at most two seconds for the next bytes: a peer that stops sending gets
+HTTP 408 `{"error":"request_timeout"}` and an unreadable body HTTP 400
+`{"error":"request_invalid"}`. Neither is reported as an internal error, and
+both close the connection rather than leave an unread body to drain. A peer
+that closes its own write side mid-body receives no reply at all: the read
+fails immediately and the connection ends.
 
 Every request has object `params._meta` fields
 `io.modelcontextprotocol/protocolVersion` and

@@ -1,8 +1,11 @@
 defmodule PtcGatewayTest do
   use ExUnit.Case, async: false
+  import PtcGateway.TestSupport.GatewayFixture
+
+  alias PtcGateway.TestSupport.GatewayLoad
   alias PtcRunner.Kernel.{GatewayConfig, Limits, ServingTemplate, WarmProviderRuntime}
 
-  @token String.duplicate("a", 32)
+  @token PtcGateway.TestSupport.GatewayFixture.token()
   @authority_uid 4_294_967_294
   @foreign_uid 65_534
   setup do
@@ -1307,6 +1310,70 @@ defmodule PtcGatewayTest do
     assert failure["isError"] == true
   end
 
+  # ~4 s of deliberate waiting, so it is skipped only on the fast pre-commit
+  # path. It still runs in pre-push and CI, which is the point: the timeout
+  # budget it covers has no other regression case outside the :soak module,
+  # and :soak runs in neither.
+  @tag :slow
+  @tag :tmp_dir
+  test "an incomplete body is the client's timeout, never an internal error", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+
+    # Headers promising a body that never arrives. The transport's own default
+    # is 15 s, and the raise reaches the outer rescue as -32603 unless the body
+    # read both bounds itself and maps its failure.
+    {:ok, stalled} = GatewayLoad.stall_body(config)
+    assert {:closed, elapsed_ms, 408} = GatewayLoad.await_close(stalled, 30_000)
+    assert elapsed_ms < 5_000, "an incomplete body held its slot for #{elapsed_ms} ms"
+
+    # The same on a connection the client wants kept alive. Without an explicit
+    # close the transport is then left to drain the unread body on its own
+    # default, which reintroduces the wait after the reply.
+    {:ok, keepalive} = GatewayLoad.stall_body(config, connection: "keep-alive")
+    assert {:closed, keepalive_ms, 408} = GatewayLoad.await_close(keepalive, 30_000)
+    assert keepalive_ms < 5_000, "a keep-alive connection lingered #{keepalive_ms} ms"
+
+    # A body that is framed, but framed wrongly, is the client's bad request
+    # rather than its timeout -- and equally not an internal error.
+    headers = GatewayLoad.raw_headers(config)
+    chunked = headers ++ [{"transfer-encoding", "chunked"}]
+    malformed = GatewayLoad.raw(config, chunked, "ZZZZ\r\nnope\r\n")
+    assert malformed =~ "400 Bad Request"
+    assert malformed =~ ~s({"error":"request_invalid"})
+
+    # The same malformed body on a connection the client wants kept alive. This
+    # closes promptly with or without the branch's own `connection: close`,
+    # because a connection whose framing is broken cannot be reused and the
+    # transport ends it either way -- measured by removing the header, which
+    # this case does not notice. The 408 branch is the opposite: without the
+    # header there, a keep-alive peer lingers 17 s. So this asserts the property
+    # a future change could break -- that a desynchronized connection is never
+    # reused -- rather than the header, which is belt-and-braces here.
+    kept = GatewayLoad.raw_headers(config, connection: "keep-alive")
+    kept_chunked = kept ++ [{"transfer-encoding", "chunked"}]
+
+    {elapsed_us, kept_response} =
+      :timer.tc(fn -> GatewayLoad.raw(config, kept_chunked, "ZZZZ\r\nnope\r\n") end)
+
+    assert kept_response =~ "400 Bad Request"
+
+    assert elapsed_us < 5_000_000,
+           "a keep-alive connection lingered #{div(elapsed_us, 1000)} ms after its 400"
+
+    unsupported = headers ++ [{"transfer-encoding", "gzip"}]
+    body = GatewayLoad.list_body()
+    assert GatewayLoad.raw(config, unsupported, body) =~ "400 Bad Request"
+
+    # The same framing done right still works, so none of the above is the
+    # gateway simply refusing everything that is not content-length.
+    correct = headers ++ [{"content-length", Integer.to_string(byte_size(body))}]
+    assert GatewayLoad.raw(config, correct, body) =~ "200 OK"
+  end
+
   @tag :tmp_dir
   test "a literal bearer credential refuses startup", %{tmp_dir: dir} do
     {path, config} = fixture(dir)
@@ -1351,75 +1418,6 @@ defmodule PtcGatewayTest do
     refute next in kept
   end
 
-  defp fixture(dir, effect \\ :read) do
-    File.mkdir_p!(dir)
-
-    File.write!(
-      Path.join(dir, "workflow.clj"),
-      "(ns app) (defn run {:effect :#{effect}} [input] (return input))"
-    )
-
-    File.write!(Path.join(dir, "schema.json"), Jason.encode!(%{"type" => "object"}))
-
-    manifest = %{
-      "version" => 1,
-      "workflow" => %{
-        "components" => [%{"id" => "app", "path" => "workflow.clj"}],
-        "entry" => "app/run"
-      },
-      "input" => %{"path" => "missing.json"},
-      "contracts" => %{
-        "input_schema" => %{"path" => "schema.json"},
-        "result_schema" => %{"path" => "schema.json"}
-      }
-    }
-
-    manifest_path = Path.join(dir, "app.json")
-    File.write!(manifest_path, Jason.encode!(manifest))
-    {:ok, template} = ServingTemplate.from_directory(manifest_path, Limits.installed_defaults())
-
-    File.write!(
-      Path.join(dir, "host.json"),
-      Jason.encode!(%{
-        "credentials" => %{"gateway" => %{"env" => "GATEWAY_TEST_TOKEN"}},
-        "install" => %{}
-      })
-    )
-
-    {:ok, socket} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
-    {:ok, port} = :inet.port(socket)
-    :gen_tcp.close(socket)
-
-    tool = %{
-      "name" => "a",
-      "title" => "A",
-      "description" => "A tool",
-      "application" => %{"manifest" => "app.json"},
-      "expected_application_content_digest" =>
-        ServingTemplate.application_content_digest(template),
-      "installation_config_pins" => %{},
-      "provider_snapshot_pins" => %{}
-    }
-
-    config = %{
-      "version" => 1,
-      "listen" => %{"address" => "127.0.0.1", "port" => port, "path" => "/mcp"},
-      "authentication" => %{"bearer" => %{"binding" => "gateway"}},
-      "host" => %{"path" => "host.json"},
-      "admission" => %{
-        "max_inflight_requests" => 16,
-        "max_concurrent_runs" => 4,
-        "max_active_provider_calls" => 4,
-        "max_waiting_provider_calls" => 0
-      },
-      "tools" => [Map.put(tool, "name", "z"), tool]
-    }
-
-    path = Path.join(dir, "gateway.json")
-    File.write!(path, Jason.encode!(config))
-    {path, config}
-  end
-
   defp audit_config(directory) do
     %{
       "directory" => directory,
@@ -1440,55 +1438,6 @@ defmodule PtcGatewayTest do
       "disconnected" => false,
       "cleanup_status" => "complete"
     }
-  end
-
-  defp response(config, path, opts \\ []) do
-    Req.request!(
-      [url: "http://127.0.0.1:#{config["listen"]["port"]}#{path}", retry: false] ++ opts
-    )
-  end
-
-  defp mcp(config, method, id, opts \\ []) do
-    protocol = Keyword.get(opts, :protocol, "2026-07-28")
-
-    params =
-      Keyword.get_lazy(opts, :full_params, fn ->
-        Map.merge(
-          %{
-            "_meta" => %{
-              "io.modelcontextprotocol/protocolVersion" => protocol,
-              "io.modelcontextprotocol/clientCapabilities" => %{}
-            }
-          },
-          Keyword.get(opts, :params, %{})
-        )
-      end)
-
-    body =
-      Keyword.get_lazy(opts, :raw_body, fn ->
-        Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "method" => method, "params" => params})
-      end)
-
-    headers =
-      [
-        {"authorization", "Bearer #{Keyword.get(opts, :token, @token)}"},
-        {"content-type", Keyword.get(opts, :content_type, "application/json")},
-        {"accept", Keyword.get(opts, :accept, "application/json, text/event-stream")},
-        {"mcp-protocol-version", protocol}
-      ] ++
-        if Keyword.get(opts, :method_header, true), do: [{"mcp-method", method}], else: []
-
-    response(config, "/mcp",
-      method: :post,
-      headers: headers ++ Keyword.get(opts, :headers, []),
-      body: body
-    )
-  end
-
-  defp stop(pid) do
-    if Process.alive?(pid), do: GenServer.stop(pid)
-  catch
-    :exit, _ -> :ok
   end
 
   defp raw_mcp_status(config, extra_headers) do

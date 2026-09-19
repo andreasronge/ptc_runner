@@ -14,6 +14,16 @@ defmodule PtcGateway.MCP do
 
   @revision "2026-07-28"
   @body_limit 2_097_152
+  # A request holds one of `max_inflight_requests` from before its body is read
+  # (`admitted/2`) until its response completes, so how long the transport waits
+  # for body bytes is how long one stalled client can hold a slot. The default is
+  # 15 s, which at a bound of eight is a fifteen-second outage of the whole
+  # endpoint caused by eight clients that sent perfect headers and then hung —
+  # while readiness, which reports on the warm runtime, stays green throughout.
+  # This budget bounds a peer that stops sending. A peer that keeps dribbling
+  # bytes renews it by definition; that residue is bounded by the in-flight
+  # ceiling, the loopback binding and the bearer requirement.
+  @body_read_timeout_ms 2_000
   @response_limit 4_194_304
   @safe_integer 9_007_199_254_740_991
   @call_result_schema_path Path.expand(
@@ -317,13 +327,34 @@ defmodule PtcGateway.MCP do
   defp specificity(_type, _subtype), do: 2
 
   defp read_bounded_body(conn) do
-    case read_body(conn, length: @body_limit + 1, read_length: 64_000) do
+    case read_body(conn,
+           length: @body_limit + 1,
+           read_length: 64_000,
+           read_timeout: @body_read_timeout_ms
+         ) do
       {:ok, body, conn} when byte_size(body) <= @body_limit -> {:ok, body, conn}
       {:ok, _body, conn} -> {:fixed, conn, 413, "request_too_large", []}
       {:more, _body, conn} -> {:fixed, conn, 413, "request_too_large", []}
       {:error, _reason} -> {:rpc, conn, 500, -32603, "Internal error", nil, nil}
     end
+  rescue
+    error in Bandit.HTTPError -> incomplete_body(conn, error)
   end
+
+  # The transport raises rather than returns when a body read fails: a peer that
+  # stops sending becomes `:request_timeout`, a malformed transfer encoding a bad
+  # request. Without this clause the module's outer rescue answers both with
+  # -32603, telling a client that its own unfinished request was a server fault.
+  #
+  # Both close the connection. The body was not read and the raise discarded the
+  # adapter state that knew how much of it had been, so leaving the connection
+  # open asks the transport to drain an unread body on its own default timeout —
+  # which is the wait this budget exists to bound, reintroduced after the reply.
+  defp incomplete_body(conn, %{plug_status: :request_timeout}),
+    do: {:fixed, conn, 408, "request_timeout", [{"connection", "close"}]}
+
+  defp incomplete_body(conn, _error),
+    do: {:fixed, conn, 400, "request_invalid", [{"connection", "close"}]}
 
   defp decode(body, conn) do
     case StrictJSON.decode(body, max_depth: 64, max_nodes: 100_000) do

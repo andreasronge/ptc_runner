@@ -12,6 +12,7 @@ defmodule PtcGateway.MixProject do
       # dependency below and therefore get ordinary cross-app checking.
       elixirc_options: [no_warn_undefined: :all],
       start_permanent: Mix.env() == :prod,
+      aliases: aliases(),
       deps: [
         {:ptc_runner, path: "..", only: [:dev, :test]},
         {:req_llm, "~> 1.20", runtime: false},
@@ -21,5 +22,13 @@ defmodule PtcGateway.MixProject do
     ]
   end
 
+  def cli, do: [preferred_envs: [soak: :test]]
+
   def application, do: [mod: {PtcGateway.Application, []}, extra_applications: [:logger]]
+
+  # The load and leak probe. Excluded from `mix test` (test/test_helper.exs)
+  # because its signal is a slope and a peak measured over thousands of calls,
+  # not a per-commit gate, and because it measures VM-wide counters that a
+  # parallel suite would perturb.
+  defp aliases, do: [soak: ["test --only soak"]]
 end
