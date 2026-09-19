@@ -1,0 +1,11 @@
+==> ptc_runner_launcher
+make: Nothing to be done for `all'.
+** (File.Error) could not read file "research-artifacts/prelude-search/002/live/fixtures/intervals-0-E1-three-turn.jsonl": no such file or directory
+    (elixir 1.20.2) lib/file.ex:451: File.read!/2
+    scripts/labs/prelude-search/support/phase1.exs:305: PtcRunner.Labs.PreludeSearch.Phase1.write_application/7
+    scripts/labs/prelude-search/support/phase1.exs:207: PtcRunner.Labs.PreludeSearch.Phase1.run_case/8
+    scripts/labs/prelude-search/support/phase1.exs:92: anonymous fn/7 in PtcRunner.Labs.PreludeSearch.Phase1.run/1
+    (elixir 1.20.2) lib/enum.ex:5119: Enumerable.List.reduce/3
+    (elixir 1.20.2) lib/enum.ex:2676: Enum.reduce_while/3
+    scripts/labs/prelude-search/support/phase1.exs:73: PtcRunner.Labs.PreludeSearch.Phase1.run/1
+    scripts/labs/prelude-search/run.exs:44: (file)

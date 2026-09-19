@@ -1,0 +1,14 @@
+{
+  "experiment": "prelude-search/002",
+  "base_commit": "8f2e50b9090d095090e5fc3b0c6760e90ceddb50",
+  "planned_cases": 240,
+  "prior_validation_known_microusd": 9881,
+  "prior_validation_reserved_microusd": 200000,
+  "new_run_budget_microusd": 4790119,
+  "corrective_cap_including_validation_microusd": 5000000,
+  "historical_issue_spend_upper_bound_microusd": 1000000,
+  "whole_issue_cap_microusd": 10000000,
+  "wall_clock_limit_seconds": 21600,
+  "automatic_restarts": false,
+  "created_at": "2026-09-19T15:02:21.817757+00:00"
+}

@@ -1,0 +1,11 @@
+==> ptc_runner_launcher
+make: Nothing to be done for `all'.
+** (RuntimeError) cannot replay dispatcher outcome "llm_request_timeout"; retain artifacts and reservation
+    scripts/labs/prelude-search/support/phase1.exs:621: PtcRunner.Labs.PreludeSearch.Phase1.unreplayable_outcome!/1
+    scripts/labs/prelude-search/support/phase1.exs:642: anonymous fn/2 in PtcRunner.Labs.PreludeSearch.Phase1.model_exchanges/1
+    (elixir 1.20.2) lib/enum.ex:1725: Enum."-map/2-lists^map/1-1-"/2
+    scripts/labs/prelude-search/support/phase1.exs:578: PtcRunner.Labs.PreludeSearch.Phase1.write_replay_fixture/2
+    scripts/labs/prelude-search/support/phase1.exs:241: PtcRunner.Labs.PreludeSearch.Phase1.run_case/8
+    scripts/labs/prelude-search/support/phase1.exs:92: anonymous fn/7 in PtcRunner.Labs.PreludeSearch.Phase1.run/1
+    (elixir 1.20.2) lib/enum.ex:5119: Enumerable.List.reduce/3
+    (elixir 1.20.2) lib/enum.ex:2676: Enum.reduce_while/3

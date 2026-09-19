@@ -1,0 +1,19 @@
+{
+  "command": [
+    "mix",
+    "run",
+    "scripts/labs/prelude-search/run.exs",
+    "--phase",
+    "1",
+    "--instances",
+    "20",
+    "--seed",
+    "20260930",
+    "--budget-microusd",
+    "4790119",
+    "--output",
+    "research-artifacts/prelude-search/002/live"
+  ],
+  "started_at": "2026-09-19T15:06:31.588948+00:00",
+  "pid": 41693
+}
