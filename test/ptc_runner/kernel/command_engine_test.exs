@@ -49,6 +49,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.RuntimeTools
+  alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.ValueContractClassification
   alias PtcRunner.Lisp.TrustedError
@@ -2057,7 +2058,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         "entry" => "slow/run"
       },
       "input" => %{"value" => %{}},
-      "limits" => %{"run_duration_ms" => 1},
+      "limits" => %{"run_duration_ms" => 1, "normal_event_count" => 3},
       "providers" => %{"workflow" => [], "mission" => []}
     }
 
@@ -2066,8 +2067,11 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         {"slow.clj", "(ns slow) (defn run [input] (return (count (vec (range 2000000)))))"}
       ])
 
+    trace_dir = Path.join(directory, "run-duration-traces")
+    File.mkdir_p!(trace_dir)
+
     assert {:error, %CommandOutcome{} = outcome} =
-             CommandEngine.dispatch(["run", application])
+             CommandEngine.dispatch(["run", application, "--trace-dir", trace_dir])
 
     assert outcome.envelope["error"]["code"] == "run_timeout"
     assert outcome.exit_status == 6
@@ -2077,6 +2081,18 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
     assert_schema_valid(outcome.envelope)
+
+    assert [trace_path] = Path.wildcard(Path.join(trace_dir, "*.jsonl"))
+    assert {:ok, trace} = TraceLog.new(source: {:file, trace_path})
+
+    assert {:ok,
+            %{
+              "terminal_reason" => "timeout",
+              "terminal_limit" => "run_duration_ms",
+              "terminal_limit_value" => 1,
+              "truncated" => true
+            }} =
+             TraceLog.query(trace, :get_run, %{"run_id" => outcome.envelope["run_ref"]})
   end
 
   @tag :tmp_dir

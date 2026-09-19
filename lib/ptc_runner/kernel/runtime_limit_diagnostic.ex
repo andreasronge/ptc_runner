@@ -636,6 +636,24 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
 
   def details_message(_details), do: :error
 
+  @doc false
+  @spec retain_terminal_details(term()) :: map()
+  def retain_terminal_details(%{limit: limit} = details) when is_atom(limit) do
+    case details_message(details) do
+      {:ok, _name, _message} ->
+        value = Map.get(details, :limit_value, Map.get(details, :limit_ms))
+
+        details
+        |> Map.take([:alias, :limit_reason, :name, :phase, :remaining, :requested])
+        |> Map.merge(%{limit: limit, limit_value: value})
+
+      :error ->
+        %{}
+    end
+  end
+
+  def retain_terminal_details(_details), do: %{}
+
   defp named_limit(limit, {:ok, message}), do: {:ok, Atom.to_string(limit), message}
   defp named_limit(_limit, :error), do: :error
 

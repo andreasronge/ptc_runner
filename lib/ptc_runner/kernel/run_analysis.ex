@@ -310,7 +310,7 @@ defmodule PtcRunner.Kernel.RunAnalysis do
 
   defp run_view(_arguments), do: {:error, :invalid_query}
 
-  @summary_run_fields ~w(run_id status duration_ms llm_calls evaluations terminal_reason complete truncated)
+  @summary_run_fields ~w(run_id status duration_ms llm_calls evaluations terminal_reason terminal_limit terminal_limit_value complete truncated)
 
   defp project_runs(items, :full) when is_list(items), do: items
 

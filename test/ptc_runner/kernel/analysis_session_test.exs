@@ -644,7 +644,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     assert Enum.map(items, & &1["run_id"]) == ["seed"]
 
     assert Map.keys(hd(items)) |> Enum.sort() ==
-             ~w(complete duration_ms evaluations llm_calls run_id status terminal_reason truncated)
+             ~w(complete duration_ms evaluations llm_calls run_id status terminal_limit terminal_limit_value terminal_reason truncated)
 
     assert Map.keys(usage.capability_calls) |> Enum.sort() ==
              PublicRunAnalysisProfile.explicit_capabilities()

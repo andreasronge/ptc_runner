@@ -2879,6 +2879,8 @@ defmodule PtcRunner.Kernel.TraceLog do
       "status" => stringify(event_data(stopped, "outcome")),
       "result_hash" => event_data(stopped, "result_hash"),
       "terminal_reason" => event_data(stopped, "reason"),
+      "terminal_limit" => event_data(stopped, "limit"),
+      "terminal_limit_value" => event_data(stopped, "limit_value"),
       "labels" => labels,
       "tags" => Map.get(labels, "tags", %{}),
       "name" => Map.get(labels, "name"),
