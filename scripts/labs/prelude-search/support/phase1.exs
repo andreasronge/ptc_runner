@@ -20,14 +20,20 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
     {"E2 K=4", 4, 1}
   ]
   @case_cap 100_000
+  @wall_cap_ms 21_600_000
 
   def run(opts) do
+    started = System.monotonic_time(:millisecond)
     output = opts |> Keyword.fetch!(:output) |> Path.expand()
     replay? = Keyword.get(opts, :replay, false)
     subjects = Keyword.get(opts, :subjects, PreludeSearch.subjects())
     instances = Keyword.get(opts, :instances, 20)
     budget = Keyword.get(opts, :budget_microusd, 5_000_000)
     seed = Keyword.get(opts, :seed, 20_260_930)
+
+    request_ms = Keyword.get(opts, :request_timeout_ms, 120_000)
+    if request_ms < 100 or request_ms > 500_000, do: raise("invalid request timeout")
+    opts = Keyword.put(opts, :request_timeout_ms, request_ms)
 
     if instances < 1 or instances > 100 or budget < @case_cap,
       do: raise("invalid experiment limits")
@@ -36,6 +42,8 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
     :ok = prepare_output(output)
 
     protocol = %{
+      request_timeout_ms: request_ms,
+      wall_cap_ms: @wall_cap_ms,
       proposal_identity: "candidate-index-v1",
       seed: seed,
       instances: instances,
@@ -69,53 +77,84 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
           condition <- @experiments,
           do: {subject, index, condition}
 
+    cases = replay_cases(cases, fixture_root, opts)
+
     {results, spent, reason} =
       Enum.reduce_while(cases, {[], 0, nil}, fn {subject, index, {experiment, candidates, turns}},
                                                 {rows, spent, _} ->
-        if spent + @case_cap > budget do
-          {:halt, {rows, spent, "budget_reservation"}}
+        remaining_ms = @wall_cap_ms - (System.monotonic_time(:millisecond) - started)
+        # Reserve the longest case plus command startup/checking headroom before admission.
+        stop_reason =
+          cond do
+            spent + @case_cap > budget -> "budget_reservation"
+            remaining_ms < request_ms * 3 + 120_000 -> "wall_clock_reservation"
+            true -> nil
+          end
+
+        if stop_reason do
+          {:halt, {rows, spent, stop_reason}}
         else
           instance = PreludeSearch.instance(subject, seed + index)
 
           File.write!(
             Path.join(output, "reservation.json"),
             pretty_json(%{
-              spent_microusd: spent,
-              reserved_microusd: @case_cap,
+              mode: if(replay?, do: "replay", else: "live"),
+              spent_microusd: if(replay?, do: 0, else: spent),
+              replayed_cost_microusd: if(replay?, do: spent, else: nil),
+              reserved_microusd: if(replay?, do: 0, else: @case_cap),
               subject: subject,
               instance: index,
               condition: experiment
             })
           )
 
-          result =
-            run_case(
-              output,
-              instance,
-              index,
-              experiment,
-              candidates,
-              turns,
-              replay?,
-              fixture_root
-            )
+          case safely_run_case(
+                 output,
+                 instance,
+                 index,
+                 experiment,
+                 candidates,
+                 turns,
+                 replay?,
+                 fixture_root,
+                 opts
+               ) do
+            {:ok, result} ->
+              cost = get_in(result, ["usage", "llm_spend", "total_cost", "microunits"])
+              next = [result | rows]
+              File.write!(Path.join(output, "results.json"), pretty_json(Enum.reverse(next)))
 
-          cost = get_in(result, ["usage", "llm_spend", "total_cost", "microunits"])
-          next = [result | rows]
-          File.write!(Path.join(output, "results.json"), pretty_json(Enum.reverse(next)))
+              {:cont, {next, spent + cost, nil}}
 
-          if is_integer(cost) do
-            {:cont, {next, spent + cost, nil}}
-          else
-            {:halt, {next, spent + @case_cap, "missing_usage_reserved_at_ceiling"}}
+            {:error, message} ->
+              File.write!(
+                Path.join(output, "stopped-case.json"),
+                pretty_json(%{
+                  subject: subject,
+                  instance: index,
+                  condition: experiment,
+                  error: message,
+                  reserved_microusd: @case_cap
+                })
+              )
+
+              {:halt, {rows, spent + @case_cap, "case_failed_reserved_at_ceiling"}}
           end
         end
       end)
 
     results = Enum.reverse(results)
+    File.write!(Path.join(output, "results.json"), pretty_json(results))
 
     if not replay? do
-      fixtures = fixture_root |> Path.join("*.jsonl") |> Path.wildcard() |> Enum.sort()
+      fixtures =
+        Enum.map(results, fn row ->
+          Path.join(
+            fixture_root,
+            case_slug(row["subject"], row["instance"], row["experiment"]) <> ".jsonl"
+          )
+        end)
 
       index =
         Enum.map(fixtures, fn path ->
@@ -134,13 +173,61 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
       pretty_json(%{
         rows: report(results),
         comparisons: Statistics.compare(results, "E1 three-turn", ["E2 K=2", "E2 K=4"]),
-        spent_or_reserved_microusd: spent,
+        mode: if(replay?, do: "replay", else: "live"),
+        spent_or_reserved_microusd: if(replay?, do: 0, else: spent),
+        replayed_cost_microusd: if(replay?, do: spent, else: nil),
         stop_reason: reason,
+        completed_cases: length(results),
+        planned_cases: length(cases),
+        unstarted_cases:
+          length(cases) - length(results) -
+            if(reason == "case_failed_reserved_at_ceiling", do: 1, else: 0),
         conclusion: "pilot; no automatic hypothesis verdict"
       })
     )
 
     results
+  end
+
+  defp safely_run_case(
+         output,
+         instance,
+         index,
+         experiment,
+         candidates,
+         turns,
+         replay?,
+         fixtures,
+         opts
+       ) do
+    {:ok,
+     run_case(output, instance, index, experiment, candidates, turns, replay?, fixtures, opts)}
+  rescue
+    error ->
+      if replay?, do: reraise(error, __STACKTRACE__), else: {:error, Exception.message(error)}
+  end
+
+  defp case_slug(subject, index, experiment),
+    do: "#{subject}-#{index}-#{String.replace(experiment, ~r/[^A-Za-z0-9]+/, "-")}"
+
+  defp replay_cases(cases, fixtures, opts) do
+    if Keyword.get(opts, :partial_replay, false) do
+      unless Keyword.get(opts, :replay, false), do: raise("partial replay requires --replay")
+      index = fixtures |> Path.join("index.json") |> File.read!() |> Jason.decode!()
+      prefix = Enum.take(cases, length(index))
+
+      names =
+        Enum.map(prefix, fn {subject, i, {experiment, _, _}} ->
+          case_slug(subject, i, experiment) <> ".jsonl"
+        end)
+
+      unless names == Enum.map(index, & &1["file"]),
+        do: raise("fixtures are not a completed prefix")
+
+      prefix
+    else
+      cases
+    end
   end
 
   def report(results) do
@@ -181,10 +268,10 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
          candidates,
          turns,
          replay?,
-         fixture_root
+         fixture_root,
+         opts
        ) do
-    slug =
-      "#{instance.subject}-#{instance_index}-#{String.replace(experiment, ~r/[^A-Za-z0-9]+/, "-")}"
+    slug = case_slug(instance.subject, instance_index, experiment)
 
     app_dir = Path.join([output, "runs", slug])
     :ok = File.mkdir_p(app_dir)
@@ -204,15 +291,20 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
       "entry" => entry(instance.subject)
     }
 
-    write_application(app_dir, input, attempts, candidates, turns, replay?, fixture_root)
+    write_application(app_dir, input, attempts, candidates, turns, replay?, fixture_root, opts)
     result_path = Path.join(app_dir, "result.json")
     envelope_path = Path.join(app_dir, "envelope.json")
-    inspection_path = Path.join(app_dir, "run.ptcins")
+    inspection_path = Path.join([app_dir, "inspection", "run.ptcins"])
+    File.mkdir_p!(Path.dirname(inspection_path))
+    trace_dir = Path.join(app_dir, "traces")
+    File.mkdir_p!(trace_dir)
 
     started = System.monotonic_time(:millisecond)
 
+    command_runner = Keyword.get(opts, :command_runner, &System.cmd/3)
+
     {console, status} =
-      System.cmd(
+      command_runner.(
         System.find_executable("mix"),
         [
           "ptc",
@@ -225,7 +317,9 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
           "--inspect",
           inspection_path,
           "--envelope",
-          envelope_path
+          envelope_path,
+          "--trace-dir",
+          trace_dir
         ],
         stderr_to_stdout: true,
         env: [{"MIX_QUIET", "1"}]
@@ -233,8 +327,25 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
 
     wall_ms = System.monotonic_time(:millisecond) - started
 
+    File.write!(Path.join(app_dir, "console.log"), console)
+
+    File.write!(
+      Path.join(app_dir, "command.json"),
+      pretty_json(%{exit_status: status, wall_ms: wall_ms})
+    )
+
+    inspection_path = index_inspection(inspection_path, envelope_path)
+
     if status != 0 do
       raise "phase 1 run failed for #{slug}:\n#{console}"
+    end
+
+    envelope = envelope_path |> File.read!() |> Jason.decode!()
+    spend = get_in(envelope, ["execution", "usage", "llm_spend"]) || %{}
+
+    unless spend["state"] == "available" and
+             is_integer(get_in(spend, ["total_cost", "microunits"])) do
+      raise "model usage unavailable; retain artifacts and reservation"
     end
 
     if not replay?,
@@ -249,6 +360,17 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
       wall_ms,
       console
     )
+  end
+
+  defp index_inspection(path, envelope_path) do
+    if File.exists?(path) and File.exists?(envelope_path) do
+      run_ref = envelope_path |> File.read!() |> Jason.decode!() |> Map.fetch!("run_ref")
+      indexed = Path.join(Path.dirname(path), run_ref <> ".ptcins")
+      File.rename!(path, indexed)
+      indexed
+    else
+      path
+    end
   end
 
   defp case_result(
@@ -291,11 +413,11 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
     }
   end
 
-  defp write_application(dir, input, attempts, candidates, turns, replay?, fixture_root) do
+  defp write_application(dir, input, attempts, candidates, turns, replay?, fixture_root, opts) do
     File.write!(Path.join(dir, "workflow.clj"), workflow_source(candidates, turns))
     File.write!(Path.join(dir, "input.json"), pretty_json(input))
     File.write!(Path.join(dir, "repair.schema.json"), pretty_json(repair_schema()))
-    File.write!(Path.join(dir, "ptc.json"), pretty_json(manifest(attempts, replay?)))
+    File.write!(Path.join(dir, "ptc.json"), pretty_json(manifest(attempts, opts)))
     fixture_name = Path.basename(dir)
 
     if replay? do
@@ -310,7 +432,10 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
       File.cp!(fixture, Path.join(dir, "replay.jsonl"))
     end
 
-    File.write!(Path.join(dir, "ptc-host.json"), pretty_json(host(replay?, fixture_name)))
+    File.write!(
+      Path.join(dir, "ptc-host.json"),
+      pretty_json(configure_host(host(replay?, fixture_name), replay?, opts))
+    )
   end
 
   defp workflow_source(1, turns) do
@@ -343,7 +468,7 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
     """
   end
 
-  defp manifest(attempts, _replay?) do
+  defp manifest(attempts, opts) do
     repair_missions =
       attempts
       |> Enum.with_index()
@@ -351,10 +476,13 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
         {"repair-#{index}", %{"components" => [], "data" => %{"params" => params}}}
       end)
 
+    request_ms = Keyword.fetch!(opts, :request_timeout_ms)
+
     limits = %{
-      "run_duration_ms" => 300_000,
-      "workflow_timeout_ms" => 300_000,
-      "parallel_timeout_ms" => 180_000,
+      "llm_request_timeout_ms" => request_ms,
+      "run_duration_ms" => request_ms * 3 + 60_000,
+      "workflow_timeout_ms" => request_ms * 3 + 60_000,
+      "parallel_timeout_ms" => request_ms + 30_000,
       "evaluation_timeout_ms" => 120_000,
       "subordinate_evaluations" => 16,
       "subordinate_source_checks" => 8,
@@ -384,6 +512,30 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
       "events" => %{"policy" => "private"},
       "labels" => %{"name" => "prelude-search-phase-1"}
     }
+  end
+
+  defp configure_host(host, replay?, opts) do
+    request_ms = Keyword.fetch!(opts, :request_timeout_ms)
+
+    limits =
+      Map.merge(host["limits"], %{
+        "llm_request_timeout_ms" => request_ms,
+        "run_duration_ms" => request_ms * 3 + 60_000,
+        "workflow_timeout_ms" => request_ms * 3 + 60_000,
+        "parallel_timeout_ms" => request_ms + 30_000
+      })
+
+    host = Map.put(host, "limits", limits)
+
+    if replay?,
+      do: host,
+      else:
+        host
+        |> put_in(["install", "deepseek", "ceilings"], %{"request_timeout_ms" => request_ms})
+        |> put_in(
+          ["install", "deepseek", "installation_revision"],
+          "prelude-search-deepseek-v2-#{request_ms}"
+        )
   end
 
   defp host(false, _fixture_name) do
@@ -592,6 +744,7 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
         :ok
 
       {:error, reason} ->
+        File.rm!(path)
         raise "unreplayable fixture: #{inspect(reason)}; retain artifacts and reservation"
     end
   end

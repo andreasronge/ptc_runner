@@ -119,3 +119,29 @@ A generic candidate index in each proposal distinguishes concurrent request
 hashes, so replay cannot swap answers between candidates. Per-case fixtures
 avoid sharing response cursors across runs. Retain fixtures
 on the experiment branch, not in a report-only pull request.
+
+### Request deadlines and stopped recordings
+
+Set `--request-timeout-ms 300000` for a five-minute request deadline. This is
+frozen in `protocol.json` and applied to the host, installation and manifest.
+The enclosing run allows three request deadlines plus 60 seconds; parallel
+sampling allows one deadline plus 30 seconds. Token and dollar ceilings stay
+unchanged. A six-hour wall-clock allowance stops admission when another maximum
+case plus startup/checking headroom would not fit. The default request deadline is 120000 ms. There are no automatic
+retries or resumptions: every newly authorized recording needs a new directory
+and must account for earlier spend and unresolved reservations.
+
+Every model case retains separate `traces/` and `inspection/` directories, plus
+its command status and console output. These directories can be passed to the
+`private-run-analysis-v2` profile. A stopped case writes `stopped-case.json`,
+retains its full reservation, and finalizes the completed `results.json`,
+`summary.json` and fixture index. The failed case is not counted as a scored
+observation. Kernel timeouts remain original evidence, never synthetic replay
+responses.
+
+For a stopped recording, add `--partial-replay` to the replay command and retain
+the original request timeout and other protocol options. This replays only the
+indexed, completed prefix. It verifies the case order and fixture digests and
+never invokes the failed case or fills in missing observations. An empty prefix
+is valid. Replay setup or integrity errors fail directly without a live-cost
+reservation; summaries separate replayed historical cost from new spend. A stopped live command exits unsuccessfully after finalizing evidence.
