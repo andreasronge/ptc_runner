@@ -138,8 +138,9 @@ them.
 
 ## Runtime wants
 
-From `prelude-search/001`. Each becomes an ordinary issue with a
-reproduction when a run version approves filing it; none is filed yet.
+Historical observations from `prelude-search/001`, with current status below.
+Remaining gaps become ordinary issues with a reproduction when a run version
+approves filing them.
 
 - Mission params passed with `kernel/eval-with` are recorded by identity
   hash only, and a mission's return value has no first-class inspection
@@ -153,7 +154,10 @@ reproduction when a run version approves filing it; none is filed yet.
 - Replay response cursors are run-scoped, so identical request hashes in
   separate runs cannot share one fixture; the experiment produced 180
   fixture files.
-- A live provider error has no successful response object, so a replay
-  fixture cannot reproduce a timeout candidate.
-- The run input is not recorded in any artifact (from `prelude-search/000`;
-  the lab stores it beside the run).
+- Resolved for classified provider errors: replay schema 2 retains error
+  outcomes without requiring a successful response. Kernel deadlines and
+  post-provider admission failures remain unsupported; the lab refuses to
+  export them and retains the budget reservation.
+- Resolved for completed private captures: inspection schema 11 retains a
+  `run-input` record. E0 reconstructs runs from retained application files and
+  that record in a fresh process; incomplete captures without it cannot replay.

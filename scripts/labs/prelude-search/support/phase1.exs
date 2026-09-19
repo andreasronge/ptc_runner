@@ -481,8 +481,7 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
             instance.ground_truth["function"]
           ),
         "form_correct" => form_correct?(diagnosis["form"], instance.ground_truth["form"]),
-        "citations_valid" => citations_valid?(diagnosis["cited_executions"], instance.visible),
-        "check_outcome" => is_binary(candidate_source)
+        "citations_valid" => citations_valid?(diagnosis["cited_executions"], instance.visible)
       }
     end)
   end
@@ -492,6 +491,11 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
   defp metric_row(experiment, subject, rows) do
     candidates = Enum.flat_map(rows, & &1["candidates"])
     solved = Enum.filter(rows, & &1["solved"])
+
+    checked =
+      rows
+      |> Enum.flat_map(& &1["selection"]["selection"])
+      |> Enum.count(&(&1["valid"] == true))
 
     %{
       experiment: experiment,
@@ -509,11 +513,10 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
       cost_microusd: sum_cost(rows),
       cost_per_solved_microusd: cost_per_solved(rows, solved),
       candidates_generated: Enum.count(candidates, &(&1["candidate_source"] != nil)),
-      candidates_checked: Enum.count(candidates, &(&1["check_outcome"] == true)),
+      candidates_checked: checked,
       generated_per_solved:
         ratio(Enum.count(candidates, &(&1["candidate_source"] != nil)), length(solved)),
-      checked_per_solved:
-        ratio(Enum.count(candidates, &(&1["check_outcome"] == true)), length(solved))
+      checked_per_solved: ratio(checked, length(solved))
     }
   end
 

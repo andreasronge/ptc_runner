@@ -3,7 +3,6 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CapabilityInvocation
-  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits
@@ -145,23 +144,21 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
 
   test "an enclosing deadline expiring after reservation records no provider dispatch" do
     parent = self()
-    deadline = Deadline.new(100)
+    handler = {__MODULE__, make_ref()}
+
+    :ok =
+      :telemetry.attach(
+        handler,
+        [:ptc_runner, :capability, :start],
+        &__MODULE__.expire_run/4,
+        parent
+      )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
 
     {result, state, sink} =
       dispatch_llm(parent,
-        run_deadline: deadline,
         limits: [llm_total_tokens: 10_000],
-        before_dispatch: fn sink ->
-          :ok = :sys.suspend(sink.pid)
-
-          resume =
-            Task.async(fn ->
-              wait_until(Deadline.expires_at(deadline) + 10)
-              :ok = :sys.resume(sink.pid)
-            end)
-
-          fn -> Task.await(resume) end
-        end,
         requester: fn _request, _context ->
           send(parent, :provider_called)
           {:ok, %{content: "unreachable", tokens: %{input: 1, output: 1}}}
@@ -524,25 +521,29 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
         deadline_ms -> [validation_deadline_ms: deadline_ms]
       end
 
-    cleanup = Keyword.get(opts, :before_dispatch, fn _sink -> fn -> :ok end end).(sink)
-
     result =
-      try do
-        Dispatcher.dispatch(
-          state,
-          :workflow,
-          environment,
-          "llm-request",
-          arguments,
-          TestHelpers.dispatch_context(state, :workflow, timeout_ms, dispatch_opts),
-          sink,
-          nil
-        )
-      after
-        cleanup.()
-      end
+      Dispatcher.dispatch(
+        state,
+        :workflow,
+        environment,
+        "llm-request",
+        arguments,
+        TestHelpers.dispatch_context(state, :workflow, timeout_ms, dispatch_opts),
+        sink,
+        nil
+      )
 
     {result, state, sink}
+  end
+
+  # The start event follows reservation and precedes provider dispatch. Expire only
+  # this test's run at that boundary, regardless of setup or scheduler latency.
+  def expire_run(_event, _measurements, %{live_run: pid}, parent) do
+    if self() == parent do
+      :sys.replace_state(pid, fn state ->
+        %{state | deadline_ms: System.monotonic_time(:millisecond) - 1}
+      end)
+    end
   end
 
   defp wait_until(deadline_ms) do

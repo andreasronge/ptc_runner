@@ -138,6 +138,32 @@ defmodule PtcRunner.Kernel.PreludeSearchLabTest do
     assert File.regular?(Path.join(root, "selection.ptcins"))
   end
 
+  @tag :tmp_dir
+  test "report counts only candidates that reached selection evaluation", %{tmp_dir: root} do
+    instance = PreludeSearch.instance("intervals", 20_260_920)
+    sources = ["(invalid", nil, instance.source]
+    selection = PreludeSearch.select_candidates(instance, sources, root)
+
+    candidates =
+      Phase1.score(Enum.map(sources, &%{"value" => %{"candidate_source" => &1}}), instance)
+
+    row = %{
+      "experiment" => "E2 K=4",
+      "subject" => "intervals",
+      "candidates" => candidates,
+      "selection" => selection,
+      "solved" => selection["final_pass"],
+      "wall_ms" => 0
+    }
+
+    report =
+      Enum.find(Phase1.report([row]), &(&1.experiment == "E2 K=4" and &1.subject == "intervals"))
+
+    assert report.candidates_generated == 2
+    assert report.candidates_checked == 1
+    assert report.checked_per_solved == 1.0
+  end
+
   test "Phase 0 re-executes every recorded execution byte-equally" do
     output =
       Path.join(System.tmp_dir!(), "prelude-search-test-#{System.unique_integer([:positive])}")
