@@ -6,7 +6,7 @@ defmodule PtcRunner.Labs.PreludeSearch.Inputs do
   end
 
   defp input("intervals", seed, index) do
-    base = Integer.mod(seed * 17 + index * 7, 19)
+    base = seed + index * 20
     gap = Integer.mod(seed + index, 4)
 
     %{
@@ -17,6 +17,7 @@ defmodule PtcRunner.Labs.PreludeSearch.Inputs do
         %{"start" => base + 3 + gap, "end" => base + 6}
       ]
     }
+    |> maybe_omit("tolerance", index)
   end
 
   defp input("normaliser", seed, index) do
@@ -25,9 +26,10 @@ defmodule PtcRunner.Labs.PreludeSearch.Inputs do
     short = if Integer.mod(index, 2) == 0, do: "A", else: "an"
 
     %{
-      "text" => Enum.join(["Alpha", short, "BETA", "tail"], separator),
-      "minimum_length" => 1 + Integer.mod(seed + index, 3)
+      "text" => Enum.join(["", "Alpha", short, "BETA", "tail#{seed}-#{index}", ""], separator),
+      "minimum_length" => Integer.mod(seed + index, 4)
     }
+    |> maybe_omit("minimum_length", index)
   end
 
   defp input("reconciliation", seed, index) do
@@ -37,12 +39,16 @@ defmodule PtcRunner.Labs.PreludeSearch.Inputs do
     %{
       "left" => [
         %{"id" => "shared", "amount" => 10 + offset},
-        %{"id" => "left-#{index}", "amount" => index}
+        maybe_omit(%{"id" => "left-#{index}", "amount" => index}, "amount", index)
       ],
       "right" => [
         %{"id" => "shared", "amount" => 10 + offset + if(equal, do: 0, else: 1)},
         %{"id" => "right-#{index}", "amount" => seed + index}
       ]
     }
+  end
+
+  defp maybe_omit(map, key, index) do
+    if rem(index, 5) == 0, do: Map.delete(map, key), else: map
   end
 end

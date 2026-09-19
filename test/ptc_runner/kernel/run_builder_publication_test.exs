@@ -5,9 +5,11 @@ defmodule PtcRunner.Kernel.RunBuilderPublicationTest do
 
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.TestSupport.RunLifecycle
   alias PtcRunner.TestSupport.StreamingInspection
 
@@ -29,7 +31,7 @@ defmodule PtcRunner.Kernel.RunBuilderPublicationTest do
         "components" => [%{"id" => "main", "path" => "main.clj"}],
         "entry" => "main/run"
       },
-      "input" => %{"value" => %{}},
+      "input" => %{"value" => %{"private-marker" => "recorded-input"}},
       "events" => %{"policy" => "normal", "run_id" => "publication-class"}
     }
 
@@ -107,8 +109,25 @@ defmodule PtcRunner.Kernel.RunBuilderPublicationTest do
       assert_receive {:policy_call_count, 1}
       assert File.regular?(trace_path)
 
-      assert {:ok, [_record | _records]} =
+      assert {:ok, records} =
                StreamingInspection.read_path(inspection_path)
+
+      assert [%{"payload" => %{"value" => %{"private-marker" => "recorded-input"}}}] =
+               Enum.filter(records, &(&1["record_type"] == "run-input"))
+
+      refute File.read!(trace_path) =~ "recorded-input"
+
+      run_id = hd(records)["run_id"]
+      {:ok, trace_snapshot} = TraceSnapshot.start({:viewer_file, trace_path})
+
+      {:ok, snapshot} =
+        InspectionSnapshot.start({:viewer_file, inspection_path, run_id}, trace_snapshot)
+
+      assert {:ok, %{"run_id" => ^run_id}} =
+               InspectionSnapshot.query(snapshot, :get_run, %{"run_id" => run_id})
+
+      InspectionSnapshot.stop(snapshot)
+      TraceSnapshot.stop(trace_snapshot)
 
       assert Jason.decode!(File.read!(output_path)) == %{"answer" => 42}
     after

@@ -66,6 +66,17 @@ defmodule PtcRunner.Kernel.InspectionRecord do
   end
 
   defp valid_shape?(%{
+         "record_type" => "run-input",
+         "correlation" => correlation,
+         "payload" => payload
+       }) do
+    correlation == %{} and exact_keys?(payload, ~w(input_hash value authority)) and
+      payload["authority"] in ["normal", "private"] and is_map(payload["value"]) and
+      ResultIdentity.valid_hash?(payload["input_hash"]) and
+      ResultIdentity.strict_json_hash(payload["value"]) == {:ok, payload["input_hash"]}
+  end
+
+  defp valid_shape?(%{
          "record_type" => "run-result",
          "correlation" => correlation,
          "payload" => payload
@@ -208,7 +219,7 @@ defmodule PtcRunner.Kernel.InspectionRecord do
 
   defp valid_shape?(_record), do: false
 
-  defp validate_raw_result("run-result", payload) do
+  defp validate_raw_result(type, payload) when type in ["run-input", "run-result"] do
     case {Map.fetch(payload, :value), Map.fetch(payload, "value")} do
       {{:ok, value}, :error} -> strict_json(value)
       {:error, {:ok, value}} -> strict_json(value)

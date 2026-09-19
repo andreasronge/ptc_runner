@@ -9,15 +9,22 @@ defmodule PtcRunner.Kernel.LLMReplay do
   the same manifest grammar selects a replay provider or a live one, and
   nothing about the application changes between them.
 
-  A fixture file is JSON Lines. Every entry requires `"schema_version": 1`, a
+  A fixture file is JSON Lines. Every entry requires `"schema_version": 2`, a
   `request_hash` matching `sha256:` followed by 64 lowercase hexadecimal
-  characters, and exactly one of `response` or `responses`. `response` is one
+  characters, and exactly one of `response`, `responses`, or `outcomes`. `response` is one
   JSON object. `responses` is an ordered, non-empty sequence of at most 1,024
-  JSON objects. No other entry keys are accepted.
+  JSON objects. `outcomes` is a non-empty sequence of at most 1,024 objects,
+  each exactly `{"response": {...}}` or `{"error": {"kind": "timeout",
+  "details": null, "retryable": true}}`. Error kinds come from
+  `PtcRunner.Kernel.LLMFailureCatalog.provider_kinds/0`; details are null or
+  at most 1,024 characters and 4,096 bytes. No other entry keys are accepted. Preserve `tokens`
+  in successful responses to replay reported usage and cost. Replayed errors
+  preserve provider classification and retryability, not elapsed latency or
+  Kernel deadline scheduling; missing original usage remains unknown.
 
   For example, one line is:
 
-      {"schema_version":1,"request_hash":"sha256:0000000000000000000000000000000000000000000000000000000000000000","response":{"content":"frozen"}}
+      {"schema_version":2,"request_hash":"sha256:0000000000000000000000000000000000000000000000000000000000000000","response":{"content":"frozen"}}
 
   The sequence form exists for a request that repeats *identically* — a retry,
   or a loop that rebuilds the same prompt — where the first call gets the first
@@ -59,15 +66,16 @@ defmodule PtcRunner.Kernel.LLMReplay do
   alias PtcRunner.Kernel.ConfinedFile
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.LLMFailureCatalog
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.LLMReplayOwner
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.StrictJSON
   alias PtcRunner.Lisp.RetainedSize
 
-  @format_version 1
+  @format_version 2
   @max_fixture_bytes 8_000_000
-  @entry_keys ~w(schema_version request_hash response responses)
+  @entry_keys ~w(schema_version request_hash response responses outcomes)
   @hash ~r/\Asha256:[0-9a-f]{64}\z/
 
   @enforce_keys [:pid, :entry_count, :response_count, :fixture_hash, :max_result_bytes]
@@ -235,6 +243,12 @@ defmodule PtcRunner.Kernel.LLMReplay do
 
   defp take(%__MODULE__{pid: pid}, key) do
     case LLMReplayOwner.take(pid, key) do
+      {:ok, %{replay_error: error}} ->
+        kind =
+          Enum.find(LLMFailureCatalog.provider_kinds(), &(Atom.to_string(&1) == error["kind"]))
+
+        {:error, ProviderError.new(kind, error["details"], retryable?: error["retryable"])}
+
       {:ok, response} ->
         {:ok, response}
 
@@ -325,6 +339,7 @@ defmodule PtcRunner.Kernel.LLMReplay do
          :ok <- known_keys(value),
          :ok <- schema_version(value),
          {:ok, key} <- request_hash_key(value),
+         :ok <- one_outcome_field(value),
          {:ok, responses} <- responses(value),
          :ok <- bounded_responses(responses, max_result_bytes) do
       {:ok, key, responses}
@@ -358,6 +373,33 @@ defmodule PtcRunner.Kernel.LLMReplay do
 
   defp request_hash_key(_value), do: {:error, :request_hash_invalid}
 
+  defp one_outcome_field(value) do
+    case Enum.count(~w(response responses outcomes), &Map.has_key?(value, &1)) do
+      0 -> {:error, :response_missing}
+      1 -> :ok
+      _ -> {:error, :response_ambiguous}
+    end
+  end
+
+  defp responses(%{"outcomes" => outcomes}) when is_list(outcomes) do
+    if length(outcomes) in 1..1_024 do
+      Enum.reduce_while(outcomes, {:ok, []}, fn outcome, {:ok, acc} ->
+        case replay_outcome(outcome) do
+          {:ok, item} -> {:cont, {:ok, [item | acc]}}
+          error -> {:halt, error}
+        end
+      end)
+      |> case do
+        {:ok, items} -> {:ok, Enum.reverse(items)}
+        error -> error
+      end
+    else
+      {:error, :responses_invalid}
+    end
+  end
+
+  defp responses(%{"outcomes" => _}), do: {:error, :responses_invalid}
+
   # Exactly one of `response` or `responses`: accepting both would leave the
   # replay order ambiguous, whatever either one holds.
   defp responses(%{"response" => _response, "responses" => _sequence}),
@@ -375,12 +417,34 @@ defmodule PtcRunner.Kernel.LLMReplay do
   defp responses(%{"responses" => _sequence}), do: {:error, :responses_invalid}
   defp responses(_value), do: {:error, :response_missing}
 
+  defp replay_outcome(%{"response" => response} = outcome)
+       when map_size(outcome) == 1 and is_map(response),
+       do: {:ok, response}
+
+  defp replay_outcome(%{"error" => error} = outcome)
+       when map_size(outcome) == 1 and is_map(error) do
+    valid =
+      Enum.sort(Map.keys(error)) == ~w(details kind retryable) and
+        error["kind"] in Enum.map(LLMFailureCatalog.provider_kinds(), &Atom.to_string/1) and
+        is_boolean(error["retryable"]) and
+        (is_nil(error["details"]) or
+           (is_binary(error["details"]) and byte_size(error["details"]) <= 4_096 and
+              String.length(error["details"]) <= 1_024))
+
+    if valid, do: {:ok, %{replay_error: error}}, else: {:error, :responses_invalid}
+  end
+
+  defp replay_outcome(_), do: {:error, :responses_invalid}
+
+  defp response_payload(%{replay_error: error}), do: error
+  defp response_payload(response), do: response
+
   defp bounded_responses(responses, max_result_bytes) do
     cond do
-      not Enum.all?(responses, &JSONValue.map?/1) ->
+      not Enum.all?(responses, &JSONValue.map?(response_payload(&1))) ->
         {:error, :responses_invalid}
 
-      not Enum.all?(responses, &within_ceiling?(&1, max_result_bytes)) ->
+      not Enum.all?(responses, &within_ceiling?(response_payload(&1), max_result_bytes)) ->
         {:error, :response_too_large}
 
       true ->

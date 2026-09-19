@@ -370,10 +370,10 @@ Use `source: "llm_replay"` when responses must be deterministic. The
 [replay evaluation guide](../guides/evaluating-with-replay.md) owns fixture authoring, the
 network-free example, candidate materialization, and component overrides.
 
-A fixture file is JSON Lines. Every line sets `schema_version` to `1`, a
+A fixture file is JSON Lines. Every line sets `schema_version` to `2`, a
 `request_hash` computed from the provider-neutral request, and exactly one of
-`response` or an ordered `responses` list for a request the workflow makes
-more than once. Plain `doctor` and `validate` parse the selected file under
+`response`, an ordered `responses` list, or an ordered `outcomes` list.
+A single provider failure uses a one-element `outcomes` list. Plain `doctor` and `validate` parse the selected file under
 the installed ceilings without starting the provider, so a manifest and host
 document that validate cannot fail on the fixture when `run` reaches it. A
 missing, empty, malformed, duplicate, or oversized fixture set fails the
@@ -382,6 +382,22 @@ file broke and, for a line-level rejection, the line number counted with
 blank lines. Nothing the line contains is published. The other local checks
 (an installed model's adapter, an MCP server's executable) stay out of
 `validate`.
+
+Each `outcomes` item is exactly `{"response": {...}}` or
+`{"error": {"kind": "timeout", "details": null, "retryable": true}}`.
+Error kinds come from `PtcRunner.Kernel.LLMFailureCatalog.provider_kinds/0`.
+Details must be null or a string of at most 1,024 characters and 4,096 bytes;
+longer details are rejected rather than truncated during replay. For example:
+
+```json
+{"schema_version":2,"request_hash":"sha256:0000000000000000000000000000000000000000000000000000000000000000","outcomes":[{"error":{"kind":"timeout","details":null,"retryable":true}}]}
+```
+
+Keep the original `tokens` usage in each successful response. An ordered list
+can reproduce a provider failure followed by a successful retry under one
+request hash. It reproduces provider classification and reported usage, not
+elapsed latency or Kernel deadline scheduling. A failed call without reported
+cost remains unknown; replay must not invent zero cost for it.
 
 Fixture matching is exact: changed messages, tools, schema, or provider-neutral
 parameters produce another `request_hash` rather than silently consuming

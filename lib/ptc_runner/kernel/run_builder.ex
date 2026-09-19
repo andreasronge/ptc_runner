@@ -79,6 +79,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.ResultArtifact
+  alias PtcRunner.Kernel.ResultIdentity
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.RunRequest
@@ -1147,6 +1148,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
              assemble_environments(package, workflow_bundle, mission_bundles, providers),
            {:ok, publication_authority, sink, inspection_sink} <-
              execution_sinks(request, providers, opts, failure_mode, sink_source),
+           :ok <- capture_run_input(inspection_sink, sink, request.input, failure_mode),
            :ok <-
              capture_prelude_sources(
                inspection_sink,
@@ -1415,6 +1417,23 @@ defmodule PtcRunner.Kernel.RunBuilder do
          projection: Map.fetch!(package.contract_prompt_projections.phase_returns, name)
        }}
     end)
+  end
+
+  defp capture_run_input(nil, _sink, _input, _failure_mode), do: :ok
+
+  defp capture_run_input(inspection_sink, sink, input, failure_mode) do
+    with {:ok, hash} <- ResultIdentity.strict_json_hash(input.value),
+         :ok <-
+           InspectionSink.emit(inspection_sink, "run-input", %{}, %{
+             input_hash: hash,
+             value: input.value,
+             authority: input.authority
+           }) do
+      :ok
+    else
+      _error ->
+        failed_build({:error, :inspection_sink_error}, sink, inspection_sink, failure_mode)
+    end
   end
 
   # When capture is enabled, the exact effective prelude source of every

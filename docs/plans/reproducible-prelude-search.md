@@ -3,10 +3,20 @@
 Status: draft, 2026-09-17. Phase 0 is #1995; Phase 1 is #1996 (deepseek) with
 #1997 (gemini-3.8-flash) as its fallback. Plan PR #1994.
 
+## Current protocol
+
+The retained research program in `docs/research/prelude-search.md` owns the
+current hypotheses, three-way data split, matched-budget comparisons,
+uncertainty rules, and backlog. It supersedes the experimental protocol below.
+In particular, selection tests are not final tests, E4 receives selection
+feedback only, and matching a pooled sampling formula establishes no verdict.
+The historical ladder below explains the original harness, not acceptance
+criteria for a new experiment. Research can proceed manually while manager
+support is implemented.
+
 ## The claim under test
 
-PtcRunner's distinguishing property is that a run is reproducible from its
-artifacts: the language has no clock or random built-in, the bundle is frozen
+The property under test is reconstruction of a run from retained artifacts: the language has no clock or random built-in, the bundle is frozen
 and hash-identified, and every value that crosses a capability boundary is
 recorded with its arguments and result. That makes a model's work
 *reproducible*, *checkable* (trusted workflow code decides over recorded

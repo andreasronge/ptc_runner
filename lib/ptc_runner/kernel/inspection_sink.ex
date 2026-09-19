@@ -165,6 +165,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
            run_id: run_id,
            trace_id: trace_id,
            writer: writer,
+           input?: false,
            result?: false,
            failed?: false
          }}
@@ -273,6 +274,9 @@ defmodule PtcRunner.Kernel.InspectionSink do
   defp append_one(%{failed?: true} = state, _type, _correlation, _payload),
     do: {:reply, {:error, :inspection_sink_error}, state}
 
+  defp append_one(%{input?: true} = state, "run-input", _correlation, _payload),
+    do: failed_reply(state)
+
   defp append_one(%{result?: true} = state, "run-result", _correlation, _payload),
     do: failed_reply(state)
 
@@ -286,7 +290,13 @@ defmodule PtcRunner.Kernel.InspectionSink do
   defp append(state, type, correlation, payload) do
     case Writer.append(state.writer, type, correlation, payload) do
       {:ok, writer} ->
-        {:ok, %{state | writer: writer, result?: state.result? or type == "run-result"}}
+        {:ok,
+         %{
+           state
+           | writer: writer,
+             input?: state.input? or type == "run-input",
+             result?: state.result? or type == "run-result"
+         }}
 
       {:error, _reason} ->
         {:error, state}

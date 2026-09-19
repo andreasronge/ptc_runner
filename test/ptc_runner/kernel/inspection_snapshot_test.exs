@@ -426,7 +426,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     assert {:ok,
             %{
-              "items" => [%{"run_id" => "mcp-run", "schema_version" => 10}],
+              "items" => [%{"run_id" => "mcp-run", "schema_version" => 11}],
               "next_cursor" => nil,
               "snapshot_hash" => ^snapshot_hash
             }} =

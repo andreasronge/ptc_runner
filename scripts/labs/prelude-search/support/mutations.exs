@@ -21,9 +21,8 @@ defmodule PtcRunner.Labs.PreludeSearch.Mutations do
       {:dropped_edge_case_clause, "finish-token", "(if (= current \"\")", "(if false"},
       {:swapped_map_key, "normalise", "{\"tokens\" (vec normal)\n             \"text\"",
        "{\"text\" (vec normal)\n             \"tokens\""},
-      {:wrong_private_default, "append-character",
-       "(assoc state \"current\" (str (get state \"current\" \"\") character))",
-       "(assoc state \"current\" (str (get state \"current\" \"_\") character))"}
+      {:wrong_private_default, "normalise", "(get input \"minimum_length\" 1)",
+       "(get input \"minimum_length\" 2)"}
     ],
     "reconciliation" => [
       {:comparator_flip, "classify", "(= left-amount right-amount)",
@@ -34,8 +33,8 @@ defmodule PtcRunner.Labs.PreludeSearch.Mutations do
        "(and false (= right-amount missing))"},
       {:swapped_map_key, "classify", "\"left_amount\" left-amount \"right_amount\" right-amount",
        "\"right_amount\" left-amount \"left_amount\" right-amount"},
-      {:wrong_private_default, "unmatched?", "(get entry \"status\" \"matched\")",
-       "(get entry \"status\" \"mismatch\")"}
+      {:wrong_private_default, "ledger-map", "(get entry \"amount\" 0)",
+       "(get entry \"amount\" 1)"}
     ]
   }
 

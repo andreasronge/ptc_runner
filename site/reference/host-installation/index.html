@@ -336,10 +336,10 @@ the adapter attests that the resolved model is safe public identity, provider
 snapshots and model-grouped usage include it. Endpoint-bearing or otherwise
 private targets remain absent, while alias/revision usage stays attributable.</p><p>Use <code class="inline">source: &quot;llm_replay&quot;</code> when responses must be deterministic. The
 <a href="/guides/evaluating-with-replay/">replay evaluation guide</a> owns fixture authoring, the
-network-free example, candidate materialization, and component overrides.</p><p>A fixture file is JSON Lines. Every line sets <code class="inline">schema_version</code> to <code class="inline">1</code>, a
+network-free example, candidate materialization, and component overrides.</p><p>A fixture file is JSON Lines. Every line sets <code class="inline">schema_version</code> to <code class="inline">2</code>, a
 <code class="inline">request_hash</code> computed from the provider-neutral request, and exactly one of
-<code class="inline">response</code> or an ordered <code class="inline">responses</code> list for a request the workflow makes
-more than once. Plain <code class="inline">doctor</code> and <code class="inline">validate</code> parse the selected file under
+<code class="inline">response</code>, an ordered <code class="inline">responses</code> list, or an ordered <code class="inline">outcomes</code> list.
+A single provider failure uses a one-element <code class="inline">outcomes</code> list. Plain <code class="inline">doctor</code> and <code class="inline">validate</code> parse the selected file under
 the installed ceilings without starting the provider, so a manifest and host
 document that validate cannot fail on the fixture when <code class="inline">run</code> reaches it. A
 missing, empty, malformed, duplicate, or oversized fixture set fails the
@@ -347,7 +347,15 @@ local provider check as <code class="inline">fixtures_unreadable</code>; the mes
 file broke and, for a line-level rejection, the line number counted with
 blank lines. Nothing the line contains is published. The other local checks
 (an installed model's adapter, an MCP server's executable) stay out of
-<code class="inline">validate</code>.</p><p>Fixture matching is exact: changed messages, tools, schema, or provider-neutral
+<code class="inline">validate</code>.</p><p>Each <code class="inline">outcomes</code> item is exactly <code class="inline">{&quot;response&quot;: {...}}</code> or
+<code class="inline">{&quot;error&quot;: {&quot;kind&quot;: &quot;timeout&quot;, &quot;details&quot;: null, &quot;retryable&quot;: true}}</code>.
+Error kinds come from <code class="inline">PtcRunner.Kernel.LLMFailureCatalog.provider_kinds/0</code>.
+Details must be null or a string of at most 1,024 characters and 4,096 bytes;
+longer details are rejected rather than truncated during replay. For example:</p><pre><code class="json language-json">{&quot;schema_version&quot;:2,&quot;request_hash&quot;:&quot;sha256:0000000000000000000000000000000000000000000000000000000000000000&quot;,&quot;outcomes&quot;:[{&quot;error&quot;:{&quot;kind&quot;:&quot;timeout&quot;,&quot;details&quot;:null,&quot;retryable&quot;:true}}]}</code></pre><p>Keep the original <code class="inline">tokens</code> usage in each successful response. An ordered list
+can reproduce a provider failure followed by a successful retry under one
+request hash. It reproduces provider classification and reported usage, not
+elapsed latency or Kernel deadline scheduling. A failed call without reported
+cost remains unknown; replay must not invent zero cost for it.</p><p>Fixture matching is exact: changed messages, tools, schema, or provider-neutral
 parameters produce another <code class="inline">request_hash</code> rather than silently consuming
 unrelated evidence. That request includes every model-visible observation
 accumulated during the run. Frozen MCP response content is therefore necessary

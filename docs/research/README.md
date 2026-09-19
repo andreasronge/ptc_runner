@@ -35,8 +35,12 @@ The document carries no authority. Budgets and permissions come from an
 approved run in the console, or from the maintainer filing an issue by hand.
 A ledger row exists only for an experiment whose branch is tagged and whose
 result file exists; the verdict is computed from the result file against the
-hypothesis's null model and tolerance, and from the method review, never
-from the experiment's own author. Backlog entries are `<program>/b<nn>`;
+hypothesis's predeclared comparison, uncertainty, and decision rule, and from
+the method review, never from the experiment's own author. A point estimate
+inside a tolerance is not evidence of equivalence. Until the harness emits
+the required paired observations and uncertainty, conclusions stay provisional
+and require maintainer review; automation must not infer them from aggregate
+percentages alone. Backlog entries are `<program>/b<nn>`;
 their `after` column is an ordering preference between entries, separate
 from native GitHub issue dependencies.
 
@@ -96,13 +100,15 @@ context, never required. It states:
 - **Program and hypotheses**, by id and sentence.
 - **Kind**, one of the three above.
 - **Conditions**: matrix, seeds, model, this experiment's budget, its
-  early-stop metric, and its wall-clock cap. Budget is enforced before each
+  early-stop metric, untouched final evaluation set, uncertainty method, and
+  its wall-clock cap. Budget is enforced before each
   spend, not checked afterwards.
 - **Deliverable**: the report at its path with the header above and the
   result file beside it, written by the harness with one entry per
-  hypothesis (`metric`, `observed`, `baseline`, and the condition values);
-  for `measure`, replay fixtures on the branch, consolidated to one file
-  per condition; for `change`, the candidate diff and a baseline-versus-candidate
+  hypothesis (`metric`, `observed`, `baseline`, condition values, paired case outcomes,
+  denominators, confidence interval, and decision-rule version);
+  for `measure`, replay fixtures on the branch, with usage and failure
+  categories retained and an explicit case-to-fixture index; for `change`, the candidate diff and a baseline-versus-candidate
   table; for `explore`, candidate backlog entries with evidence.
 - **Prior results** it builds on, by experiment id.
 - **Pull request**: title `experiment(<program>): <slug>`, label

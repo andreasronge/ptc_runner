@@ -2,11 +2,18 @@ directory = __DIR__
 Code.require_file("support/mutations.exs", directory)
 Code.require_file("support/inputs.exs", directory)
 Code.require_file("support/lab.exs", directory)
+Code.require_file("support/statistics.exs", directory)
+Code.require_file("support/phase1.exs", directory)
 
 {options, arguments, invalid} =
   OptionParser.parse(System.argv(),
     strict: [
       phase: :integer,
+      instances: :integer,
+      budget_microusd: :integer,
+      replay: :boolean,
+      fixtures: :string,
+      replay_artifacts: :string,
       subject: :string,
       seed: :integer,
       executions: :integer,
@@ -14,7 +21,9 @@ Code.require_file("support/lab.exs", directory)
     ]
   )
 
-if arguments != [] or invalid != [] or Keyword.get(options, :phase) != 0 do
+if arguments != [] or invalid != [] or
+     (Keyword.get(options, :phase) not in [0, 1] and
+        not Keyword.has_key?(options, :replay_artifacts)) do
   raise "usage: mix run scripts/labs/prelude-search/run.exs --phase 0 [--subject NAME] [--seed N] [--executions N] [--output DIRECTORY]"
 end
 
@@ -30,26 +39,42 @@ output =
     Path.join(System.tmp_dir!(), "ptc-prelude-search-#{suffix}")
   end)
 
-{:ok, results} =
-  PtcRunner.Labs.PreludeSearch.run(
-    output: output,
-    subjects: subjects,
-    seed: Keyword.get(options, :seed, 20_260_917),
-    executions: Keyword.get(options, :executions, 100)
-  )
+if Keyword.get(options, :phase) == 1 do
+  results =
+    PtcRunner.Labs.PreludeSearch.Phase1.run(
+      Keyword.merge(options, output: output, subjects: subjects)
+    )
 
-IO.puts("| subject | executions | equal | unequal | milliseconds per re-execution |")
-IO.puts("| --- | ---: | ---: | ---: | ---: |")
+  IO.puts(Jason.encode!(PtcRunner.Labs.PreludeSearch.Phase1.report(results), pretty: true))
+  IO.puts("Artifacts: #{output}")
+else
+  {:ok, results} =
+    case Keyword.fetch(options, :replay_artifacts) do
+      {:ok, directory} ->
+        PtcRunner.Labs.PreludeSearch.replay(Path.expand(directory))
 
-Enum.each(results, fn result ->
-  IO.puts(
-    "| #{result.subject} | #{result.executions} | #{result.equal} | #{length(result.unequal)} | #{result.milliseconds_per_reexecution} |"
-  )
-end)
+      :error ->
+        PtcRunner.Labs.PreludeSearch.run(
+          output: output,
+          subjects: subjects,
+          seed: Keyword.get(options, :seed, 20_260_917),
+          executions: Keyword.get(options, :executions, 100)
+        )
+    end
 
-IO.puts("\nArtifacts: #{Path.expand(output)}")
+  IO.puts("| subject | executions | equal | unequal | milliseconds per re-execution |")
+  IO.puts("| --- | ---: | ---: | ---: | ---: |")
 
-case Enum.flat_map(results, & &1.unequal) do
-  [] -> :ok
-  findings -> raise "unequal re-executions: #{inspect(findings)}"
+  Enum.each(results, fn result ->
+    IO.puts(
+      "| #{result.subject} | #{result.executions} | #{result.equal} | #{length(result.unequal)} | #{result.milliseconds_per_reexecution} |"
+    )
+  end)
+
+  IO.puts("\nArtifacts: #{Path.expand(Keyword.get(options, :replay_artifacts, output))}")
+
+  case Enum.flat_map(results, & &1.unequal) do
+    [] -> :ok
+    findings -> raise "unequal re-executions: #{inspect(findings)}"
+  end
 end

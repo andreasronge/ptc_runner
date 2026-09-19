@@ -44,6 +44,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
       generated_meta: [],
       prelude_meta: [],
       execution_meta: %{prints: [], errors: [], failures: []},
+      input_sequence: nil,
       result_sequence: nil,
       result_hash: nil
     }
@@ -330,6 +331,9 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
   defp put_join(state, %{"record_type" => "explicit-failure-value"} = record) do
     put_execution(state, :failures, record)
   end
+
+  defp put_join(%{input_sequence: nil} = state, %{"record_type" => "run-input"} = record),
+    do: {:ok, %{state | input_sequence: record["sequence"]}}
 
   defp put_join(state, %{"record_type" => "run-result"} = record) do
     cond do
