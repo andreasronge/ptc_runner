@@ -39,12 +39,12 @@ The host document points the alias at a JSON Lines fixture file:
 }
 ```
 
-Each line carries `schema_version` 1, the hash of the request it answers, and
-one `response`, or an ordered list of `responses` for a request the workflow
-makes more than once:
+Each line carries its schema version and request hash, followed by one response,
+a `responses` list of answers, or an `outcomes` list that can also contain
+provider failures:
 
 ```json
-{"schema_version":1,"request_hash":"sha256:0000000000000000000000000000000000000000000000000000000000000000","response":{"content":"frozen"}}
+{"schema_version":2,"request_hash":"sha256:0000000000000000000000000000000000000000000000000000000000000000","response":{"content":"frozen"}}
 ```
 
 `ptc doctor` and `ptc validate` both read the fixture file, so a broken file

@@ -102,7 +102,7 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
     diagnostic = AcquisitionReason.diagnostic({:schema_version_invalid, 7}, @occurrence)
 
     assert {diagnostic.phase, diagnostic.code} == {:local_preflight, :environment_unavailable}
-    assert diagnostic.message == "replay fixture line 7 must set schema_version to 1"
+    assert diagnostic.message == "replay fixture line 7 must set schema_version to 2"
 
     assert AcquisitionReason.diagnostic({:not_a_fixture_reason, 7}, @occurrence).code ==
              :internal_error

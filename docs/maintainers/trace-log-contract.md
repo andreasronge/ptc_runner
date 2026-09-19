@@ -872,7 +872,7 @@ deterministically encoded JSON object with this exact envelope:
 
 ```json
 {
-  "schema_version": 10,
+  "schema_version": 11,
   "run_id": "run-id",
   "trace_id": "trace-id",
   "sequence": 1,
@@ -884,8 +884,8 @@ deterministically encoded JSON object with this exact envelope:
 ```
 
 Keys are exact. `sequence` is positive and strictly increasing within the
-artifact. The timestamp is UTC ISO 8601. `run-result` correlates to nothing
-and carries an empty map. Every other record carries exactly one of
+artifact. The timestamp is UTC ISO 8601. `run-input` and `run-result` correlate to nothing
+and carry empty maps. Every other record carries exactly one of
 `capability_id`, `evaluation_id`, or `component_id`, and the three MCP record
 types pair their `capability_id` with the positive integer `request_id` that
 identifies the exchange. Capability and evaluation values must occur in the
@@ -1039,22 +1039,36 @@ Prelude uniqueness is `(environment, mission_name, component_id)`, so the same
 component ID can be inspected independently in multiple missions. Every
 mission-owned query result preserves `mission_name`.
 
-V8 retains the successful terminal-result record introduced in V6, at most one
-per run, and adds the dedicated `explicit-failure-value` record:
+Schema 11 adds `run-input` to the closed inspection vocabulary. It retains
+the successful terminal result introduced in schema 6 and the explicit-failure
+record introduced in schema 8. Older inspection schemas are rejected as
+unsupported; they are not silently interpreted as schema 11:
 
 | Record type | Correlation | Exact payload fields |
 | --- | --- | --- |
+| `run-input` | empty map | `input_hash`, `value`, `authority` (`normal` or `private`) |
 | `run-result` | empty map | `result_hash`, `value` |
 
-The value must already be strict JSON: string-keyed maps, lists, strings,
+The terminal result value must already be strict JSON: string-keyed maps, lists, strings,
 finite numbers, booleans, or `null`. Its lowercase `sha256:` hash is computed
 from deterministic canonical JSON and must equal both `payload.result_hash`
 and the one successful canonical `run-stopped.data.result_hash`. The record is
 omitted for failures and successful native values that cannot be represented
 as strict JSON.
 
-For record types other than `run-result`, enums and map keys are normalized to
-JSON strings before retention. A `run-result.value` is never coerced; it is
+When inspection capture is enabled, one `run-input` record retains the exact
+selected input before execution, including for private inputs. It exists only
+in the private inspection artifact, never the canonical trace or application
+identity. Capture is fail-closed under the same record and artifact limits as
+`run-result`; a duplicate input record is invalid. The input hash commits to
+the strict JSON value. The artifact grammar permits at most one input record:
+sealed captures taken before execution, including zero-frame artifacts, can
+omit it. Such captures cannot be replayed from retained input; the E0 lab
+rejects them. Retaining this record does not by itself guarantee
+replay of provider calls, schedules, or deadlines.
+
+For record types other than `run-input` and `run-result`, enums and map keys are normalized to
+JSON strings before retention. A `run-input.value` or `run-result.value` is never coerced; it is
 rejected unless the supplied value is already strict JSON. `result` is the
 bounded Dispatcher envelope returned to Lisp, so `llm-request` input/output
 records contain the provider-neutral model request and normalized response, and

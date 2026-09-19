@@ -1199,7 +1199,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     File.write!(
       Path.join(directory, "replay.jsonl"),
       Jason.encode!(%{
-        "schema_version" => 1,
+        "schema_version" => 2,
         "request_hash" => "sha256:" <> String.duplicate("0", 64),
         "response" => %{"content" => "frozen"}
       }) <> "\n"
@@ -1254,7 +1254,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     File.write!(
       Path.join(directory, "replay.jsonl"),
       Jason.encode!(%{
-        "schema_version" => 1,
+        "schema_version" => 2,
         "request_hash" => "sha256:" <> String.duplicate("0", 64),
         "response" => %{"content" => "unreachable"}
       }) <> "\n"
@@ -3304,7 +3304,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     File.write!(
       Path.join(directory, "replay.jsonl"),
       Jason.encode!(%{
-        "schema_version" => 1,
+        "schema_version" => 2,
         "request_hash" => "sha256:" <> String.duplicate("0", 64),
         "response" => %{"content" => "frozen"}
       }) <> "\n"
@@ -3345,7 +3345,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     File.write!(
       Path.join(directory, "large-replay.jsonl"),
       Jason.encode!(%{
-        "schema_version" => 1,
+        "schema_version" => 2,
         "request_hash" => "sha256:" <> String.duplicate("1", 64),
         "response" => %{"content" => String.duplicate("x", 900_000)}
       }) <> "\n"

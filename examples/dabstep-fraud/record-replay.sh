@@ -50,7 +50,7 @@ ${PTC:-ptc} repl --profile private-run-analysis-v2 --private-unattended \
                    (mapcat exchanges [$runs]))]
        (mapv (fn [[h vs]]
                (if (= 1 (count vs))
-                 {\"schema_version\" 1 \"request_hash\" h \"response\" (first vs)}
-                 {\"schema_version\" 1 \"request_hash\" h \"responses\" vs}))
+                 {\"schema_version\" 2 \"request_hash\" h \"response\" (first vs)}
+                 {\"schema_version\" 2 \"request_hash\" h \"responses\" vs}))
              grouped))" >/dev/null
 python3 -c 'import json,sys; [print(json.dumps(l, separators=(",", ":"))) for l in json.load(open(sys.argv[1]))]' "$out"

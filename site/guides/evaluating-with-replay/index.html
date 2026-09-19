@@ -113,9 +113,9 @@ ptc run replay-example/ptc-project.json</code></pre><pre><code class="json langu
   &quot;source&quot;: &quot;llm_replay&quot;,
   &quot;installation_revision&quot;: &quot;frozen-model-v1&quot;,
   &quot;fixtures&quot;: &quot;evaluation/replay.jsonl&quot;
-}</code></pre><p>Each line carries <code class="inline">schema_version</code> 1, the hash of the request it answers, and
-one <code class="inline">response</code>, or an ordered list of <code class="inline">responses</code> for a request the workflow
-makes more than once:</p><pre><code class="json language-json">{&quot;schema_version&quot;:1,&quot;request_hash&quot;:&quot;sha256:0000000000000000000000000000000000000000000000000000000000000000&quot;,&quot;response&quot;:{&quot;content&quot;:&quot;frozen&quot;}}</code></pre><p><code class="inline">ptc doctor</code> and <code class="inline">ptc validate</code> both read the fixture file, so a broken file
+}</code></pre><p>Each line carries its schema version and request hash, followed by one response,
+a <code class="inline">responses</code> list of answers, or an <code class="inline">outcomes</code> list that can also contain
+provider failures:</p><pre><code class="json language-json">{&quot;schema_version&quot;:2,&quot;request_hash&quot;:&quot;sha256:0000000000000000000000000000000000000000000000000000000000000000&quot;,&quot;response&quot;:{&quot;content&quot;:&quot;frozen&quot;}}</code></pre><p><code class="inline">ptc doctor</code> and <code class="inline">ptc validate</code> both read the fixture file, so a broken file
 fails before a run starts. The
 <a href="/reference/host-installation/#choose-a-provider-source">host reference</a>
 lists the rules a fixture file must follow.</p><h2 id="write-a-fixture-from-a-real-request">Write a fixture from a real request</h2><p>Start with a placeholder hash and the response shape you want. The first run

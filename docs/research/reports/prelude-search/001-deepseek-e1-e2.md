@@ -18,6 +18,13 @@ tags: [sampling, held-out-check, deepseek, e1, e2]
 > The numbers below are the author's claims and are superseded by
 > `prelude-search/b01` once it runs.
 
+> Additional method review, 2026-09-19: the reported held-out rates use the
+> same examples for candidate selection and evaluation. They are not untouched
+> final-test rates. The pooled independent-sampling formula does not establish
+> independence or equivalence. Some planted default mutations are unreachable
+> through the subject entry, and some generated inputs repeat across partitions.
+> The corrective protocol and reusable harness repairs are tracked in #2002.
+
 # Prelude-search E1/E2: deepseek-v4-flash
 
 Date: 2026-09-18  

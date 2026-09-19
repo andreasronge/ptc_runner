@@ -32,6 +32,68 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
   describe "fixture decoding" do
     @tag :tmp_dir
+    test "replays a provider failure followed by a priced response", %{tmp_dir: dir} do
+      {:ok, key} = LLMReplay.request_hash(@request)
+
+      details = String.duplicate("é", 1_024)
+
+      tokens = %{
+        "input" => 12,
+        "output" => 3,
+        "total_cost" => %{"currency" => "USD", "microunits" => 7}
+      }
+
+      write(dir, [
+        %{
+          "request_hash" => key,
+          "outcomes" => [
+            %{
+              "error" => %{
+                "kind" => "timeout",
+                "details" => details,
+                "retryable" => true
+              }
+            },
+            %{"response" => %{"content" => "repaired", "tokens" => tokens}}
+          ]
+        }
+      ])
+
+      {:ok, replay} = start(dir)
+      requester = LLMReplay.requester(replay)
+
+      assert {:error, %ProviderError{kind: :timeout, retryable?: true, details: ^details}} =
+               requester.(@request, LLMSupport.llm_context())
+
+      assert {:ok, %{"tokens" => ^tokens}} = requester.(@request, LLMSupport.llm_context())
+
+      assert {:error, %ProviderError{kind: :not_found}} =
+               requester.(@request, LLMSupport.llm_context())
+    end
+
+    @tag :tmp_dir
+    test "rejects replay error details that ProviderError would truncate", %{tmp_dir: dir} do
+      {:ok, key} = LLMReplay.request_hash(@request)
+
+      write(dir, [
+        %{
+          "request_hash" => key,
+          "outcomes" => [
+            %{
+              "error" => %{
+                "kind" => "timeout",
+                "details" => String.duplicate("x", 2_000),
+                "retryable" => true
+              }
+            }
+          ]
+        }
+      ])
+
+      assert {:error, {:responses_invalid, 1}} = start(dir)
+    end
+
+    @tag :tmp_dir
     test "the local probe parses fixtures without starting a replay owner", %{tmp_dir: dir} do
       {:ok, key} = LLMReplay.request_hash(@request)
       write(dir, [%{"request_hash" => key, "responses" => [%{"n" => 1}, %{"n" => 2}]}])
@@ -202,7 +264,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
              :response_ambiguous},
             {%{"request_hash" => key, "response" => %{}, "unexpected" => true},
              :unknown_entry_key},
-            {%{"schema_version" => 2, "request_hash" => key, "response" => %{}},
+            {%{"schema_version" => 3, "request_hash" => key, "response" => %{}},
              :schema_version_invalid}
           ] do
         write(dir, [entry])
@@ -221,11 +283,11 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
         Path.join(dir, "replay.jsonl"),
         "\n" <>
           Jason.encode!(%{
-            "schema_version" => 1,
+            "schema_version" => 2,
             "request_hash" => key,
             "response" => %{"n" => 1}
           }) <>
-          "\n\n" <> ~s({"schema_version": 1, "request_hash": "nope", "response": {}}\n)
+          "\n\n" <> ~s({"schema_version": 2, "request_hash": "nope", "response": {}}\n)
       )
 
       assert {:error, {:request_hash_invalid, 4}} = start(dir)
@@ -432,7 +494,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       assert refused.envelope["error"]["code"] == "environment_unavailable"
 
       assert refused.envelope["error"]["message"] ==
-               "replay fixture line 1 must set schema_version to 1"
+               "replay fixture line 1 must set schema_version to 2"
 
       assert refused.envelope["error"]["provider_activity"] == false
       assert refused.envelope["error"]["subject"]["name"] == "replay-llm"
@@ -1087,7 +1149,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       File.write!(
         Path.join(dir, "replay.jsonl"),
         Jason.encode!(%{
-          "schema_version" => 1,
+          "schema_version" => 2,
           "request_hash" => key,
           "response" => %{"content" => "first"}
         }) <>
@@ -1097,7 +1159,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       File.write!(
         Path.join(dir, "second.jsonl"),
         Jason.encode!(%{
-          "schema_version" => 1,
+          "schema_version" => 2,
           "request_hash" => key,
           "response" => %{"content" => "second"}
         }) <>
@@ -1301,7 +1363,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
   defp write(dir, entries) do
     File.write!(
       Path.join(dir, "replay.jsonl"),
-      Enum.map_join(entries, "\n", &Jason.encode!(Map.put_new(&1, "schema_version", 1))) <>
+      Enum.map_join(entries, "\n", &Jason.encode!(Map.put_new(&1, "schema_version", 2))) <>
         "\n"
     )
   end
