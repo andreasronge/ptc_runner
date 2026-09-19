@@ -660,16 +660,23 @@ defmodule PtcRunner.Labs.PreludeSearch.Phase1 do
         Jason.encode!(%{"schema_version" => 2, "request_hash" => hash, "outcomes" => outcomes})
       end)
 
-    File.write!(path, lines <> "\n")
+    publish_replay_fixture(path, lines <> "\n")
+  end
 
-    case LLMReplay.probe(Path.dirname(path), Path.basename(path),
+  @doc false
+  def publish_replay_fixture(path, contents) do
+    pending = path <> ".pending"
+    File.write!(pending, contents)
+
+    case LLMReplay.probe(Path.dirname(pending), Path.basename(pending),
            max_entries: 1_000,
            max_result_bytes: 1_000_000
          ) do
       {:ok, _summary} ->
-        :ok
+        File.rename!(pending, path)
 
       {:error, reason} ->
+        File.rm!(pending)
         raise "unreplayable fixture: #{inspect(reason)}; retain artifacts and reservation"
     end
   end

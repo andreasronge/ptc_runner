@@ -77,6 +77,18 @@ defmodule PtcRunner.Kernel.PreludeSearchLabTest do
   end
 
   @tag :tmp_dir
+  test "fixture export publishes only probe-accepted bytes", %{tmp_dir: root} do
+    path = Path.join(root, "rejected.jsonl")
+
+    assert_raise RuntimeError, ~r/unreplayable fixture/, fn ->
+      Phase1.publish_replay_fixture(path, "not replay JSONL\n")
+    end
+
+    refute File.exists?(path)
+    refute File.exists?(path <> ".pending")
+  end
+
+  @tag :tmp_dir
   @tag timeout: 30_000
   test "Phase 1 finalizes an injected Kernel timeout with analyzable evidence", %{tmp_dir: root} do
     output = Path.join(root, "stopped")
