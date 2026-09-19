@@ -1,0 +1,18 @@
+{
+  "install": {
+    "deepseek": {
+      "ceilings": {
+        "max_entries": 1000,
+        "max_result_bytes": 1000000
+      },
+      "fixtures": "replay.jsonl",
+      "installation_revision": "prelude-search-deepseek-v4-flash-replay-v1",
+      "source": "llm_replay"
+    }
+  },
+  "limits": {
+    "llm_cost_microusd": 100000,
+    "llm_total_tokens": 320000,
+    "parallel_timeout_ms": 180000
+  }
+}

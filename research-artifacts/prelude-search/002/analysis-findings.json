@@ -1,0 +1,13 @@
+{
+  "profile": "private-run-analysis-v2",
+  "run_id": "cmd-7cvrzb4f83szap4h5h3fgt721r",
+  "query": {
+    "collection": "activity",
+    "limit": 100
+  },
+  "mission_evaluations": 20,
+  "statuses": {
+    "continued": 20
+  },
+  "timeout_run_analysis_error": "selected_trace_missing"
+}

@@ -1,0 +1,130 @@
+[
+  {
+    "candidates": [
+      {
+        "candidate_source": "(ns lab.intervals \"Interval merging subject with configurable adjacency tolerance.\" {:visibility :prompt})\n\n(defn- ordered\n  \"Put one interval into ascending endpoint order.\"\n  [interval]\n  (let [start (get interval \"start\")\n        finish (get interval \"end\")]\n    (if (<= start finish)\n      {\"start\" start \"end\" finish}\n      {\"start\" finish \"end\" start})))\n\n(defn- touches?\n  \"Return true when the next interval is within tolerance.\"\n  [current next tolerance]\n  (<= (get next \"start\")\n      (+ (get current \"end\") tolerance)))\n\n(defn- extend\n  \"Extend a merged interval without moving its start.\"\n  [current next]\n  {\"start\" (get current \"start\")\n   \"end\" (max (get current \"end\") (get next \"end\"))})\n\n(defn- merge-ordered\n  \"Merge an already sorted sequence.\"\n  [intervals tolerance]\n  (reduce\n    (fn [merged interval]\n      (if (empty? merged)\n        [interval]\n        (let [current (last merged)]\n          (if (touches? current interval tolerance)\n            (conj (vec (butlast merged)) (extend current interval))\n            (conj merged interval)))))\n    []\n    intervals))\n\n(defn merge-with-tolerance\n  \"Normalise and merge intervals whose gap is no greater than tolerance.\"\n  {:signature \"(input :map) -> :map\"}\n  [input]\n  (let [tolerance (get input \"tolerance\" 0)\n        intervals (map ordered (get input \"intervals\" []))\n        sorted (sort-by #(get % \"start\") intervals)]\n    {\"intervals\" (merge-ordered sorted tolerance)}))",
+        "citations_valid": true,
+        "diagnosis": {
+          "cited_executions": [
+            {
+              "index": 14,
+              "observed_json": "{\"intervals\":[{\"end\":20261213,\"start\":20261210},{\"end\":20261218,\"start\":20261213}]}"
+            },
+            {
+              "index": 26,
+              "observed_json": "{\"intervals\":[{\"end\":20261453,\"start\":20261450},{\"end\":20261458,\"start\":20261453}]}"
+            },
+            {
+              "index": 38,
+              "observed_json": "{\"intervals\":[{\"end\":20261693,\"start\":20261690},{\"end\":20261698,\"start\":20261693}]}"
+            }
+          ],
+          "form": "(< (get next \"start\") (+ (get current \"end\") tolerance))",
+          "function": "touches?"
+        },
+        "failure_kind": null,
+        "failure_reason": null,
+        "form_correct": false,
+        "function_correct": true,
+        "status": "returned"
+      }
+    ],
+    "console": "{\"artifact_class\":\"private\",\"status\":\"ok\"}",
+    "experiment": "E1 one-turn",
+    "ground_truth": {
+      "form": "(< (get next \"start\")",
+      "function": "touches?",
+      "operator": "comparator_flip",
+      "subject": "intervals"
+    },
+    "instance": 0,
+    "run_ref": "cmd-2sms554jpm5zh06f1fge0qy4rw",
+    "seed": 20260930,
+    "selection": {
+      "final_pass": false,
+      "selected": null,
+      "selection": [
+        {
+          "index": 0,
+          "mission": "candidate-0",
+          "passed": false,
+          "valid": true
+        }
+      ]
+    },
+    "solved": false,
+    "subject": "intervals",
+    "usage": {
+      "agent_protocol_errors": 0,
+      "capability_calls": {
+        "workflow/llm-request": 1
+      },
+      "capability_denials": {},
+      "capability_refusals": {},
+      "evaluation_continuation_bytes": 24,
+      "evaluation_history_bytes": 0,
+      "evaluation_memory_bytes": 24,
+      "evaluations_by_mission": {
+        "repair-0": 1
+      },
+      "events_dropped": {},
+      "llm_budget": {
+        "cost": {
+          "charged_microusd": 0,
+          "currency": "USD",
+          "limit_microusd": 100000,
+          "refused": 0,
+          "remaining_microusd": 100000,
+          "reserved_microusd": 0,
+          "state": "available"
+        },
+        "total_tokens": {
+          "charged": 0,
+          "limit": 320000,
+          "refused": 0,
+          "remaining": 320000,
+          "reserved": 0,
+          "state": "available"
+        }
+      },
+      "llm_spend": {
+        "input": 5161,
+        "output": 5614,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 693
+        }
+      },
+      "llm_usage": [
+        {
+          "alias": "deepseek",
+          "calls": 1,
+          "installation_revision": "prelude-search-deepseek-v4-flash-replay-v1",
+          "missing_usage_calls": 0,
+          "successful_calls": 1,
+          "usage": {
+            "cache_creation": 0,
+            "cache_read": 0,
+            "input": 5161,
+            "output": 5614,
+            "total_cost": {
+              "currency": "USD",
+              "microunits": 693
+            }
+          },
+          "usage_calls": 1,
+          "usage_overflow": false
+        }
+      ],
+      "llm_usage_by_model": [],
+      "llm_usage_state": "available",
+      "protocol_errors": 0,
+      "remaining_ms": 299542,
+      "subordinate_evaluations": 1,
+      "unattributed_model_calls": 1
+    },
+    "wall_ms": 3840,
+    "winner": null
+  }
+]
