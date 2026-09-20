@@ -133,6 +133,11 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   @timeout_phases [:compilation, :execution]
   @timeout_value_pattern @subordinate_limit_pattern
   @timeout_family [:run_duration_ms | @timeout_limits]
+  @workflow_clock_limits [:run_duration_ms, :workflow_timeout_ms]
+  @workflow_clock_middle "; effective workflow clocks are limits.run_duration_ms="
+  @workflow_clock_separator " ms and limits.workflow_timeout_ms="
+  @workflow_clock_suffix " ms. Increasing one does not increase the other; raise the binding limit in the manifest, and its installed host ceiling if it is lower"
+  @workflow_clock_maximum_message_bytes 512
   @timeout_maximum_message_bytes (for limit <- @timeout_family, phase <- @timeout_phases do
                                     name = Atom.to_string(limit)
 
@@ -217,6 +222,44 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   end
 
   def live_timeout_message(_limit, _limit_ms, _phase), do: :error
+
+  @doc false
+  @spec workflow_clock_message(term(), term(), term(), term(), term()) ::
+          {:ok, binary()} | :error
+  def workflow_clock_message(
+        limit,
+        limit_ms,
+        phase,
+        run_duration_ms,
+        workflow_timeout_ms
+      )
+      when limit in @workflow_clock_limits and phase in @timeout_phases do
+    with {:ok, limit_row} <- LimitCatalog.fetch(limit),
+         {:ok, run_row} <- LimitCatalog.fetch(:run_duration_ms),
+         {:ok, workflow_row} <- LimitCatalog.fetch(:workflow_timeout_ms),
+         true <- LimitCatalog.valid_value?(limit_row, limit_ms),
+         true <- LimitCatalog.valid_value?(run_row, run_duration_ms),
+         true <- LimitCatalog.valid_value?(workflow_row, workflow_timeout_ms),
+         true <-
+           Map.fetch!(
+             %{run_duration_ms: run_duration_ms, workflow_timeout_ms: workflow_timeout_ms},
+             limit
+           ) == limit_ms do
+      {:ok,
+       timeout_prefix(limit) <>
+         Integer.to_string(limit_ms) <>
+         " ms was exceeded during #{phase}" <>
+         @workflow_clock_middle <>
+         Integer.to_string(run_duration_ms) <>
+         @workflow_clock_separator <>
+         Integer.to_string(workflow_timeout_ms) <> @workflow_clock_suffix}
+    else
+      _invalid -> :error
+    end
+  end
+
+  def workflow_clock_message(_limit, _limit_ms, _phase, _run_duration_ms, _workflow_timeout_ms),
+    do: :error
 
   @doc false
   @spec direct_live_timeout_message(term(), term(), term()) :: {:ok, binary()} | :error
@@ -723,11 +766,24 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   @spec runtime_limit_message?(term()) :: boolean()
   def runtime_limit_message?(message) when is_binary(message) do
     subordinate_evaluations_message?(message) or transcript_chars_message?(message) or
-      timeout_message?(message) or heap_words_message?(message) or
+      timeout_message?(message) or workflow_clock_message?(message) or
+      heap_words_message?(message) or
       protocol_errors_message?(message) or budget_message?(message)
   end
 
   def runtime_limit_message?(_message), do: false
+
+  @doc false
+  @spec workflow_clock_message?(term()) :: boolean()
+  def workflow_clock_message?(message) when is_binary(message) do
+    Enum.any?(@workflow_clock_limits, fn limit ->
+      Enum.any?(@timeout_phases, fn phase ->
+        workflow_clock_message?(message, limit, phase)
+      end)
+    end)
+  end
+
+  def workflow_clock_message?(_message), do: false
 
   @doc false
   @spec capability_quota_limit_message?(term()) :: boolean()
@@ -767,15 +823,16 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   @doc false
   @spec run_duration_message?(term()) :: boolean()
   def run_duration_message?(message) when is_binary(message) do
-    Enum.any?(@timeout_phases, fn phase ->
-      valid_exact_message?(
-        message,
-        timeout_prefix(:run_duration_ms),
-        timeout_suffix(:run_duration_ms, phase),
-        @subordinate_maximum_digits,
-        &live_timeout_message(:run_duration_ms, &1, phase)
-      )
-    end)
+    workflow_clock_message?(message, :run_duration_ms) or
+      Enum.any?(@timeout_phases, fn phase ->
+        valid_exact_message?(
+          message,
+          timeout_prefix(:run_duration_ms),
+          timeout_suffix(:run_duration_ms, phase),
+          @subordinate_maximum_digits,
+          &live_timeout_message(:run_duration_ms, &1, phase)
+        )
+      end)
   end
 
   def run_duration_message?(_message), do: false
@@ -828,6 +885,7 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
       [subordinate_message_branch()] ++
         [transcript_message_branch()] ++
         timeout_message_branches() ++
+        workflow_clock_message_branches() ++
         [heap_message_branch(), protocol_errors_message_branch() | budget_message_branches()]
     )
   end
@@ -844,6 +902,7 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
       message_schema(
         fallback,
         [subordinate_message_branch() | timeout_message_branches()] ++
+          workflow_clock_message_branches() ++
           [heap_message_branch(), protocol_errors_message_branch() | budget_message_branches()]
       )
 
@@ -869,7 +928,11 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   @doc false
   @spec run_duration_message_schema(binary()) :: map()
   def run_duration_message_schema(fallback) when is_binary(fallback),
-    do: message_schema(fallback, run_duration_message_branches())
+    do:
+      message_schema(
+        fallback,
+        run_duration_message_branches() ++ workflow_clock_message_branches([:run_duration_ms])
+      )
 
   @doc false
   @spec result_limit_message_schema(binary()) :: map()
@@ -956,6 +1019,24 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
 
   defp timeout_message_branches, do: timeout_branches(@timeout_limits)
 
+  defp workflow_clock_message_branches(limits \\ @workflow_clock_limits) do
+    for limit <- limits,
+        phase <- @timeout_phases do
+      DiagnosticPattern.exact_message_schema(
+        @workflow_clock_maximum_message_bytes,
+        [
+          {:literal, timeout_prefix(limit)},
+          {:pattern, @timeout_value_pattern},
+          {:literal, " ms was exceeded during #{phase}" <> @workflow_clock_middle},
+          {:pattern, @timeout_value_pattern},
+          {:literal, @workflow_clock_separator},
+          {:pattern, @timeout_value_pattern},
+          {:literal, @workflow_clock_suffix}
+        ]
+      )
+    end
+  end
+
   defp timeout_branches(limits) do
     for limit <- limits,
         phase <- @timeout_phases do
@@ -988,6 +1069,42 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
       @subordinate_maximum_digits,
       &timeout_message(limit, &1, phase)
     )
+  end
+
+  defp workflow_clock_message?(message, limit, phase) do
+    prefix = timeout_prefix(limit)
+    phase_middle = " ms was exceeded during #{phase}" <> @workflow_clock_middle
+
+    with true <- byte_size(message) <= @workflow_clock_maximum_message_bytes,
+         true <- String.starts_with?(message, prefix),
+         [limit_text, clocks_text] <-
+           String.split(String.trim_leading(message, prefix), phase_middle, parts: 2),
+         [run_text, workflow_text] <-
+           String.split(clocks_text, @workflow_clock_separator, parts: 2),
+         true <- String.ends_with?(workflow_text, @workflow_clock_suffix),
+         workflow_text <- String.trim_trailing(workflow_text, @workflow_clock_suffix),
+         true <- byte_size(limit_text) in 1..@subordinate_maximum_digits,
+         true <- byte_size(run_text) in 1..@subordinate_maximum_digits,
+         true <- byte_size(workflow_text) in 1..@subordinate_maximum_digits,
+         {limit_ms, ""} <- Integer.parse(limit_text),
+         {run_duration_ms, ""} <- Integer.parse(run_text),
+         {workflow_timeout_ms, ""} <- Integer.parse(workflow_text),
+         {:ok, expected} <-
+           workflow_clock_message(
+             limit,
+             limit_ms,
+             phase,
+             run_duration_ms,
+             workflow_timeout_ms
+           ) do
+      message == expected
+    else
+      _invalid -> false
+    end
+  end
+
+  defp workflow_clock_message?(message, limit) do
+    Enum.any?(@timeout_phases, &workflow_clock_message?(message, limit, &1))
   end
 
   defp valid_exact_message?(message, prefix, suffix, maximum_digits, builder),

@@ -1672,6 +1672,35 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     end
   end
 
+  @tag :tmp_dir
+  test "a workflow timeout reports both effective workflow clocks", %{tmp_dir: directory} do
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "slow", "path" => "slow.clj"}],
+        "entry" => "slow/run"
+      },
+      "input" => %{"value" => %{}},
+      "limits" => %{"run_duration_ms" => 1_000, "workflow_timeout_ms" => 1},
+      "providers" => %{"workflow" => [], "mission" => []}
+    }
+
+    application =
+      write_application(directory, "workflow-timeout", manifest, [
+        {"slow.clj", "(ns slow) (defn run [input] (return (count (vec (range 2000000)))))"}
+      ])
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application])
+
+    assert outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+
+    assert outcome.envelope["error"]["message"] =~
+             ~r/^workflow_timeout_ms limit 1 ms was exceeded during (compilation|execution); effective workflow clocks are limits\.run_duration_ms=1000 ms and limits\.workflow_timeout_ms=1 ms\. Increasing one does not increase the other; raise the binding limit in the manifest, and its installed host ceiling if it is lower$/
+
+    assert_schema_valid(outcome.envelope)
+  end
+
   test "workflow heap diagnostics name the limit and bind the runtime source" do
     assert {:error, %CommandOutcome{} = outcome} =
              project_limit_exceeded(:memory_exceeded, %{
@@ -2073,7 +2102,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.exit_status == 6
 
     assert outcome.envelope["error"]["message"] =~
-             ~r/^run_duration_ms limit 1 ms was exceeded during (compilation|execution); raise limits\.run_duration_ms in the manifest, and the installed host ceiling if it is lower$/
+             ~r/^run_duration_ms limit 1 ms was exceeded during (compilation|execution); effective workflow clocks are limits\.run_duration_ms=1 ms and limits\.workflow_timeout_ms=120000 ms\. Increasing one does not increase the other; raise the binding limit in the manifest, and its installed host ceiling if it is lower$/
 
     assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
     assert_schema_valid(outcome.envelope)
