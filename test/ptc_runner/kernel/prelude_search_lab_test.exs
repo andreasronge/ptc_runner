@@ -135,6 +135,65 @@ defmodule PtcRunner.Kernel.PreludeSearchLabTest do
     assert analysis_output =~ "model_exchanges"
     assert File.read!(Path.join(failed, "result.json")) =~ "llm_request_timeout"
 
+    Application.put_env(:ptc_runner, :prelude_search_malformed_program, true)
+    on_exit(fn -> Application.delete_env(:ptc_runner, :prelude_search_malformed_program) end)
+    malformed_output = Path.join(tmp, "malformed")
+
+    assert [_row] =
+             Phase1.run(
+               output: malformed_output,
+               subjects: ["intervals"],
+               instances: 1,
+               budget_microusd: 100_000,
+               command_runner: runner
+             )
+
+    capture = Path.join(malformed_output, "runs/intervals-0-E1-one-turn")
+    [malformed_trace] = Path.wildcard(Path.join(capture, "traces/*.jsonl"))
+    malformed_run_id = malformed_trace |> Path.basename(".jsonl") |> String.split(".") |> hd()
+
+    malformed_analysis =
+      ExUnit.CaptureIO.capture_io(fn ->
+        presentation =
+          PtcRunner.MixCommandAdapter.execute([
+            "repl",
+            "--profile",
+            "private-run-analysis-v2",
+            "--private-unattended",
+            "--resource",
+            "traces=" <> Path.join(capture, "traces"),
+            "--resource",
+            "inspection=" <> Path.join(capture, "inspection"),
+            "--session-trace-dir",
+            analysis_dir,
+            "--format",
+            "jsonl",
+            "-e",
+            "(analysis/open " <> Jason.encode!(malformed_run_id) <> ")",
+            "-e",
+            "(analysis/read " <>
+              Jason.encode!(malformed_run_id) <> " {\"collection\" \"execution_errors\"})"
+          ])
+
+        assert presentation.exit_status == 0, presentation.stdout <> presentation.stderr
+      end)
+
+    [_opened, errors] =
+      malformed_analysis
+      |> String.split("\n", trim: true)
+      |> Enum.map(&Jason.decode!/1)
+      |> Enum.filter(&(&1["type"] == "evaluation"))
+      |> Enum.map(&get_in(&1, ["result", "value"]))
+
+    [error] = errors["items"]
+    assert error["mission_name"] == "repair-0"
+    assert error["reason"] == "parse_error"
+    assert error["details"]["source_location"] == %{"offset" => 4}
+    evaluation_id = error["evaluation_id"]
+
+    assert %{"filters" => %{"evaluation_id" => ^evaluation_id}, "state" => "complete"} =
+             Enum.find(error["relationships"], &(&1["rel"] == "failed_generated_source"))
+
     replay =
       Phase1.run(
         [

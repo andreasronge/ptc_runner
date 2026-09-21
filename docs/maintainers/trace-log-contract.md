@@ -906,7 +906,7 @@ The current record types and payloads are:
 | `mcp-response` | `capability_id`, `request_id` | `transport`, `body` or `body_identity` |
 | `mcp-stderr` | `capability_id`, `request_id` | `transport`, `text`, `truncated` |
 | `execution-prints` | `evaluation_id` | `environment`, `prints`, `truncated` |
-| `execution-error` | `evaluation_id` | `environment`, `kind`, `reason`, `details` |
+| `execution-error` | `evaluation_id` | `environment`, optional mission-only `mission_name`, `kind`, `reason`, `details` |
 | `explicit-failure-value` | `evaluation_id` | `environment`, `value` |
 
 A read tool the host declared with `inspection_capture: "digest_results"`
@@ -1113,11 +1113,16 @@ succeeds or fails: `prints` is the run's bounded `println` output. Public
 evaluation prints are projected in one pass under both a 128-entry ceiling and
 a 65,536-byte encoded JSON-array ceiling, and the truncation flag is
 authoritative even when the omitted entries are empty strings; this record uses
-the same projection. `execution-error` is emitted only when the top-level
-workflow evaluation fails with a non-empty `details` map, where `details` is
-the Kernel `Error.details` map computed for that failure. Their `environment`
-is always `"workflow"`, and their `evaluation_id` must match a canonical
-`evaluation-started` event with `environment: "workflow"` for the same run.
+the same projection. `execution-error` is emitted when the top-level workflow
+evaluation fails with a non-empty `details` map and when a subordinate mission
+evaluation returns an evaluator failure. Its `evaluation_id` must match a
+canonical `evaluation-started` event with the same environment for the same
+run. A workflow record's `details` is the Kernel `Error.details` map computed
+for that failure. Mission records additionally carry `mission_name`; their
+bounded details retain the evaluator message, whether it was truncated, and an
+available source byte offset. They are written when the mission evaluation
+finishes, so an enclosing workflow may recover from the failure without
+erasing its private diagnostic.
 When the workflow's `return` expression is directly a `kernel-eval`, private
 details also contain bounded `boundary_producer` evidence: the child
 `evaluation_id` when that retained successful result is exactly the workflow

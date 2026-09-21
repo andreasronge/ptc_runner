@@ -447,7 +447,10 @@ execution prints and any provider-backed private activity that occurred. A
 failure can add detailed <code class="inline">execution-error</code> evidence. A raised capability
 callback additionally records its bounded exception class, message, and
 formatted stacktrace while the trace retains only the closed
-<code class="inline">provider_error / exception</code> category. Exception text and stacktrace paths can
+<code class="inline">provider_error / exception</code> category. Failed mission evaluations retain their
+bounded evaluator diagnostic and available source offset under the exact
+generated-source evaluation identity, even when the workflow handles the
+failure and returns normally. Exception text and stacktrace paths can
 contain sensitive data and are not reliably redactable; read the artifact only
 through an authorized private sink.</p><p>To debug compilation with the manifest bundle, use manifest mode:</p><pre><code class="console language-console">ptc repl -m ptc.json</code></pre><p><code class="inline">-l</code> dynamically evaluates setup code and does not accept component-only forms
 such as <code class="inline">ns</code> or <code class="inline">defn-</code>.</p><h2 id="use-workflow-repl-sessions">Use workflow REPL sessions</h2><p>Start a scratch session or attach the manifest's frozen workflow environment:</p><pre><code class="console language-console">ptc repl

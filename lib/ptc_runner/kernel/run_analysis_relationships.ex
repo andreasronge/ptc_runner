@@ -221,6 +221,41 @@ defmodule PtcRunner.Kernel.RunAnalysisRelationships do
   defp relation_state(_many), do: "ambiguous"
 
   defp error_relations(error, trace_facts, generated_sources) do
+    if error["environment"] == "mission" do
+      mission_error_relations(error, trace_facts, generated_sources)
+    else
+      workflow_error_relations(error, trace_facts, generated_sources)
+    end
+  end
+
+  defp mission_error_relations(error, trace_facts, generated_sources) do
+    evaluation_id = error["evaluation_id"]
+    canonical_state = if complete_canonical?(trace_facts), do: "complete", else: "incomplete"
+
+    {failure_state, failure_filters} =
+      boundary_failure_state_and_filters(trace_facts, evaluation_id, canonical_state)
+
+    source_matches = Enum.filter(generated_sources, &(&1["evaluation_id"] == evaluation_id))
+
+    source_state =
+      if length(source_matches) == 1, do: "complete", else: relation_state(length(source_matches))
+
+    source_filters =
+      if source_state == "complete", do: %{"evaluation_id" => evaluation_id}, else: nil
+
+    [
+      relation("evaluation_failure", "causation", "activity", failure_filters, failure_state),
+      relation(
+        "failed_generated_source",
+        "association",
+        "generated_sources",
+        source_filters,
+        source_state
+      )
+    ]
+  end
+
+  defp workflow_error_relations(error, trace_facts, generated_sources) do
     workflow_evaluation_id = error["evaluation_id"]
     canonical_state = if complete_canonical?(trace_facts), do: "complete", else: "incomplete"
 
