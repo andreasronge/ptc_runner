@@ -194,7 +194,7 @@ defmodule PtcRunner.MixProject do
   defp deps do
     [
       {:jason, "~> 1.4"},
-      {:jsv, "~> 0.22.0"},
+      {:jsv, "~> 0.23.0"},
       {:nimble_parsec, "~> 1.4"},
       {:mint, "~> 1.10"},
       {:req, "~> 0.7.3"},
