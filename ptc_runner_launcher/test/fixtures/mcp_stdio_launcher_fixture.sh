@@ -117,8 +117,10 @@ case "$1" in
     printf 'stdin closed\n'
     trap '' TERM
 
+    # Keep helper lifetime below the one-second final group-cleanup deadline.
+    # A sleep fork racing the group signal must not consume that whole budget.
     while :; do
-      /bin/sleep 1
+      /bin/sleep 0.05
     done
     ;;
 
@@ -142,8 +144,10 @@ case "$1" in
     printf 'descendant=%s\n' "$descendant"
     trap '' TERM
 
+    # Keep helper lifetime below the one-second final group-cleanup deadline.
+    # A sleep fork racing the group signal must not consume that whole budget.
     while :; do
-      /bin/sleep 1
+      /bin/sleep 0.05
     done
     ;;
 
