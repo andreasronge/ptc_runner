@@ -68,13 +68,19 @@ jobs:
             # not a tree CI can have tested.
             merged="$(git merge-tree --write-tree \
                         "$GITHUB_SHA^" refs/ptc/settled-head 2>/dev/null || true)"
-            proven="$(gh api \
-              "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$head&status=completed&conclusion=success" \
-              --jq '.total_count' 2>/dev/null || true)"
+            # The green run tested the head merged onto main as it stood when
+            # the run started, so it proves this push only if the parent was
+            # already main's tip then: a parent committed after the run began
+            # is a base that moved, and the merge onto it was never tested.
+            proven_at="$(gh api \
+              "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$head&status=completed&conclusion=success&per_page=1" \
+              --jq '.workflow_runs[0].run_started_at // empty' 2>/dev/null || true)"
+            parent_at="$(git show -s --format=%cI "$GITHUB_SHA^" 2>/dev/null || true)"
 
             if [ -n "$merged" ] &&
                [ "$merged" = "$(git rev-parse "$GITHUB_SHA^{tree}")" ] &&
-               [ "${proven:-0}" -gt 0 ]; then
+               [ -n "$proven_at" ] && [ -n "$parent_at" ] &&
+               [ "$(date -u -d "$parent_at" +%s)" -lt "$(date -u -d "$proven_at" +%s)" ]; then
               settled=true
             fi
           fi
