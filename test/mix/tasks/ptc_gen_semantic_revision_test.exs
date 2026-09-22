@@ -1,5 +1,6 @@
 defmodule Mix.Tasks.Ptc.GenSemanticRevisionTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   alias Mix.Tasks.Ptc.GenSemanticRevision
 

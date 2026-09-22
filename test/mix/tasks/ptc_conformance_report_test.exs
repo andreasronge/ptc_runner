@@ -1,5 +1,6 @@
 defmodule Mix.Tasks.Ptc.ConformanceReportTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   alias Mix.Tasks.Ptc.ConformanceReport
 

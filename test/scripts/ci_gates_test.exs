@@ -1,5 +1,6 @@
 defmodule PtcRunner.Scripts.CIGatesTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   alias PtcRunner.TestSupport.GitEnv
 

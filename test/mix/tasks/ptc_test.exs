@@ -2,6 +2,7 @@ defmodule Mix.Tasks.PtcTest do
   # async: false — reenables the ptc Mix task and mutates OS env, cwd, and :ptc_runner app env
   # (class D); ~3 of 33 cases are pure.
   use ExUnit.Case, async: false
+  @moduletag :operator
 
   import ExUnit.CaptureIO
 

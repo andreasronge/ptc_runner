@@ -1,5 +1,6 @@
 defmodule PtcRunner.Scripts.DuplicationGateTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   @gate Path.expand("../../scripts/duplication_gate.py", __DIR__)
 

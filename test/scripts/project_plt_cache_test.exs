@@ -1,5 +1,6 @@
 defmodule PtcRunner.Scripts.ProjectPltCacheTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   @moduletag :nightly
   @script Path.expand("../../scripts/project-plt-cache.py", __DIR__)

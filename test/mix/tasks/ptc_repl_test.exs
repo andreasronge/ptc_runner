@@ -2,6 +2,7 @@ defmodule PtcRunner.ReplFrontendTest do
   # async: false — run_task reinstalls the VM-global :default logger handler on every case, and
   # three cases assert the whole VM process list (class D).
   use ExUnit.Case, async: false
+  @moduletag :operator
 
   import ExUnit.CaptureIO
 

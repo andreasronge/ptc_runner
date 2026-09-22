@@ -19,6 +19,7 @@ mcp_filesystem=false
 java=false
 viewer=false
 docs=false
+operator=false
 saw_path=false
 
 select_all() {
@@ -29,6 +30,40 @@ select_all() {
   java=true
   viewer=true
   docs=true
+  operator=true
+}
+
+# `operator` is not a gate of its own: it widens the core suite from its
+# library lane to every module. The modules it adds carry `@moduletag
+# :operator` and drive the repository through its Mix tasks, git hooks,
+# scripts, Viewer, guides, and examples, so the surfaces below are the ones
+# whose edits must run them before a push. Any test file already tagged
+# selects itself, so this list only names the sources they exercise.
+mark_operator() {
+  case "$1" in
+    .githooks/*|scripts/*|lib/mix/*|dev/*|ptc_viewer/*|docs/guides/*|\
+      examples/*|bench/*|test/githooks/*|test/scripts/*|test/mix/*|\
+      test/support/*|mix.exs|mix.lock|\
+      lib/ptc_runner/kernel.ex|lib/ptc_runner/repl_frontend.ex|\
+      lib/ptc_runner/dotenv.ex|lib/ptc_runner/build_identity.ex|\
+      lib/ptc_runner/kernel/command_*|lib/ptc_runner/kernel/repl_*|\
+      lib/ptc_runner/kernel/viewer_*|lib/ptc_runner/kernel/mix_command_*|\
+      lib/ptc_runner/kernel/standalone_*|lib/ptc_runner/kernel/project_*|\
+      lib/ptc_runner/kernel/doctor_*|lib/ptc_runner/kernel/cli_*|\
+      lib/ptc_runner/kernel/manifest_repl*|lib/ptc_runner/kernel/inspect_only_repl.ex|\
+      lib/ptc_runner/kernel/one_shot_frontend.ex|lib/ptc_runner/kernel/transcript_frontend.ex|\
+      lib/ptc_runner/kernel/trace_log.ex|lib/ptc_runner/kernel/inspection_preflight.ex|\
+      lib/ptc_runner/kernel/inspection_lab*|lib/ptc_runner/kernel/application.ex|\
+      lib/ptc_runner/kernel/example_*|lib/ptc_runner/kernel/tutorial_*|\
+      lib/ptc_runner/kernel/prelude_search*|lib/ptc_runner/kernel/*_catalog.ex)
+      operator=true
+      ;;
+    test/*_test.exs)
+      if [ -f "$repo_root/$1" ] && grep -q '@moduletag :operator' "$repo_root/$1"; then
+        operator=true
+      fi
+      ;;
+  esac
 }
 
 registry_valid=true
@@ -50,9 +85,12 @@ while IFS= read -r path || [ -n "$path" ]; do
     continue
   fi
 
+  mark_operator "$path"
+
   if grep -Fxq -- "$path" "$executable_guides"; then
     core=true
     docs=true
+    operator=true
     continue
   fi
 
@@ -245,3 +283,4 @@ printf 'mcp_filesystem=%s\n' "$mcp_filesystem"
 printf 'java=%s\n' "$java"
 printf 'viewer=%s\n' "$viewer"
 printf 'docs=%s\n' "$docs"
+printf 'operator=%s\n' "$operator"

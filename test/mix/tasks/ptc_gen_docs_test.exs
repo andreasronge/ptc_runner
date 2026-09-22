@@ -1,5 +1,6 @@
 defmodule Mix.Tasks.Ptc.GenDocsTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   alias Mix.Tasks.Ptc.GenDocs
   alias PtcRunner.Kernel
