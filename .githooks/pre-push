@@ -392,6 +392,7 @@ mcp_filesystem=false
 java=false
 viewer=false
 docs=false
+release=false
 operator=false
 # shellcheck disable=SC1090
 source "$SCOPES_FILE"

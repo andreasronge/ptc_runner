@@ -59,9 +59,13 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
   test "known standing paths do not fall through to every scope" do
     docs = only(["docs"])
     core = only(["core"])
+    core_release = only(~w(core release))
     operator_docs = only(~w(docs operator))
     operator_core = only(~w(core operator))
-    every_scope = only(~w(core launcher mcp_http mcp_filesystem java viewer docs operator))
+    operator_core_release = only(~w(core release operator))
+
+    every_scope =
+      only(~w(core launcher mcp_http mcp_filesystem java viewer docs release operator))
 
     for {path, expected} <- [
           {"AGENTS.md", docs},
@@ -82,9 +86,9 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
           {".ex_dna.exs", core},
           {"conformance_inventory.json", core},
           {"bench/lisp_throughput.exs", operator_core},
-          {"Dockerfile", core},
-          {".dockerignore", core},
-          {"rel/overlays/bin/ptc", core},
+          {"Dockerfile", core_release},
+          {".dockerignore", core_release},
+          {"rel/overlays/bin/ptc", core_release},
           {"examples/kernel-tutorial/03-file-agent/agent.clj", operator_core},
           {"test/ptc_runner/kernel/filesystem_mcp_e2e_test.exs", only(["mcp_filesystem"])},
           {"test/support/ptc_fs_mcp.ex", only(~w(mcp_filesystem operator))},
@@ -94,6 +98,7 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
           {".claude/skills/precommit/SKILL.md", all_false()},
           {".github/workflows/nightly.yml", all_false()},
           {".github/workflows/soak.yml", all_false()},
+          {".github/workflows/flake-hunt.yml", all_false()},
           {".github/workflows/e2e.yml", all_false()},
           {".github/workflows/pages.yml", all_false()},
           {".github/dependabot.yml", all_false()},
@@ -106,14 +111,25 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
           {"scripts/publish_hex_artifact.sh", only(~w(core launcher operator))},
           {"scripts/ci/docs.sh", operator_docs},
           {"scripts/build_site.sh", operator_docs},
+          # Site tooling, not a product gate; the other repository scripts in
+          # Python are gate bodies the core suite owns.
+          {"scripts/build_og_cards.py", operator_docs},
+          {"scripts/duplication_gate.py", operator_core},
+          {"scripts/guide_budget.py", operator_core},
+          {"scripts/macho_closure.py", operator_core_release},
+          {"scripts/project-plt-cache.py", operator_core},
           {"scripts/ci/launcher.sh", only(~w(launcher operator))},
-          {"scripts/ci/core-release.sh", operator_core},
+          {"scripts/ci/core-release.sh", operator_core_release},
           {"scripts/ci/viewer.sh", only(~w(core viewer operator))},
-          {"scripts/verify_standalone_release.sh", operator_core},
+          {"scripts/verify_standalone_release.sh", operator_core_release},
           {"scripts/worktree.sh", operator_core},
           {".githooks/README.md", operator_docs},
           {".githooks/pre-push", operator_core},
           {".formatter.exs", core},
+          {"mix.exs", every_scope},
+          # A root lockfile cannot reach the launcher's own Mix project or the
+          # pinned JVM Clojure oracle.
+          {"mix.lock", only(~w(core mcp_http mcp_filesystem viewer docs release operator))},
           {".github/workflows/test.yml", every_scope},
           {"scripts/ci/classify-changes.sh", every_scope},
           {"scripts/ci/_common.sh", every_scope},
@@ -125,7 +141,7 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
 
   test "unknown paths conservatively select every scope" do
     assert classify(["new-area/contract.data"]) ==
-             only(~w(core launcher mcp_http mcp_filesystem java viewer docs operator))
+             only(~w(core launcher mcp_http mcp_filesystem java viewer docs release operator))
   end
 
   test "non-canonical executable-guide entries conservatively select every scope" do
@@ -134,7 +150,7 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
           "./docs/maintainers/development-setup.md"
         ] do
       assert classify(["docs/maintainers/development-setup.md"], registry: entry <> "\n") ==
-               only(~w(core launcher mcp_http mcp_filesystem java viewer docs operator))
+               only(~w(core launcher mcp_http mcp_filesystem java viewer docs release operator))
     end
   end
 
@@ -176,7 +192,7 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
 
   defp all_false do
     Map.new(
-      ~w(core launcher mcp_http mcp_filesystem java viewer docs operator),
+      ~w(core launcher mcp_http mcp_filesystem java viewer docs release operator),
       &{&1, "false"}
     )
   end

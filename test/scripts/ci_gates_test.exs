@@ -468,14 +468,21 @@ defmodule PtcRunner.Scripts.CIGatesTest do
       assert output =~ "1x  test/a_test.exs:451"
     end
 
-    test "the nightly workflow runs the hunt on main and keeps its records" do
+    # The hunt has its own weekly workflow: its output is a rate over ten
+    # samples, and it was two thirds of Nightly's cost.
+    test "the weekly workflow runs the hunt on main and keeps its records" do
+      hunt = File.read!(Path.join(@root, ".github/workflows/flake-hunt.yml"))
       nightly = File.read!(Path.join(@root, ".github/workflows/nightly.yml"))
 
-      assert nightly =~
-               ~s(scripts/ci/flake-hunt.sh 10 --schedulers 4 --out "$RUNNER_TEMP/flake-hunt")
+      assert hunt =~ ~s(cron: "41 2 * * 0")
 
-      assert nightly =~
+      assert hunt =~
+               ~s(scripts/ci/flake-hunt.sh "${{ inputs.runs || 10 }}" --schedulers 4 --out "$RUNNER_TEMP/flake-hunt")
+
+      assert hunt =~
                ~r/if: always\(\)\n\s+uses: actions\/upload-artifact@v6\n\s+with:\n\s+name: flake-hunt/
+
+      refute nightly =~ "flake-hunt.sh"
     end
 
     # The formatter is the only producer of the record file, so it is proven

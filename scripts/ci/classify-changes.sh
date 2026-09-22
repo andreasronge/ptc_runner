@@ -19,6 +19,7 @@ mcp_filesystem=false
 java=false
 viewer=false
 docs=false
+release=false
 operator=false
 saw_path=false
 
@@ -30,6 +31,7 @@ select_all() {
   java=true
   viewer=true
   docs=true
+  release=true
   operator=true
 }
 
@@ -66,6 +68,23 @@ mark_operator() {
   esac
 }
 
+# `release` is not a gate of its own either: it decides whether the release
+# verification gate runs on a pull request. That gate builds the Hex package
+# and assembles the standalone release from cold, and only the packaging
+# inputs below can change its verdict in a way the core suite does not already
+# catch. It stays unconditional on main and on a `release`-labelled pull
+# request, so a pure `lib/` change is still verified before a tag.
+mark_release() {
+  case "$1" in
+    mix.exs|mix.lock|rel/*|priv/*|Dockerfile|.dockerignore|\
+      scripts/verify_*.sh|scripts/package_standalone_release.sh|\
+      scripts/build_container_image.sh|scripts/macho_closure.py|\
+      scripts/ci/core-release.sh)
+      release=true
+      ;;
+  esac
+}
+
 registry_valid=true
 
 if [ ! -f "$executable_guides" ] || ! awk '
@@ -86,6 +105,7 @@ while IFS= read -r path || [ -n "$path" ]; do
   fi
 
   mark_operator "$path"
+  mark_release "$path"
 
   if grep -Fxq -- "$path" "$executable_guides"; then
     core=true
@@ -186,8 +206,24 @@ while IFS= read -r path || [ -n "$path" ]; do
       mcp_filesystem=true
       ;;
 
-    mix.exs|mix.lock)
+    mix.exs)
+      # The root project file carries the launcher's version requirement and
+      # the Java oracle's Mix task wiring, so keep the fail-safe here.
       select_all
+      ;;
+
+    mix.lock)
+      # A root lockfile change rebuilds the library and everything embedding
+      # it, but it cannot reach `ptc_runner_launcher` -- a separate Mix project
+      # with its own mix.exs and mix.lock -- nor the Java oracle, a pinned JVM
+      # Clojure installed by `mix ptc.install_clojure`. Half the lockfile
+      # fan-outs in a fortnight were dependabot bumps of ex_doc, usage_rules
+      # and dialyxir, each of which ran the macOS launcher matrix.
+      core=true
+      viewer=true
+      docs=true
+      mcp_http=true
+      mcp_filesystem=true
       ;;
 
     lib/*|test/*|config/*|priv/*)
@@ -202,8 +238,8 @@ while IFS= read -r path || [ -n "$path" ]; do
       ;;
 
     .github/workflows/nightly.yml|.github/workflows/soak.yml|\
-      .github/workflows/e2e.yml|.github/workflows/pages.yml|\
-      .github/dependabot.yml)
+      .github/workflows/flake-hunt.yml|.github/workflows/e2e.yml|\
+      .github/workflows/pages.yml|.github/dependabot.yml)
       # Scheduled or deploy-only workflows are not a per-push product gate.
       # Editing them must not spend minutes on core tests, Dialyzer, or
       # release; GitHub still parses the YAML when that workflow next runs.
@@ -235,6 +271,19 @@ while IFS= read -r path || [ -n "$path" ]; do
     scripts/ci/viewer.sh)
       core=true
       viewer=true
+      ;;
+
+    scripts/build_og_cards.py)
+      # Renders the link-preview cards under `site/og/` from `site/style.css`
+      # and the site mark. Nothing it touches reaches a product gate.
+      docs=true
+      ;;
+
+    scripts/duplication_gate.py|scripts/guide_budget.py|\
+      scripts/macho_closure.py|scripts/project-plt-cache.py)
+      # The bodies behind duplication_gate.sh, guide_budget.sh, the packaged
+      # macOS closure check, and the Dialyzer PLT cache.
+      core=true
       ;;
 
     scripts/ci/*|scripts/verify_*.sh|scripts/package_standalone_release.sh|\
@@ -283,4 +332,5 @@ printf 'mcp_filesystem=%s\n' "$mcp_filesystem"
 printf 'java=%s\n' "$java"
 printf 'viewer=%s\n' "$viewer"
 printf 'docs=%s\n' "$docs"
+printf 'release=%s\n' "$release"
 printf 'operator=%s\n' "$operator"
