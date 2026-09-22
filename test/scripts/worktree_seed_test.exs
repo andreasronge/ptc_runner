@@ -1,5 +1,6 @@
 defmodule PtcRunner.Scripts.WorktreeSeedTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   alias PtcRunner.TestSupport.GitEnv
 

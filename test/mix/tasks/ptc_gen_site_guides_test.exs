@@ -1,5 +1,6 @@
 defmodule Mix.Tasks.Ptc.GenSiteGuidesTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   alias Mix.Tasks.Ptc.GenSiteGuides
   alias PtcRunner.SiteGuides.MarkdownHTML

@@ -15,6 +15,7 @@ defmodule PtcRunner.TestSupport.LifecycleSoakTest do
   # async: false — gates on VM-wide :erlang.memory slopes and a 50 ms termination deadline, and
   # spawns a port (class D, A).
   use ExUnit.Case, async: false
+  @moduletag :operator
 
   alias PtcRunner.TestSupport.LifecycleSoak
 

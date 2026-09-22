@@ -24,18 +24,29 @@ required pull-request CI also runs release-package verification in parallel;
 ordinary local pushes leave that production build to CI. The core static gate
 also runs the sibling gateway format, compile, and test gate, including its
 short startup CLI smoke test.
-For mixed documentation and code changes, ExDoc runs
-before the longer test and Dialyzer stages. Plan-only changes skip the
+Plan-only changes skip the
 expensive gate. Scheduled workflows (`nightly.yml`, `soak.yml`, `e2e.yml`,
 `pages.yml`) and other paths that cannot break a product gate select none.
 Unknown paths select every path-routed local gate.
 `FORCE_FULL_PRE_PUSH=1` explicitly adds release verification and forces all
 path scopes; release preparation uses this mode.
 
+The suite runs in one of two lanes. A push that touches none of the
+operator surfaces (Mix tasks, hooks, scripts, Viewer, guides, examples, and
+the command and REPL front ends that drive them) runs the library lane,
+`mix test --exclude operator`; the excluded modules carry
+`@moduletag :operator` and select themselves when edited. Any operator
+surface, a forced full run, or an unknown path runs every module, as CI
+always does.
+
 After the test suite, the deterministic local gates run as concurrent lanes,
 because they own disjoint build trees: core static analysis followed by
-Dialyzer (`_build/test`) and the Viewer (`ptc_viewer/_build/test`). A forced
-full run adds release verification (`_build/prod`) as another lane. Each lane's
+Dialyzer (`_build/test`), the Viewer (`ptc_viewer/_build/test`), and ExDoc
+(`_build/dev`). A forced full run adds release verification (`_build/prod`)
+as another lane. Core static analysis begins with the same quality gate as
+`mix precommit`; a clean tree that gate has already passed is stamped under
+`_build/test` and skipped, so running `mix precommit` before `git push` costs
+the gate once (`PTC_QUALITY_FORCE=1` reruns it). Each lane's
 output is buffered and replayed under its own heading once it finishes, so a
 concurrent run reads like a serial one and every lane is reported even when an
 earlier one fails.

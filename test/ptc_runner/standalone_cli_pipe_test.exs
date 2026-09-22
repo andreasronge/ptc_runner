@@ -10,6 +10,7 @@ defmodule PtcRunner.StandaloneCLIPipeTest do
   # async: false — drives a real Mix/OS subprocess with a multi-second budget (class C); serialized
   # so load from other tests cannot spend it.
   use ExUnit.Case, async: false
+  @moduletag :operator
 
   @root Path.expand("../..", __DIR__)
   @release_root Path.join(@root, "_build/ptc_packaged_cli_pipe/release")

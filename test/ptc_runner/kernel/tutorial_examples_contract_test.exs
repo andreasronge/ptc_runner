@@ -1,5 +1,6 @@
 defmodule PtcRunner.Kernel.TutorialExamplesContractTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   @repo_root Path.expand("../../..", __DIR__)
   @examples Path.expand("../../../examples/kernel-tutorial", __DIR__)

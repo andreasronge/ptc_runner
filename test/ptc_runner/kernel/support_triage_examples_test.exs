@@ -1,5 +1,6 @@
 defmodule PtcRunner.Kernel.SupportTriageExamplesTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandOutcome

@@ -1,5 +1,6 @@
 defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   import ExUnit.CaptureIO
 
