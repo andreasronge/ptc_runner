@@ -10,6 +10,7 @@ defmodule PtcRunner.Lisp.SciConformanceTest do
   Run with: mix test test/ptc_runner/lisp/sci_conformance_test.exs
   """
   use ExUnit.Case, async: true
+  @moduletag :operator
   import PtcRunner.TestSupport.ClojureTestHelpers
 
   alias PtcRunner.Lisp.ClojureValidator

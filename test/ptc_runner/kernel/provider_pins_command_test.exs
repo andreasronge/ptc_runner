@@ -1,5 +1,6 @@
 defmodule PtcRunner.Kernel.ProviderPinsCommandTest do
   use ExUnit.Case, async: false
+  @moduletag :operator
   @moduletag :nightly
   @tag :tmp_dir
   test "operator command prints the exact two pin maps without running the workflow", %{

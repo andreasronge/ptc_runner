@@ -30,5 +30,14 @@ case "$#" in
     ;;
 esac
 
+# `PTC_TEST_LANE=library` leaves out the `:operator` modules: the tests that
+# drive the repository through its Mix tasks, git hooks, scripts, Viewer,
+# guides, and examples. The pre-push hook selects that lane when a push
+# touches none of those surfaces; CI and a bare invocation run everything.
+lane_args=()
+if [ "${PTC_TEST_LANE:-}" = library ]; then
+  lane_args=(--exclude operator)
+fi
+
 mix compile --warnings-as-errors
-mix test --max-failures 1 --warnings-as-errors
+mix test --max-failures 1 --warnings-as-errors ${lane_args[@]+"${lane_args[@]}"}

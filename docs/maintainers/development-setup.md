@@ -158,9 +158,10 @@ scripts/ci/flake-hunt.sh 5 --out /tmp/flake-hunt
 
 Every run appends one JSON line to `runs.jsonl` in that directory through
 the `PTC_TEST_RUN_LOG` formatter, carrying the seed, scheduler count, the
-wall/async/sync split, and each failure's location. The `Nightly` workflow
-runs the same script on `main` and uploads the directory as the `flake-hunt`
-artifact. Reproduce a named failure with `mix test FILE:LINE --seed SEED`,
+wall/async/sync split, and each failure's location. The weekly `Flake hunt`
+workflow runs the same script on `main` and uploads the directory as the
+`flake-hunt` artifact; dispatch it by hand, with a run count, when a failure
+needs a verdict sooner. Reproduce a named failure with `mix test FILE:LINE --seed SEED`,
 then `--repeat-until-failure 100`; a test that passes alone with its seed is a
 load flake, not an ordering bug.
 

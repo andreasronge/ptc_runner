@@ -1,5 +1,6 @@
 defmodule PtcRunner.GitHooks.PrePushTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   alias PtcRunner.TestSupport.GitEnv
 
@@ -127,7 +128,8 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     refute output =~ "Documentation-only push"
     assert output =~ "core tests"
 
-    assert_core_gate_invocations(mix_marker)
+    # Registered executable guides are run by operator-lane tests.
+    assert_core_gate_invocations(mix_marker, [], operator: true)
   end
 
   @tag :slow
@@ -169,7 +171,8 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     assert status == 0, output
     refute output =~ "Documentation-only push"
 
-    invocations = assert_core_gate_invocations(mix_marker, ["ci-gate launcher"])
+    invocations =
+      assert_core_gate_invocations(mix_marker, ["ci-gate launcher"], operator: true)
 
     # The launcher gate owns load-sensitive port-teardown assertions, so it
     # never shares the machine with a lane.
@@ -253,12 +256,12 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     {output, status} = run_hook(repo, path)
 
     assert status == 0, output
-    assert output =~ ~r/core tests passed in \d+s/
+    assert output =~ ~r/core tests \(library lane\) passed in \d+s/
     assert output =~ ~r/core static analysis \+ Dialyzer passed in \d+s/
     refute output =~ "core release verification"
 
     assert output =~ "Phase timings:"
-    assert output =~ ~r/core tests\s+\d+s/
+    assert output =~ ~r/core tests \(library lane\)\s+\d+s/
     assert output =~ ~r/core static analysis \+ Dialyzer\s+\d+s/
 
     assert_core_gate_invocations(mix_marker)
@@ -275,9 +278,9 @@ defmodule PtcRunner.GitHooks.PrePushTest do
 
     assert mix_marker |> File.read!() |> String.split("\n", trim: true) ==
              [
+               "ci-gate core-tests lane=library",
                "deps.get --check-locked",
                "docs --warnings-as-errors",
-               "ci-gate core-tests",
                "ci-gate core-static",
                "ci-gate core-dialyzer",
                "ci-gate viewer"
@@ -296,9 +299,9 @@ defmodule PtcRunner.GitHooks.PrePushTest do
 
     assert mix_marker |> File.read!() |> String.split("\n", trim: true) ==
              [
+               "ci-gate core-tests",
                "deps.get --check-locked",
                "docs --warnings-as-errors",
-               "ci-gate core-tests",
                "ci-gate core-static",
                "ci-gate core-dialyzer",
                "ci-gate core-release",
@@ -399,7 +402,22 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     assert output =~ "Documentation"
     assert output =~ "core tests"
 
-    assert_core_gate_invocations(mix_marker)
+    # Guides are executed by operator-lane tests, so the whole suite runs.
+    assert_core_gate_invocations(mix_marker, [], operator: true)
+  end
+
+  @tag :slow
+  test "a change to an operator surface runs every module of the suite" do
+    %{repo: repo, mix_marker: mix_marker, path: path} =
+      git_repo_with_change("lib/mix/tasks/ptc.example.ex")
+
+    {output, status} = run_hook(repo, path)
+
+    assert status == 0, output
+    assert output =~ ~r/core tests passed in \d+s/
+    refute output =~ "library lane"
+
+    assert_core_gate_invocations(mix_marker, [], operator: true)
   end
 
   test "documentation dependency setup rejects an uncommitted lockfile repair" do
@@ -419,7 +437,6 @@ defmodule PtcRunner.GitHooks.PrePushTest do
   @core_gate_invocations [
     "deps.get --check-locked",
     "docs --warnings-as-errors",
-    "ci-gate core-tests",
     "ci-gate core-static",
     "ci-gate core-dialyzer",
     "ci-gate viewer"
@@ -429,18 +446,24 @@ defmodule PtcRunner.GitHooks.PrePushTest do
   # is asserted as a multiset plus the orderings the design actually
   # guarantees. Pinning a total order here would only re-record whichever
   # interleaving the machine happened to produce.
-  defp assert_core_gate_invocations(mix_marker, extra_gates \\ []) do
+  # A push that touches no operator surface runs the library lane of the suite;
+  # one that does runs every module.
+  defp assert_core_gate_invocations(mix_marker, extra_gates \\ [], opts \\ []) do
     invocations = mix_marker |> File.read!() |> String.split("\n", trim: true)
 
-    assert Enum.sort(invocations) == Enum.sort(@core_gate_invocations ++ extra_gates),
+    core_tests =
+      if opts[:operator], do: "ci-gate core-tests", else: "ci-gate core-tests lane=library"
+
+    expected = @core_gate_invocations ++ [core_tests] ++ extra_gates
+
+    assert Enum.sort(invocations) == Enum.sort(expected),
            "unexpected gate invocations: #{inspect(invocations)}"
 
     assert_runs_before(invocations, "deps.get --check-locked", "docs --warnings-as-errors")
-    assert_runs_before(invocations, "docs --warnings-as-errors", "ci-gate core-tests")
 
     # The suite owns the machine: no lane starts until it has finished.
-    for lane <- ["ci-gate core-static", "ci-gate viewer"] do
-      assert_runs_before(invocations, "ci-gate core-tests", lane)
+    for lane <- ["ci-gate core-static", "ci-gate viewer", "docs --warnings-as-errors"] do
+      assert_runs_before(invocations, core_tests, lane)
     end
 
     # Static analysis and Dialyzer compile into the same `_build/test`, so
@@ -616,7 +639,7 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     for gate <- ~w(core-tests core-static core-dialyzer core-release viewer launcher) do
       write_executable!(Path.join(repo, "scripts/ci/#{gate}.sh"), """
       #!/bin/sh
-      mix ci-gate #{gate}
+      mix ci-gate #{gate}${PTC_TEST_LANE:+ lane=$PTC_TEST_LANE}
       """)
     end
   end

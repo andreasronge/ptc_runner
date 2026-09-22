@@ -1,5 +1,6 @@
 defmodule PtcRunner.Kernel.ViewerAdapterTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   alias PtcRunner.Kernel.ConversationProjection
   alias PtcRunner.Kernel.InspectionArtifact

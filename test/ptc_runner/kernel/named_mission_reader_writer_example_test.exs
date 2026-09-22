@@ -1,5 +1,6 @@
 defmodule PtcRunner.Kernel.NamedMissionReaderWriterExampleTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.ProjectConfig

@@ -1,5 +1,6 @@
 defmodule Mix.Tasks.PtcTranscriptTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   alias PtcRunner.Kernel.CommandEntry
   alias PtcRunner.Kernel.CommandRuntime

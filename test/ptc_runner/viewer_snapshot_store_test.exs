@@ -1,5 +1,6 @@
 defmodule PtcRunner.ViewerSnapshotStoreTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.ProjectConfig

@@ -1,5 +1,6 @@
 defmodule PtcRunner.Kernel.TraceLogTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.TraceLog

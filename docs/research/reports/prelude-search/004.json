@@ -1,0 +1,4037 @@
+{
+  "schema_version": 1,
+  "experiment": "prelude-search/004",
+  "kind": "measure",
+  "purpose": "corrective_e1_e2_pilot",
+  "source_commit": "608c2a92d17a58164357d2d99f0cd201f5d8de7c",
+  "status": "stopped",
+  "protocol": {
+    "seed": 20261021,
+    "instances": 20,
+    "budget_microusd": 4683562,
+    "request_timeout_ms": 300000,
+    "subjects": [
+      "intervals",
+      "normaliser",
+      "reconciliation"
+    ],
+    "conditions": [
+      [
+        "E1 one-turn",
+        1,
+        1
+      ],
+      [
+        "E1 three-turn",
+        1,
+        3
+      ],
+      [
+        "E2 K=2",
+        2,
+        1
+      ],
+      [
+        "E2 K=4",
+        4,
+        1
+      ]
+    ],
+    "wall_cap_ms": 21600000,
+    "proposal_identity": "candidate-index-v1",
+    "case_cap_microusd": 100000,
+    "total_token_ceiling": 320000,
+    "model": "openrouter:deepseek/deepseek-v4-flash",
+    "final_tests": "never used for selection"
+  },
+  "completion": {
+    "ended_at": "2026-09-19T19:53:17.066043+00:00",
+    "exit_status": 1,
+    "wall_ms": 4444849
+  },
+  "summary": {
+    "mode": "live",
+    "rows": [
+      {
+        "instances": 14,
+        "subject": "intervals",
+        "experiment": "E1 one-turn",
+        "wall_ms": 930681,
+        "function_accuracy": 0.5,
+        "form_accuracy": 0.0,
+        "final_test_pass_rate": 0.2143,
+        "citation_values_valid_rate": 0.3571,
+        "tokens_in": 72587,
+        "tokens_out": 91413,
+        "cost_microusd": 9907,
+        "cost_per_solved_microusd": 3302.3333333333335,
+        "candidates_generated": 7,
+        "candidates_checked": 5,
+        "generated_per_solved": 2.3333,
+        "checked_per_solved": 1.6667
+      },
+      {
+        "instances": 0,
+        "subject": "normaliser",
+        "experiment": "E1 one-turn",
+        "wall_ms": 0,
+        "function_accuracy": null,
+        "form_accuracy": null,
+        "final_test_pass_rate": null,
+        "citation_values_valid_rate": null,
+        "tokens_in": null,
+        "tokens_out": null,
+        "cost_microusd": null,
+        "cost_per_solved_microusd": null,
+        "candidates_generated": 0,
+        "candidates_checked": 0,
+        "generated_per_solved": null,
+        "checked_per_solved": null
+      },
+      {
+        "instances": 0,
+        "subject": "reconciliation",
+        "experiment": "E1 one-turn",
+        "wall_ms": 0,
+        "function_accuracy": null,
+        "form_accuracy": null,
+        "final_test_pass_rate": null,
+        "citation_values_valid_rate": null,
+        "tokens_in": null,
+        "tokens_out": null,
+        "cost_microusd": null,
+        "cost_per_solved_microusd": null,
+        "candidates_generated": 0,
+        "candidates_checked": 0,
+        "generated_per_solved": null,
+        "checked_per_solved": null
+      },
+      {
+        "instances": 14,
+        "subject": "overall",
+        "experiment": "E1 one-turn",
+        "wall_ms": 930681,
+        "function_accuracy": 0.5,
+        "form_accuracy": 0.0,
+        "final_test_pass_rate": 0.2143,
+        "citation_values_valid_rate": 0.3571,
+        "tokens_in": 72587,
+        "tokens_out": 91413,
+        "cost_microusd": 9907,
+        "cost_per_solved_microusd": 3302.3333333333335,
+        "candidates_generated": 7,
+        "candidates_checked": 5,
+        "generated_per_solved": 2.3333,
+        "checked_per_solved": 1.6667
+      },
+      {
+        "instances": 13,
+        "subject": "intervals",
+        "experiment": "E1 three-turn",
+        "wall_ms": 1367438,
+        "function_accuracy": 0.6154,
+        "form_accuracy": 0.0,
+        "final_test_pass_rate": 0.2308,
+        "citation_values_valid_rate": 0.6154,
+        "tokens_in": 188262,
+        "tokens_out": 136887,
+        "cost_microusd": 14550,
+        "cost_per_solved_microusd": 4850.0,
+        "candidates_generated": 8,
+        "candidates_checked": 8,
+        "generated_per_solved": 2.6667,
+        "checked_per_solved": 2.6667
+      },
+      {
+        "instances": 0,
+        "subject": "normaliser",
+        "experiment": "E1 three-turn",
+        "wall_ms": 0,
+        "function_accuracy": null,
+        "form_accuracy": null,
+        "final_test_pass_rate": null,
+        "citation_values_valid_rate": null,
+        "tokens_in": null,
+        "tokens_out": null,
+        "cost_microusd": null,
+        "cost_per_solved_microusd": null,
+        "candidates_generated": 0,
+        "candidates_checked": 0,
+        "generated_per_solved": null,
+        "checked_per_solved": null
+      },
+      {
+        "instances": 0,
+        "subject": "reconciliation",
+        "experiment": "E1 three-turn",
+        "wall_ms": 0,
+        "function_accuracy": null,
+        "form_accuracy": null,
+        "final_test_pass_rate": null,
+        "citation_values_valid_rate": null,
+        "tokens_in": null,
+        "tokens_out": null,
+        "cost_microusd": null,
+        "cost_per_solved_microusd": null,
+        "candidates_generated": 0,
+        "candidates_checked": 0,
+        "generated_per_solved": null,
+        "checked_per_solved": null
+      },
+      {
+        "instances": 13,
+        "subject": "overall",
+        "experiment": "E1 three-turn",
+        "wall_ms": 1367438,
+        "function_accuracy": 0.6154,
+        "form_accuracy": 0.0,
+        "final_test_pass_rate": 0.2308,
+        "citation_values_valid_rate": 0.6154,
+        "tokens_in": 188262,
+        "tokens_out": 136887,
+        "cost_microusd": 14550,
+        "cost_per_solved_microusd": 4850.0,
+        "candidates_generated": 8,
+        "candidates_checked": 8,
+        "generated_per_solved": 2.6667,
+        "checked_per_solved": 2.6667
+      },
+      {
+        "instances": 13,
+        "subject": "intervals",
+        "experiment": "E2 K=2",
+        "wall_ms": 829893,
+        "function_accuracy": 0.3462,
+        "form_accuracy": 0.0,
+        "final_test_pass_rate": 0.3077,
+        "citation_values_valid_rate": 0.2308,
+        "tokens_in": 135186,
+        "tokens_out": 142048,
+        "cost_microusd": 15010,
+        "cost_per_solved_microusd": 3752.5,
+        "candidates_generated": 9,
+        "candidates_checked": 8,
+        "generated_per_solved": 2.25,
+        "checked_per_solved": 2.0
+      },
+      {
+        "instances": 0,
+        "subject": "normaliser",
+        "experiment": "E2 K=2",
+        "wall_ms": 0,
+        "function_accuracy": null,
+        "form_accuracy": null,
+        "final_test_pass_rate": null,
+        "citation_values_valid_rate": null,
+        "tokens_in": null,
+        "tokens_out": null,
+        "cost_microusd": null,
+        "cost_per_solved_microusd": null,
+        "candidates_generated": 0,
+        "candidates_checked": 0,
+        "generated_per_solved": null,
+        "checked_per_solved": null
+      },
+      {
+        "instances": 0,
+        "subject": "reconciliation",
+        "experiment": "E2 K=2",
+        "wall_ms": 0,
+        "function_accuracy": null,
+        "form_accuracy": null,
+        "final_test_pass_rate": null,
+        "citation_values_valid_rate": null,
+        "tokens_in": null,
+        "tokens_out": null,
+        "cost_microusd": null,
+        "cost_per_solved_microusd": null,
+        "candidates_generated": 0,
+        "candidates_checked": 0,
+        "generated_per_solved": null,
+        "checked_per_solved": null
+      },
+      {
+        "instances": 13,
+        "subject": "overall",
+        "experiment": "E2 K=2",
+        "wall_ms": 829893,
+        "function_accuracy": 0.3462,
+        "form_accuracy": 0.0,
+        "final_test_pass_rate": 0.3077,
+        "citation_values_valid_rate": 0.2308,
+        "tokens_in": 135186,
+        "tokens_out": 142048,
+        "cost_microusd": 15010,
+        "cost_per_solved_microusd": 3752.5,
+        "candidates_generated": 9,
+        "candidates_checked": 8,
+        "generated_per_solved": 2.25,
+        "checked_per_solved": 2.0
+      },
+      {
+        "instances": 13,
+        "subject": "intervals",
+        "experiment": "E2 K=4",
+        "wall_ms": 958896,
+        "function_accuracy": 0.3846,
+        "form_accuracy": 0.0385,
+        "final_test_pass_rate": 0.2308,
+        "citation_values_valid_rate": 0.3269,
+        "tokens_in": 270372,
+        "tokens_out": 287614,
+        "cost_microusd": 30449,
+        "cost_per_solved_microusd": 10149.666666666666,
+        "candidates_generated": 22,
+        "candidates_checked": 20,
+        "generated_per_solved": 7.3333,
+        "checked_per_solved": 6.6667
+      },
+      {
+        "instances": 0,
+        "subject": "normaliser",
+        "experiment": "E2 K=4",
+        "wall_ms": 0,
+        "function_accuracy": null,
+        "form_accuracy": null,
+        "final_test_pass_rate": null,
+        "citation_values_valid_rate": null,
+        "tokens_in": null,
+        "tokens_out": null,
+        "cost_microusd": null,
+        "cost_per_solved_microusd": null,
+        "candidates_generated": 0,
+        "candidates_checked": 0,
+        "generated_per_solved": null,
+        "checked_per_solved": null
+      },
+      {
+        "instances": 0,
+        "subject": "reconciliation",
+        "experiment": "E2 K=4",
+        "wall_ms": 0,
+        "function_accuracy": null,
+        "form_accuracy": null,
+        "final_test_pass_rate": null,
+        "citation_values_valid_rate": null,
+        "tokens_in": null,
+        "tokens_out": null,
+        "cost_microusd": null,
+        "cost_per_solved_microusd": null,
+        "candidates_generated": 0,
+        "candidates_checked": 0,
+        "generated_per_solved": null,
+        "checked_per_solved": null
+      },
+      {
+        "instances": 13,
+        "subject": "overall",
+        "experiment": "E2 K=4",
+        "wall_ms": 958896,
+        "function_accuracy": 0.3846,
+        "form_accuracy": 0.0385,
+        "final_test_pass_rate": 0.2308,
+        "citation_values_valid_rate": 0.3269,
+        "tokens_in": 270372,
+        "tokens_out": 287614,
+        "cost_microusd": 30449,
+        "cost_per_solved_microusd": 10149.666666666666,
+        "candidates_generated": 22,
+        "candidates_checked": 20,
+        "generated_per_solved": 7.3333,
+        "checked_per_solved": 6.6667
+      }
+    ],
+    "stop_reason": "case_failed_reserved_at_ceiling",
+    "replayed_cost_microusd": null,
+    "comparisons": [
+      {
+        "baseline": 0.23076923076923078,
+        "bootstrap_seed": [
+          2026,
+          9,
+          19
+        ],
+        "condition": "E2 K=2",
+        "difference": 0.07692307692307693,
+        "interval_95": [
+          -0.15384615384615385,
+          0.38461538461538464
+        ],
+        "method": "stratified paired percentile bootstrap",
+        "observed": 0.3076923076923077,
+        "pairs": [
+          {
+            "baseline": 0,
+            "candidate": 0,
+            "difference": 0,
+            "seed": 20261021,
+            "subject": "intervals"
+          },
+          {
+            "baseline": 0,
+            "candidate": 1,
+            "difference": 1,
+            "seed": 20261022,
+            "subject": "intervals"
+          },
+          {
+            "baseline": 0,
+            "candidate": 1,
+            "difference": 1,
+            "seed": 20261023,
+            "subject": "intervals"
+          },
+          {
+            "baseline": 0,
+            "candidate": 0,
+            "difference": 0,
+            "seed": 20261024,
+            "subject": "intervals"
+          },
+          {
+            "baseline": 1,
+            "candidate": 1,
+            "difference": 0,
+            "seed": 20261025,
+            "subject": "intervals"
+          },
+          {
+            "baseline": 0,
+            "candidate": 0,
+            "difference": 0,
+            "seed": 20261026,
+            "subject": "intervals"
+          },
+          {
+            "baseline": 0,
+            "candidate": 0,
+            "difference": 0,
+            "seed": 20261027,
+            "subject": "intervals"
+          },
+          {
+            "baseline": 1,
+            "candidate": 0,
+            "difference": -1,
+            "seed": 20261028,
+            "subject": "intervals"
+          },
+          {
+            "baseline": 0,
+            "candidate": 0,
+            "difference": 0,
+            "seed": 20261029,
+            "subject": "intervals"
+          },
+          {
+            "baseline": 0,
+            "candidate": 0,
+            "difference": 0,
+            "seed": 20261030,
+            "subject": "intervals"
+          },
+          {
+            "baseline": 0,
+            "candidate": 0,
+            "difference": 0,
+            "seed": 20261031,
+            "subject": "intervals"
+          },
+          {
+            "baseline": 0,
+            "candidate": 0,
+            "difference": 0,
+            "seed": 20261032,
+            "subject": "intervals"
+          },
+          {
+            "baseline": 1,
+            "candidate": 1,
+            "difference": 0,
+            "seed": 20261033,
+            "subject": "intervals"
+          }
+        ],
+        "replicates": 2000,
+        "status": "descriptive_pilot",
+        "verdict": "inconclusive"
+      },
+      {
+        "baseline": 0.23076923076923078,
+        "bootstrap_seed": [
+          2026,
+          9,
+          19
+        ],
+        "condition": "E2 K=4",
+        "difference": 0.0,
+        "interval_95": [
+          -0.23076923076923078,
+          0.23076923076923078
+        ],
+        "method": "stratified paired percentile bootstrap",
+        "observed": 0.23076923076923078,
+        "pairs": [
+          {
+            "baseline": 0,
+            "candidate": 0,
+            "difference": 0,
+            "seed": 20261021,
+            "subject": "intervals"
+          },
+          {
+            "baseline": 0,
+            "candidate": 0,
+            "difference": 0,
+            "seed": 20261022,
+            "subject": "intervals"
+          },
+          {
+            "baseline": 0,
+            "candidate": 0,
+            "difference": 0,
+            "seed": 20261023,
+            "subject": "intervals"
+          },
+          {
+            "baseline": 0,
+            "candidate": 0,
+            "difference": 0,
+            "seed": 20261024,
+            "subject": "intervals"
+          },
+          {
+            "baseline": 1,
+            "candidate": 1,
+            "difference": 0,
+            "seed": 20261025,
+            "subject": "intervals"
+          },
+          {
+            "baseline": 0,
+            "candidate": 0,
+            "difference": 0,
+            "seed": 20261026,
+            "subject": "intervals"
+          },
+          {
+            "baseline": 0,
+            "candidate": 0,
+            "difference": 0,
+            "seed": 20261027,
+            "subject": "intervals"
+          },
+          {
+            "baseline": 1,
+            "candidate": 0,
+            "difference": -1,
+            "seed": 20261028,
+            "subject": "intervals"
+          },
+          {
+            "baseline": 0,
+            "candidate": 0,
+            "difference": 0,
+            "seed": 20261029,
+            "subject": "intervals"
+          },
+          {
+            "baseline": 0,
+            "candidate": 0,
+            "difference": 0,
+            "seed": 20261030,
+            "subject": "intervals"
+          },
+          {
+            "baseline": 0,
+            "candidate": 1,
+            "difference": 1,
+            "seed": 20261031,
+            "subject": "intervals"
+          },
+          {
+            "baseline": 0,
+            "candidate": 0,
+            "difference": 0,
+            "seed": 20261032,
+            "subject": "intervals"
+          },
+          {
+            "baseline": 1,
+            "candidate": 1,
+            "difference": 0,
+            "seed": 20261033,
+            "subject": "intervals"
+          }
+        ],
+        "replicates": 2000,
+        "status": "descriptive_pilot",
+        "verdict": "inconclusive"
+      }
+    ],
+    "spent_or_reserved_microusd": 169916,
+    "completed_cases": 53,
+    "planned_cases": 240,
+    "unstarted_cases": 186,
+    "conclusion": "pilot; no automatic hypothesis verdict"
+  },
+  "observations": [
+    {
+      "experiment": "E1 one-turn",
+      "subject": "intervals",
+      "instance": 0,
+      "seed": 20261021,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 31715,
+      "llm_spend": {
+        "input": 5153,
+        "output": 3128,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 429
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261024,\"start\":20261021},{\"end\":20261029,\"start\":20261025}]}"
+              },
+              {
+                "index": 2,
+                "observed_json": "{\"intervals\":[{\"end\":20261064,\"start\":20261061},{\"end\":20261069,\"start\":20261066}]}"
+              },
+              {
+                "index": 4,
+                "observed_json": "{\"intervals\":[{\"end\":20261104,\"start\":20261101},{\"end\":20261109,\"start\":20261105}]}"
+              }
+            ],
+            "form": "(<= (get next \"start\") (+ (get current \"end\") (- tolerance 1)))",
+            "function": "touches?"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "5020982a15cac39aabe8a9f1fe44feab69edc750b049fffedc5f7783f829f0b2"
+        }
+      ]
+    },
+    {
+      "experiment": "E1 three-turn",
+      "subject": "intervals",
+      "instance": 0,
+      "seed": 20261021,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 64832,
+      "llm_spend": {
+        "input": 5134,
+        "output": 7386,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 673
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261024,\"start\":20261021},{\"end\":20261029,\"start\":20261025}]}"
+              },
+              {
+                "index": 2,
+                "observed_json": "{\"intervals\":[{\"end\":20261064,\"start\":20261061},{\"end\":20261069,\"start\":20261066}]}"
+              },
+              {
+                "index": 4,
+                "observed_json": "{\"intervals\":[{\"end\":20261104,\"start\":20261101},{\"end\":20261109,\"start\":20261105}]}"
+              }
+            ],
+            "form": "(<= (get next \"start\") (+ (get current \"end\") (- tolerance 1)))",
+            "function": "touches?"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "5ab8f022f58588d7de4a9af93cb586415516d51f2e719ff1345d26d359dc3bec"
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=2",
+      "subject": "intervals",
+      "instance": 0,
+      "seed": 20261021,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 93436,
+      "llm_spend": {
+        "input": 10306,
+        "output": 18378,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1739
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=4",
+      "subject": "intervals",
+      "instance": 0,
+      "seed": 20261021,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 92159,
+      "llm_spend": {
+        "input": 20612,
+        "output": 32167,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 3108
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 6,
+                "observed_json": "{\"intervals\":[{\"start\":20261041,\"end\":20261044},{\"start\":20261046,\"end\":20261049}]}"
+              }
+            ],
+            "form": "(<= (get next \"start\") (+ (get current \"end\") (- tolerance 1))",
+            "function": "touches?"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "0a0cd49b156901ed43a20872bf7f3107d26a119cf390a6a3e4f57d3b713e5b22"
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 31,
+                "observed_json": "{\"intervals\":[{\"start\":20261141,\"end\":20261144},{\"start\":20261144,\"end\":20261149}]}"
+              },
+              {
+                "index": 35,
+                "observed_json": "{\"intervals\":[{\"start\":20261121,\"end\":20261124},{\"start\":20261124,\"end\":20261129}]}"
+              }
+            ],
+            "form": "(+ (get current \"end\") (- tolerance 1))",
+            "function": "touches?"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": true,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "abacde279df4c9e205638c5430192adbbdfd5a05f8cba5de701646d2065f47fd"
+        }
+      ]
+    },
+    {
+      "experiment": "E1 one-turn",
+      "subject": "intervals",
+      "instance": 1,
+      "seed": 20261022,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 44440,
+      "llm_spend": {
+        "input": 5402,
+        "output": 4592,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 558
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "[{\"end\":20261025,\"start\":20261022},{\"end\":20261028,\"start\":20261027},{\"end\":20261027,\"start\":20261030}]"
+              },
+              {
+                "index": 2,
+                "observed_json": "[{\"end\":20261068,\"start\":20261062}]"
+              },
+              {
+                "index": 10,
+                "observed_json": "[{\"end\":20261028,\"start\":20261022},{\"end\":20261027,\"start\":20261030}]"
+              }
+            ],
+            "form": "(if (<= start finish) {\"start\" start \"end\" finish} {\"start\" start \"end\" finish})",
+            "function": "ordered"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "8ba6c365b78ea89028eef240f45878e1685b3c36042fa2d7658574fa3aa16766"
+        }
+      ]
+    },
+    {
+      "experiment": "E1 three-turn",
+      "subject": "intervals",
+      "instance": 1,
+      "seed": 20261022,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 45042,
+      "llm_spend": {
+        "input": 17679,
+        "output": 4742,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 645
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=2",
+      "subject": "intervals",
+      "instance": 1,
+      "seed": 20261022,
+      "solved": true,
+      "winner": 1,
+      "wall_ms": 25924,
+      "llm_spend": {
+        "input": 10804,
+        "output": 3901,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 588
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261025,\"start\":20261022},{\"end\":20261028,\"start\":20261027},{\"end\":20261027,\"start\":20261030}]}"
+              }
+            ],
+            "form": "(if (<= start finish) {\"start\" start \"end\" finish} {\"start\" start \"end\" finish})",
+            "function": "ordered"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "c0a79c20c0694844d9b523754387275bd6204baa8aaaa9b5e7c866f409ab8c77"
+        },
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261025,\"start\":20261022},{\"end\":20261028,\"start\":20261027},{\"end\":20261027,\"start\":20261030}]}"
+              },
+              {
+                "index": 2,
+                "observed_json": "{\"intervals\":[{\"end\":20261068,\"start\":20261062}]}"
+              },
+              {
+                "index": 10,
+                "observed_json": "{\"intervals\":[{\"end\":20261228,\"start\":20261222},{\"end\":20261227,\"start\":20261230}]}"
+              }
+            ],
+            "form": "(if (<= start finish)\n      {\"start\" start \"end\" finish}\n      {\"start\" start \"end\" finish})",
+            "function": "ordered"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "ec83680c438c5c7c64242815d0fd40b3baa48806d80bfb378954d36a5e09c04b"
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=4",
+      "subject": "intervals",
+      "instance": 1,
+      "seed": 20261022,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 50347,
+      "llm_spend": {
+        "input": 21608,
+        "output": 12394,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1741
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E1 one-turn",
+      "subject": "intervals",
+      "instance": 2,
+      "seed": 20261023,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 21766,
+      "llm_spend": {
+        "input": 5246,
+        "output": 2032,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 344
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E1 three-turn",
+      "subject": "intervals",
+      "instance": 2,
+      "seed": 20261023,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 100871,
+      "llm_spend": {
+        "input": 17524,
+        "output": 12713,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1341
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261026,\"start\":20261023},{\"end\":20261028,\"start\":20261031}]}"
+              },
+              {
+                "index": 1,
+                "observed_json": "{\"intervals\":[{\"end\":20261043,\"start\":20261049},{\"end\":20261051,\"start\":20261048}]}"
+              },
+              {
+                "index": 7,
+                "observed_json": "{\"intervals\":[{\"end\":20261163,\"start\":20261171},{\"end\":20261169,\"start\":20261168}]}"
+              },
+              {
+                "index": 16,
+                "observed_json": "{\"intervals\":[{\"end\":20261343,\"start\":20261351},{\"end\":20261349,\"start\":20261349}]}"
+              },
+              {
+                "index": 28,
+                "observed_json": "{\"intervals\":[{\"end\":20261583,\"start\":20261591},{\"end\":20261589,\"start\":20261589}]}"
+              }
+            ],
+            "form": "(defn- extend\n  \"Extend a merged interval without moving its start.\"\n  [current next]\n  {\"end\" (get current \"start\")\n   \"start\" (max (get current \"end\") (get next \"end\"))})",
+            "function": "lab.intervals/extend"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "c0a79c20c0694844d9b523754387275bd6204baa8aaaa9b5e7c866f409ab8c77"
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=2",
+      "subject": "intervals",
+      "instance": 2,
+      "seed": 20261023,
+      "solved": true,
+      "winner": 0,
+      "wall_ms": 69019,
+      "llm_spend": {
+        "input": 10492,
+        "output": 10736,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1129
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 1,
+                "observed_json": "{\"intervals\":[{\"end\":20261043,\"start\":20261049},{\"end\":20261051,\"start\":20261048}]}"
+              },
+              {
+                "index": 4,
+                "observed_json": "{\"intervals\":[{\"end\":20261103,\"start\":20261111},{\"end\":20261109,\"start\":20261109}]}"
+              },
+              {
+                "index": 16,
+                "observed_json": "{\"intervals\":[{\"end\":20261343,\"start\":20261351},{\"end\":20261349,\"start\":20261349}]}"
+              }
+            ],
+            "form": "{\"end\" (get current \"start\") \"start\" (max (get current \"end\") (get next \"end\"))}",
+            "function": "extend"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "ec83680c438c5c7c64242815d0fd40b3baa48806d80bfb378954d36a5e09c04b"
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "phase-return-contract-failed",
+          "failure_reason": {
+            "completion": "invalid-return",
+            "constraint": "json_value",
+            "contract": "repair",
+            "contract_source": "repair.schema.json",
+            "max_turns": 1,
+            "mission": "repair-1",
+            "phase_index": 1,
+            "violations": []
+          },
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=4",
+      "subject": "intervals",
+      "instance": 2,
+      "seed": 20261023,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 38288,
+      "llm_spend": {
+        "input": 20984,
+        "output": 14267,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1674
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E1 one-turn",
+      "subject": "intervals",
+      "instance": 3,
+      "seed": 20261024,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 86835,
+      "llm_spend": {
+        "input": 4982,
+        "output": 11504,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1100
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E1 three-turn",
+      "subject": "intervals",
+      "instance": 3,
+      "seed": 20261024,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 162038,
+      "llm_spend": {
+        "input": 16233,
+        "output": 21978,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 2044
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "intermediate-result",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=2",
+      "subject": "intervals",
+      "instance": 3,
+      "seed": 20261024,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 68892,
+      "llm_spend": {
+        "input": 9964,
+        "output": 17092,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1621
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=4",
+      "subject": "intervals",
+      "instance": 3,
+      "seed": 20261024,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 86535,
+      "llm_spend": {
+        "input": 19928,
+        "output": 34919,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 3294
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E1 one-turn",
+      "subject": "intervals",
+      "instance": 4,
+      "seed": 20261025,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 148512,
+      "llm_spend": {
+        "input": 5161,
+        "output": 9846,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1003
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 3,
+                "observed_json": "{\"intervals\":[{\"end\":20261088,\"start\":20261085},{\"end\":20261093,\"start\":20261088}]}"
+              },
+              {
+                "index": 4,
+                "observed_json": "{\"intervals\":[{\"end\":20261108,\"start\":20261105},{\"end\":20261113,\"start\":20261109}]}"
+              },
+              {
+                "index": 9,
+                "observed_json": "{\"intervals\":[{\"end\":20261208,\"start\":20261205},{\"end\":20261213,\"start\":20261210}]}"
+              },
+              {
+                "index": 12,
+                "observed_json": "{\"intervals\":[{\"end\":20261268,\"start\":20261265},{\"end\":20261273,\"start\":20261269}]}"
+              }
+            ],
+            "form": "(< (get next \"start\") (+ (get current \"end\") tolerance))",
+            "function": "touches?"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "fd69434da84ca5f7c2be68c188e2bb00dd176bd60c01019f1002f2de5b94190b"
+        }
+      ]
+    },
+    {
+      "experiment": "E1 three-turn",
+      "subject": "intervals",
+      "instance": 4,
+      "seed": 20261025,
+      "solved": true,
+      "winner": 0,
+      "wall_ms": 228426,
+      "llm_spend": {
+        "input": 16885,
+        "output": 14615,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1687
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 3,
+                "observed_json": "{\"intervals\":[{\"end\":20261088,\"start\":20261085},{\"end\":20261093,\"start\":20261088}]}"
+              },
+              {
+                "index": 12,
+                "observed_json": "{\"intervals\":[{\"end\":20261268,\"start\":20261265},{\"end\":20261273,\"start\":20261269}]}"
+              },
+              {
+                "index": 21,
+                "observed_json": "{\"intervals\":[{\"end\":20261448,\"start\":20261445},{\"end\":20261453,\"start\":20261450}]}"
+              },
+              {
+                "index": 27,
+                "observed_json": "{\"intervals\":[{\"end\":20261568,\"start\":20261565},{\"end\":20261573,\"start\":20261568}]}"
+              },
+              {
+                "index": 33,
+                "observed_json": "{\"intervals\":[{\"end\":20261688,\"start\":20261685},{\"end\":20261693,\"start\":20261690}]}"
+              },
+              {
+                "index": 36,
+                "observed_json": "{\"intervals\":[{\"end\":20261748,\"start\":20261745},{\"end\":20261753,\"start\":20261749}]}"
+              },
+              {
+                "index": 39,
+                "observed_json": "{\"intervals\":[{\"end\":20261808,\"start\":20261805},{\"end\":20261813,\"start\":20261808}]}"
+              }
+            ],
+            "form": "(defn- touches? ... (< (get next \"start\") (+ (get current \"end\") tolerance)))",
+            "function": "touches?"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "07dcc3fee5d975be75faf0d4a55987abfe4b5f489c7ca353ce8f78a7d5e297fd"
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=2",
+      "subject": "intervals",
+      "instance": 4,
+      "seed": 20261025,
+      "solved": true,
+      "winner": 0,
+      "wall_ms": 143609,
+      "llm_spend": {
+        "input": 10322,
+        "output": 17039,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1791
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 4,
+                "observed_json": "{\"end\":20261113,\"start\":20261105,\"end\":20261108,\"intervals\":[{\"end\":20261108,\"start\":20261105},{\"end\":20261113,\"start\":20261109}]}"
+              },
+              {
+                "index": 16,
+                "observed_json": "{\"end\":20261353,\"start\":20261345,\"end\":20261348,\"intervals\":[{\"end\":20261348,\"start\":20261345},{\"end\":20261353,\"start\":20261349}]}"
+              }
+            ],
+            "form": "(< (get next \"start\") (+ (get current \"end\") tolerance))",
+            "function": "touches?"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "07dcc3fee5d975be75faf0d4a55987abfe4b5f489c7ca353ce8f78a7d5e297fd"
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=4",
+      "subject": "intervals",
+      "instance": 4,
+      "seed": 20261025,
+      "solved": true,
+      "winner": 1,
+      "wall_ms": 186561,
+      "llm_spend": {
+        "input": 20644,
+        "output": 35436,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 3692
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 2,
+                "observed_json": "{\"intervals\":[{\"end\":20261068,\"start\":20261065},{\"end\":20261073,\"start\":20261070}]}"
+              },
+              {
+                "index": 7,
+                "observed_json": "{\"intervals\":[{\"end\":20261173,\"start\":20261165}]}"
+              },
+              {
+                "index": 8,
+                "observed_json": "{\"intervals\":[{\"end\":20261193,\"start\":20261185}]}"
+              }
+            ],
+            "form": "(return {\"intervals\" (merge-ordered sorted tolerance)})",
+            "function": "merge-with-tolerance"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": false,
+          "status": "returned",
+          "candidate_source_sha256": "c0a79c20c0694844d9b523754387275bd6204baa8aaaa9b5e7c866f409ab8c77"
+        },
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 4,
+                "observed_json": "{\"intervals\":[{\"end\":20261108,\"start\":20261105},{\"end\":20261113,\"start\":20261109}]}"
+              }
+            ],
+            "form": "(< (get next \"start\") (+ (get current \"end\") tolerance))",
+            "function": "touches?"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "07dcc3fee5d975be75faf0d4a55987abfe4b5f489c7ca353ce8f78a7d5e297fd"
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 3,
+                "observed_json": "{\"intervals\":[{\"end\":20261088,\"start\":20261085},{\"end\":20261093,\"start\":20261090}]}"
+              },
+              {
+                "index": 4,
+                "observed_json": "{\"intervals\":[{\"end\":20261108,\"start\":20261105},{\"end\":20261113,\"start\":20261109}]}"
+              },
+              {
+                "index": 16,
+                "observed_json": "{\"intervals\":[{\"end\":20261348,\"start\":20261345},{\"end\":20261353,\"start\":20261349}]}"
+              },
+              {
+                "index": 28,
+                "observed_json": "{\"intervals\":[{\"end\":20261588,\"start\":20261585},{\"end\":20261593,\"start\":20261589}]}"
+              }
+            ],
+            "form": "(< (get next \"start\") (+ (get current \"end\") tolerance))",
+            "function": "lab.intervals/touches?"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "7bef365419f43cd622467ce0d935f62870125365f88772dbc3fc2c39bb9b3803"
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "phase-return-contract-failed",
+          "failure_reason": {
+            "completion": "invalid-return",
+            "constraint": "additionalProperties",
+            "contract": "repair",
+            "contract_source": "repair.schema.json",
+            "max_turns": 1,
+            "mission": "repair-3",
+            "phase_index": 1,
+            "violations": [
+              {
+                "kind": "additionalProperties",
+                "path": "/diagnosis"
+              }
+            ]
+          },
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E1 one-turn",
+      "subject": "intervals",
+      "instance": 5,
+      "seed": 20261026,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 71624,
+      "llm_spend": {
+        "input": 5165,
+        "output": 8428,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 885
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E1 three-turn",
+      "subject": "intervals",
+      "instance": 5,
+      "seed": 20261026,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 116587,
+      "llm_spend": {
+        "input": 17855,
+        "output": 14222,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1409
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 1,
+                "observed_json": "{\"intervals\":[{\"end\":20261049,\"start\":20261046},{\"end\":20261054,\"start\":20261051}]}"
+              },
+              {
+                "index": 2,
+                "observed_json": "{\"intervals\":[{\"end\":20261069,\"start\":20261066},{\"end\":20261074,\"start\":20261069}]}"
+              },
+              {
+                "index": 3,
+                "observed_json": "{\"intervals\":[{\"end\":20261089,\"start\":20261086},{\"end\":20261094,\"start\":20261090}]}"
+              }
+            ],
+            "form": "(- tolerance 1)",
+            "function": "touches?"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "c0a79c20c0694844d9b523754387275bd6204baa8aaaa9b5e7c866f409ab8c77"
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=2",
+      "subject": "intervals",
+      "instance": 5,
+      "seed": 20261026,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 63066,
+      "llm_spend": {
+        "input": 10330,
+        "output": 12387,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1247
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=4",
+      "subject": "intervals",
+      "instance": 5,
+      "seed": 20261026,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 91339,
+      "llm_spend": {
+        "input": 20660,
+        "output": 25480,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 2550
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 1,
+                "observed_json": "{\"intervals\":[{\"end\":20261049,\"start\":20261046},{\"end\":20261054,\"start\":20261051}]}"
+              },
+              {
+                "index": 6,
+                "observed_json": "{\"intervals\":[{\"end\":20261154,\"start\":20261146}]}"
+              },
+              {
+                "index": 31,
+                "observed_json": "{\"intervals\":[{\"end\":20261654,\"start\":20261646}]}"
+              }
+            ],
+            "form": "(+ (get current \"end\") (- tolerance 1))",
+            "function": "touches?"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": true,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "f1d012bafc06e7af4d7677f18dd4f8402e623e2907a4f0c0c89e3cf2a8f6affb"
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "phase-return-contract-failed",
+          "failure_reason": {
+            "completion": "invalid-return",
+            "constraint": "additionalProperties",
+            "contract": "repair",
+            "contract_source": "repair.schema.json",
+            "max_turns": 1,
+            "mission": "repair-3",
+            "phase_index": 1,
+            "violations": [
+              {
+                "kind": "additionalProperties",
+                "path": "/diagnosis/cited_executions/0"
+              }
+            ]
+          },
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E1 one-turn",
+      "subject": "intervals",
+      "instance": 6,
+      "seed": 20261027,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 16810,
+      "llm_spend": {
+        "input": 5366,
+        "output": 1242,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 283
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "phase-return-contract-failed",
+          "failure_reason": {
+            "completion": "invalid-return",
+            "constraint": "additionalProperties",
+            "contract": "repair",
+            "contract_source": "repair.schema.json",
+            "max_turns": 1,
+            "mission": "repair-0",
+            "phase_index": 1,
+            "violations": [
+              {
+                "kind": "additionalProperties",
+                "path": "/diagnosis"
+              }
+            ]
+          },
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E1 three-turn",
+      "subject": "intervals",
+      "instance": 6,
+      "seed": 20261027,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 32159,
+      "llm_spend": {
+        "input": 11504,
+        "output": 3446,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 477
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261030,\"start\":20261027},{\"end\":20261033,\"start\":20261033},{\"end\":20261032,\"start\":20261035}]}"
+              },
+              {
+                "index": 1,
+                "observed_json": "{\"intervals\":[{\"end\":20261053,\"start\":20261047},{\"end\":20261052,\"start\":20261055}]}"
+              },
+              {
+                "index": 37,
+                "observed_json": "{\"intervals\":[{\"end\":20261773,\"start\":20261767},{\"end\":20261772,\"start\":20261775}]}"
+              }
+            ],
+            "form": "(if (<= start finish) {\"start\" start \"end\" finish} {\"start\" start \"end\" finish})",
+            "function": "ordered"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "c0a79c20c0694844d9b523754387275bd6204baa8aaaa9b5e7c866f409ab8c77"
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=2",
+      "subject": "intervals",
+      "instance": 6,
+      "seed": 20261027,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 23388,
+      "llm_spend": {
+        "input": 10732,
+        "output": 3612,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 558
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "intermediate-result",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "intermediate-result",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=4",
+      "subject": "intervals",
+      "instance": 6,
+      "seed": 20261027,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 27206,
+      "llm_spend": {
+        "input": 21464,
+        "output": 5004,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1001
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "[{\"end\":20261032,\"start\":20261035},{\"end\":20261030,\"start\":20261027},{\"end\":20261033,\"start\":20261033}]"
+              },
+              {
+                "index": 4,
+                "observed_json": "[{\"end\":20261110,\"start\":20261107},{\"end\":20261113,\"start\":20261113},{\"end\":20261112,\"start\":20261115}]"
+              }
+            ],
+            "form": "(if (<= start finish) {\"start\" start \"end\" finish} {\"start\" start \"end\" finish})",
+            "function": "ordered"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "7e47c4162bc8fb69d4a9e8320920981c00df33cc3ac76935abed4cdffdbb3e7a"
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E1 one-turn",
+      "subject": "intervals",
+      "instance": 7,
+      "seed": 20261028,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 15046,
+      "llm_spend": {
+        "input": 5246,
+        "output": 1059,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 263
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E1 three-turn",
+      "subject": "intervals",
+      "instance": 7,
+      "seed": 20261028,
+      "solved": true,
+      "winner": 0,
+      "wall_ms": 19539,
+      "llm_spend": {
+        "input": 5227,
+        "output": 1779,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 222
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261028,\"start\":20261034},{\"end\":20261036,\"start\":20261033}]}"
+              }
+            ],
+            "form": "{\"end\" (get current \"start\") \"start\" (max (get current \"end\") (get next \"end\"))}",
+            "function": "extend"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "ec83680c438c5c7c64242815d0fd40b3baa48806d80bfb378954d36a5e09c04b"
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=2",
+      "subject": "intervals",
+      "instance": 7,
+      "seed": 20261028,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 43061,
+      "llm_spend": {
+        "input": 10492,
+        "output": 6149,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 720
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=4",
+      "subject": "intervals",
+      "instance": 7,
+      "seed": 20261028,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 29851,
+      "llm_spend": {
+        "input": 20984,
+        "output": 8490,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1197
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261028,\"start\":20261034},{\"end\":20261036,\"start\":20261033}]}"
+              },
+              {
+                "index": 1,
+                "observed_json": "{\"intervals\":[{\"end\":20261048,\"start\":20261054},{\"end\":20261056,\"start\":20261053}]}"
+              },
+              {
+                "index": 2,
+                "observed_json": "{\"intervals\":[{\"end\":20261068,\"start\":20261076},{\"end\":20261074,\"start\":20261073}]}"
+              }
+            ],
+            "form": "{\"end\" (get current \"start\") \"start\" (max (get current \"end\") (get next \"end\"))}",
+            "function": "extend"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "c0a79c20c0694844d9b523754387275bd6204baa8aaaa9b5e7c866f409ab8c77"
+        },
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261028,\"start\":20261034},{\"end\":20261036,\"start\":20261033}]}"
+              },
+              {
+                "index": 1,
+                "observed_json": "{\"intervals\":[{\"end\":20261048,\"start\":20261054},{\"end\":20261056,\"start\":20261053}]}"
+              },
+              {
+                "index": 2,
+                "observed_json": "{\"intervals\":[{\"end\":20261068,\"start\":20261076},{\"end\":20261074,\"start\":20261073}]}"
+              }
+            ],
+            "form": "(defn- extend\n  \"Extend a merged interval without moving its start.\"\n  [current next]\n  {\"end\" (get current \"start\")\n   \"start\" (max (get current \"end\") (get next \"end\"))})",
+            "function": "extend"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "c0a79c20c0694844d9b523754387275bd6204baa8aaaa9b5e7c866f409ab8c77"
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E1 one-turn",
+      "subject": "intervals",
+      "instance": 8,
+      "seed": 20261029,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 125097,
+      "llm_spend": {
+        "input": 4970,
+        "output": 16008,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1454
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261037,\"start\":20261029}]}"
+              },
+              {
+                "index": 5,
+                "observed_json": "{\"intervals\":[{\"end\":20261132,\"start\":20261129},{\"end\":20261137,\"start\":20261134}]}"
+              },
+              {
+                "index": 11,
+                "observed_json": "{\"intervals\":[{\"end\":20261257,\"start\":20261249}]}"
+              }
+            ],
+            "form": "(return {\"intervals\" (merge-ordered sorted tolerance)})",
+            "function": "merge-with-tolerance"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "8eceb026ff2797263e9707c1898706efb7cb6e25de031e6afbcb82ff71625967"
+        }
+      ]
+    },
+    {
+      "experiment": "E1 three-turn",
+      "subject": "intervals",
+      "instance": 8,
+      "seed": 20261029,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 117127,
+      "llm_spend": {
+        "input": 16374,
+        "output": 15016,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1471
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=2",
+      "subject": "intervals",
+      "instance": 8,
+      "seed": 20261029,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 87254,
+      "llm_spend": {
+        "input": 9940,
+        "output": 19065,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1743
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261037,\"start\":20261029}]}"
+              }
+            ],
+            "form": "(return {\"intervals\" (merge-ordered sorted tolerance)})",
+            "function": "merge-with-tolerance"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "048864b96c1d728eed31fe2fb28c9fb833627722774c82e7224da70daaafe449"
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261037,\"start\":20261029}]}"
+              },
+              {
+                "index": 1,
+                "observed_json": "{\"intervals\":[{\"end\":20261057,\"start\":20261049}]}"
+              },
+              {
+                "index": 2,
+                "observed_json": "{\"intervals\":[{\"end\":20261072,\"start\":20261069},{\"end\":20261077,\"start\":20261074}]}"
+              },
+              {
+                "index": 3,
+                "observed_json": "{\"intervals\":[{\"end\":20261097,\"start\":20261089}]}"
+              },
+              {
+                "index": 4,
+                "observed_json": "{\"intervals\":[{\"end\":20261117,\"start\":20261109}]}"
+              },
+              {
+                "index": 5,
+                "observed_json": "{\"intervals\":[{\"end\":20261132,\"start\":20261129},{\"end\":20261137,\"start\":20261134}]}"
+              },
+              {
+                "index": 6,
+                "observed_json": "{\"intervals\":[{\"end\":20261152,\"start\":20261149},{\"end\":20261157,\"start\":20261154}]}"
+              },
+              {
+                "index": 7,
+                "observed_json": "{\"intervals\":[{\"end\":20261177,\"start\":20261169}]}"
+              },
+              {
+                "index": 8,
+                "observed_json": "{\"intervals\":[{\"end\":20261192,\"start\":20261189},{\"end\":20261197,\"start\":20261193}]}"
+              },
+              {
+                "index": 9,
+                "observed_json": "{\"intervals\":[{\"end\":20261212,\"start\":20261209},{\"end\":20261217,\"start\":20261214}]}"
+              },
+              {
+                "index": 10,
+                "observed_json": "{\"intervals\":[{\"end\":20261232,\"start\":20261229},{\"end\":20261237,\"start\":20261234}]}"
+              },
+              {
+                "index": 11,
+                "observed_json": "{\"intervals\":[{\"end\":20261257,\"start\":20261249}]}"
+              },
+              {
+                "index": 12,
+                "observed_json": "{\"intervals\":[{\"end\":20261277,\"start\":20261269}]}"
+              },
+              {
+                "index": 13,
+                "observed_json": "{\"intervals\":[{\"end\":20261297,\"start\":20261289}]}"
+              },
+              {
+                "index": 14,
+                "observed_json": "{\"intervals\":[{\"end\":20261312,\"start\":20261309},{\"end\":20261317,\"start\":20261314}]}"
+              },
+              {
+                "index": 15,
+                "observed_json": "{\"intervals\":[{\"end\":20261337,\"start\":20261329}]}"
+              },
+              {
+                "index": 16,
+                "observed_json": "{\"intervals\":[{\"end\":20261357,\"start\":20261349}]}"
+              },
+              {
+                "index": 17,
+                "observed_json": "{\"intervals\":[{\"end\":20261372,\"start\":20261369},{\"end\":20261377,\"start\":20261374}]}"
+              },
+              {
+                "index": 18,
+                "observed_json": "{\"intervals\":[{\"end\":20261392,\"start\":20261389},{\"end\":20261397,\"start\":20261394}]}"
+              },
+              {
+                "index": 19,
+                "observed_json": "{\"intervals\":[{\"end\":20261417,\"start\":20261409}]}"
+              },
+              {
+                "index": 20,
+                "observed_json": "{\"intervals\":[{\"end\":20261437,\"start\":20261429}]}"
+              },
+              {
+                "index": 21,
+                "observed_json": "{\"intervals\":[{\"end\":20261452,\"start\":20261449},{\"end\":20261457,\"start\":20261454}]}"
+              },
+              {
+                "index": 22,
+                "observed_json": "{\"intervals\":[{\"end\":20261477,\"start\":20261469}]}"
+              },
+              {
+                "index": 23,
+                "observed_json": "{\"intervals\":[{\"end\":20261497,\"start\":20261489}]}"
+              },
+              {
+                "index": 24,
+                "observed_json": "{\"intervals\":[{\"end\":20261517,\"start\":20261509}]}"
+              },
+              {
+                "index": 25,
+                "observed_json": "{\"intervals\":[{\"end\":20261532,\"start\":20261529},{\"end\":20261537,\"start\":20261534}]}"
+              },
+              {
+                "index": 26,
+                "observed_json": "{\"intervals\":[{\"end\":20261552,\"start\":20261549},{\"end\":20261557,\"start\":20261554}]}"
+              },
+              {
+                "index": 27,
+                "observed_json": "{\"intervals\":[{\"end\":20261577,\"start\":20261569}]}"
+              },
+              {
+                "index": 28,
+                "observed_json": "{\"intervals\":[{\"end\":20261597,\"start\":20261589}]}"
+              },
+              {
+                "index": 29,
+                "observed_json": "{\"intervals\":[{\"end\":20261612,\"start\":20261609},{\"end\":20261617,\"start\":20261614}]}"
+              },
+              {
+                "index": 30,
+                "observed_json": "{\"intervals\":[{\"end\":20261632,\"start\":20261629},{\"end\":20261637,\"start\":20261634}]}"
+              },
+              {
+                "index": 31,
+                "observed_json": "{\"intervals\":[{\"end\":20261657,\"start\":20261649}]}"
+              },
+              {
+                "index": 32,
+                "observed_json": "{\"intervals\":[{\"end\":20261672,\"start\":20261669},{\"end\":20261677,\"start\":20261674}]}"
+              },
+              {
+                "index": 33,
+                "observed_json": "{\"intervals\":[{\"end\":20261692,\"start\":20261689},{\"end\":20261697,\"start\":20261694}]}"
+              },
+              {
+                "index": 34,
+                "observed_json": "{\"intervals\":[{\"end\":20261717,\"start\":20261709}]}"
+              },
+              {
+                "index": 35,
+                "observed_json": "{\"intervals\":[{\"end\":20261737,\"start\":20261729}]}"
+              },
+              {
+                "index": 36,
+                "observed_json": "{\"intervals\":[{\"end\":20261757,\"start\":20261749}]}"
+              },
+              {
+                "index": 37,
+                "observed_json": "{\"intervals\":[{\"end\":20261777,\"start\":20261769}]}"
+              },
+              {
+                "index": 38,
+                "observed_json": "{\"intervals\":[{\"end\":20261792,\"start\":20261789},{\"end\":20261797,\"start\":20261794}]}"
+              },
+              {
+                "index": 39,
+                "observed_json": "{\"intervals\":[{\"end\":20261817,\"start\":20261809}]}"
+              }
+            ],
+            "form": "(return {\"intervals\" (merge-ordered sorted tolerance)})",
+            "function": "merge-with-tolerance"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "8eceb026ff2797263e9707c1898706efb7cb6e25de031e6afbcb82ff71625967"
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=4",
+      "subject": "intervals",
+      "instance": 8,
+      "seed": 20261029,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 65806,
+      "llm_spend": {
+        "input": 19880,
+        "output": 31101,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 2970
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261037,\"start\":20261029}]}"
+              },
+              {
+                "index": 2,
+                "observed_json": "{\"intervals\":[{\"end\":20261072,\"start\":20261069},{\"end\":20261077,\"start\":20261074}]}"
+              },
+              {
+                "index": 5,
+                "observed_json": "{\"intervals\":[{\"end\":20261132,\"start\":20261129},{\"end\":20261137,\"start\":20261134}]}"
+              }
+            ],
+            "form": "(return {\"intervals\" (merge-ordered sorted tolerance)})",
+            "function": "merge-with-tolerance"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "8eceb026ff2797263e9707c1898706efb7cb6e25de031e6afbcb82ff71625967"
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261037,\"start\":20261029}]}"
+              },
+              {
+                "index": 11,
+                "observed_json": "{\"intervals\":[{\"end\":20261257,\"start\":20261249}]}"
+              },
+              {
+                "index": 25,
+                "observed_json": "{\"intervals\":[{\"end\":20261532,\"start\":20261529},{\"end\":20261537,\"start\":20261534}]}"
+              }
+            ],
+            "form": "(return {\"intervals\" (merge-ordered sorted tolerance)})",
+            "function": "merge-with-tolerance"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "8eceb026ff2797263e9707c1898706efb7cb6e25de031e6afbcb82ff71625967"
+        }
+      ]
+    },
+    {
+      "experiment": "E1 one-turn",
+      "subject": "intervals",
+      "instance": 9,
+      "seed": 20261030,
+      "solved": true,
+      "winner": 0,
+      "wall_ms": 168387,
+      "llm_spend": {
+        "input": 5137,
+        "output": 9974,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1005
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 22,
+                "observed_json": "{\"intervals\":[{\"end\":20261473,\"start\":20261470},{\"end\":20261478,\"start\":20261473}]}"
+              },
+              {
+                "index": 34,
+                "observed_json": "{\"intervals\":[{\"end\":20261713,\"start\":20261710},{\"end\":20261718,\"start\":20261713}]}"
+              }
+            ],
+            "form": "(defn- touches?\n  \"Return true when the next interval is within tolerance.\"\n  [current next tolerance]\n  (< (get next \"start\")\n      (+ (get current \"end\") tolerance)))",
+            "function": "touches?"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "ec83680c438c5c7c64242815d0fd40b3baa48806d80bfb378954d36a5e09c04b"
+        }
+      ]
+    },
+    {
+      "experiment": "E1 three-turn",
+      "subject": "intervals",
+      "instance": 9,
+      "seed": 20261030,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 280733,
+      "llm_spend": {
+        "input": 16759,
+        "output": 18413,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1975
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "intermediate-result",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=2",
+      "subject": "intervals",
+      "instance": 9,
+      "seed": 20261030,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 72930,
+      "llm_spend": {
+        "input": 10274,
+        "output": 8802,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1117
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 22,
+                "observed_json": "{\"intervals\":[{\"end\":20261473,\"start\":20261470},{\"end\":20261478,\"start\":20261473}]}"
+              },
+              {
+                "index": 34,
+                "observed_json": "{\"intervals\":[{\"end\":20261473,\"start\":20261470},{\"end\":20261478,\"start\":20261473}]}"
+              }
+            ],
+            "form": "(< (get next \"start\") (+ (get current \"end\") tolerance))",
+            "function": "touches?"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "c0a79c20c0694844d9b523754387275bd6204baa8aaaa9b5e7c866f409ab8c77"
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=4",
+      "subject": "intervals",
+      "instance": 9,
+      "seed": 20261030,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 108120,
+      "llm_spend": {
+        "input": 20548,
+        "output": 30725,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 2952
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 22,
+                "observed_json": "{\"intervals\":[{\"end\":20261473,\"start\":20261470},{\"end\":20261478,\"start\":20261473}]}"
+              },
+              {
+                "index": 34,
+                "observed_json": "{\"intervals\":[{\"end\":20261713,\"start\":20261710},{\"end\":20261718,\"start\":20261713}]}"
+              }
+            ],
+            "form": "(< (get next \"start\") (+ (get current \"end\") tolerance))",
+            "function": "touches?"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "c0a79c20c0694844d9b523754387275bd6204baa8aaaa9b5e7c866f409ab8c77"
+        },
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261033,\"start\":20261030},{\"end\":20261038,\"start\":20261035}]}"
+              },
+              {
+                "index": 1,
+                "observed_json": "{\"intervals\":[{\"end\":20261053,\"start\":20261050},{\"end\":20261058,\"start\":20261055}]}"
+              },
+              {
+                "index": 2,
+                "observed_json": "{\"intervals\":[{\"end\":20261078,\"start\":20261070}]}"
+              }
+            ],
+            "form": "(return {\"intervals\" (merge-ordered sorted tolerance)})",
+            "function": "merge-with-tolerance"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": false,
+          "status": "returned",
+          "candidate_source_sha256": "7e47c4162bc8fb69d4a9e8320920981c00df33cc3ac76935abed4cdffdbb3e7a"
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E1 one-turn",
+      "subject": "intervals",
+      "instance": 10,
+      "seed": 20261031,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 69304,
+      "llm_spend": {
+        "input": 5141,
+        "output": 8450,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 847
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E1 three-turn",
+      "subject": "intervals",
+      "instance": 10,
+      "seed": 20261031,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 127556,
+      "llm_spend": {
+        "input": 17291,
+        "output": 16527,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1618
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "intermediate-result",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=2",
+      "subject": "intervals",
+      "instance": 10,
+      "seed": 20261031,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 82075,
+      "llm_spend": {
+        "input": 10282,
+        "output": 15411,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1478
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=4",
+      "subject": "intervals",
+      "instance": 10,
+      "seed": 20261031,
+      "solved": true,
+      "winner": 0,
+      "wall_ms": 111794,
+      "llm_spend": {
+        "input": 20564,
+        "output": 37311,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 3604
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261034,\"start\":20261031},{\"end\":20261039,\"start\":20261036}]}"
+              }
+            ],
+            "form": "(defn- touches? ...)",
+            "function": "touches?"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "ec83680c438c5c7c64242815d0fd40b3baa48806d80bfb378954d36a5e09c04b"
+        },
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 5,
+                "observed_json": "{\"intervals\":[{\"end\":20261134,\"start\":20261131},{\"end\":20261139,\"start\":20261134}]}"
+              },
+              {
+                "index": 9,
+                "observed_json": "{\"intervals\":[{\"end\":20261214,\"start\":20261211},{\"end\":20261219,\"start\":20261214}]}"
+              },
+              {
+                "index": 21,
+                "observed_json": "{\"intervals\":[{\"end\":20261454,\"start\":20261451},{\"end\":20261459,\"start\":20261454}]}"
+              }
+            ],
+            "form": "(<= (get next \"start\") (+ (get current \"end\") (- tolerance 1)))",
+            "function": "touches?"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "c0a79c20c0694844d9b523754387275bd6204baa8aaaa9b5e7c866f409ab8c77"
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 32,
+                "observed_json": "[{\"end\":20261674,\"start\":20261671},{\"end\":20261679,\"start\":20261676}]"
+              }
+            ],
+            "form": "(- tolerance 1)",
+            "function": "touches?"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "07dcc3fee5d975be75faf0d4a55987abfe4b5f489c7ca353ce8f78a7d5e297fd"
+        },
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 1,
+                "observed_json": "{\"intervals\":[{\"end\":20261059,\"start\":20261051}]}"
+              },
+              {
+                "index": 13,
+                "observed_json": "{\"intervals\":[{\"end\":20261299,\"start\":20261291}]}"
+              },
+              {
+                "index": 14,
+                "observed_json": "{\"intervals\":[{\"end\":20261319,\"start\":20261311}]}"
+              },
+              {
+                "index": 17,
+                "observed_json": "{\"intervals\":[{\"end\":20261379,\"start\":20261371}]}"
+              },
+              {
+                "index": 26,
+                "observed_json": "{\"intervals\":[{\"end\":20261559,\"start\":20261551}]}"
+              },
+              {
+                "index": 29,
+                "observed_json": "{\"intervals\":[{\"end\":20261619,\"start\":20261611}]}"
+              },
+              {
+                "index": 37,
+                "observed_json": "{\"intervals\":[{\"end\":20261779,\"start\":20261771}]}"
+              },
+              {
+                "index": 38,
+                "observed_json": "{\"intervals\":[{\"end\":20261799,\"start\":20261791}]}"
+              }
+            ],
+            "form": "(<= (get next \"start\") (+ (get current \"end\") (- tolerance 1)))",
+            "function": "touches?"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "07dcc3fee5d975be75faf0d4a55987abfe4b5f489c7ca353ce8f78a7d5e297fd"
+        }
+      ]
+    },
+    {
+      "experiment": "E1 one-turn",
+      "subject": "intervals",
+      "instance": 11,
+      "seed": 20261032,
+      "solved": true,
+      "winner": 0,
+      "wall_ms": 23083,
+      "llm_spend": {
+        "input": 5378,
+        "output": 1874,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 332
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261038,\"start\":20261032},{\"end\":20261037,\"start\":20261040}]}"
+              },
+              {
+                "index": 2,
+                "observed_json": "{\"intervals\":[{\"end\":20261075,\"start\":20261072},{\"end\":20261078,\"start\":20261077},{\"end\":20261077,\"start\":20261080}]}"
+              },
+              {
+                "index": 3,
+                "observed_json": "{\"intervals\":[{\"end\":20261095,\"start\":20261092},{\"end\":20261098,\"start\":20261098},{\"end\":20261097,\"start\":20261100}]}"
+              },
+              {
+                "index": 5,
+                "observed_json": "{\"intervals\":[{\"end\":20261135,\"start\":20261132},{\"end\":20261138,\"start\":20261136},{\"end\":20261137,\"start\":20261140}]}"
+              }
+            ],
+            "form": "(defn- ordered ...)",
+            "function": "ordered"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "07dcc3fee5d975be75faf0d4a55987abfe4b5f489c7ca353ce8f78a7d5e297fd"
+        }
+      ]
+    },
+    {
+      "experiment": "E1 three-turn",
+      "subject": "intervals",
+      "instance": 11,
+      "seed": 20261032,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 47201,
+      "llm_spend": {
+        "input": 18477,
+        "output": 3750,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 646
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261038,\"start\":20261032},{\"end\":20261037,\"start\":20261040}]}"
+              },
+              {
+                "index": 2,
+                "observed_json": "{\"intervals\":[{\"end\":20261075,\"start\":20261072},{\"end\":20261078,\"start\":20261077},{\"end\":20261077,\"start\":20261080}]}"
+              },
+              {
+                "index": 5,
+                "observed_json": "{\"intervals\":[{\"end\":20261135,\"start\":20261132},{\"end\":20261138,\"start\":20261136},{\"end\":20261137,\"start\":20261140}]}"
+              }
+            ],
+            "form": "(if (<= start finish)\n      {\"start\" start \"end\" finish}\n      {\"start\" start \"end\" finish})",
+            "function": "ordered"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "c0a79c20c0694844d9b523754387275bd6204baa8aaaa9b5e7c866f409ab8c77"
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=2",
+      "subject": "intervals",
+      "instance": 11,
+      "seed": 20261032,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 21035,
+      "llm_spend": {
+        "input": 10756,
+        "output": 2787,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 489
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261038,\"start\":20261032},{\"end\":20261037,\"start\":20261040}]}"
+              },
+              {
+                "index": 20,
+                "observed_json": "{\"intervals\":[{\"end\":20261438,\"start\":20261432},{\"end\":20261437,\"start\":20261440}]}"
+              },
+              {
+                "index": 5,
+                "observed_json": "{\"intervals\":[{\"end\":20261135,\"start\":20261132},{\"end\":20261138,\"start\":20261136},{\"end\":20261137,\"start\":20261140}]}"
+              }
+            ],
+            "form": "(defn- ordered ...)",
+            "function": "ordered"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "7e47c4162bc8fb69d4a9e8320920981c00df33cc3ac76935abed4cdffdbb3e7a"
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=4",
+      "subject": "intervals",
+      "instance": 11,
+      "seed": 20261032,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 24498,
+      "llm_spend": {
+        "input": 21512,
+        "output": 7532,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1134
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "intermediate-result",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "phase-return-contract-failed",
+          "failure_reason": {
+            "completion": "invalid-return",
+            "constraint": "additionalProperties",
+            "contract": "repair",
+            "contract_source": "repair.schema.json",
+            "max_turns": 1,
+            "mission": "repair-2",
+            "phase_index": 1,
+            "violations": [
+              {
+                "kind": "additionalProperties",
+                "path": "/diagnosis"
+              }
+            ]
+          },
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261038,\"start\":20261032},{\"end\":20261037,\"start\":20261040}]}"
+              },
+              {
+                "index": 2,
+                "observed_json": "{\"intervals\":[{\"end\":20261075,\"start\":20261072},{\"end\":20261078,\"start\":20261077},{\"end\":20261077,\"start\":20261080}]}"
+              },
+              {
+                "index": 3,
+                "observed_json": "{\"intervals\":[{\"end\":20261095,\"start\":20261092},{\"end\":20261098,\"start\":20261098},{\"end\":20261097,\"start\":20261100}]}"
+              }
+            ],
+            "form": "ordered",
+            "function": "ordered"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "c0a79c20c0694844d9b523754387275bd6204baa8aaaa9b5e7c866f409ab8c77"
+        }
+      ]
+    },
+    {
+      "experiment": "E1 one-turn",
+      "subject": "intervals",
+      "instance": 12,
+      "seed": 20261033,
+      "solved": true,
+      "winner": 0,
+      "wall_ms": 46290,
+      "llm_spend": {
+        "input": 5246,
+        "output": 5432,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 611
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"end\":20261037,\"start\":20261041}"
+              },
+              {
+                "index": 7,
+                "observed_json": "{\"end\":20261173,\"start\":20261179}"
+              }
+            ],
+            "form": "(defn- extend\n  \"Extend a merged interval without moving its start.\"\n  [current next]\n  {\"end\" (get current \"start\")\n   \"start\" (max (get current \"end\") (get next \"end\"))})",
+            "function": "extend"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "ec83680c438c5c7c64242815d0fd40b3baa48806d80bfb378954d36a5e09c04b"
+        }
+      ]
+    },
+    {
+      "experiment": "E1 three-turn",
+      "subject": "intervals",
+      "instance": 12,
+      "seed": 20261033,
+      "solved": true,
+      "winner": 0,
+      "wall_ms": 25327,
+      "llm_spend": {
+        "input": 11320,
+        "output": 2300,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 342
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261036,\"start\":20261033},{\"end\":20261037,\"start\":20261041}]}"
+              },
+              {
+                "index": 1,
+                "observed_json": "{\"intervals\":[{\"end\":20261056,\"start\":20261053},{\"end\":20261058,\"start\":20261061}]}"
+              },
+              {
+                "index": 3,
+                "observed_json": "{\"intervals\":[{\"end\":20261093,\"start\":20261099},{\"end\":20261101,\"start\":20261098}]}"
+              }
+            ],
+            "form": "(defn- extend ...)",
+            "function": "extend"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "ec83680c438c5c7c64242815d0fd40b3baa48806d80bfb378954d36a5e09c04b"
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=2",
+      "subject": "intervals",
+      "instance": 12,
+      "seed": 20261033,
+      "solved": true,
+      "winner": 0,
+      "wall_ms": 36204,
+      "llm_spend": {
+        "input": 10492,
+        "output": 6689,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 790
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261036,\"start\":20261033},{\"end\":20261037,\"start\":20261041}]}"
+              },
+              {
+                "index": 1,
+                "observed_json": "{\"intervals\":[{\"end\":20261056,\"start\":20261053},{\"end\":20261058,\"start\":20261061}]}"
+              },
+              {
+                "index": 2,
+                "observed_json": "{\"intervals\":[{\"end\":20261076,\"start\":20261073},{\"end\":20261078,\"start\":20261081}]}"
+              }
+            ],
+            "form": "(defn- extend\n  \"Extend a merged interval without moving its start.\"\n  [current next]\n  {\"end\" (get current \"start\")\n   \"start\" (max (get current \"end\") (get next \"end\"))})",
+            "function": "extend"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "ec83680c438c5c7c64242815d0fd40b3baa48806d80bfb378954d36a5e09c04b"
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=4",
+      "subject": "intervals",
+      "instance": 12,
+      "seed": 20261033,
+      "solved": true,
+      "winner": 1,
+      "wall_ms": 46392,
+      "llm_spend": {
+        "input": 20984,
+        "output": 12788,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1532
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261036,\"start\":20261033},{\"end\":20261037,\"start\":20261041}]}"
+              },
+              {
+                "index": 3,
+                "observed_json": "{\"intervals\":[{\"end\":20261093,\"start\":20261099},{\"end\":20261101,\"start\":20261098}]}"
+              },
+              {
+                "index": 4,
+                "observed_json": "{\"intervals\":[{\"end\":20261116,\"start\":20261113},{\"end\":20261117,\"start\":20261121}]}"
+              }
+            ],
+            "form": "(defn- extend\n  [current next]\n  {\"end\" (get current \"start\")\n   \"start\" (max (get current \"end\") (get next \"end\"))})",
+            "function": "extend"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "7e47c4162bc8fb69d4a9e8320920981c00df33cc3ac76935abed4cdffdbb3e7a"
+        },
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261036,\"start\":20261033},{\"end\":20261037,\"start\":20261041}]}"
+              },
+              {
+                "index": 1,
+                "observed_json": "{\"intervals\":[{\"end\":20261056,\"start\":20261053},{\"end\":20261058,\"start\":20261061}]}"
+              }
+            ],
+            "form": "{\"end\" (get current \"start\") \"start\" (max (get current \"end\") (get next \"end\"))}",
+            "function": "extend"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "07dcc3fee5d975be75faf0d4a55987abfe4b5f489c7ca353ce8f78a7d5e297fd"
+        },
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261036,\"start\":20261033},{\"end\":20261037,\"start\":20261041}]}"
+              },
+              {
+                "index": 2,
+                "observed_json": "{\"intervals\":[{\"end\":20261076,\"start\":20261073},{\"end\":20261078,\"start\":20261081}]}"
+              },
+              {
+                "index": 4,
+                "observed_json": "{\"intervals\":[{\"end\":20261116,\"start\":20261113},{\"end\":20261117,\"start\":20261121}]}"
+              }
+            ],
+            "form": "(defn- extend\n  \"Extend a merged interval without moving its start.\"\n  [current next]\n  {\"end\" (get current \"start\")\n   \"start\" (max (get current \"end\") (get next \"end\"))})",
+            "function": "extend"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "ec83680c438c5c7c64242815d0fd40b3baa48806d80bfb378954d36a5e09c04b"
+        },
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261036,\"start\":20261033},{\"end\":20261037,\"start\":20261041}]}"
+              },
+              {
+                "index": 1,
+                "observed_json": "{\"intervals\":[{\"end\":20261056,\"start\":20261053},{\"end\":20261058,\"start\":20261061}]}"
+              },
+              {
+                "index": 2,
+                "observed_json": "{\"intervals\":[{\"end\":20261076,\"start\":20261073},{\"end\":20261078,\"start\":20261081}]}"
+              }
+            ],
+            "form": "{\"end\" (get current \"start\") \"start\" (max (get current \"end\") (get next \"end\"))}",
+            "function": "lab.intervals/extend"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "ec83680c438c5c7c64242815d0fd40b3baa48806d80bfb378954d36a5e09c04b"
+        }
+      ]
+    },
+    {
+      "experiment": "E1 one-turn",
+      "subject": "intervals",
+      "instance": 13,
+      "seed": 20261034,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 61772,
+      "llm_spend": {
+        "input": 4994,
+        "output": 7844,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 793
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    }
+  ],
+  "raw_results_sha256": "4768281fe1cfdc186ead8c4c93996b74e4d5a3ca41358b13677be31855bc2826",
+  "replay_verification": {
+    "completed_cases_verified": 53,
+    "comparison_fields": [
+      "experiment",
+      "subject",
+      "seed",
+      "ground_truth",
+      "candidates",
+      "solved",
+      "winner",
+      "selection",
+      "usage.llm_spend"
+    ],
+    "equal": true,
+    "excluded_fields": [
+      "run_ref",
+      "wall_ms",
+      "console",
+      "non-model run bookkeeping"
+    ],
+    "stopped_case_replayed": false,
+    "full_matrix_replayed": false,
+    "replay_new_spend_microusd": 0
+  },
+  "budget": {
+    "experiment": "prelude-search/004",
+    "kind": "corrective_e1_e2_pilot",
+    "authorization": "https://github.com/andreasronge/ptc_runner/issues/1996#issuecomment-5744271571",
+    "corrective_allowance_microusd": 5000000,
+    "prior_spent_or_reserved_microusd": 316438,
+    "recording_cap_microusd": 4683562,
+    "known_completed_case_cost_microusd": 69916,
+    "retained_failed_case_reservation_microusd": 100000,
+    "remaining_microusd": 4513646
+  },
+  "verdict": "stopped",
+  "hypotheses": [
+    {
+      "id": "H1",
+      "metric": "paired final-test pass-rate difference",
+      "assessment": "inconclusive",
+      "assessment_scope": "descriptive completed pairs only; incomplete outcome-dependent prefix",
+      "baseline_condition": "E1 three-turn",
+      "tolerance": 0.03,
+      "decision_rule": {
+        "version": "prelude-search-corrective-2026-09-19",
+        "source": "docs/research/prelude-search.md#corrective-experiment-protocol",
+        "support": "95% paired interval lower bound > 0.03",
+        "rule_out_useful_improvement": "95% paired interval upper bound < 0.03",
+        "equivalence": "entire interval inside [-0.03, 0.03]",
+        "otherwise": "inconclusive",
+        "pilot_constraint": "No automatic verdict; stopped prefix does not establish population effects."
+      },
+      "comparisons": [
+        {
+          "baseline": 0.23076923076923078,
+          "bootstrap_seed": [
+            2026,
+            9,
+            19
+          ],
+          "condition": "E2 K=2",
+          "difference": 0.07692307692307693,
+          "interval_95": [
+            -0.15384615384615385,
+            0.38461538461538464
+          ],
+          "method": "stratified paired percentile bootstrap",
+          "observed": 0.3076923076923077,
+          "pairs": [
+            {
+              "baseline": 0,
+              "candidate": 0,
+              "difference": 0,
+              "seed": 20261021,
+              "subject": "intervals"
+            },
+            {
+              "baseline": 0,
+              "candidate": 1,
+              "difference": 1,
+              "seed": 20261022,
+              "subject": "intervals"
+            },
+            {
+              "baseline": 0,
+              "candidate": 1,
+              "difference": 1,
+              "seed": 20261023,
+              "subject": "intervals"
+            },
+            {
+              "baseline": 0,
+              "candidate": 0,
+              "difference": 0,
+              "seed": 20261024,
+              "subject": "intervals"
+            },
+            {
+              "baseline": 1,
+              "candidate": 1,
+              "difference": 0,
+              "seed": 20261025,
+              "subject": "intervals"
+            },
+            {
+              "baseline": 0,
+              "candidate": 0,
+              "difference": 0,
+              "seed": 20261026,
+              "subject": "intervals"
+            },
+            {
+              "baseline": 0,
+              "candidate": 0,
+              "difference": 0,
+              "seed": 20261027,
+              "subject": "intervals"
+            },
+            {
+              "baseline": 1,
+              "candidate": 0,
+              "difference": -1,
+              "seed": 20261028,
+              "subject": "intervals"
+            },
+            {
+              "baseline": 0,
+              "candidate": 0,
+              "difference": 0,
+              "seed": 20261029,
+              "subject": "intervals"
+            },
+            {
+              "baseline": 0,
+              "candidate": 0,
+              "difference": 0,
+              "seed": 20261030,
+              "subject": "intervals"
+            },
+            {
+              "baseline": 0,
+              "candidate": 0,
+              "difference": 0,
+              "seed": 20261031,
+              "subject": "intervals"
+            },
+            {
+              "baseline": 0,
+              "candidate": 0,
+              "difference": 0,
+              "seed": 20261032,
+              "subject": "intervals"
+            },
+            {
+              "baseline": 1,
+              "candidate": 1,
+              "difference": 0,
+              "seed": 20261033,
+              "subject": "intervals"
+            }
+          ],
+          "replicates": 2000,
+          "status": "descriptive_pilot",
+          "verdict": "inconclusive",
+          "denominators": {
+            "observed": 13,
+            "baseline": 13
+          }
+        },
+        {
+          "baseline": 0.23076923076923078,
+          "bootstrap_seed": [
+            2026,
+            9,
+            19
+          ],
+          "condition": "E2 K=4",
+          "difference": 0.0,
+          "interval_95": [
+            -0.23076923076923078,
+            0.23076923076923078
+          ],
+          "method": "stratified paired percentile bootstrap",
+          "observed": 0.23076923076923078,
+          "pairs": [
+            {
+              "baseline": 0,
+              "candidate": 0,
+              "difference": 0,
+              "seed": 20261021,
+              "subject": "intervals"
+            },
+            {
+              "baseline": 0,
+              "candidate": 0,
+              "difference": 0,
+              "seed": 20261022,
+              "subject": "intervals"
+            },
+            {
+              "baseline": 0,
+              "candidate": 0,
+              "difference": 0,
+              "seed": 20261023,
+              "subject": "intervals"
+            },
+            {
+              "baseline": 0,
+              "candidate": 0,
+              "difference": 0,
+              "seed": 20261024,
+              "subject": "intervals"
+            },
+            {
+              "baseline": 1,
+              "candidate": 1,
+              "difference": 0,
+              "seed": 20261025,
+              "subject": "intervals"
+            },
+            {
+              "baseline": 0,
+              "candidate": 0,
+              "difference": 0,
+              "seed": 20261026,
+              "subject": "intervals"
+            },
+            {
+              "baseline": 0,
+              "candidate": 0,
+              "difference": 0,
+              "seed": 20261027,
+              "subject": "intervals"
+            },
+            {
+              "baseline": 1,
+              "candidate": 0,
+              "difference": -1,
+              "seed": 20261028,
+              "subject": "intervals"
+            },
+            {
+              "baseline": 0,
+              "candidate": 0,
+              "difference": 0,
+              "seed": 20261029,
+              "subject": "intervals"
+            },
+            {
+              "baseline": 0,
+              "candidate": 0,
+              "difference": 0,
+              "seed": 20261030,
+              "subject": "intervals"
+            },
+            {
+              "baseline": 0,
+              "candidate": 1,
+              "difference": 1,
+              "seed": 20261031,
+              "subject": "intervals"
+            },
+            {
+              "baseline": 0,
+              "candidate": 0,
+              "difference": 0,
+              "seed": 20261032,
+              "subject": "intervals"
+            },
+            {
+              "baseline": 1,
+              "candidate": 1,
+              "difference": 0,
+              "seed": 20261033,
+              "subject": "intervals"
+            }
+          ],
+          "replicates": 2000,
+          "status": "descriptive_pilot",
+          "verdict": "inconclusive",
+          "denominators": {
+            "observed": 13,
+            "baseline": 13
+          }
+        }
+      ]
+    }
+  ],
+  "analysis_findings": {
+    "run_ref": "cmd-15eb5hp054jngg1xb9q6bn1p18",
+    "case": "intervals-0-E2-K-2",
+    "source": "private-run-analysis-v2",
+    "observation": "Both mission evaluations failed on the final allowed turn. Generated sources, complete model exchanges and generic evaluation_error activity are retained, but detailed mission evaluator diagnostics are absent from the private capture.",
+    "counts": {
+      "model_exchanges": 2,
+      "generated_sources": 2,
+      "turns": 2,
+      "execution_errors": 0,
+      "capability_calls": 0,
+      "explicit_failure_values": 0
+    },
+    "runtime_followup": "https://github.com/andreasronge/ptc_runner/issues/2021",
+    "measurement_effect": "None identified: failed-attempt outcomes, candidate absence and model usage remain recorded and replayable. This is a navigation/diagnostic limitation.",
+    "queries": [
+      "capture-counts-invocation.json",
+      "failure-analysis-invocation.json",
+      "outcome-analysis-invocation.json",
+      "turn-analysis-invocation.json",
+      "activity-analysis-invocation.json"
+    ]
+  },
+  "stopped_case_analysis": {
+    "run_id": "cmd-2tbr5gbc125jrh9mswnqgr56zn",
+    "terminal_reason": "model_output_truncated",
+    "llm_spend": {
+      "input": 17116,
+      "output": 40501,
+      "state": "available",
+      "total_cost": {
+        "currency": "USD",
+        "microunits": 3524
+      }
+    },
+    "calls": [
+      {
+        "input_sequence": 14,
+        "duration_ms": 101869,
+        "finish_reason": "tool_calls",
+        "tokens": {
+          "cache_creation": 0,
+          "cache_read": 4096,
+          "input": 4975,
+          "output": 14205,
+          "total_cost": {
+            "currency": "USD",
+            "microunits": 1202
+          }
+        },
+        "output_limit": null
+      },
+      {
+        "input_sequence": 17,
+        "duration_ms": 71461,
+        "finish_reason": "tool_calls",
+        "tokens": {
+          "cache_creation": 0,
+          "cache_read": 4096,
+          "input": 5648,
+          "output": 9912,
+          "total_cost": {
+            "currency": "USD",
+            "microunits": 886
+          }
+        },
+        "output_limit": null
+      },
+      {
+        "input_sequence": 21,
+        "duration_ms": 120250,
+        "finish_reason": "length",
+        "tokens": {
+          "cache_creation": 0,
+          "cache_read": 4096,
+          "input": 6493,
+          "output": 16384,
+          "total_cost": {
+            "currency": "USD",
+            "microunits": 1436
+          }
+        },
+        "output_limit": {
+          "bindings": [
+            "application_limit",
+            "installation_param"
+          ],
+          "name": "max_tokens",
+          "value": 16384
+        }
+      }
+    ],
+    "reservation_policy": "Retain full 100000 microusd failed-case reservation despite recovered known usage; no automatic restart."
+  }
+}

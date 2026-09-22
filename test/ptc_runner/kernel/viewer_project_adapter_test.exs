@@ -1,5 +1,6 @@
 defmodule PtcRunner.Kernel.ViewerProjectAdapterTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.SafeMetadata

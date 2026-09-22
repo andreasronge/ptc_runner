@@ -12,7 +12,8 @@ page holds whether a program is driven by that console or by a person.
 
 | Program | Question | Status |
 | --- | --- | --- |
-| [prelude-search](prelude-search.md) | Does bounded search over model-written candidates, selected by a check against recorded executions, produce repairs that hold on unseen executions at a cost single-shot repair cannot match? | active |
+| [prelude-search](prelude-search.md) | Does checked candidate search improve repair on unseen executions under matched budget ceilings? | paused; corrective pilot inconclusive |
+| [debug-efficiency](debug-efficiency.md) | Can Jev-assisted evidence selection reduce time and cost to a correct diagnosis without increasing wrong conclusions? | proposed; protocol decision #2028, no live run authorized |
 
 ## Layout
 

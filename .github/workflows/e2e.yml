@@ -54,6 +54,8 @@ jobs:
 
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
+        with:
+          cache-plt: 'false'
 
       - name: Setup pinned Go toolchain
         if: env.RUN_E2E == 'true'
