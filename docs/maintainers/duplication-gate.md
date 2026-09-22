@@ -7,7 +7,13 @@ an application uses.
 
 `mix precommit` and CI run `scripts/duplication_gate.sh check`. It compares an
 [ExDNA](https://github.com/elixir-vibe/ex_dna) report with
-`.duplication-baseline.json`.
+`.duplication-baseline.json`. The report is two detector runs, one over `lib/`
+and one over `test/`, merged: a single run over both trees held every fragment
+in one heap (4.7 GB, most of the minute spent in garbage collection), while
+the pair peaks at about 3.5 GB each and finishes in a quarter of the time. The
+one clone shape it cannot see spans the two trees, which the baseline has
+never held. `PTC_DUPLICATION_SERIAL=1` runs the pair one after the other on a
+machine that cannot hold both.
 
 The gate is a ratchet: known baseline clones pass, new clones fail. Removing a
 baseline clone also passes and prompts you to update the baseline.
