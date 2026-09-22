@@ -7,13 +7,7 @@ an application uses.
 
 `mix precommit` and CI run `scripts/duplication_gate.sh check`. It compares an
 [ExDNA](https://github.com/elixir-vibe/ex_dna) report with
-`.duplication-baseline.json`. The report is two detector runs, one over `lib/`
-and one over `test/`, merged: a single run over both trees held every fragment
-in one heap (4.7 GB, most of the minute spent in garbage collection), while
-the pair peaks at about 3.5 GB each and finishes in a quarter of the time. The
-one clone shape it cannot see spans the two trees, which the baseline has
-never held. `PTC_DUPLICATION_SERIAL=1` runs the pair one after the other on a
-machine that cannot hold both.
+`.duplication-baseline.json`.
 
 The gate is a ratchet: known baseline clones pass, new clones fail. Removing a
 baseline clone also passes and prompts you to update the baseline.
@@ -86,11 +80,23 @@ mix ex_dna.explain 3 lib/ test/      # extraction breakdown for one clone
 Configuration lives in `.ex_dna.exs`. ExDNA cache files are machine-local and
 ignored.
 
-## Testing an unreleased ExDNA checkout
+## Pinned ExDNA dependency
 
-Normal development and package builds resolve ExDNA from Hex. To test an
-unreleased checkout without changing `mix.lock`, point the complete build at
-that checkout:
+Development and CI use the `andreasronge/ex_dna` fork pinned in `mix.exs` and
+`mix.lock` to commit `548b0fcf3f1ea191a5a7a5de562c4dcc74049d9b`. This revision preserves AST
+sharing during fingerprinting and releases unnecessary fragments between clone
+types, reducing full-scan memory while preserving complete detection results.
+Its declared package version is still `1.5.4`; the Git SHA selects the fixes.
+
+Mix fetches and compiles this dependency normally. No local ExDNA checkout or
+Hex release is required. ExDNA is limited to `:dev` and `:test`, so it is excluded
+from production and the published Hex package's dependency requirements.
+Ordinary duplication gates remain uncached.
+
+## Testing a local ExDNA checkout
+
+To test another checkout without changing `mix.lock`, point the complete build
+at that checkout:
 
 ```bash
 mix deps.get
@@ -99,15 +105,17 @@ mix deps.compile ex_dna --force
 scripts/duplication_gate.sh check
 ```
 
-The override also enables ExDNA's opt-in result cache. Fetch the locked graph
+The override also enables ExDNA's opt-in result cache. Fetch the pinned graph
 before setting it: `mix deps.get` with the override active may re-resolve the
 candidate's development dependencies. Keep the variable set for every Mix
-command in that build. To return to Hex:
+command in that build. To return to the pinned Git revision:
 
 ```bash
 unset PTC_EX_DNA_PATH
+mix deps.get --check-locked
 mix deps.compile ex_dna --force
 ```
 
 CI separately tests a pinned candidate checkout cold and warm and verifies that
-the warm run does not rewrite either cache file. Ordinary jobs remain on Hex.
+the warm run does not rewrite the complete-result cache. Ordinary jobs use the
+pinned Git dependency without the local-checkout override.

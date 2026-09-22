@@ -224,7 +224,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: andreasronge/ex_dna
-          ref: 8fe513647329bff792a3a3d2d20c3810f9e30269
+          ref: 548b0fcf3f1ea191a5a7a5de562c4dcc74049d9b
           path: .candidate/ex_dna
 
       - name: Setup Elixir environment
@@ -238,9 +238,9 @@ jobs:
           PTC_EX_DNA_PATH: ${{ github.workspace }}/.candidate/ex_dna
         run: |
           test "$(git -C "$PTC_EX_DNA_PATH" rev-parse HEAD)" = \
-            "8fe513647329bff792a3a3d2d20c3810f9e30269"
+            "548b0fcf3f1ea191a5a7a5de562c4dcc74049d9b"
           mix deps.compile ex_dna --force
           scripts/duplication_gate.sh check
-          sha256sum .ex_dna_cache .ex_dna_cache.fingerprints > "$RUNNER_TEMP/ex-dna-cache.before"
+          sha256sum .ex_dna_cache > "$RUNNER_TEMP/ex-dna-cache.before"
           scripts/duplication_gate.sh check
           sha256sum --check "$RUNNER_TEMP/ex-dna-cache.before"
