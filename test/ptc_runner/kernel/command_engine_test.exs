@@ -2106,6 +2106,19 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
     assert_schema_valid(outcome.envelope)
+
+    run_duration_message = outcome.envelope["error"]["message"]
+
+    assert {:error, :invalid_command_diagnostic} =
+             CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+               message: run_duration_message,
+               source: CommandSource.fixed(:runtime),
+               provider_activity: true
+             )
+
+    refute CommandContract.valid_envelope?(
+             put_in(outcome.envelope, ["error", "code"], "runtime_limit_exceeded")
+           )
   end
 
   @tag :tmp_dir

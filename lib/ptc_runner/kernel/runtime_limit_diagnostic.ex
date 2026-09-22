@@ -766,7 +766,7 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   @spec runtime_limit_message?(term()) :: boolean()
   def runtime_limit_message?(message) when is_binary(message) do
     subordinate_evaluations_message?(message) or transcript_chars_message?(message) or
-      timeout_message?(message) or workflow_clock_message?(message) or
+      timeout_message?(message) or workflow_timeout_message?(message) or
       heap_words_message?(message) or
       protocol_errors_message?(message) or budget_message?(message)
   end
@@ -784,6 +784,11 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   end
 
   def workflow_clock_message?(_message), do: false
+
+  @doc false
+  @spec workflow_timeout_message?(term()) :: boolean()
+  def workflow_timeout_message?(message),
+    do: workflow_clock_message?(message, :workflow_timeout_ms)
 
   @doc false
   @spec capability_quota_limit_message?(term()) :: boolean()
@@ -902,7 +907,7 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
       message_schema(
         fallback,
         [subordinate_message_branch() | timeout_message_branches()] ++
-          workflow_clock_message_branches() ++
+          workflow_clock_message_branches([:workflow_timeout_ms]) ++
           [heap_message_branch(), protocol_errors_message_branch() | budget_message_branches()]
       )
 
