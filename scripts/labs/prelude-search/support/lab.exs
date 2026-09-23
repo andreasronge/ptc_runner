@@ -254,6 +254,35 @@ defmodule PtcRunner.Labs.PreludeSearch do
     replay_subject(subject_dir, registry)
   end
 
+  def capture_helper(output, subject, component_id, entry, source, cases) do
+    :ok = prepare_output(output)
+    subject_dir = Path.join(output, subject)
+    :ok = prepare_output(subject_dir)
+    {:ok, registry} = ProviderRegistry.new()
+
+    try do
+      frozen =
+        freeze(subject_dir, "oracle", component_id, source, registry.installed_limits, entry)
+
+      records =
+        Enum.map(cases, fn %{"input" => input, "split" => split, "branch" => branch} ->
+          execute_recorded(frozen, input, subject_dir, split, "oracle", registry)
+          |> Map.put(:branch, branch)
+          |> Map.put(:input, input)
+        end)
+
+      File.write!(Path.join(subject_dir, "executions.json"), pretty_json(records))
+      result = replay_subject(subject_dir, registry)
+
+      if result.unequal != [],
+        do: raise("helper corpus capture did not replay equally: #{subject}")
+
+      result
+    after
+      ProviderRegistry.close(registry)
+    end
+  end
+
   def replay(output) do
     {:ok, registry} = ProviderRegistry.new()
 
@@ -283,8 +312,15 @@ defmodule PtcRunner.Labs.PreludeSearch do
         payload = input["payload"]
         {:ok, input_hash} = ResultIdentity.strict_json_hash(payload["value"])
         if input_hash != payload["input_hash"], do: raise("input identity changed: #{path}")
+        expected = record["result_hash"]
         result = Enum.find(captured, &(&1["record_type"] == "run-result"))
-        expected = result["payload"]["result_hash"]
+
+        if result && result["payload"]["result_hash"] != expected,
+          do: raise("recorded result identity changed: #{path}")
+
+        if is_nil(result) and not Enum.any?(captured, &(&1["record_type"] == "execution-error")),
+          do: raise("inspection artifact has no outcome: #{path}")
+
         manifest = Path.join([subject_dir, record["variant"] <> "-bundle", "ptc.json"])
 
         {:ok, saved} =
@@ -329,7 +365,7 @@ defmodule PtcRunner.Labs.PreludeSearch do
 
   defp digest(bytes), do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
 
-  defp freeze(subject_dir, variant, subject, source, installed_limits) do
+  defp freeze(subject_dir, variant, subject, source, installed_limits, entry \\ nil) do
     directory = Path.join(subject_dir, variant <> "-bundle")
     :ok = File.mkdir!(directory)
     File.write!(Path.join(directory, "subject.clj"), source)
@@ -338,8 +374,10 @@ defmodule PtcRunner.Labs.PreludeSearch do
     manifest = %{
       "version" => 1,
       "workflow" => %{
-        "components" => [%{"id" => "lab.#{subject}", "path" => "subject.clj"}],
-        "entry" => Map.fetch!(@entries, subject)
+        "components" => [
+          %{"id" => if(entry, do: subject, else: "lab.#{subject}"), "path" => "subject.clj"}
+        ],
+        "entry" => entry || Map.fetch!(@entries, subject)
       },
       "input" => %{"path" => "input.json"},
       "providers" => %{"workflow" => [], "mission" => []},
@@ -366,8 +404,10 @@ defmodule PtcRunner.Labs.PreludeSearch do
 
     {:ok, request} = request(frozen.package, input, run_ref, true)
     {:ok, built} = RunBuilder.build(request, registry, trace_path: trace, inspect: inspection)
-    {:ok, _result} = execute_and_publish(built)
-    result_hash = recorded_result_hash!(inspection)
+    started = System.monotonic_time(:millisecond)
+    result = execute_and_publish(built, true)
+    duration_ms = System.monotonic_time(:millisecond) - started
+    result_hash = recorded_result_hash!(inspection, result)
 
     %{
       run_ref: run_ref,
@@ -375,6 +415,9 @@ defmodule PtcRunner.Labs.PreludeSearch do
       split: split,
       reached_mutation: false,
       result_hash: result_hash,
+      duration_ms: duration_ms,
+      kernel_usage: result_usage(result),
+      failure_envelope: recorded_failure_envelope(inspection, result),
       bundle_hash: built.config.workflow_environment.bundle.hash,
       inspection_hash: digest(File.read!(inspection)),
       trace_path: Path.relative_to(trace, subject_dir),
@@ -382,19 +425,64 @@ defmodule PtcRunner.Labs.PreludeSearch do
     }
   end
 
+  defp result_usage({:ok, {_value, usage}}), do: usage
+  defp result_usage({:error, %{error: %{usage: usage}}}), do: usage
+  defp result_usage({:error, %{usage: usage}}), do: usage
+  defp result_usage(_), do: nil
+
+  defp failure_envelope({:error, %{error: error}}), do: failure_envelope({:error, error})
+
+  defp failure_envelope({:error, %{kind: kind, reason: reason, details: details}}),
+    do: %{
+      "kind" => to_string(kind),
+      "reason" => to_string(reason),
+      "details" => Jason.decode!(Jason.encode!(details))
+    }
+
+  defp failure_envelope({:error, reason}), do: %{"reason" => inspect(reason)}
+  defp failure_envelope(_), do: nil
+
+  defp recorded_failure_envelope(path, result) do
+    case failure_envelope(result) do
+      nil ->
+        nil
+
+      envelope ->
+        value =
+          path
+          |> File.read!()
+          |> inspection_records()
+          |> Enum.find_value(fn
+            %{"record_type" => "explicit-failure-value", "payload" => %{"value" => value}} ->
+              value
+
+            _ ->
+              nil
+          end)
+
+        Map.put(envelope, "explicit_value", value)
+    end
+  end
+
   defp execute_replay(frozen, input, registry, expected_bundle_hash) do
     {:ok, run_ref} = CommandRunRef.generate()
-    {:ok, request} = request(frozen.package, input, run_ref, false)
-    {:ok, built} = RunBuilder.build(request, registry)
+    root = Path.join(System.tmp_dir!(), "ptc-replay-#{run_ref}")
+    inspection = Path.join(private_child!(root, "inspection"), run_ref <> ".ptcins")
 
-    if built.config.workflow_environment.bundle.hash != expected_bundle_hash do
-      RunBuilder.close(built)
-      raise "bundle identity changed"
+    try do
+      {:ok, request} = request(frozen.package, input, run_ref, true)
+      {:ok, built} = RunBuilder.build(request, registry, inspect: inspection)
+
+      if built.config.workflow_environment.bundle.hash != expected_bundle_hash do
+        RunBuilder.close(built)
+        raise "bundle identity changed"
+      end
+
+      result = execute_and_publish(built)
+      recorded_result_hash!(inspection, result)
+    after
+      File.rm_rf!(root)
     end
-
-    {:ok, result} = execute_and_publish(built)
-    {:ok, hash} = ResultIdentity.strict_json_hash(result)
-    hash
   end
 
   defp execute_value(frozen, input, registry) do
@@ -418,14 +506,21 @@ defmodule PtcRunner.Labs.PreludeSearch do
          do: RunRequest.new(package, execution_input, policy)
   end
 
-  defp execute_and_publish(%{publication_authority: authority} = built) do
+  defp execute_and_publish(built, with_usage \\ false)
+
+  defp execute_and_publish(%{publication_authority: authority} = built, with_usage) do
     case RunBuilder.execute_built(built) do
       {:ok, outcome} ->
         result =
           case RunBuilder.publish_execution_report(outcome, authority) do
-            {:ok, %{result: {:ok, %Result{value: value}}}} -> {:ok, value}
-            {:ok, %{result: {:error, reason}}} -> {:error, reason}
-            {:error, report} -> {:error, report}
+            {:ok, %{result: {:ok, %Result{value: value, usage: usage}}}} ->
+              if with_usage, do: {:ok, {value, usage}}, else: {:ok, value}
+
+            {:ok, %{result: {:error, reason}}} ->
+              {:error, reason}
+
+            {:error, report} ->
+              {:error, report}
           end
 
         :ok = PublicationAuthority.close(authority)
@@ -437,7 +532,7 @@ defmodule PtcRunner.Labs.PreludeSearch do
     end
   end
 
-  defp recorded_result_hash!(path) do
+  defp recorded_result_hash!(path, result) do
     path
     |> File.read!()
     |> inspection_records()
@@ -446,8 +541,12 @@ defmodule PtcRunner.Labs.PreludeSearch do
       _record -> nil
     end)
     |> case do
-      nil -> raise "inspection artifact has no run-result: #{path}"
-      hash -> hash
+      nil ->
+        {:ok, hash} = ResultIdentity.strict_json_hash(failure_envelope(result))
+        hash
+
+      hash ->
+        hash
     end
   end
 

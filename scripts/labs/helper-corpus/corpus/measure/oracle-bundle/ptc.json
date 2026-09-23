@@ -1,0 +1,26 @@
+{
+  "input": {
+    "path": "input.json"
+  },
+  "labels": {
+    "name": "prelude-search-prompt.audit-oracle"
+  },
+  "limits": {
+    "evaluation_timeout_ms": 5000,
+    "run_duration_ms": 10000
+  },
+  "providers": {
+    "mission": [],
+    "workflow": []
+  },
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "id": "prompt.audit",
+        "path": "subject.clj"
+      }
+    ],
+    "entry": "prompt.audit/corpus"
+  }
+}
