@@ -206,6 +206,26 @@ evidence, not measurements of this program.
 | self-improvement/b05 | measure | H4 | rerun b03 with the b04 candidate as diagnoser | 5 | b04 | b03, b04 |
 | self-improvement/b06 | explore | H5 | tabulate steward and maintainer proposals and their verdicts once the steward has run for a declared period | 6 | maintainer | |
 
+### Conditions before b02
+
+The b09 corpus (#2056, `scripts/labs/helper-corpus/`) is a pilot judge, not
+yet sufficient for an H1 verdict. b02 does not start until:
+
+- **Withheld inputs are out of the proposer's reach.** They are committed in
+  plain text; either the proposer runs without repository access or the
+  withheld set moves to a tagged, never-merged branch.
+- **The corpus covers failure paths and real variation.** It has 8–11 inputs
+  per helper, near-duplicate generated inputs, no failure case for the three
+  `prompt.audit` helpers, and nine unrepresented arms, including five
+  `cap/fold-pages` error arms.
+- **Helper cost is measurable.** Whole-run `duration_ms` of 14–30 ms is
+  dominated by Kernel overhead and cannot show a helper speedup; b10 must
+  establish a measure that can.
+- **The target is worth optimizing.** `prompt.audit` is development tooling,
+  not a per-request path. b10 records whether any shortlisted helper has a
+  production cost worth a model search; if none does, H1 needs a different
+  target before b02.
+
 ## Pending proposals
 
 - Decide whether captured prelude-search failures (timeouts, truncation,
