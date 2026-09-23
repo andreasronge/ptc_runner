@@ -52,14 +52,14 @@ None of these publish anything. Step 6 is the same suite the scheduled `Soak`
 workflow runs; run it locally at release time because the schedule may not have
 fired since the last change. After the release commit lands on `main`, run the
 `Release` workflow manually with `skip_llm: true` as a CI dry run before tagging
-- see `docs/RELEASING.md`.
+- see `docs/maintainers/releasing.md`.
 
 ## Step 4: Version bump
 
 1. Read current version from `mix.exs`
 2. If it differs from $ARGUMENTS, update the `version:` field in `mix.exs` to `"$ARGUMENTS"`
-3. Search for the old version string in docs and livebooks: `grep -r 'OLD_VERSION' README.md livebooks/ docs/`
-4. Update any `{:ptc_runner, "~> OLD_VERSION"}` references to `"~> $ARGUMENTS"` in README.md and livebooks
+3. Search for the old version string: `grep -r 'OLD_VERSION' README.md docs/`
+4. Update any `{:ptc_runner, "~> OLD_VERSION"}` references to `"~> $ARGUMENTS"`
 
 ## Step 5: Commit, tag, and push
 
@@ -71,7 +71,7 @@ Ask the user for confirmation before proceeding. Show:
 After confirmation:
 
 1. Stage all changed files: `git add mix.exs CHANGELOG.md` (and any other modified files)
-2. Commit with message: `chore: prepare release $ARGUMENTS`
+2. Commit with message: `chore(release): prepare $ARGUMENTS`
 3. Create annotated tag: `git tag -a "v$ARGUMENTS" -m "Release $ARGUMENTS"`
 4. Push: `git push && git push --tags`
 
@@ -83,7 +83,5 @@ Report success and remind the user:
 
 ## Version Guidelines
 
-Follow Semantic Versioning:
-- **MAJOR** (1.0.0): Breaking API changes
-- **MINOR** (0.2.0): New features, backwards compatible
-- **PATCH** (0.1.1): Bug fixes, backwards compatible
+This is a 0.x library: a release with breaking changes or new features bumps
+the minor version, and a fixes-only release bumps the patch version.
