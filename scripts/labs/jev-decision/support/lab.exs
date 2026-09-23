@@ -7,6 +7,7 @@ defmodule PtcRunner.Examples.JevDecisionLab do
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.WorkflowEnvironment
@@ -122,7 +123,8 @@ defmodule PtcRunner.Examples.JevDecisionLab do
   end
 
   def run_request(request, opts \\ []) when is_map(request) and is_list(opts) do
-    encoded_request = request |> Jason.encode!() |> inspect()
+    encoded_request =
+      request |> Jason.encode!() |> inspect(limit: :infinity, printable_limit: :infinity)
 
     run_program(
       "(return (decision/request (json/parse-string #{encoded_request})))",
@@ -394,11 +396,7 @@ defmodule PtcRunner.Examples.JevDecisionLab do
 
   defp record_attempt(record) do
     dir = Path.expand("../../../../tmp/jev-decision-attempts", __DIR__)
-    File.mkdir_p!(dir)
-    File.chmod!(dir, 0o700)
-
-    %{type: :directory, mode: mode} = File.lstat!(dir)
-    true = Bitwise.band(mode, 0o777) == 0o700
+    :ok = ensure_private_record_directory(dir)
 
     path =
       Path.join(
@@ -410,6 +408,33 @@ defmodule PtcRunner.Examples.JevDecisionLab do
       File.chmod!(path, 0o600)
       :ok = IO.binwrite(io, :erlang.term_to_binary(record))
     end)
+  end
+
+  defp ensure_private_record_directory(dir) do
+    case File.lstat(dir, time: :posix) do
+      {:error, :enoent} ->
+        case PrivateDirectory.create(dir) do
+          :ok -> validate_private_record_directory(dir)
+          {:error, _race_or_failure} -> validate_private_record_directory(dir)
+        end
+
+      {:ok, _existing} ->
+        validate_private_record_directory(dir)
+
+      {:error, _reason} ->
+        {:error, :private_record_directory_unavailable}
+    end
+  end
+
+  defp validate_private_record_directory(dir) do
+    with {:ok, uid} <- PrivateDirectory.preflight_owner(Path.join(dir, "record.term")),
+         {:ok, %File.Stat{type: :directory, uid: ^uid, mode: mode}} <-
+           File.lstat(dir, time: :posix),
+         true <- Bitwise.band(mode, 0o777) == 0o700 do
+      :ok
+    else
+      _unsafe_or_unavailable -> {:error, :private_record_directory_unavailable}
+    end
   end
 
   defp normalize_answers(answers) do

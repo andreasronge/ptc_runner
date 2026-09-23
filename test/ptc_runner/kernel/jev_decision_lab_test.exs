@@ -211,6 +211,32 @@ defmodule PtcRunner.Kernel.JevDecisionLabTest do
     refute_received :dispatched
   end
 
+  test "the Kernel request seam preserves legal requests larger than four kilobytes" do
+    parent = self()
+    criteria = Map.new(1..255, &{"option_#{&1}", String.duplicate("description ", 4)})
+
+    request = %{
+      "state" => %{"context" => String.duplicate("state ", 800)},
+      "questions" => %{
+        "large" => %{"type" => "choice", "instructions" => "Pick", "criteria" => criteria}
+      }
+    }
+
+    assert byte_size(Jason.encode!(request)) > 4_096
+
+    assert {:ok, result} =
+             JevDecisionLab.run_request(request,
+               requester: fn _body ->
+                 send(parent, :dispatched)
+                 {:ok, %{status: 503}}
+               end,
+               recorder: fn _ -> :ok end
+             )
+
+    assert result.value["reason"] == "unavailable"
+    assert_received :dispatched
+  end
+
   test "malformed dispatched answers retain known and unknown accounting privately" do
     for usage <- [
           %{"input_tokens" => 2, "output_tokens" => 1, "cost" => 0.01},
