@@ -71,11 +71,12 @@ def cache_directory():
       IO.write(Enum.join([System.version(), version, :erlang.system_info(:version)], "|"))
     '''
     runtime = subprocess.check_output(["elixir", "-e", expression], timeout=60)
-    # Conservatively hash all of mix.exs so changing plt_add_apps or other
-    # project options cannot reuse a fallback built with different settings.
+    # mix.exs stays out of the key: docs-group and version edits would
+    # otherwise force a cold build. Dialyxir's Plt.check diffs the stored
+    # modules against those its apps (plt_add_apps included) expect, then
+    # removes, checks, and adds, so any fallback within a runtime is sound.
     compatibility = digest(
-        b"v2", runtime, platform.system().encode(), platform.machine().encode(),
-        Path("mix.exs").read_bytes(), b"test",
+        b"v3", runtime, platform.system().encode(), platform.machine().encode(), b"test",
     )
     root = Path(os.environ.get(
         "PTC_PROJECT_PLT_CACHE", "~/.cache/ptc_runner/project_plts"
@@ -139,8 +140,23 @@ def publish(directory, key, local):
             print("Project PLT cache: invalid publication ignored")
             return
         with locked(directory):
-            os.replace(staged, directory / f"{key}.plt")
+            published = directory / f"{key}.plt"
+            os.replace(staged, published)
+            prune(directory, published)
         print("Project PLT cache: published")
+
+
+# Bound one directory now that every lockfile shares it. Directories of other
+# keys are left alone: they may serve another runtime still in use, and this
+# publisher holds none of their locks.
+KEEP = 4
+
+
+def prune(directory, published):
+    older = sorted((p for p in directory.glob("*.plt") if p != published),
+                   key=lambda p: p.stat().st_mtime_ns, reverse=True)
+    for stale in older[KEEP - 1:]:
+        stale.unlink(missing_ok=True)
 
 
 def main():
