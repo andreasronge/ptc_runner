@@ -1,7 +1,7 @@
 defmodule PtcRunner.Kernel.PublicationAuthorityTest do
-  # async: false — one case blanks PATH VM-wide to prove the destination check fails closed
-  # (class D); the other 24 are :tmp_dir-only and could run async in a sibling module.
-  use ExUnit.Case, async: false
+  # The cases that rewrite PATH VM-wide live in PublicationAuthorityGlobalStateTest; these are
+  # :tmp_dir-only.
+  use ExUnit.Case, async: true
 
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
 
@@ -587,70 +587,6 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
   end
 
   @tag :tmp_dir
-  test "missing publication primitives make the artifact destination unavailable", %{tmp_dir: dir} do
-    application = application!(dir, "missing-publication-primitives")
-    original_path = System.get_env("PATH")
-
-    on_exit(fn -> restore_env("PATH", original_path) end)
-
-    assert {:ok, preparation} =
-             CommandEngine.prepare([
-               "run",
-               application,
-               "--output",
-               Path.join(dir, "result.json")
-             ])
-
-    System.put_env("PATH", "")
-
-    assert {:error, outcome} = CommandEngine.preflight(preparation)
-    assert outcome.envelope["error"]["phase"] == "destination"
-    assert outcome.envelope["error"]["code"] == "result_destination_unavailable"
-    assert outcome.envelope["error"]["provider_activity"] == false
-    refute Jason.encode!(outcome.envelope) =~ dir
-  end
-
-  @tag :tmp_dir
-  test "a no-space reservation keeps the artifact-specific destination diagnostic", %{
-    tmp_dir: dir
-  } do
-    application = application!(dir, "no-space-result")
-    real_id = System.find_executable("id")
-    fake_bin = Path.join(dir, "bin")
-    original_path = System.get_env("PATH")
-
-    assert is_binary(real_id)
-    File.mkdir!(fake_bin)
-    File.ln_s!(real_id, Path.join(fake_bin, "id"))
-
-    fake_mkdir = Path.join(fake_bin, "mkdir")
-
-    File.write!(
-      fake_mkdir,
-      "#!/bin/sh\nprintf '%s\\n' 'mkdir: destination: No space left on device' >&2\nexit 1\n"
-    )
-
-    File.chmod!(fake_mkdir, 0o700)
-    on_exit(fn -> restore_env("PATH", original_path) end)
-
-    assert {:ok, preparation} =
-             CommandEngine.prepare([
-               "run",
-               application,
-               "--output",
-               Path.join(dir, "result.json")
-             ])
-
-    System.put_env("PATH", fake_bin)
-
-    assert {:error, outcome} = CommandEngine.preflight(preparation)
-    assert outcome.envelope["error"]["phase"] == "destination"
-    assert outcome.envelope["error"]["code"] == "result_destination_unavailable"
-    assert outcome.envelope["error"]["provider_activity"] == false
-    refute Jason.encode!(outcome.envelope) =~ dir
-  end
-
-  @tag :tmp_dir
   test "a no-space owner-marker failure survives reservation directory creation", %{tmp_dir: dir} do
     destination = Path.join(dir, "result.json")
 
@@ -747,9 +683,6 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
 
   defp maybe_private_output(argv, :private, output),
     do: argv ++ ["--private-output", output]
-
-  defp restore_env(name, nil), do: System.delete_env(name)
-  defp restore_env(name, value), do: System.put_env(name, value)
 
   # An attempt-counted yield loop expires in microseconds under scheduler
   # load (the failure mode Eventually's moduledoc documents); the wall-clock
