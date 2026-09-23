@@ -6,12 +6,12 @@
     },
     "split": "visible",
     "branch": "same-labels",
-    "trace_path": "artifacts/traces/cmd-006wddychaqg39qwpjq9x4qh3g.jsonl",
+    "trace_path": "artifacts/traces/cmd-7rjgpezqhn5j1jafcmsxxse9gw.jsonl",
     "result_hash": "sha256:a5360a110e6cd045ad015697dcca691afebd6e3d4e65cb2f6425866f96952489",
     "reached_mutation": false,
-    "run_ref": "cmd-006wddychaqg39qwpjq9x4qh3g",
+    "run_ref": "cmd-7rjgpezqhn5j1jafcmsxxse9gw",
     "variant": "oracle",
-    "duration_ms": 37,
+    "duration_ms": 46,
     "kernel_usage": {
       "subordinate_source_checks": 0,
       "evaluation_history_bytes": 0,
@@ -38,12 +38,12 @@
       "llm_spend": {
         "state": "empty"
       },
-      "remaining_ms": 9989
+      "remaining_ms": 9984
     },
     "failure_envelope": null,
     "bundle_hash": "38765c4e3a2e2eb31192fe639adabcf8ba311c6bc48d0844a251709041062573",
-    "inspection_hash": "970be6f65111f2edb7166f8515a083b619f16c0284be14070deaff96e219e686",
-    "inspection_path": "artifacts/inspection/cmd-006wddychaqg39qwpjq9x4qh3g.ptcins"
+    "inspection_hash": "5f83a3b0af77b282b9edac89a22ddabbb3c9064037b9218b2c6f3dddff0bd5c5",
+    "inspection_path": "artifacts/inspection/cmd-7rjgpezqhn5j1jafcmsxxse9gw.ptcins"
   },
   {
     "input": {
@@ -52,12 +52,12 @@
     },
     "split": "visible",
     "branch": "after-adds-labels",
-    "trace_path": "artifacts/traces/cmd-1xc2e4wmmmk8m848swr4z5k59t.jsonl",
+    "trace_path": "artifacts/traces/cmd-63cj29sgbwycw4tn3rtkq4z30d.jsonl",
     "result_hash": "sha256:9b4b139a2a730a903bb048210f6dbfe770a8b5b2fa5175323ff432636cb80764",
     "reached_mutation": false,
-    "run_ref": "cmd-1xc2e4wmmmk8m848swr4z5k59t",
+    "run_ref": "cmd-63cj29sgbwycw4tn3rtkq4z30d",
     "variant": "oracle",
-    "duration_ms": 42,
+    "duration_ms": 44,
     "kernel_usage": {
       "subordinate_source_checks": 0,
       "evaluation_history_bytes": 0,
@@ -84,12 +84,12 @@
       "llm_spend": {
         "state": "empty"
       },
-      "remaining_ms": 9986
+      "remaining_ms": 9982
     },
     "failure_envelope": null,
     "bundle_hash": "38765c4e3a2e2eb31192fe639adabcf8ba311c6bc48d0844a251709041062573",
-    "inspection_hash": "404da734e0c71660666840a7d42783f8afcc6b51833880236a147fe14bc6af34",
-    "inspection_path": "artifacts/inspection/cmd-1xc2e4wmmmk8m848swr4z5k59t.ptcins"
+    "inspection_hash": "5474b177db526e2895df7929d6b682d1bb902163a216e08ff587639eacc16495",
+    "inspection_path": "artifacts/inspection/cmd-63cj29sgbwycw4tn3rtkq4z30d.ptcins"
   },
   {
     "input": {
@@ -98,12 +98,12 @@
     },
     "split": "withheld",
     "branch": "before-only-labels",
-    "trace_path": "artifacts/traces/cmd-2mchkhmymrmn31w2w84bekbp6k.jsonl",
+    "trace_path": "artifacts/traces/cmd-6w88533vzm58ajr3gqk3rpmzqa.jsonl",
     "result_hash": "sha256:38709ebe8007b6e93eff0dd7eb94b2863204c58b2fcd93d886faa60607588ba6",
     "reached_mutation": false,
-    "run_ref": "cmd-2mchkhmymrmn31w2w84bekbp6k",
+    "run_ref": "cmd-6w88533vzm58ajr3gqk3rpmzqa",
     "variant": "oracle",
-    "duration_ms": 34,
+    "duration_ms": 45,
     "kernel_usage": {
       "subordinate_source_checks": 0,
       "evaluation_history_bytes": 0,
@@ -130,12 +130,12 @@
       "llm_spend": {
         "state": "empty"
       },
-      "remaining_ms": 9990
+      "remaining_ms": 9981
     },
     "failure_envelope": null,
     "bundle_hash": "38765c4e3a2e2eb31192fe639adabcf8ba311c6bc48d0844a251709041062573",
-    "inspection_hash": "a8b29ef9114ddd8d2cfe18072881ad1733175726e89577da40ce4c58af8b84ef",
-    "inspection_path": "artifacts/inspection/cmd-2mchkhmymrmn31w2w84bekbp6k.ptcins"
+    "inspection_hash": "6bd44058f7d6c8ce558791755629017d751c947ab38be486fa0ca658c42f0151",
+    "inspection_path": "artifacts/inspection/cmd-6w88533vzm58ajr3gqk3rpmzqa.ptcins"
   },
   {
     "input": {
@@ -144,56 +144,10 @@
     },
     "split": "withheld",
     "branch": "unrecognised-to-contract",
-    "trace_path": "artifacts/traces/cmd-713ctc3gmc2d61sm5engwmx5s9.jsonl",
+    "trace_path": "artifacts/traces/cmd-2x0gnaa0jrdc29dqj8b346cpwq.jsonl",
     "result_hash": "sha256:d80679d0709ee2be309e8c3e74d8e6a0df79901fe28f7ff49af31ef0780f9260",
     "reached_mutation": false,
-    "run_ref": "cmd-713ctc3gmc2d61sm5engwmx5s9",
-    "variant": "oracle",
-    "duration_ms": 43,
-    "kernel_usage": {
-      "subordinate_source_checks": 0,
-      "evaluation_history_bytes": 0,
-      "evaluation_memory_bytes": 0,
-      "protocol_errors": 0,
-      "subordinate_evaluations": 0,
-      "closed?": true,
-      "events_dropped": {},
-      "evaluations_by_mission": {},
-      "agent_protocol_errors": 0,
-      "capability_calls": {
-        "mission": {},
-        "workflow": {}
-      },
-      "capability_denials": {},
-      "capability_refusals": {},
-      "evaluation_busy?": false,
-      "evaluation_continuation_bytes": 0,
-      "evaluation_missions": [],
-      "llm_budget": {
-        "cost": null,
-        "total_tokens": null
-      },
-      "llm_spend": {
-        "state": "empty"
-      },
-      "remaining_ms": 9986
-    },
-    "failure_envelope": null,
-    "bundle_hash": "38765c4e3a2e2eb31192fe639adabcf8ba311c6bc48d0844a251709041062573",
-    "inspection_hash": "1da47dd1f7b426a3f82ab9dcd6f65e436265f51462c78de5d958ef27ef4f6092",
-    "inspection_path": "artifacts/inspection/cmd-713ctc3gmc2d61sm5engwmx5s9.ptcins"
-  },
-  {
-    "input": {
-      "after": "PTC_AGENT_PROMPT_V1\n\nInstructions\nUse the run_ptc_lisp tool exactly once per turn with one program string.\nOrdinary expression results are intermediate observations and continue to another turn.\nThe last expression's value is retained as *1; end a program with nil when you only meant to define something, so a large intermediate is not carried forward.\nDefinitions created by successful programs persist and can be reused by later programs in this run.\nFailed evaluations roll back every definition created by that failed program.\nUse (return value) only when the task is complete; (return value) completes successfully.\nUse (fail value) only when the task cannot be completed; (fail value) aborts the run.\nGenerated programs run only against the installed mission API; the prompt inventory below may omit runtime-discoverable capabilities.\nDo not repeat irreversible capability effects merely to reconstruct state.\nThe task and each continuation message state how many programs remain; use that budget to pace exploration.\nWhen a budget notice says FINAL TURN, the next program must call (return value) or (fail value).\nDo not answer in prose.\n\nPTC-Lisp\n- PTC-Lisp is a bounded Clojure-like language.\n- Use let, fn, def/defn, if, loop/recur, map/filter/reduce, and collection helpers.\n- Also available: cond/case, ->/->>, for/doseq, string, set, regex, math, date/time, and json helpers.\n- Built-ins include collections, strings, regex, math, numeric parsing, and date/time, including a bounded Java-compatible API.\n- Decoded JSON maps use string keys; read them with get/get-in.\n- Explore first, return last. Use (println ...) only for concise diagnostics; output previews are bounded.\n- Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.\n- Value references are values; call only function references.\n- The Available API section below is complete for mission data and prompt-visible mission functions and tools; other installed capabilities remain discoverable at runtime.\n- Use (apropos \"term\") to search visible mission prelude exports, installed capabilities, and fixed built-ins plus the bounded Java surface; use (doc \"name\") to print their documentation. (dir) lists attached prelude namespaces, (dir \"ns\") their exports, (export-meta \"ns/name\") returns attached export metadata as data, and (source ns/name) prints an attached prelude definition when available. Only apropos and doc cover installed direct tool capabilities; none enumerate data references.\n- Call granted capabilities only with exact tool/... forms shown below or documented by doc.\n- Fixed namespaces: clojure.core/core, clojure.string/str/string, clojure.set/set, clojure.walk/walk, regex, Math, System, Boolean, numeric/date/time namespaces, data, tool, and json.\n- No ns/require/refer/import, user-defined macros, eval/read-string, or host file I/O.\n\nExamples\nTurn 1: (defn add-one [x] (+ x 1))\nTurn 2: (return (add-one 41))\n(let [response (tool/exact-name {\"query\" \"value\"})] (if (= :ok (get response :status)) (return (get response :value)) (fail response)))\n\nAvailable API\nAPI notes\n- fixture: Every export here is measured, never called; the fixture pins one rendering.\n\nCalls beginning with tool/ take exactly one argument map and return a result envelope. Check :status; when it is :ok, the displayed return type describes the :value field.\nIn map types, field? means the field may be omitted; type? means nil is allowed.\n\n- Call: (tool/sample-lookup {\"id\" id})\n  Type: (arguments {id :string}) -> {value :string}\n  Constraints: arguments has no additional fields; return has no additional fields\n  Effect: read\n  Docs: Look one sample up by identifier.\n\n- Value: fixture/sample-budget\n  Type: :int\n  Docs: Characters this fixture reserves.\n\nx",
-      "before": "PTC_AGENT_PROMPT_V1\n\nInstructions\nUse the run_ptc_lisp tool exactly once per turn with one program string.\nOrdinary expression results are intermediate observations and continue to another turn.\nThe last expression's value is retained as *1; end a program with nil when you only meant to define something, so a large intermediate is not carried forward.\nDefinitions created by successful programs persist and can be reused by later programs in this run.\nFailed evaluations roll back every definition created by that failed program.\nUse (return value) only when the task is complete; (return value) completes successfully.\nUse (fail value) only when the task cannot be completed; (fail value) aborts the run.\nGenerated programs run only against the installed mission API; the prompt inventory below may omit runtime-discoverable capabilities.\nDo not repeat irreversible capability effects merely to reconstruct state.\nThe task and each continuation message state how many programs remain; use that budget to pace exploration.\nWhen a budget notice says FINAL TURN, the next program must call (return value) or (fail value).\nDo not answer in prose.\n\nPTC-Lisp\n- PTC-Lisp is a bounded Clojure-like language.\n- Use let, fn, def/defn, if, loop/recur, map/filter/reduce, and collection helpers.\n- Also available: cond/case, ->/->>, for/doseq, string, set, regex, math, date/time, and json helpers.\n- Built-ins include collections, strings, regex, math, numeric parsing, and date/time, including a bounded Java-compatible API.\n- Decoded JSON maps use string keys; read them with get/get-in.\n- Explore first, return last. Use (println ...) only for concise diagnostics; output previews are bounded.\n- Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.\n- Value references are values; call only function references.\n- The Available API section below is complete for mission data and prompt-visible mission functions and tools; other installed capabilities remain discoverable at runtime.\n- Use (apropos \"term\") to search visible mission prelude exports, installed capabilities, and fixed built-ins plus the bounded Java surface; use (doc \"name\") to print their documentation. (dir) lists attached prelude namespaces, (dir \"ns\") their exports, (export-meta \"ns/name\") returns attached export metadata as data, and (source ns/name) prints an attached prelude definition when available. Only apropos and doc cover installed direct tool capabilities; none enumerate data references.\n- Call granted capabilities only with exact tool/... forms shown below or documented by doc.\n- Fixed namespaces: clojure.core/core, clojure.string/str/string, clojure.set/set, clojure.walk/walk, regex, Math, System, Boolean, numeric/date/time namespaces, data, tool, and json.\n- No ns/require/refer/import, user-defined macros, eval/read-string, or host file I/O.\n\nExamples\nTurn 1: (defn add-one [x] (+ x 1))\nTurn 2: (return (add-one 41))\n(let [response (tool/exact-name {\"query\" \"value\"})] (if (= :ok (get response :status)) (return (get response :value)) (fail response)))\n\nAvailable API\nAPI notes\n- fixture: Every export here is measured, never called; the fixture pins one rendering.\n\nCalls beginning with tool/ take exactly one argument map and return a result envelope. Check :status; when it is :ok, the displayed return type describes the :value field.\nIn map types, field? means the field may be omitted; type? means nil is allowed.\n\n- Call: (tool/sample-lookup {\"id\" id})\n  Type: (arguments {id :string}) -> {value :string}\n  Constraints: arguments has no additional fields; return has no additional fields\n  Effect: read\n  Docs: Look one sample up by identifier.\n\n- Value: fixture/sample-budget\n  Type: :int\n  Docs: Characters this fixture reserves.\n\n"
-    },
-    "split": "visible",
-    "branch": "generated-after-suffix",
-    "trace_path": "artifacts/traces/cmd-0jp47cm0rkaf1m990rhk8gcfbe.jsonl",
-    "result_hash": "sha256:6c2db7f232caa0ec5fed1b3b1092b94f1394bd237a0d1674b289670ad2b2df3b",
-    "reached_mutation": false,
-    "run_ref": "cmd-0jp47cm0rkaf1m990rhk8gcfbe",
+    "run_ref": "cmd-2x0gnaa0jrdc29dqj8b346cpwq",
     "variant": "oracle",
     "duration_ms": 48,
     "kernel_usage": {
@@ -222,116 +176,24 @@
       "llm_spend": {
         "state": "empty"
       },
-      "remaining_ms": 9982
+      "remaining_ms": 9986
     },
     "failure_envelope": null,
     "bundle_hash": "38765c4e3a2e2eb31192fe639adabcf8ba311c6bc48d0844a251709041062573",
-    "inspection_hash": "61507eebfd9e57ff591ee0213bd4e6afc9214e381d059e6fbc560b107dc6c50d",
-    "inspection_path": "artifacts/inspection/cmd-0jp47cm0rkaf1m990rhk8gcfbe.ptcins"
+    "inspection_hash": "fce707633109cfaaf64c28d1d70e02ad2160a0e22b063068ec822af8fc1be651",
+    "inspection_path": "artifacts/inspection/cmd-2x0gnaa0jrdc29dqj8b346cpwq.ptcins"
   },
   {
     "input": {
-      "after": "PTC_AGENT_PROMPT_V1\n\nInstructions\nUse the run_ptc_lisp tool exactly once per turn with one program string.\nOrdinary expression results are intermediate observations and continue to another turn.\nThe last expression's value is retained as *1; end a program with nil when you only meant to define something, so a large intermediate is not carried forward.\nDefinitions created by successful programs persist and can be reused by later programs in this run.\nFailed evaluations roll back every definition created by that failed program.\nUse (return value) only when the task is complete; (return value) completes successfully.\nUse (fail value) only when the task cannot be completed; (fail value) aborts the run.\nGenerated programs run only against the installed mission API; the prompt inventory below may omit runtime-discoverable capabilities.\nDo not repeat irreversible capability effects merely to reconstruct state.\nThe task and each continuation message state how many programs remain; use that budget to pace exploration.\nWhen a budget notice says FINAL TURN, the next program must call (return value) or (fail value).\nDo not answer in prose.\n\nPTC-Lisp\n- PTC-Lisp is a bounded Clojure-like language.\n- Use let, fn, def/defn, if, loop/recur, map/filter/reduce, and collection helpers.\n- Also available: cond/case, ->/->>, for/doseq, string, set, regex, math, date/time, and json helpers.\n- Built-ins include collections, strings, regex, math, numeric parsing, and date/time, including a bounded Java-compatible API.\n- Decoded JSON maps use string keys; read them with get/get-in.\n- Explore first, return last. Use (println ...) only for concise diagnostics; output previews are bounded.\n- Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.\n- Value references are values; call only function references.\n- The Available API section below is complete for mission data and prompt-visible mission functions and tools; other installed capabilities remain discoverable at runtime.\n- Use (apropos \"term\") to search visible mission prelude exports, installed capabilities, and fixed built-ins plus the bounded Java surface; use (doc \"name\") to print their documentation. (dir) lists attached prelude namespaces, (dir \"ns\") their exports, (export-meta \"ns/name\") returns attached export metadata as data, and (source ns/name) prints an attached prelude definition when available. Only apropos and doc cover installed direct tool capabilities; none enumerate data references.\n- Call granted capabilities only with exact tool/... forms shown below or documented by doc.\n- Fixed namespaces: clojure.core/core, clojure.string/str/string, clojure.set/set, clojure.walk/walk, regex, Math, System, Boolean, numeric/date/time namespaces, data, tool, and json.\n- No ns/require/refer/import, user-defined macros, eval/read-string, or host file I/O.\n\nExamples\nTurn 1: (defn add-one [x] (+ x 1))\nTurn 2: (return (add-one 41))\n(let [response (tool/exact-name {\"query\" \"value\"})] (if (= :ok (get response :status)) (return (get response :value)) (fail response)))\n\nAvailable API\nAPI notes\n- fixture: Every export here is measured, never called; the fixture pins one rendering.\n\nCalls beginning with tool/ take exactly one argument map and return a result envelope. Check :status; when it is :ok, the displayed return type describes the :value field.\nIn map types, field? means the field may be omitted; type? means nil is allowed.\n\n- Call: (tool/sample-lookup {\"id\" id})\n  Type: (arguments {id :string}) -> {value :string}\n  Constraints: arguments has no additional fields; return has no additional fields\n  Effect: read\n  Docs: Look one sample up by identifier.\n\n- Value: fixture/sample-budget\n  Type: :int\n  Docs: Characters this fixture reserves.\n\nxx",
-      "before": "PTC_AGENT_PROMPT_V1\n\nInstructions\nUse the run_ptc_lisp tool exactly once per turn with one program string.\nOrdinary expression results are intermediate observations and continue to another turn.\nThe last expression's value is retained as *1; end a program with nil when you only meant to define something, so a large intermediate is not carried forward.\nDefinitions created by successful programs persist and can be reused by later programs in this run.\nFailed evaluations roll back every definition created by that failed program.\nUse (return value) only when the task is complete; (return value) completes successfully.\nUse (fail value) only when the task cannot be completed; (fail value) aborts the run.\nGenerated programs run only against the installed mission API; the prompt inventory below may omit runtime-discoverable capabilities.\nDo not repeat irreversible capability effects merely to reconstruct state.\nThe task and each continuation message state how many programs remain; use that budget to pace exploration.\nWhen a budget notice says FINAL TURN, the next program must call (return value) or (fail value).\nDo not answer in prose.\n\nPTC-Lisp\n- PTC-Lisp is a bounded Clojure-like language.\n- Use let, fn, def/defn, if, loop/recur, map/filter/reduce, and collection helpers.\n- Also available: cond/case, ->/->>, for/doseq, string, set, regex, math, date/time, and json helpers.\n- Built-ins include collections, strings, regex, math, numeric parsing, and date/time, including a bounded Java-compatible API.\n- Decoded JSON maps use string keys; read them with get/get-in.\n- Explore first, return last. Use (println ...) only for concise diagnostics; output previews are bounded.\n- Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.\n- Value references are values; call only function references.\n- The Available API section below is complete for mission data and prompt-visible mission functions and tools; other installed capabilities remain discoverable at runtime.\n- Use (apropos \"term\") to search visible mission prelude exports, installed capabilities, and fixed built-ins plus the bounded Java surface; use (doc \"name\") to print their documentation. (dir) lists attached prelude namespaces, (dir \"ns\") their exports, (export-meta \"ns/name\") returns attached export metadata as data, and (source ns/name) prints an attached prelude definition when available. Only apropos and doc cover installed direct tool capabilities; none enumerate data references.\n- Call granted capabilities only with exact tool/... forms shown below or documented by doc.\n- Fixed namespaces: clojure.core/core, clojure.string/str/string, clojure.set/set, clojure.walk/walk, regex, Math, System, Boolean, numeric/date/time namespaces, data, tool, and json.\n- No ns/require/refer/import, user-defined macros, eval/read-string, or host file I/O.\n\nExamples\nTurn 1: (defn add-one [x] (+ x 1))\nTurn 2: (return (add-one 41))\n(let [response (tool/exact-name {\"query\" \"value\"})] (if (= :ok (get response :status)) (return (get response :value)) (fail response)))\n\nAvailable API\nAPI notes\n- fixture: Every export here is measured, never called; the fixture pins one rendering.\n\nCalls beginning with tool/ take exactly one argument map and return a result envelope. Check :status; when it is :ok, the displayed return type describes the :value field.\nIn map types, field? means the field may be omitted; type? means nil is allowed.\n\n- Call: (tool/sample-lookup {\"id\" id})\n  Type: (arguments {id :string}) -> {value :string}\n  Constraints: arguments has no additional fields; return has no additional fields\n  Effect: read\n  Docs: Look one sample up by identifier.\n\n- Value: fixture/sample-budget\n  Type: :int\n  Docs: Characters this fixture reserves.\n\n"
-    },
-    "split": "withheld",
-    "branch": "generated-after-suffix",
-    "trace_path": "artifacts/traces/cmd-1szp83e8p9e18b1m4y9rv7jcs0.jsonl",
-    "result_hash": "sha256:f4c156a3ac59f673ffb6fd40c960a576da10ea4ecc7f7e8acc63b40ba0461924",
-    "reached_mutation": false,
-    "run_ref": "cmd-1szp83e8p9e18b1m4y9rv7jcs0",
-    "variant": "oracle",
-    "duration_ms": 50,
-    "kernel_usage": {
-      "subordinate_source_checks": 0,
-      "evaluation_history_bytes": 0,
-      "evaluation_memory_bytes": 0,
-      "protocol_errors": 0,
-      "subordinate_evaluations": 0,
-      "closed?": true,
-      "events_dropped": {},
-      "evaluations_by_mission": {},
-      "agent_protocol_errors": 0,
-      "capability_calls": {
-        "mission": {},
-        "workflow": {}
-      },
-      "capability_denials": {},
-      "capability_refusals": {},
-      "evaluation_busy?": false,
-      "evaluation_continuation_bytes": 0,
-      "evaluation_missions": [],
-      "llm_budget": {
-        "cost": null,
-        "total_tokens": null
-      },
-      "llm_spend": {
-        "state": "empty"
-      },
-      "remaining_ms": 9982
-    },
-    "failure_envelope": null,
-    "bundle_hash": "38765c4e3a2e2eb31192fe639adabcf8ba311c6bc48d0844a251709041062573",
-    "inspection_hash": "c47c94ac48c2ac2964a136102863632941dcf30952f7854431e7103b121d6005",
-    "inspection_path": "artifacts/inspection/cmd-1szp83e8p9e18b1m4y9rv7jcs0.ptcins"
-  },
-  {
-    "input": {
-      "after": "PTC_AGENT_PROMPT_V1\n\nInstructions\nUse the run_ptc_lisp tool exactly once per turn with one program string.\nOrdinary expression results are intermediate observations and continue to another turn.\nThe last expression's value is retained as *1; end a program with nil when you only meant to define something, so a large intermediate is not carried forward.\nDefinitions created by successful programs persist and can be reused by later programs in this run.\nFailed evaluations roll back every definition created by that failed program.\nUse (return value) only when the task is complete; (return value) completes successfully.\nUse (fail value) only when the task cannot be completed; (fail value) aborts the run.\nGenerated programs run only against the installed mission API; the prompt inventory below may omit runtime-discoverable capabilities.\nDo not repeat irreversible capability effects merely to reconstruct state.\nThe task and each continuation message state how many programs remain; use that budget to pace exploration.\nWhen a budget notice says FINAL TURN, the next program must call (return value) or (fail value).\nDo not answer in prose.\n\nPTC-Lisp\n- PTC-Lisp is a bounded Clojure-like language.\n- Use let, fn, def/defn, if, loop/recur, map/filter/reduce, and collection helpers.\n- Also available: cond/case, ->/->>, for/doseq, string, set, regex, math, date/time, and json helpers.\n- Built-ins include collections, strings, regex, math, numeric parsing, and date/time, including a bounded Java-compatible API.\n- Decoded JSON maps use string keys; read them with get/get-in.\n- Explore first, return last. Use (println ...) only for concise diagnostics; output previews are bounded.\n- Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.\n- Value references are values; call only function references.\n- The Available API section below is complete for mission data and prompt-visible mission functions and tools; other installed capabilities remain discoverable at runtime.\n- Use (apropos \"term\") to search visible mission prelude exports, installed capabilities, and fixed built-ins plus the bounded Java surface; use (doc \"name\") to print their documentation. (dir) lists attached prelude namespaces, (dir \"ns\") their exports, (export-meta \"ns/name\") returns attached export metadata as data, and (source ns/name) prints an attached prelude definition when available. Only apropos and doc cover installed direct tool capabilities; none enumerate data references.\n- Call granted capabilities only with exact tool/... forms shown below or documented by doc.\n- Fixed namespaces: clojure.core/core, clojure.string/str/string, clojure.set/set, clojure.walk/walk, regex, Math, System, Boolean, numeric/date/time namespaces, data, tool, and json.\n- No ns/require/refer/import, user-defined macros, eval/read-string, or host file I/O.\n\nExamples\nTurn 1: (defn add-one [x] (+ x 1))\nTurn 2: (return (add-one 41))\n(let [response (tool/exact-name {\"query\" \"value\"})] (if (= :ok (get response :status)) (return (get response :value)) (fail response)))\n\nAvailable API\nAPI notes\n- fixture: Every export here is measured, never called; the fixture pins one rendering.\n\nCalls beginning with tool/ take exactly one argument map and return a result envelope. Check :status; when it is :ok, the displayed return type describes the :value field.\nIn map types, field? means the field may be omitted; type? means nil is allowed.\n\n- Call: (tool/sample-lookup {\"id\" id})\n  Type: (arguments {id :string}) -> {value :string}\n  Constraints: arguments has no additional fields; return has no additional fields\n  Effect: read\n  Docs: Look one sample up by identifier.\n\n- Value: fixture/sample-budget\n  Type: :int\n  Docs: Characters this fixture reserves.\n\nxxx",
+      "after": "PTC_AGENT_PROMPT_V1\n\nInstructions\nUse the run_ptc_lisp tool exactly once per turn with one program string.\nOrdinary expression results are intermediate observations and continue to another turn.\nThe last expression's value is retained as *1; end a program with nil when you only meant to define something, so a large intermediate is not carried forward.\nDefinitions created by successful programs persist and can be reused by later programs in this run.\nFailed evaluations roll back every definition created by that failed program.\nUse (return value) only when the task is complete; (return value) completes successfully.\nUse (fail value) only when the task cannot be completed; (fail value) aborts the run.\nGenerated programs run only against the installed mission API; the prompt inventory below may omit runtime-discoverable capabilities.\nDo not repeat irreversible capability effects merely to reconstruct state.\nThe task and each continuation message state how many programs remain; use that budget to pace exploration.\nWhen a budget notice says FINAL TURN, the next program must call (return value) or (fail value).\nDo not answer in prose.\n\nPTC-Lisp\n- PTC-Lisp is a bounded Clojure-like language.\n- Use let, fn, def/defn, if, loop/recur, map/filter/reduce, and collection helpers.\n- Also available: cond/case, ->/->>, for/doseq, string, set, regex, math, date/time, and json helpers.\n- Built-ins include collections, strings, regex, math, numeric parsing, and date/time, including a bounded Java-compatible API.\n- Decoded JSON maps use string keys; read them with get/get-in.\n- Explore first, return last. Use (println ...) only for concise diagnostics; output previews are bounded.\n- Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.\n- Value references are values; call only function references.\n- The Available API section below is complete for mission data and prompt-visible mission functions and tools; other installed capabilities remain discoverable at runtime.\n- Use (apropos \"term\") to search visible mission prelude exports, installed capabilities, and fixed built-ins plus the bounded Java surface; use (doc \"name\") to print their documentation. (dir) lists attached prelude namespaces, (dir \"ns\") their exports, (export-meta \"ns/name\") returns attached export metadata as data, and (source ns/name) prints an attached prelude definition when available. Only apropos and doc cover installed direct tool capabilities; none enumerate data references.\n- Call granted capabilities only with exact tool/... forms shown below or documented by doc.\n- Fixed namespaces: clojure.core/core, clojure.string/str/string, clojure.set/set, clojure.walk/walk, regex, Math, System, Boolean, numeric/date/time namespaces, data, tool, and json.\n- No ns/require/refer/import, user-defined macros, eval/read-string, or host file I/O.\n\nExamples\nTurn 1: (defn add-one [x] (+ x 1))\nTurn 2: (return (add-one 41))\n(let [response (tool/exact-name {\"query\" \"value\"})] (if (= :ok (get response :status)) (return (get response :value)) (fail response)))\n\nAvailable API\nAPI notes\n- fixture: Every export here is measured, never called; the fixture pins one rendering.\n\nCalls beginning with tool/ take exactly one argument map and return a result envelope. Check :status; when it is :ok, the displayed return type describes the :value field.\nIn map types, field? means the field may be omitted; type? means nil is allowed.\n\n- Call: (tool/sample-lookup {\"id\" id})\n  Type: (arguments {id :string}) -> {value :string}\n  Constraints: arguments has no additional fields; return has no additional fields\n  Effect: read\n  Docs: Look one sample up by identifier.\n\n- Value: fixture/sample-budget\n  Type: :int\n  Docs: Characters this fixture reserves.\n\nx",
       "before": "PTC_AGENT_PROMPT_V1\n\nInstructions\nUse the run_ptc_lisp tool exactly once per turn with one program string.\nOrdinary expression results are intermediate observations and continue to another turn.\nThe last expression's value is retained as *1; end a program with nil when you only meant to define something, so a large intermediate is not carried forward.\nDefinitions created by successful programs persist and can be reused by later programs in this run.\nFailed evaluations roll back every definition created by that failed program.\nUse (return value) only when the task is complete; (return value) completes successfully.\nUse (fail value) only when the task cannot be completed; (fail value) aborts the run.\nGenerated programs run only against the installed mission API; the prompt inventory below may omit runtime-discoverable capabilities.\nDo not repeat irreversible capability effects merely to reconstruct state.\nThe task and each continuation message state how many programs remain; use that budget to pace exploration.\nWhen a budget notice says FINAL TURN, the next program must call (return value) or (fail value).\nDo not answer in prose.\n\nPTC-Lisp\n- PTC-Lisp is a bounded Clojure-like language.\n- Use let, fn, def/defn, if, loop/recur, map/filter/reduce, and collection helpers.\n- Also available: cond/case, ->/->>, for/doseq, string, set, regex, math, date/time, and json helpers.\n- Built-ins include collections, strings, regex, math, numeric parsing, and date/time, including a bounded Java-compatible API.\n- Decoded JSON maps use string keys; read them with get/get-in.\n- Explore first, return last. Use (println ...) only for concise diagnostics; output previews are bounded.\n- Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.\n- Value references are values; call only function references.\n- The Available API section below is complete for mission data and prompt-visible mission functions and tools; other installed capabilities remain discoverable at runtime.\n- Use (apropos \"term\") to search visible mission prelude exports, installed capabilities, and fixed built-ins plus the bounded Java surface; use (doc \"name\") to print their documentation. (dir) lists attached prelude namespaces, (dir \"ns\") their exports, (export-meta \"ns/name\") returns attached export metadata as data, and (source ns/name) prints an attached prelude definition when available. Only apropos and doc cover installed direct tool capabilities; none enumerate data references.\n- Call granted capabilities only with exact tool/... forms shown below or documented by doc.\n- Fixed namespaces: clojure.core/core, clojure.string/str/string, clojure.set/set, clojure.walk/walk, regex, Math, System, Boolean, numeric/date/time namespaces, data, tool, and json.\n- No ns/require/refer/import, user-defined macros, eval/read-string, or host file I/O.\n\nExamples\nTurn 1: (defn add-one [x] (+ x 1))\nTurn 2: (return (add-one 41))\n(let [response (tool/exact-name {\"query\" \"value\"})] (if (= :ok (get response :status)) (return (get response :value)) (fail response)))\n\nAvailable API\nAPI notes\n- fixture: Every export here is measured, never called; the fixture pins one rendering.\n\nCalls beginning with tool/ take exactly one argument map and return a result envelope. Check :status; when it is :ok, the displayed return type describes the :value field.\nIn map types, field? means the field may be omitted; type? means nil is allowed.\n\n- Call: (tool/sample-lookup {\"id\" id})\n  Type: (arguments {id :string}) -> {value :string}\n  Constraints: arguments has no additional fields; return has no additional fields\n  Effect: read\n  Docs: Look one sample up by identifier.\n\n- Value: fixture/sample-budget\n  Type: :int\n  Docs: Characters this fixture reserves.\n\n"
     },
     "split": "visible",
     "branch": "generated-after-suffix",
-    "trace_path": "artifacts/traces/cmd-4m0e8ns1qqwah3c56k492955er.jsonl",
-    "result_hash": "sha256:1ba6f89843a7e4441127bdd66bbcc02a76c0834262504b1512dc5a127ee348d7",
+    "trace_path": "artifacts/traces/cmd-29sxs3mem1x8zp7apq54zctjp8.jsonl",
+    "result_hash": "sha256:6c2db7f232caa0ec5fed1b3b1092b94f1394bd237a0d1674b289670ad2b2df3b",
     "reached_mutation": false,
-    "run_ref": "cmd-4m0e8ns1qqwah3c56k492955er",
-    "variant": "oracle",
-    "duration_ms": 35,
-    "kernel_usage": {
-      "subordinate_source_checks": 0,
-      "evaluation_history_bytes": 0,
-      "evaluation_memory_bytes": 0,
-      "protocol_errors": 0,
-      "subordinate_evaluations": 0,
-      "closed?": true,
-      "events_dropped": {},
-      "evaluations_by_mission": {},
-      "agent_protocol_errors": 0,
-      "capability_calls": {
-        "mission": {},
-        "workflow": {}
-      },
-      "capability_denials": {},
-      "capability_refusals": {},
-      "evaluation_busy?": false,
-      "evaluation_continuation_bytes": 0,
-      "evaluation_missions": [],
-      "llm_budget": {
-        "cost": null,
-        "total_tokens": null
-      },
-      "llm_spend": {
-        "state": "empty"
-      },
-      "remaining_ms": 9992
-    },
-    "failure_envelope": null,
-    "bundle_hash": "38765c4e3a2e2eb31192fe639adabcf8ba311c6bc48d0844a251709041062573",
-    "inspection_hash": "32c8ccf5a1412c83150654160dfce7cedb324a382b14e9953bde2fce9606922a",
-    "inspection_path": "artifacts/inspection/cmd-4m0e8ns1qqwah3c56k492955er.ptcins"
-  },
-  {
-    "input": {
-      "after": "PTC_AGENT_PROMPT_V1\n\nInstructions\nUse the run_ptc_lisp tool exactly once per turn with one program string.\nOrdinary expression results are intermediate observations and continue to another turn.\nThe last expression's value is retained as *1; end a program with nil when you only meant to define something, so a large intermediate is not carried forward.\nDefinitions created by successful programs persist and can be reused by later programs in this run.\nFailed evaluations roll back every definition created by that failed program.\nUse (return value) only when the task is complete; (return value) completes successfully.\nUse (fail value) only when the task cannot be completed; (fail value) aborts the run.\nGenerated programs run only against the installed mission API; the prompt inventory below may omit runtime-discoverable capabilities.\nDo not repeat irreversible capability effects merely to reconstruct state.\nThe task and each continuation message state how many programs remain; use that budget to pace exploration.\nWhen a budget notice says FINAL TURN, the next program must call (return value) or (fail value).\nDo not answer in prose.\n\nPTC-Lisp\n- PTC-Lisp is a bounded Clojure-like language.\n- Use let, fn, def/defn, if, loop/recur, map/filter/reduce, and collection helpers.\n- Also available: cond/case, ->/->>, for/doseq, string, set, regex, math, date/time, and json helpers.\n- Built-ins include collections, strings, regex, math, numeric parsing, and date/time, including a bounded Java-compatible API.\n- Decoded JSON maps use string keys; read them with get/get-in.\n- Explore first, return last. Use (println ...) only for concise diagnostics; output previews are bounded.\n- Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.\n- Value references are values; call only function references.\n- The Available API section below is complete for mission data and prompt-visible mission functions and tools; other installed capabilities remain discoverable at runtime.\n- Use (apropos \"term\") to search visible mission prelude exports, installed capabilities, and fixed built-ins plus the bounded Java surface; use (doc \"name\") to print their documentation. (dir) lists attached prelude namespaces, (dir \"ns\") their exports, (export-meta \"ns/name\") returns attached export metadata as data, and (source ns/name) prints an attached prelude definition when available. Only apropos and doc cover installed direct tool capabilities; none enumerate data references.\n- Call granted capabilities only with exact tool/... forms shown below or documented by doc.\n- Fixed namespaces: clojure.core/core, clojure.string/str/string, clojure.set/set, clojure.walk/walk, regex, Math, System, Boolean, numeric/date/time namespaces, data, tool, and json.\n- No ns/require/refer/import, user-defined macros, eval/read-string, or host file I/O.\n\nExamples\nTurn 1: (defn add-one [x] (+ x 1))\nTurn 2: (return (add-one 41))\n(let [response (tool/exact-name {\"query\" \"value\"})] (if (= :ok (get response :status)) (return (get response :value)) (fail response)))\n\nAvailable API\nAPI notes\n- fixture: Every export here is measured, never called; the fixture pins one rendering.\n\nCalls beginning with tool/ take exactly one argument map and return a result envelope. Check :status; when it is :ok, the displayed return type describes the :value field.\nIn map types, field? means the field may be omitted; type? means nil is allowed.\n\n- Call: (tool/sample-lookup {\"id\" id})\n  Type: (arguments {id :string}) -> {value :string}\n  Constraints: arguments has no additional fields; return has no additional fields\n  Effect: read\n  Docs: Look one sample up by identifier.\n\n- Value: fixture/sample-budget\n  Type: :int\n  Docs: Characters this fixture reserves.\n\nxxxx",
-      "before": "PTC_AGENT_PROMPT_V1\n\nInstructions\nUse the run_ptc_lisp tool exactly once per turn with one program string.\nOrdinary expression results are intermediate observations and continue to another turn.\nThe last expression's value is retained as *1; end a program with nil when you only meant to define something, so a large intermediate is not carried forward.\nDefinitions created by successful programs persist and can be reused by later programs in this run.\nFailed evaluations roll back every definition created by that failed program.\nUse (return value) only when the task is complete; (return value) completes successfully.\nUse (fail value) only when the task cannot be completed; (fail value) aborts the run.\nGenerated programs run only against the installed mission API; the prompt inventory below may omit runtime-discoverable capabilities.\nDo not repeat irreversible capability effects merely to reconstruct state.\nThe task and each continuation message state how many programs remain; use that budget to pace exploration.\nWhen a budget notice says FINAL TURN, the next program must call (return value) or (fail value).\nDo not answer in prose.\n\nPTC-Lisp\n- PTC-Lisp is a bounded Clojure-like language.\n- Use let, fn, def/defn, if, loop/recur, map/filter/reduce, and collection helpers.\n- Also available: cond/case, ->/->>, for/doseq, string, set, regex, math, date/time, and json helpers.\n- Built-ins include collections, strings, regex, math, numeric parsing, and date/time, including a bounded Java-compatible API.\n- Decoded JSON maps use string keys; read them with get/get-in.\n- Explore first, return last. Use (println ...) only for concise diagnostics; output previews are bounded.\n- Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.\n- Value references are values; call only function references.\n- The Available API section below is complete for mission data and prompt-visible mission functions and tools; other installed capabilities remain discoverable at runtime.\n- Use (apropos \"term\") to search visible mission prelude exports, installed capabilities, and fixed built-ins plus the bounded Java surface; use (doc \"name\") to print their documentation. (dir) lists attached prelude namespaces, (dir \"ns\") their exports, (export-meta \"ns/name\") returns attached export metadata as data, and (source ns/name) prints an attached prelude definition when available. Only apropos and doc cover installed direct tool capabilities; none enumerate data references.\n- Call granted capabilities only with exact tool/... forms shown below or documented by doc.\n- Fixed namespaces: clojure.core/core, clojure.string/str/string, clojure.set/set, clojure.walk/walk, regex, Math, System, Boolean, numeric/date/time namespaces, data, tool, and json.\n- No ns/require/refer/import, user-defined macros, eval/read-string, or host file I/O.\n\nExamples\nTurn 1: (defn add-one [x] (+ x 1))\nTurn 2: (return (add-one 41))\n(let [response (tool/exact-name {\"query\" \"value\"})] (if (= :ok (get response :status)) (return (get response :value)) (fail response)))\n\nAvailable API\nAPI notes\n- fixture: Every export here is measured, never called; the fixture pins one rendering.\n\nCalls beginning with tool/ take exactly one argument map and return a result envelope. Check :status; when it is :ok, the displayed return type describes the :value field.\nIn map types, field? means the field may be omitted; type? means nil is allowed.\n\n- Call: (tool/sample-lookup {\"id\" id})\n  Type: (arguments {id :string}) -> {value :string}\n  Constraints: arguments has no additional fields; return has no additional fields\n  Effect: read\n  Docs: Look one sample up by identifier.\n\n- Value: fixture/sample-budget\n  Type: :int\n  Docs: Characters this fixture reserves.\n\n"
-    },
-    "split": "withheld",
-    "branch": "generated-after-suffix",
-    "trace_path": "artifacts/traces/cmd-0zag9fre7msen9fbxfhm1gvt92.jsonl",
-    "result_hash": "sha256:43cefe239a5663f4f5c3bf72846b97a6afe45f77d96be97a0e894e44123142ca",
-    "reached_mutation": false,
-    "run_ref": "cmd-0zag9fre7msen9fbxfhm1gvt92",
+    "run_ref": "cmd-29sxs3mem1x8zp7apq54zctjp8",
     "variant": "oracle",
     "duration_ms": 30,
     "kernel_usage": {
@@ -364,7 +226,145 @@
     },
     "failure_envelope": null,
     "bundle_hash": "38765c4e3a2e2eb31192fe639adabcf8ba311c6bc48d0844a251709041062573",
-    "inspection_hash": "d8d4cc6879b062e82f632b1664461d2018a8f2758cb986d50fe12941489beefb",
-    "inspection_path": "artifacts/inspection/cmd-0zag9fre7msen9fbxfhm1gvt92.ptcins"
+    "inspection_hash": "3d6aaa97f791f19e409043716a218bfde5bf7ae21b409bf09c75a5b086a331a2",
+    "inspection_path": "artifacts/inspection/cmd-29sxs3mem1x8zp7apq54zctjp8.ptcins"
+  },
+  {
+    "input": {
+      "after": "PTC_AGENT_PROMPT_V1\n\nInstructions\nUse the run_ptc_lisp tool exactly once per turn with one program string.\nOrdinary expression results are intermediate observations and continue to another turn.\nThe last expression's value is retained as *1; end a program with nil when you only meant to define something, so a large intermediate is not carried forward.\nDefinitions created by successful programs persist and can be reused by later programs in this run.\nFailed evaluations roll back every definition created by that failed program.\nUse (return value) only when the task is complete; (return value) completes successfully.\nUse (fail value) only when the task cannot be completed; (fail value) aborts the run.\nGenerated programs run only against the installed mission API; the prompt inventory below may omit runtime-discoverable capabilities.\nDo not repeat irreversible capability effects merely to reconstruct state.\nThe task and each continuation message state how many programs remain; use that budget to pace exploration.\nWhen a budget notice says FINAL TURN, the next program must call (return value) or (fail value).\nDo not answer in prose.\n\nPTC-Lisp\n- PTC-Lisp is a bounded Clojure-like language.\n- Use let, fn, def/defn, if, loop/recur, map/filter/reduce, and collection helpers.\n- Also available: cond/case, ->/->>, for/doseq, string, set, regex, math, date/time, and json helpers.\n- Built-ins include collections, strings, regex, math, numeric parsing, and date/time, including a bounded Java-compatible API.\n- Decoded JSON maps use string keys; read them with get/get-in.\n- Explore first, return last. Use (println ...) only for concise diagnostics; output previews are bounded.\n- Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.\n- Value references are values; call only function references.\n- The Available API section below is complete for mission data and prompt-visible mission functions and tools; other installed capabilities remain discoverable at runtime.\n- Use (apropos \"term\") to search visible mission prelude exports, installed capabilities, and fixed built-ins plus the bounded Java surface; use (doc \"name\") to print their documentation. (dir) lists attached prelude namespaces, (dir \"ns\") their exports, (export-meta \"ns/name\") returns attached export metadata as data, and (source ns/name) prints an attached prelude definition when available. Only apropos and doc cover installed direct tool capabilities; none enumerate data references.\n- Call granted capabilities only with exact tool/... forms shown below or documented by doc.\n- Fixed namespaces: clojure.core/core, clojure.string/str/string, clojure.set/set, clojure.walk/walk, regex, Math, System, Boolean, numeric/date/time namespaces, data, tool, and json.\n- No ns/require/refer/import, user-defined macros, eval/read-string, or host file I/O.\n\nExamples\nTurn 1: (defn add-one [x] (+ x 1))\nTurn 2: (return (add-one 41))\n(let [response (tool/exact-name {\"query\" \"value\"})] (if (= :ok (get response :status)) (return (get response :value)) (fail response)))\n\nAvailable API\nAPI notes\n- fixture: Every export here is measured, never called; the fixture pins one rendering.\n\nCalls beginning with tool/ take exactly one argument map and return a result envelope. Check :status; when it is :ok, the displayed return type describes the :value field.\nIn map types, field? means the field may be omitted; type? means nil is allowed.\n\n- Call: (tool/sample-lookup {\"id\" id})\n  Type: (arguments {id :string}) -> {value :string}\n  Constraints: arguments has no additional fields; return has no additional fields\n  Effect: read\n  Docs: Look one sample up by identifier.\n\n- Value: fixture/sample-budget\n  Type: :int\n  Docs: Characters this fixture reserves.\n\nxx",
+      "before": "PTC_AGENT_PROMPT_V1\n\nInstructions\nUse the run_ptc_lisp tool exactly once per turn with one program string.\nOrdinary expression results are intermediate observations and continue to another turn.\nThe last expression's value is retained as *1; end a program with nil when you only meant to define something, so a large intermediate is not carried forward.\nDefinitions created by successful programs persist and can be reused by later programs in this run.\nFailed evaluations roll back every definition created by that failed program.\nUse (return value) only when the task is complete; (return value) completes successfully.\nUse (fail value) only when the task cannot be completed; (fail value) aborts the run.\nGenerated programs run only against the installed mission API; the prompt inventory below may omit runtime-discoverable capabilities.\nDo not repeat irreversible capability effects merely to reconstruct state.\nThe task and each continuation message state how many programs remain; use that budget to pace exploration.\nWhen a budget notice says FINAL TURN, the next program must call (return value) or (fail value).\nDo not answer in prose.\n\nPTC-Lisp\n- PTC-Lisp is a bounded Clojure-like language.\n- Use let, fn, def/defn, if, loop/recur, map/filter/reduce, and collection helpers.\n- Also available: cond/case, ->/->>, for/doseq, string, set, regex, math, date/time, and json helpers.\n- Built-ins include collections, strings, regex, math, numeric parsing, and date/time, including a bounded Java-compatible API.\n- Decoded JSON maps use string keys; read them with get/get-in.\n- Explore first, return last. Use (println ...) only for concise diagnostics; output previews are bounded.\n- Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.\n- Value references are values; call only function references.\n- The Available API section below is complete for mission data and prompt-visible mission functions and tools; other installed capabilities remain discoverable at runtime.\n- Use (apropos \"term\") to search visible mission prelude exports, installed capabilities, and fixed built-ins plus the bounded Java surface; use (doc \"name\") to print their documentation. (dir) lists attached prelude namespaces, (dir \"ns\") their exports, (export-meta \"ns/name\") returns attached export metadata as data, and (source ns/name) prints an attached prelude definition when available. Only apropos and doc cover installed direct tool capabilities; none enumerate data references.\n- Call granted capabilities only with exact tool/... forms shown below or documented by doc.\n- Fixed namespaces: clojure.core/core, clojure.string/str/string, clojure.set/set, clojure.walk/walk, regex, Math, System, Boolean, numeric/date/time namespaces, data, tool, and json.\n- No ns/require/refer/import, user-defined macros, eval/read-string, or host file I/O.\n\nExamples\nTurn 1: (defn add-one [x] (+ x 1))\nTurn 2: (return (add-one 41))\n(let [response (tool/exact-name {\"query\" \"value\"})] (if (= :ok (get response :status)) (return (get response :value)) (fail response)))\n\nAvailable API\nAPI notes\n- fixture: Every export here is measured, never called; the fixture pins one rendering.\n\nCalls beginning with tool/ take exactly one argument map and return a result envelope. Check :status; when it is :ok, the displayed return type describes the :value field.\nIn map types, field? means the field may be omitted; type? means nil is allowed.\n\n- Call: (tool/sample-lookup {\"id\" id})\n  Type: (arguments {id :string}) -> {value :string}\n  Constraints: arguments has no additional fields; return has no additional fields\n  Effect: read\n  Docs: Look one sample up by identifier.\n\n- Value: fixture/sample-budget\n  Type: :int\n  Docs: Characters this fixture reserves.\n\n"
+    },
+    "split": "withheld",
+    "branch": "generated-after-suffix",
+    "trace_path": "artifacts/traces/cmd-4h26xqb1wwq4k6en4m2m0npbkr.jsonl",
+    "result_hash": "sha256:f4c156a3ac59f673ffb6fd40c960a576da10ea4ecc7f7e8acc63b40ba0461924",
+    "reached_mutation": false,
+    "run_ref": "cmd-4h26xqb1wwq4k6en4m2m0npbkr",
+    "variant": "oracle",
+    "duration_ms": 30,
+    "kernel_usage": {
+      "subordinate_source_checks": 0,
+      "evaluation_history_bytes": 0,
+      "evaluation_memory_bytes": 0,
+      "protocol_errors": 0,
+      "subordinate_evaluations": 0,
+      "closed?": true,
+      "events_dropped": {},
+      "evaluations_by_mission": {},
+      "agent_protocol_errors": 0,
+      "capability_calls": {
+        "mission": {},
+        "workflow": {}
+      },
+      "capability_denials": {},
+      "capability_refusals": {},
+      "evaluation_busy?": false,
+      "evaluation_continuation_bytes": 0,
+      "evaluation_missions": [],
+      "llm_budget": {
+        "cost": null,
+        "total_tokens": null
+      },
+      "llm_spend": {
+        "state": "empty"
+      },
+      "remaining_ms": 9993
+    },
+    "failure_envelope": null,
+    "bundle_hash": "38765c4e3a2e2eb31192fe639adabcf8ba311c6bc48d0844a251709041062573",
+    "inspection_hash": "55d9e112e07811b0f22b1009b96ff7d4e6fcb3d6ba92fd6b30abae5e6482c79a",
+    "inspection_path": "artifacts/inspection/cmd-4h26xqb1wwq4k6en4m2m0npbkr.ptcins"
+  },
+  {
+    "input": {
+      "after": "PTC_AGENT_PROMPT_V1\n\nInstructions\nUse the run_ptc_lisp tool exactly once per turn with one program string.\nOrdinary expression results are intermediate observations and continue to another turn.\nThe last expression's value is retained as *1; end a program with nil when you only meant to define something, so a large intermediate is not carried forward.\nDefinitions created by successful programs persist and can be reused by later programs in this run.\nFailed evaluations roll back every definition created by that failed program.\nUse (return value) only when the task is complete; (return value) completes successfully.\nUse (fail value) only when the task cannot be completed; (fail value) aborts the run.\nGenerated programs run only against the installed mission API; the prompt inventory below may omit runtime-discoverable capabilities.\nDo not repeat irreversible capability effects merely to reconstruct state.\nThe task and each continuation message state how many programs remain; use that budget to pace exploration.\nWhen a budget notice says FINAL TURN, the next program must call (return value) or (fail value).\nDo not answer in prose.\n\nPTC-Lisp\n- PTC-Lisp is a bounded Clojure-like language.\n- Use let, fn, def/defn, if, loop/recur, map/filter/reduce, and collection helpers.\n- Also available: cond/case, ->/->>, for/doseq, string, set, regex, math, date/time, and json helpers.\n- Built-ins include collections, strings, regex, math, numeric parsing, and date/time, including a bounded Java-compatible API.\n- Decoded JSON maps use string keys; read them with get/get-in.\n- Explore first, return last. Use (println ...) only for concise diagnostics; output previews are bounded.\n- Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.\n- Value references are values; call only function references.\n- The Available API section below is complete for mission data and prompt-visible mission functions and tools; other installed capabilities remain discoverable at runtime.\n- Use (apropos \"term\") to search visible mission prelude exports, installed capabilities, and fixed built-ins plus the bounded Java surface; use (doc \"name\") to print their documentation. (dir) lists attached prelude namespaces, (dir \"ns\") their exports, (export-meta \"ns/name\") returns attached export metadata as data, and (source ns/name) prints an attached prelude definition when available. Only apropos and doc cover installed direct tool capabilities; none enumerate data references.\n- Call granted capabilities only with exact tool/... forms shown below or documented by doc.\n- Fixed namespaces: clojure.core/core, clojure.string/str/string, clojure.set/set, clojure.walk/walk, regex, Math, System, Boolean, numeric/date/time namespaces, data, tool, and json.\n- No ns/require/refer/import, user-defined macros, eval/read-string, or host file I/O.\n\nExamples\nTurn 1: (defn add-one [x] (+ x 1))\nTurn 2: (return (add-one 41))\n(let [response (tool/exact-name {\"query\" \"value\"})] (if (= :ok (get response :status)) (return (get response :value)) (fail response)))\n\nAvailable API\nAPI notes\n- fixture: Every export here is measured, never called; the fixture pins one rendering.\n\nCalls beginning with tool/ take exactly one argument map and return a result envelope. Check :status; when it is :ok, the displayed return type describes the :value field.\nIn map types, field? means the field may be omitted; type? means nil is allowed.\n\n- Call: (tool/sample-lookup {\"id\" id})\n  Type: (arguments {id :string}) -> {value :string}\n  Constraints: arguments has no additional fields; return has no additional fields\n  Effect: read\n  Docs: Look one sample up by identifier.\n\n- Value: fixture/sample-budget\n  Type: :int\n  Docs: Characters this fixture reserves.\n\nxxx",
+      "before": "PTC_AGENT_PROMPT_V1\n\nInstructions\nUse the run_ptc_lisp tool exactly once per turn with one program string.\nOrdinary expression results are intermediate observations and continue to another turn.\nThe last expression's value is retained as *1; end a program with nil when you only meant to define something, so a large intermediate is not carried forward.\nDefinitions created by successful programs persist and can be reused by later programs in this run.\nFailed evaluations roll back every definition created by that failed program.\nUse (return value) only when the task is complete; (return value) completes successfully.\nUse (fail value) only when the task cannot be completed; (fail value) aborts the run.\nGenerated programs run only against the installed mission API; the prompt inventory below may omit runtime-discoverable capabilities.\nDo not repeat irreversible capability effects merely to reconstruct state.\nThe task and each continuation message state how many programs remain; use that budget to pace exploration.\nWhen a budget notice says FINAL TURN, the next program must call (return value) or (fail value).\nDo not answer in prose.\n\nPTC-Lisp\n- PTC-Lisp is a bounded Clojure-like language.\n- Use let, fn, def/defn, if, loop/recur, map/filter/reduce, and collection helpers.\n- Also available: cond/case, ->/->>, for/doseq, string, set, regex, math, date/time, and json helpers.\n- Built-ins include collections, strings, regex, math, numeric parsing, and date/time, including a bounded Java-compatible API.\n- Decoded JSON maps use string keys; read them with get/get-in.\n- Explore first, return last. Use (println ...) only for concise diagnostics; output previews are bounded.\n- Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.\n- Value references are values; call only function references.\n- The Available API section below is complete for mission data and prompt-visible mission functions and tools; other installed capabilities remain discoverable at runtime.\n- Use (apropos \"term\") to search visible mission prelude exports, installed capabilities, and fixed built-ins plus the bounded Java surface; use (doc \"name\") to print their documentation. (dir) lists attached prelude namespaces, (dir \"ns\") their exports, (export-meta \"ns/name\") returns attached export metadata as data, and (source ns/name) prints an attached prelude definition when available. Only apropos and doc cover installed direct tool capabilities; none enumerate data references.\n- Call granted capabilities only with exact tool/... forms shown below or documented by doc.\n- Fixed namespaces: clojure.core/core, clojure.string/str/string, clojure.set/set, clojure.walk/walk, regex, Math, System, Boolean, numeric/date/time namespaces, data, tool, and json.\n- No ns/require/refer/import, user-defined macros, eval/read-string, or host file I/O.\n\nExamples\nTurn 1: (defn add-one [x] (+ x 1))\nTurn 2: (return (add-one 41))\n(let [response (tool/exact-name {\"query\" \"value\"})] (if (= :ok (get response :status)) (return (get response :value)) (fail response)))\n\nAvailable API\nAPI notes\n- fixture: Every export here is measured, never called; the fixture pins one rendering.\n\nCalls beginning with tool/ take exactly one argument map and return a result envelope. Check :status; when it is :ok, the displayed return type describes the :value field.\nIn map types, field? means the field may be omitted; type? means nil is allowed.\n\n- Call: (tool/sample-lookup {\"id\" id})\n  Type: (arguments {id :string}) -> {value :string}\n  Constraints: arguments has no additional fields; return has no additional fields\n  Effect: read\n  Docs: Look one sample up by identifier.\n\n- Value: fixture/sample-budget\n  Type: :int\n  Docs: Characters this fixture reserves.\n\n"
+    },
+    "split": "visible",
+    "branch": "generated-after-suffix",
+    "trace_path": "artifacts/traces/cmd-1xk8ka1bvpym66y4jjbcg66hkn.jsonl",
+    "result_hash": "sha256:1ba6f89843a7e4441127bdd66bbcc02a76c0834262504b1512dc5a127ee348d7",
+    "reached_mutation": false,
+    "run_ref": "cmd-1xk8ka1bvpym66y4jjbcg66hkn",
+    "variant": "oracle",
+    "duration_ms": 35,
+    "kernel_usage": {
+      "subordinate_source_checks": 0,
+      "evaluation_history_bytes": 0,
+      "evaluation_memory_bytes": 0,
+      "protocol_errors": 0,
+      "subordinate_evaluations": 0,
+      "closed?": true,
+      "events_dropped": {},
+      "evaluations_by_mission": {},
+      "agent_protocol_errors": 0,
+      "capability_calls": {
+        "mission": {},
+        "workflow": {}
+      },
+      "capability_denials": {},
+      "capability_refusals": {},
+      "evaluation_busy?": false,
+      "evaluation_continuation_bytes": 0,
+      "evaluation_missions": [],
+      "llm_budget": {
+        "cost": null,
+        "total_tokens": null
+      },
+      "llm_spend": {
+        "state": "empty"
+      },
+      "remaining_ms": 9993
+    },
+    "failure_envelope": null,
+    "bundle_hash": "38765c4e3a2e2eb31192fe639adabcf8ba311c6bc48d0844a251709041062573",
+    "inspection_hash": "a2c4fb2a2df42dfed5e5655ebddf5386f07e88023567ef59c5385e39b557b5fd",
+    "inspection_path": "artifacts/inspection/cmd-1xk8ka1bvpym66y4jjbcg66hkn.ptcins"
+  },
+  {
+    "input": {
+      "after": "PTC_AGENT_PROMPT_V1\n\nInstructions\nUse the run_ptc_lisp tool exactly once per turn with one program string.\nOrdinary expression results are intermediate observations and continue to another turn.\nThe last expression's value is retained as *1; end a program with nil when you only meant to define something, so a large intermediate is not carried forward.\nDefinitions created by successful programs persist and can be reused by later programs in this run.\nFailed evaluations roll back every definition created by that failed program.\nUse (return value) only when the task is complete; (return value) completes successfully.\nUse (fail value) only when the task cannot be completed; (fail value) aborts the run.\nGenerated programs run only against the installed mission API; the prompt inventory below may omit runtime-discoverable capabilities.\nDo not repeat irreversible capability effects merely to reconstruct state.\nThe task and each continuation message state how many programs remain; use that budget to pace exploration.\nWhen a budget notice says FINAL TURN, the next program must call (return value) or (fail value).\nDo not answer in prose.\n\nPTC-Lisp\n- PTC-Lisp is a bounded Clojure-like language.\n- Use let, fn, def/defn, if, loop/recur, map/filter/reduce, and collection helpers.\n- Also available: cond/case, ->/->>, for/doseq, string, set, regex, math, date/time, and json helpers.\n- Built-ins include collections, strings, regex, math, numeric parsing, and date/time, including a bounded Java-compatible API.\n- Decoded JSON maps use string keys; read them with get/get-in.\n- Explore first, return last. Use (println ...) only for concise diagnostics; output previews are bounded.\n- Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.\n- Value references are values; call only function references.\n- The Available API section below is complete for mission data and prompt-visible mission functions and tools; other installed capabilities remain discoverable at runtime.\n- Use (apropos \"term\") to search visible mission prelude exports, installed capabilities, and fixed built-ins plus the bounded Java surface; use (doc \"name\") to print their documentation. (dir) lists attached prelude namespaces, (dir \"ns\") their exports, (export-meta \"ns/name\") returns attached export metadata as data, and (source ns/name) prints an attached prelude definition when available. Only apropos and doc cover installed direct tool capabilities; none enumerate data references.\n- Call granted capabilities only with exact tool/... forms shown below or documented by doc.\n- Fixed namespaces: clojure.core/core, clojure.string/str/string, clojure.set/set, clojure.walk/walk, regex, Math, System, Boolean, numeric/date/time namespaces, data, tool, and json.\n- No ns/require/refer/import, user-defined macros, eval/read-string, or host file I/O.\n\nExamples\nTurn 1: (defn add-one [x] (+ x 1))\nTurn 2: (return (add-one 41))\n(let [response (tool/exact-name {\"query\" \"value\"})] (if (= :ok (get response :status)) (return (get response :value)) (fail response)))\n\nAvailable API\nAPI notes\n- fixture: Every export here is measured, never called; the fixture pins one rendering.\n\nCalls beginning with tool/ take exactly one argument map and return a result envelope. Check :status; when it is :ok, the displayed return type describes the :value field.\nIn map types, field? means the field may be omitted; type? means nil is allowed.\n\n- Call: (tool/sample-lookup {\"id\" id})\n  Type: (arguments {id :string}) -> {value :string}\n  Constraints: arguments has no additional fields; return has no additional fields\n  Effect: read\n  Docs: Look one sample up by identifier.\n\n- Value: fixture/sample-budget\n  Type: :int\n  Docs: Characters this fixture reserves.\n\nxxxx",
+      "before": "PTC_AGENT_PROMPT_V1\n\nInstructions\nUse the run_ptc_lisp tool exactly once per turn with one program string.\nOrdinary expression results are intermediate observations and continue to another turn.\nThe last expression's value is retained as *1; end a program with nil when you only meant to define something, so a large intermediate is not carried forward.\nDefinitions created by successful programs persist and can be reused by later programs in this run.\nFailed evaluations roll back every definition created by that failed program.\nUse (return value) only when the task is complete; (return value) completes successfully.\nUse (fail value) only when the task cannot be completed; (fail value) aborts the run.\nGenerated programs run only against the installed mission API; the prompt inventory below may omit runtime-discoverable capabilities.\nDo not repeat irreversible capability effects merely to reconstruct state.\nThe task and each continuation message state how many programs remain; use that budget to pace exploration.\nWhen a budget notice says FINAL TURN, the next program must call (return value) or (fail value).\nDo not answer in prose.\n\nPTC-Lisp\n- PTC-Lisp is a bounded Clojure-like language.\n- Use let, fn, def/defn, if, loop/recur, map/filter/reduce, and collection helpers.\n- Also available: cond/case, ->/->>, for/doseq, string, set, regex, math, date/time, and json helpers.\n- Built-ins include collections, strings, regex, math, numeric parsing, and date/time, including a bounded Java-compatible API.\n- Decoded JSON maps use string keys; read them with get/get-in.\n- Explore first, return last. Use (println ...) only for concise diagnostics; output previews are bounded.\n- Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.\n- Value references are values; call only function references.\n- The Available API section below is complete for mission data and prompt-visible mission functions and tools; other installed capabilities remain discoverable at runtime.\n- Use (apropos \"term\") to search visible mission prelude exports, installed capabilities, and fixed built-ins plus the bounded Java surface; use (doc \"name\") to print their documentation. (dir) lists attached prelude namespaces, (dir \"ns\") their exports, (export-meta \"ns/name\") returns attached export metadata as data, and (source ns/name) prints an attached prelude definition when available. Only apropos and doc cover installed direct tool capabilities; none enumerate data references.\n- Call granted capabilities only with exact tool/... forms shown below or documented by doc.\n- Fixed namespaces: clojure.core/core, clojure.string/str/string, clojure.set/set, clojure.walk/walk, regex, Math, System, Boolean, numeric/date/time namespaces, data, tool, and json.\n- No ns/require/refer/import, user-defined macros, eval/read-string, or host file I/O.\n\nExamples\nTurn 1: (defn add-one [x] (+ x 1))\nTurn 2: (return (add-one 41))\n(let [response (tool/exact-name {\"query\" \"value\"})] (if (= :ok (get response :status)) (return (get response :value)) (fail response)))\n\nAvailable API\nAPI notes\n- fixture: Every export here is measured, never called; the fixture pins one rendering.\n\nCalls beginning with tool/ take exactly one argument map and return a result envelope. Check :status; when it is :ok, the displayed return type describes the :value field.\nIn map types, field? means the field may be omitted; type? means nil is allowed.\n\n- Call: (tool/sample-lookup {\"id\" id})\n  Type: (arguments {id :string}) -> {value :string}\n  Constraints: arguments has no additional fields; return has no additional fields\n  Effect: read\n  Docs: Look one sample up by identifier.\n\n- Value: fixture/sample-budget\n  Type: :int\n  Docs: Characters this fixture reserves.\n\n"
+    },
+    "split": "withheld",
+    "branch": "generated-after-suffix",
+    "trace_path": "artifacts/traces/cmd-5zdqpz9an9m3e37sc8jef75y23.jsonl",
+    "result_hash": "sha256:43cefe239a5663f4f5c3bf72846b97a6afe45f77d96be97a0e894e44123142ca",
+    "reached_mutation": false,
+    "run_ref": "cmd-5zdqpz9an9m3e37sc8jef75y23",
+    "variant": "oracle",
+    "duration_ms": 29,
+    "kernel_usage": {
+      "subordinate_source_checks": 0,
+      "evaluation_history_bytes": 0,
+      "evaluation_memory_bytes": 0,
+      "protocol_errors": 0,
+      "subordinate_evaluations": 0,
+      "closed?": true,
+      "events_dropped": {},
+      "evaluations_by_mission": {},
+      "agent_protocol_errors": 0,
+      "capability_calls": {
+        "mission": {},
+        "workflow": {}
+      },
+      "capability_denials": {},
+      "capability_refusals": {},
+      "evaluation_busy?": false,
+      "evaluation_continuation_bytes": 0,
+      "evaluation_missions": [],
+      "llm_budget": {
+        "cost": null,
+        "total_tokens": null
+      },
+      "llm_spend": {
+        "state": "empty"
+      },
+      "remaining_ms": 9994
+    },
+    "failure_envelope": null,
+    "bundle_hash": "38765c4e3a2e2eb31192fe639adabcf8ba311c6bc48d0844a251709041062573",
+    "inspection_hash": "25b510e7ed78b0b7339d3724ee91ec7d45ec8c047fcf1d5391b2c59f247195f0",
+    "inspection_path": "artifacts/inspection/cmd-5zdqpz9an9m3e37sc8jef75y23.ptcins"
   }
 ]

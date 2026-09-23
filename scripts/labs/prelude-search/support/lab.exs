@@ -542,7 +542,7 @@ defmodule PtcRunner.Labs.PreludeSearch do
     end)
     |> case do
       nil ->
-        {:ok, hash} = ResultIdentity.strict_json_hash(failure_envelope(result))
+        {:ok, hash} = ResultIdentity.strict_json_hash(recorded_failure_envelope(path, result))
         hash
 
       hash ->

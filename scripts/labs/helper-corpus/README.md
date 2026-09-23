@@ -30,6 +30,7 @@ keep the corpus private when adding any non-fixture inputs.
 
 The replay command reconstructs frozen bundles from the corpus, checks artifact
 and input digests, then compares result hashes. Failure outcomes use a strict
-JSON hash of the published Kernel failure envelope; successful outcomes use
-the run-result hash. The test copies the corpus, runs replay in a fresh VM, and
-shows that a changed helper bundle is rejected.
+JSON hash of the published Kernel failure envelope together with the explicit
+failure value; successful outcomes use the run-result hash. The test copies the
+corpus, runs replay in a fresh VM, and checks both bundle identity and changed
+results from a behavior-changing helper mutation.

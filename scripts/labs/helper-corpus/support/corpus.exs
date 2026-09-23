@@ -6,6 +6,17 @@ defmodule PtcRunner.Labs.HelperCorpus do
   @legend "In map types, field? means the field may be omitted; type? means nil is allowed.\n\n"
 
   def generate(output) do
+    if File.exists?(output) do
+      index = Path.join(output, "index.json")
+
+      unless File.lstat!(output).type == :directory and
+               (File.ls!(output) == [] or
+                  (File.regular?(index) and Jason.decode!(File.read!(index))["version"] == 1)),
+             do: raise("refusing to replace a directory that is not a helper corpus: #{output}")
+
+      File.rm_rf!(output)
+    end
+
     File.mkdir_p!(output)
     prompt = File.read!(@fixture)
     empty = prompt |> String.split("Available API\n", parts: 2) |> hd()
