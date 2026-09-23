@@ -1,8 +1,8 @@
 # Program: self-improvement
 
-Status: draft, 2026-09-23. Discussion:
-[#2034](https://github.com/andreasronge/ptc_runner/issues/2034). No experiment,
-live run or provider spend is authorized. This document proposes how existing
+Status: active, 2026-09-23. Discussion
+[#2034](https://github.com/andreasronge/ptc_runner/issues/2034) decided to
+pursue this program. No live run or provider spend is authorized. This document proposes how existing
 programs combine into one question; it does not restart
 [prelude-search](prelude-search.md) or widen
 [debug-efficiency](debug-efficiency.md).
@@ -175,15 +175,30 @@ These are planning constraints, not spending authority.
 
 ## Ledger
 
-No experiments run. Prelude-search 000–004 and any future debug-efficiency
-results are prior evidence, not measurements of this program.
+| experiment | report / result | immutable tag | verdict | known USD | consumed or reserved USD |
+| --- | --- | --- | --- | ---: | ---: |
+| self-improvement/001 | [report](reports/self-improvement/001-prelude-helper-inventory.md) / [result](reports/self-improvement/001.json) | [001](https://github.com/andreasronge/ptc_runner/tree/research/self-improvement/001) | inconclusive; explore, no hypothesis tested | 0 | 0 |
+
+001 inventoried 61 public shipped prelude functions: 10 deterministic, 20
+model-visible, 31 nondeterministic. It shortlisted `prompt.audit/segments`,
+`prompt.audit/measure`, `prompt.audit/delta` and, with pure callbacks,
+`cap/fold-pages`. No retained recording executes any shortlisted helper, so
+H1 cannot yet be judged by replay. Of the deterministic helpers, only
+`cap/unwrap!` (1) and `validate-phase-return` (13) have recorded executions,
+and both are too small to justify a model search.
+
+Prelude-search 000–004 and any future debug-efficiency results are prior
+evidence, not measurements of this program.
 
 ## Backlog
 
 | id | kind | hypothesis | settles | priority | spawned_by | after |
 | --- | --- | --- | --- | --- | --- | --- |
 | self-improvement/b01 | explore | H1 | which shipped prelude helpers have deterministic, replay-covered executions and a measurable cost, how many recordings cover them, and which paths no recording reaches | 1 | maintainer | |
-| self-improvement/b02 | measure | H1 | model-proposed behaviour-preserving edits judged by replay equality on withheld recordings and property tests, and by paired cost, against the unmodified prelude and a hand-optimized helper | 2 | b01 | b01 |
+| self-improvement/b09 | change | H1 | a no-model judge corpus for the 001 shortlist: frozen bundles, visible and withheld inputs, result hashes, failure envelopes; #2056 | 1 | self-improvement/001 | b01 |
+| self-improvement/b10 | measure | H1 | paired isolated-run Kernel usage and elapsed cost for the shortlisted helpers, with a hand-written optimization baseline, before any model-proposed edit | 2 | self-improvement/001 | b09 |
+| self-improvement/b02 | measure | H1 | model-proposed behaviour-preserving edits judged by replay equality on withheld recordings and property tests, and by paired cost, against the unmodified prelude and a hand-optimized helper | 2 | b01 | b09, b10 |
+| self-improvement/b11 | explore | H2, H3 | model-visible agent correction paths, using retained failure fixtures from prelude-search/004; changed requests need live evaluation | 4 | self-improvement/001 | b09 |
 | self-improvement/b07 | change | H3, H4 | the mechanical leakage screen and trace-based inert-code check, validated on seeded leaking and inert candidates before any evolution uses them | 3 | maintainer | |
 | self-improvement/b08 | measure | H3 | noise tolerance δ from repeated runs of the frozen parent debugger on the development set | 3 | maintainer | debug-efficiency/b02 |
 | self-improvement/b03 | measure | H2 | diagnosis-guided repair against independent sampling at matched budget, using the frozen debug-efficiency baseline as the diagnoser | 3 | maintainer | debug-efficiency/b02 |
@@ -193,17 +208,24 @@ results are prior evidence, not measurements of this program.
 
 ## Pending proposals
 
-- Decide on #2034: pursue, defer or drop, and whether this program replaces
-  the single-domain procedural-guidance probe it suggests.
 - Decide whether captured prelude-search failures (timeouts, truncation,
   evaluation errors) may enter a debug-efficiency development set. #2028
   currently keeps reports 002–004 outside its cohort.
-- b01 and b02 need no model judge and no dependency on debug-efficiency; they
-  are the cheapest first step if the program proceeds.
+- #2056 (b09) and #2057 (seeded-mutation case packets for the
+  debug-efficiency corpus) are ready. Both are no-model captures on the
+  prelude-search Phase 0 mechanism; neither authorizes spend.
 
 ## Runtime wants
 
-None observed yet. Known gaps that bound this program:
+From self-improvement/001:
+
+- Per-public-helper invocation and branch identifiers, with evaluation steps,
+  heap and `duration_ms` attributable to one invocation. Today only aggregate
+  run usage exists.
+- A no-provider re-execution path that compares strict outputs and failure
+  envelopes for one shipped helper across a candidate bundle.
+
+Known gaps that bound this program:
 
 - #2021: missing final mission evaluation diagnostics limit which failures an
   L2 debugger can diagnose from authoritative evidence.

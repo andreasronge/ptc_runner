@@ -1,3 +1,8 @@
+---
+name: precommit
+description: Run the local quality gate (mix precommit), then commit and push through the tracked pre-push hook. Use when asked to run the quality gate or to commit and push changes in this repository.
+---
+
 Run the local quality gate, then push once:
 
 1. Run `mix precommit` (nested fetch + `scripts/ci/core-quality.sh`) and fix every failure.
