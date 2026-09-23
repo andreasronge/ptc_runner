@@ -70,3 +70,40 @@ This remains a lab. `decision-request` is not yet a host-config provider, and
 it does not yet participate in LLM replay, cost budgets, or admission. The
 recommended product boundary is a separate `decision/request` prelude that
 shares those host policies with `llm/request`.
+
+## Supported boundary and private records
+
+The lab accepts map state and named questions with nonempty string instructions.
+Boolean questions may omit criteria or provide exactly `true` and `false` string
+descriptions. Choice criteria contain 1–255 named string descriptions; score
+criteria contain 2–10 ordered string levels. This string-only subset is a lab
+restriction: the [vendor API](https://docs.typesafe.ai/api) also accepts
+structured instructions and criteria and null choice descriptions.
+
+Responses must answer every requested ID once with the corresponding wire type
+(`noul`, `choice`, or `score`). Choice distributions cover exactly the requested
+options; score distributions and legends cover exactly the requested levels.
+Probabilities and confidence are finite values from 0 to 1. Distribution sums,
+chosen-option ties, and reported weighted scores allow an absolute rounding
+difference of at most `0.01`; larger differences fail validation. The raw
+values are never repaired. Successful results retain full distributions,
+confidence, score, and legend.
+
+A boolean answer is a probability of yes, not a boolean decision. The refund
+workflow applies its own `0.5` threshold. Confidence describes concentration
+of a distribution; it does not establish calibration or correctness.
+
+Every received successful HTTP response is recorded before answer validation.
+The default recorder writes private Erlang term files under
+`tmp/jev-decision-attempts/` with mode `0600`; callers can inject a `:recorder`
+function for comparison runs. Each record contains the dispatched request, raw
+response, resolved model, status, validation outcome, independently validated
+usage and cost, and a bounded allowlist of available OpenRouter correlation or
+retry headers (`x-generation-id`, `x-request-id`, `retry-after`). Those headers
+are captured only if present; the Decisions endpoint does not promise them.
+A malformed response returns a dispatched `invalid_result` error without
+retry. Valid reported usage and cost remain known even when an answer is
+rejected. Missing or malformed usage and absent cost are `:unknown`, so a
+comparison harness can stop and retain its reservation. This lab recorder does
+not settle Kernel LLM budgets or provide replay or admission. Transport retries
+remain disabled and host execution limits still apply.
