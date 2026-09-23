@@ -58,6 +58,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   alias PtcRunner.Kernel.QueryCursor
   alias PtcRunner.Kernel.QueryValidation
   alias PtcRunner.Kernel.ResultLimit
+  alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.TraceDirectoryAdmission
   alias PtcRunner.Kernel.TraceEventValidation
@@ -2958,12 +2959,29 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   defp observed_call_counts(events) do
     %{
-      workflow: capability_call_count(events, "workflow"),
-      mission: capability_call_count(events, "mission"),
+      workflow: quota_backed_capability_call_count(events, "workflow"),
+      mission: quota_backed_capability_call_count(events, "mission"),
       llm: capability_name_count(events, "workflow", "llm-request"),
       complete?: false
     }
   end
+
+  defp quota_backed_capability_call_count(events, environment) do
+    Enum.count(events, fn event ->
+      name = event_data(event, "name")
+
+      event["type"] == "capability-started" and
+        stringify(event_data(event, "environment")) == environment and
+        is_binary(name) and
+        not runtime_instrumented_name?(environment, name)
+    end)
+  end
+
+  defp runtime_instrumented_name?("workflow", name),
+    do: RuntimeTools.instrumented_name?(:workflow, name)
+
+  defp runtime_instrumented_name?("mission", name),
+    do: RuntimeTools.instrumented_name?(:mission, name)
 
   defp scoped_terminal_call_count(calls, prefix) do
     Enum.reduce(calls, 0, fn {name, count}, total ->

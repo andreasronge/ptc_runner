@@ -76,6 +76,16 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
       counter_event("legacy", 4, "run-stopped", %{"outcome" => "ok"})
     ]
 
+    legacy_runtime = [
+      counter_event("legacy-runtime", 1, "run-started", %{"missions" => %{}}),
+      counter_event("legacy-runtime", 2, "capability-started", %{
+        "capability_id" => "runtime-call",
+        "environment" => "workflow",
+        "name" => "kernel-eval"
+      }),
+      counter_event("legacy-runtime", 3, "run-stopped", %{"outcome" => "ok"})
+    ]
+
     native = [
       counter_event("native", 1, "run-started", %{"missions" => %{}}),
       counter_event("native", 2, "run-stopped", %{
@@ -109,6 +119,7 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
     for {run_id, events} <- [
           {"authoritative", authoritative},
           {"legacy", legacy},
+          {"legacy-runtime", legacy_runtime},
           {"native", native},
           {"contradictory", contradictory}
         ] do
@@ -132,6 +143,8 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
     assert summaries["native"]["call_counts_complete"]
     assert summaries["legacy"]["llm_calls"] == 1
     refute summaries["legacy"]["call_counts_complete"]
+    assert summaries["legacy-runtime"]["llm_calls"] == 0
+    refute summaries["legacy-runtime"]["call_counts_complete"]
 
     assert {:ok, %{"items" => full_items}} =
              RunAnalysis.query(analysis, :runs, %{"view" => "full"})
@@ -159,6 +172,18 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
              "workflow_capability_calls" => 1,
              "mission_capability_calls" => 1,
              "llm_calls" => 1,
+             "call_counts_complete" => false
+           }
+
+    assert Map.take(full["legacy-runtime"], [
+             "workflow_capability_calls",
+             "mission_capability_calls",
+             "llm_calls",
+             "call_counts_complete"
+           ]) == %{
+             "workflow_capability_calls" => 0,
+             "mission_capability_calls" => 0,
+             "llm_calls" => 0,
              "call_counts_complete" => false
            }
 
