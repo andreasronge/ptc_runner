@@ -22,8 +22,14 @@ defmodule PtcGateway.MCP do
   # while readiness, which reports on the warm runtime, stays green throughout.
   # This budget bounds a peer that stops sending. A peer that keeps dribbling
   # bytes renews it by definition; that residue is bounded by the in-flight
-  # ceiling, the loopback binding and the bearer requirement.
+  # ceiling, the loopback binding and the bearer requirement. The router option
+  # `:body_read_timeout_ms` overrides it so tests need not wait out the default.
   @body_read_timeout_ms 2_000
+  # How often a streaming call probes its client while the run is still going.
+  # A disconnect is observed at the first probe after it, so this is also how
+  # long a vanished client's run continues before cancellation. The router
+  # option `:heartbeat_ms` overrides it.
+  @heartbeat_ms 5_000
   @response_limit 4_194_304
   @safe_integer 9_007_199_254_740_991
   @call_result_schema_path Path.expand(
@@ -79,7 +85,7 @@ defmodule PtcGateway.MCP do
   end
 
   defp handle_body(conn, opts) do
-    with {:ok, body, conn} <- read_bounded_body(conn),
+    with {:ok, body, conn} <- read_bounded_body(conn, opts),
          {:ok, request} <- decode(body, conn),
          {:ok, id, method, params} <- envelope(request, conn),
          :ok <- valid_metadata(conn, id, method, params),
@@ -326,11 +332,11 @@ defmodule PtcGateway.MCP do
   defp specificity(_type, "*"), do: 1
   defp specificity(_type, _subtype), do: 2
 
-  defp read_bounded_body(conn) do
+  defp read_bounded_body(conn, opts) do
     case read_body(conn,
            length: @body_limit + 1,
            read_length: 64_000,
-           read_timeout: @body_read_timeout_ms
+           read_timeout: Keyword.get(opts, :body_read_timeout_ms, @body_read_timeout_ms)
          ) do
       {:ok, body, conn} when byte_size(body) <= @body_limit -> {:ok, body, conn}
       {:ok, _body, conn} -> {:fixed, conn, 413, "request_too_large", []}
@@ -666,7 +672,8 @@ defmodule PtcGateway.MCP do
       {:reserved, ^owner, reservation} ->
         case precommit_outcome(reservation) do
           :reserved ->
-            commit_sse(conn, id, owner, monitor, reservation)
+            heartbeat_ms = Keyword.get(opts, :heartbeat_ms, @heartbeat_ms)
+            commit_sse(conn, id, owner, monitor, reservation, heartbeat_ms)
 
           {:error, status, code, message} ->
             send(owner, :close)
@@ -728,7 +735,7 @@ defmodule PtcGateway.MCP do
     end
   end
 
-  defp commit_sse(conn, id, owner, monitor, reservation) do
+  defp commit_sse(conn, id, owner, monitor, reservation, heartbeat_ms) do
     conn =
       conn
       |> put_resp_content_type("text/event-stream")
@@ -739,7 +746,7 @@ defmodule PtcGateway.MCP do
     case chunk(conn, ": accepted\n\n") do
       {:ok, conn} ->
         send(owner, {:activate, self()})
-        await_outcome(conn, id, owner, monitor, reservation)
+        await_outcome(conn, id, owner, monitor, reservation, heartbeat_ms)
 
       {:error, _} ->
         send(owner, :close)
@@ -747,7 +754,7 @@ defmodule PtcGateway.MCP do
     end
   end
 
-  defp await_outcome(conn, id, owner, monitor, reservation) do
+  defp await_outcome(conn, id, owner, monitor, reservation, heartbeat_ms) do
     receive do
       {:publish, ^owner, outcome} ->
         {:ok, encoded} = encode_call_response(id, outcome)
@@ -766,12 +773,12 @@ defmodule PtcGateway.MCP do
       {:DOWN, ^monitor, :process, ^owner, _reason} ->
         {:ok, {:stream, conn}}
     after
-      5_000 ->
+      heartbeat_ms ->
         if connection_down?(conn) do
           disconnect(conn, owner, reservation)
         else
           case chunk(conn, ": heartbeat\n\n") do
-            {:ok, conn} -> await_outcome(conn, id, owner, monitor, reservation)
+            {:ok, conn} -> await_outcome(conn, id, owner, monitor, reservation, heartbeat_ms)
             {:error, _} -> disconnect(conn, owner, reservation)
           end
         end
