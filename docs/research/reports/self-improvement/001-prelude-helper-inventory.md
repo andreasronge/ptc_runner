@@ -62,7 +62,17 @@ These yield twelve `agent.core/run-outcome` calls, one
 `agent.core/run-value` call, thirteen `agent.machine/start` calls, and at least
 23 `llm/request`, `agent.native/normalize`, and prompt-render calls. The
 `coverage_count` rows show conservative per-function counts; they do not imply
-coverage of every branch. The three
+coverage of every branch. I also propagated only guaranteed transitive calls:
+all thirteen loops resolve a named return contract and validate a returned
+candidate (`agent.core.clj:94-114,647`), every model response is annotated
+(`agent.core.clj:482-487`), and each prompt render reads mission model context
+(`agent.prompt.clj:311-316`). Ten requests occur after the first request of
+their loop, establishing at least ten retry-policy and prompt-transition
+calls. The adaptive repair run reads the accepted source and evaluates the
+installed parser before requesting a model, establishing at least two
+`kernel/eval-with` calls; its successful repair also checks terminal source
+and evaluates the candidate on two URLs (`workflow.clj:10-31,61-80`). These
+are lower bounds where the code may invoke a helper more often. The three
 `scripts/labs/prelude-search/subjects/*.clj` are application preludes, not
 shipped kernel helpers. Their 300 of 300 byte-equal re-executions in
 [prelude-search/000](../prelude-search/000-reproducibility.md) therefore count
