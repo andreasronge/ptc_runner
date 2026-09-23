@@ -1386,6 +1386,65 @@ defmodule PtcRunner.Kernel.TraceLogTest do
   end
 
   @tag :tmp_dir
+  test "canonical validation rejects terminal call totals below retained starts", %{
+    tmp_dir: directory
+  } do
+    for {shape, capability_calls} <- [
+          flat: %{"workflow/llm-request" => 0},
+          nested: %{"workflow" => %{"llm-request" => 0}, "mission" => %{}}
+        ] do
+      path = Path.join(directory, "contradictory-capability-calls-#{shape}.jsonl")
+
+      events = [
+        decoded_event("contradictory-capability-calls-#{shape}", 1, "run-started"),
+        decoded_event("contradictory-capability-calls-#{shape}", 2, "capability-started", %{
+          "capability_id" => "retained-call",
+          "environment" => "workflow",
+          "name" => "llm-request"
+        }),
+        decoded_event("contradictory-capability-calls-#{shape}", 3, "run-stopped", %{
+          "usage" => %{
+            "capability_calls" => capability_calls,
+            "llm_budget" => %{"total_tokens" => nil, "cost" => nil}
+          }
+        })
+      ]
+
+      File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
+      {:ok, trace_log} = TraceLog.new(source: {:file, path})
+
+      assert {:error, :malformed_source} = TraceLog.query(trace_log, :list_runs, %{})
+    end
+  end
+
+  @tag :tmp_dir
+  test "canonical validation accepts producer-supported call-count cardinality", %{
+    tmp_dir: directory
+  } do
+    path = Path.join(directory, "high-cardinality-capability-calls.jsonl")
+
+    capability_calls =
+      1..513
+      |> Map.new(fn index -> {"workflow/tool-#{index}", 1} end)
+
+    events = [
+      decoded_event("high-cardinality-capability-calls", 1, "run-started"),
+      decoded_event("high-cardinality-capability-calls", 2, "run-stopped", %{
+        "usage" => %{
+          "capability_calls" => capability_calls,
+          "llm_budget" => %{"total_tokens" => nil, "cost" => nil}
+        }
+      })
+    ]
+
+    File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
+    {:ok, trace_log} = TraceLog.new(source: {:file, path})
+
+    assert {:ok, %{"items" => [%{"workflow_capability_calls" => 513}]}} =
+             TraceLog.query(trace_log, :list_runs, %{})
+  end
+
+  @tag :tmp_dir
   test "canonical validation rejects terminal events without usage", %{tmp_dir: directory} do
     path = Path.join(directory, "missing-terminal-usage.jsonl")
 

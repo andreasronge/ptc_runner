@@ -51,7 +51,7 @@ defmodule PtcRunner.Kernel.TraceEventValidation do
       end
     end)
     |> case do
-      {:ok, _state} -> :ok
+      {:ok, _state} -> validate_call_count_consistency(events)
       {:error, _reason} = error -> error
     end
   end
@@ -417,7 +417,7 @@ defmodule PtcRunner.Kernel.TraceEventValidation do
       :error ->
         :ok
 
-      {:ok, calls} when is_map(calls) and map_size(calls) <= 512 ->
+      {:ok, calls} when is_map(calls) ->
         if valid_capability_calls?(calls),
           do: :ok,
           else: {:error, :malformed_source}
@@ -430,11 +430,10 @@ defmodule PtcRunner.Kernel.TraceEventValidation do
   defp valid_capability_calls?(%{"workflow" => workflow, "mission" => mission} = calls)
        when map_size(calls) == 2 and is_map(workflow) and is_map(mission) do
     Enum.all?([workflow, mission], fn scoped ->
-      map_size(scoped) <= 512 and
-        Enum.all?(scoped, fn {name, count} ->
-          is_binary(name) and Regex.match?(@capability_call_key, "workflow/" <> name) and
-            is_integer(count) and count >= 0
-        end)
+      Enum.all?(scoped, fn {name, count} ->
+        is_binary(name) and Regex.match?(@capability_call_key, "workflow/" <> name) and
+          is_integer(count) and count >= 0
+      end)
     end)
   end
 
@@ -456,6 +455,76 @@ defmodule PtcRunner.Kernel.TraceEventValidation do
   end
 
   defp valid_capability_call_entry?(_entry), do: false
+
+  defp validate_call_count_consistency(events) do
+    observed =
+      Enum.reduce(events, %{}, fn event, counts ->
+        data = event["data"]
+
+        case {event["type"], stringify(data["environment"]), data["name"]} do
+          {"capability-started", environment, name}
+          when environment in ["workflow", "mission"] and is_binary(name) ->
+            run_id = event["run_id"]
+            call_name = environment <> "/" <> name
+
+            Map.update(counts, run_id, %{call_name => 1}, fn run_counts ->
+              Map.update(run_counts, call_name, 1, &(&1 + 1))
+            end)
+
+          _other ->
+            counts
+        end
+      end)
+
+    Enum.reduce_while(events, :ok, fn event, :ok ->
+      case {event["type"], terminal_call_totals(event["data"])} do
+        {"run-stopped", {:ok, totals}} ->
+          run_id = event["run_id"]
+
+          if terminal_counts_cover?(totals, Map.get(observed, run_id, %{})) do
+            {:cont, :ok}
+          else
+            {:halt, {:error, :malformed_source}}
+          end
+
+        _legacy_or_non_terminal ->
+          {:cont, :ok}
+      end
+    end)
+  end
+
+  defp terminal_counts_cover?(totals, observed) do
+    # Runtime-owned instrumented tools also emit capability events, but they do
+    # not consume the public capability quotas projected in terminal usage.
+    # Compare only names the terminal projection identifies as quota-backed.
+    Enum.all?(observed, fn {name, count} ->
+      not Map.has_key?(totals, name) or Map.fetch!(totals, name) >= count
+    end)
+  end
+
+  defp terminal_call_totals(%{
+         "usage" => %{
+           "capability_calls" => %{"workflow" => workflow, "mission" => mission} = calls
+         }
+       })
+       when map_size(calls) == 2 and is_map(workflow) and is_map(mission) do
+    totals =
+      for {environment, scoped} <- [{"workflow", workflow}, {"mission", mission}],
+          {name, count} <- scoped,
+          into: %{},
+          do: {environment <> "/" <> name, count}
+
+    {:ok, totals}
+  end
+
+  defp terminal_call_totals(%{"usage" => %{"capability_calls" => calls}})
+       when is_map(calls) do
+    if Enum.all?(calls, fn {_name, count} -> is_integer(count) end),
+      do: {:ok, calls},
+      else: :unavailable
+  end
+
+  defp terminal_call_totals(_data), do: :unavailable
 
   defp validate_terminal_llm_budget(usage) do
     case LLMBudget.validate_terminal_projection(Map.get(usage, "llm_budget")) do
