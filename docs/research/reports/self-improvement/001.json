@@ -5,9 +5,13 @@
     "source": "priv/preludes/kernel/agent.core.clj:667",
     "classification": "nondeterministic",
     "reason": "Runs the agent loop and dispatches a model request (agent.core.clj:482-487,552).",
-    "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
-    "coverage_evidence": [],
+    "coverage_count": 12,
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
+    "coverage_evidence": [
+      "examples/dabstep-fraud/replay.jsonl: one full workflow, three agent loops, eleven model calls (evidence/STUDY.md:155-165)",
+      "examples/dabstep-fraud/reviewer-replay.jsonl: three reviewer runs, one agent loop and model call each (evidence/STUDY.md:150-155)",
+      "examples/dabstep-fraud/verification-replay.jsonl: two constructed full workflows, three agent loops each, four and three model calls (evidence/VERIFICATION.md:9-21; dabstep_reviewer_regression_test.exs:102-136)"
+    ],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/agent_library_test.exs:1666",
       "test/ptc_runner/kernel/agent_library_test.exs:1680",
@@ -22,6 +26,7 @@
       "test/ptc_runner/kernel/agent_library_test.exs:1905",
       "test/ptc_runner/kernel/agent_library_test.exs:1930",
       "test/ptc_runner/kernel/agent_library_test.exs:1966",
+      "test/ptc_runner/kernel/agent_library_test.exs:1994",
       "test/ptc_runner/kernel/agent_library_test.exs:2024",
       "test/ptc_runner/kernel/agent_library_test.exs:2049",
       "test/ptc_runner/kernel/agent_library_test.exs:2083",
@@ -62,6 +67,7 @@
       "test/ptc_runner/kernel/agent_library_test.exs:6505",
       "test/ptc_runner/kernel/agent_library_test.exs:6523",
       "test/ptc_runner/kernel/agent_library_test.exs:6533",
+      "test/ptc_runner/kernel/agent_core_characterization_test.exs:288",
       "test/ptc_runner/kernel/agent_core_characterization_test.exs:378",
       "test/ptc_runner/kernel/agent_core_characterization_test.exs:403",
       "test/ptc_runner/kernel/agent_core_characterization_test.exs:727",
@@ -81,7 +87,7 @@
     "classification": "nondeterministic",
     "reason": "Runs the agent loop and dispatches a model request (agent.core.clj:482-487,552).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/agent_library_test.exs:2527",
@@ -96,7 +102,8 @@
       "test/ptc_runner/kernel/agent_library_test.exs:6285",
       "test/ptc_runner/kernel/agent_library_test.exs:6340",
       "test/ptc_runner/kernel/agent_library_test.exs:6396",
-      "test/ptc_runner/kernel/agent_library_test.exs:6523"
+      "test/ptc_runner/kernel/agent_library_test.exs:6523",
+      "test/ptc_runner/kernel/command_engine_test.exs:1292"
     ],
     "uncovered_paths": "Unknown from recordings; structural branch forms: case. No per-function branch trace exists.",
     "cost_measurability": "Kernel.run aggregate usage and trace duration_ms can measure a whole invocation, but no retained recording attributes evaluation steps, heap, or duration_ms to this function; an isolated no-model benchmark with frozen inputs is needed.",
@@ -108,9 +115,11 @@
     "source": "priv/preludes/kernel/agent.core.clj:736",
     "classification": "nondeterministic",
     "reason": "Runs the agent loop and dispatches a model request (agent.core.clj:482-487,552).",
-    "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
-    "coverage_evidence": [],
+    "coverage_count": 1,
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
+    "coverage_evidence": [
+      "examples/adaptive-web-parser/replay.jsonl: one repair run with one agent loop and two model calls (workflow.clj:61; README.md:1-48)"
+    ],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/named_missions_parallel_test.exs:26",
       "test/ptc_runner/kernel/named_missions_parallel_test.exs:27",
@@ -171,7 +180,7 @@
     "classification": "nondeterministic",
     "reason": "Runs the agent loop and dispatches a model request (agent.core.clj:482-487,552).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/agent_library_test.exs:1374",
@@ -196,14 +205,26 @@
     "classification": "nondeterministic",
     "reason": "Runs the agent loop and dispatches a model request (agent.core.clj:482-487,552).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
+      "test/ptc_runner/kernel/agent_library_test.exs:574",
+      "test/ptc_runner/kernel/agent_library_test.exs:704",
+      "test/ptc_runner/kernel/agent_library_test.exs:736",
+      "test/ptc_runner/kernel/agent_library_test.exs:774",
+      "test/ptc_runner/kernel/agent_library_test.exs:822",
+      "test/ptc_runner/kernel/agent_library_test.exs:863",
+      "test/ptc_runner/kernel/agent_library_test.exs:908",
       "test/ptc_runner/kernel/agent_library_test.exs:2297",
       "test/ptc_runner/kernel/agent_library_test.exs:2693",
       "test/ptc_runner/kernel/agent_library_test.exs:2763",
       "test/ptc_runner/kernel/agent_library_test.exs:2790",
-      "test/ptc_runner/kernel/agent_library_test.exs:5668"
+      "test/ptc_runner/kernel/agent_library_test.exs:5668",
+      "test/ptc_runner/kernel/agent_core_characterization_test.exs:170",
+      "test/ptc_runner/kernel/agent_core_characterization_test.exs:197",
+      "test/ptc_runner/kernel/agent_core_characterization_test.exs:232",
+      "test/ptc_runner/kernel/agent_core_characterization_test.exs:542",
+      "test/ptc_runner/kernel/agent_core_characterization_test.exs:813"
     ],
     "uncovered_paths": "No local branch form; failure/callback paths and indirect callees remain unverified by recordings.",
     "cost_measurability": "Kernel.run aggregate usage and trace duration_ms can measure a whole invocation, but no retained recording attributes evaluation steps, heap, or duration_ms to this function; an isolated no-model benchmark with frozen inputs is needed.",
@@ -216,7 +237,7 @@
     "classification": "nondeterministic",
     "reason": "Runs the agent loop and dispatches a model request (agent.core.clj:482-487,552).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/ptc_runner/live_status_test.exs:570",
@@ -335,7 +356,7 @@
     "classification": "model-visible",
     "reason": "Pure formatting, but the message is appended to the next model request (agent.machine.clj:84-118).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [],
     "uncovered_paths": "Unknown from recordings; structural branch forms: and, cond, if. No per-function branch trace exists.",
@@ -349,7 +370,7 @@
     "classification": "model-visible",
     "reason": "Pure formatting, but the message is appended to the next model request (agent.machine.clj:84-118).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/agent_library_test.exs:6739"
@@ -365,7 +386,7 @@
     "classification": "model-visible",
     "reason": "Pure formatting, but the message is appended to the next model request (agent.machine.clj:84-118).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [],
     "uncovered_paths": "Unknown from recordings; structural branch forms: and, if. No per-function branch trace exists.",
@@ -379,7 +400,7 @@
     "classification": "model-visible",
     "reason": "Pure formatting, but the message is appended to the next model request (agent.machine.clj:84-118).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [],
     "uncovered_paths": "Unknown from recordings; structural branch forms: if. No per-function branch trace exists.",
@@ -393,7 +414,7 @@
     "classification": "model-visible",
     "reason": "Pure formatting, but the message is appended to the next model request (agent.machine.clj:84-118).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [],
     "uncovered_paths": "Unknown from recordings; structural branch forms: case, if, or. No per-function branch trace exists.",
@@ -407,7 +428,7 @@
     "classification": "model-visible",
     "reason": "Pure formatting, but the message is appended to the next model request (agent.machine.clj:84-118).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/dispatcher_argument_violation_test.exs:544"
@@ -423,7 +444,7 @@
     "classification": "model-visible",
     "reason": "Pure formatting, but the message is appended to the next model request (agent.machine.clj:84-118).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [],
     "uncovered_paths": "Unknown from recordings; structural branch forms: or. No per-function branch trace exists.",
@@ -437,7 +458,7 @@
     "classification": "model-visible",
     "reason": "Pure formatting, but the message is appended to the next model request (agent.machine.clj:84-118).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [],
     "uncovered_paths": "No local branch form; failure/callback paths and indirect callees remain unverified by recordings.",
@@ -451,7 +472,7 @@
     "classification": "model-visible",
     "reason": "Pure formatting, but the message is appended to the next model request (agent.machine.clj:84-118).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [],
     "uncovered_paths": "Unknown from recordings; structural branch forms: if. No per-function branch trace exists.",
@@ -464,9 +485,14 @@
     "source": "priv/preludes/kernel/agent.machine.clj:611",
     "classification": "model-visible",
     "reason": "Pure transition, but builds the transcript and request commands consumed by the model loop (agent.machine.clj:611-649).",
-    "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
-    "coverage_evidence": [],
+    "coverage_count": 13,
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
+    "coverage_evidence": [
+      "examples/dabstep-fraud/replay.jsonl: one full workflow, three agent loops, eleven model calls (evidence/STUDY.md:155-165)",
+      "examples/dabstep-fraud/reviewer-replay.jsonl: three reviewer runs, one agent loop and model call each (evidence/STUDY.md:150-155)",
+      "examples/dabstep-fraud/verification-replay.jsonl: two constructed full workflows, three agent loops each, four and three model calls (evidence/VERIFICATION.md:9-21; dabstep_reviewer_regression_test.exs:102-136)",
+      "examples/adaptive-web-parser/replay.jsonl: one repair run with one agent loop and two model calls (workflow.clj:61; README.md:1-48)"
+    ],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/agent_machine_test.exs:349"
     ],
@@ -480,9 +506,14 @@
     "source": "priv/preludes/kernel/agent.machine.clj:649",
     "classification": "model-visible",
     "reason": "Pure transition, but builds the transcript and request commands consumed by the model loop (agent.machine.clj:611-649).",
-    "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
-    "coverage_evidence": [],
+    "coverage_count": 23,
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
+    "coverage_evidence": [
+      "examples/dabstep-fraud/replay.jsonl: one full workflow, three agent loops, eleven model calls (evidence/STUDY.md:155-165)",
+      "examples/dabstep-fraud/reviewer-replay.jsonl: three reviewer runs, one agent loop and model call each (evidence/STUDY.md:150-155)",
+      "examples/dabstep-fraud/verification-replay.jsonl: two constructed full workflows, three agent loops each, four and three model calls (evidence/VERIFICATION.md:9-21; dabstep_reviewer_regression_test.exs:102-136)",
+      "examples/adaptive-web-parser/replay.jsonl: one repair run with one agent loop and two model calls (workflow.clj:61; README.md:1-48)"
+    ],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/agent_machine_test.exs:352",
       "test/ptc_runner/kernel/agent_machine_test.exs:363"
@@ -498,7 +529,7 @@
     "classification": "nondeterministic",
     "reason": "Delegates to agent.core, which requests a model (agent.main.clj:3).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/agent_library_test.exs:1040",
@@ -521,9 +552,14 @@
     "source": "priv/preludes/kernel/agent.native.clj:3",
     "classification": "model-visible",
     "reason": "Pure schema/response normalization that changes model tool contracts or the transcript (agent.native.clj:3,218).",
-    "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
-    "coverage_evidence": [],
+    "coverage_count": 23,
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
+    "coverage_evidence": [
+      "examples/dabstep-fraud/replay.jsonl: one full workflow, three agent loops, eleven model calls (evidence/STUDY.md:155-165)",
+      "examples/dabstep-fraud/reviewer-replay.jsonl: three reviewer runs, one agent loop and model call each (evidence/STUDY.md:150-155)",
+      "examples/dabstep-fraud/verification-replay.jsonl: two constructed full workflows, three agent loops each, four and three model calls (evidence/VERIFICATION.md:9-21; dabstep_reviewer_regression_test.exs:102-136)",
+      "examples/adaptive-web-parser/replay.jsonl: one repair run with one agent loop and two model calls (workflow.clj:61; README.md:1-48)"
+    ],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/named_missions_diagnosis_test.exs:39"
     ],
@@ -537,9 +573,14 @@
     "source": "priv/preludes/kernel/agent.native.clj:218",
     "classification": "model-visible",
     "reason": "Pure schema/response normalization that changes model tool contracts or the transcript (agent.native.clj:3,218).",
-    "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
-    "coverage_evidence": [],
+    "coverage_count": 23,
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
+    "coverage_evidence": [
+      "examples/dabstep-fraud/replay.jsonl: one full workflow, three agent loops, eleven model calls (evidence/STUDY.md:155-165)",
+      "examples/dabstep-fraud/reviewer-replay.jsonl: three reviewer runs, one agent loop and model call each (evidence/STUDY.md:150-155)",
+      "examples/dabstep-fraud/verification-replay.jsonl: two constructed full workflows, three agent loops each, four and three model calls (evidence/VERIFICATION.md:9-21; dabstep_reviewer_regression_test.exs:102-136)",
+      "examples/adaptive-web-parser/replay.jsonl: one repair run with one agent loop and two model calls (workflow.clj:61; README.md:1-48)"
+    ],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/agent_library_test.exs:144",
       "test/ptc_runner/kernel/agent_library_test.exs:309",
@@ -560,9 +601,14 @@
     "source": "priv/preludes/kernel/agent.prompt.clj:3",
     "classification": "model-visible",
     "reason": "Prompt state and rendering feed the system message (agent.prompt.clj:311,368).",
-    "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
-    "coverage_evidence": [],
+    "coverage_count": 13,
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
+    "coverage_evidence": [
+      "examples/dabstep-fraud/replay.jsonl: one full workflow, three agent loops, eleven model calls (evidence/STUDY.md:155-165)",
+      "examples/dabstep-fraud/reviewer-replay.jsonl: three reviewer runs, one agent loop and model call each (evidence/STUDY.md:150-155)",
+      "examples/dabstep-fraud/verification-replay.jsonl: two constructed full workflows, three agent loops each, four and three model calls (evidence/VERIFICATION.md:9-21; dabstep_reviewer_regression_test.exs:102-136)",
+      "examples/adaptive-web-parser/replay.jsonl: one repair run with one agent loop and two model calls (workflow.clj:61; README.md:1-48)"
+    ],
     "direct_test_call_sites": [],
     "uncovered_paths": "Unknown from recordings; structural branch forms: or. No per-function branch trace exists.",
     "cost_measurability": "Kernel.run aggregate usage and trace duration_ms can measure a whole invocation, but no retained recording attributes evaluation steps, heap, or duration_ms to this function; an isolated no-model benchmark with frozen inputs is needed.",
@@ -574,9 +620,14 @@
     "source": "priv/preludes/kernel/agent.prompt.clj:311",
     "classification": "model-visible",
     "reason": "Prompt state and rendering feed the system message (agent.prompt.clj:311,368).",
-    "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
-    "coverage_evidence": [],
+    "coverage_count": 23,
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
+    "coverage_evidence": [
+      "examples/dabstep-fraud/replay.jsonl: one full workflow, three agent loops, eleven model calls (evidence/STUDY.md:155-165)",
+      "examples/dabstep-fraud/reviewer-replay.jsonl: three reviewer runs, one agent loop and model call each (evidence/STUDY.md:150-155)",
+      "examples/dabstep-fraud/verification-replay.jsonl: two constructed full workflows, three agent loops each, four and three model calls (evidence/VERIFICATION.md:9-21; dabstep_reviewer_regression_test.exs:102-136)",
+      "examples/adaptive-web-parser/replay.jsonl: one repair run with one agent loop and two model calls (workflow.clj:61; README.md:1-48)"
+    ],
     "direct_test_call_sites": [],
     "uncovered_paths": "Unknown from recordings; structural branch forms: and, if, or. No per-function branch trace exists.",
     "cost_measurability": "Kernel.run aggregate usage and trace duration_ms can measure a whole invocation, but no retained recording attributes evaluation steps, heap, or duration_ms to this function; an isolated no-model benchmark with frozen inputs is needed.",
@@ -589,7 +640,7 @@
     "classification": "model-visible",
     "reason": "Prompt state and rendering feed the system message (agent.prompt.clj:311,368).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [],
     "uncovered_paths": "Unknown from recordings; structural branch forms: and, if. No per-function branch trace exists.",
@@ -603,7 +654,7 @@
     "classification": "model-visible",
     "reason": "Pure comparison controls whether another model request is made (agent.machine.clj:255,500).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [],
     "uncovered_paths": "No local branch form; failure/callback paths and indirect callees remain unverified by recordings.",
@@ -617,7 +668,7 @@
     "classification": "deterministic",
     "reason": "Pure arithmetic on supplied turn and configuration (agent.retry.clj:3-13). No shipped caller was found by source search.",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [],
     "uncovered_paths": "Unknown from recordings; structural branch forms: or. No per-function branch trace exists.",
@@ -629,9 +680,9 @@
     "name": "catalog",
     "source": "priv/preludes/kernel/analysis.catalog.clj:3",
     "classification": "nondeterministic",
-    "reason": "Pure function of supplied arguments.",
+    "reason": "Calls tool/analysis-catalog against a selected private catalog generation (analysis.catalog.clj:3-6).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/mix/tasks/ptc_repl_test.exs:1317",
@@ -652,7 +703,7 @@
     "classification": "nondeterministic",
     "reason": "Reads a capability-backed run capture/catalog whose contents vary with the selected capture (analysis.clj:3; analysis.catalog.clj:3).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/mix/tasks/ptc_repl_test.exs:1257",
@@ -688,7 +739,7 @@
     "classification": "nondeterministic",
     "reason": "Reads a capability-backed run capture/catalog whose contents vary with the selected capture (analysis.clj:3; analysis.catalog.clj:3).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/mix/tasks/ptc_repl_test.exs:1571",
@@ -715,7 +766,7 @@
     "classification": "nondeterministic",
     "reason": "Reads a capability-backed run capture/catalog whose contents vary with the selected capture (analysis.clj:3; analysis.catalog.clj:3).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/mix/tasks/ptc_repl_test.exs:1923",
@@ -747,7 +798,7 @@
     "classification": "nondeterministic",
     "reason": "Reads a capability-backed run capture/catalog whose contents vary with the selected capture (analysis.clj:3; analysis.catalog.clj:3).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/mix/tasks/ptc_repl_test.exs:1609",
@@ -769,7 +820,7 @@
     "classification": "nondeterministic",
     "reason": "Queries the installed capability inventory (cap.clj:3); inventory can differ between runs.",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/core_contract_test.exs:3955"
@@ -785,7 +836,7 @@
     "classification": "nondeterministic",
     "reason": "Queries the installed capability inventory (cap.clj:8); inventory can differ between runs.",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/core_contract_test.exs:3956",
@@ -802,7 +853,7 @@
     "classification": "deterministic",
     "reason": "Pure processing of supplied values and callback outputs (cap.clj:13,39).",
     "coverage_count": 1,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [
       "examples/llm-replay/workflow.clj:5-9; replay.jsonl (one fixture)"
     ],
@@ -824,18 +875,23 @@
     "namespace": "cap",
     "name": "fold-pages",
     "source": "priv/preludes/kernel/cap.clj:39",
-    "classification": "deterministic",
-    "reason": "Pure processing of supplied values and callback outputs (cap.clj:13,39).",
+    "classification": "nondeterministic",
+    "reason": "Invokes caller-supplied fetch and step callbacks (cap.clj:69,87); fetch can call a changing capability. Deterministic only with frozen pure callbacks and page inputs.",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
+      "test/ptc_runner/kernel/cap_agent_main_test.exs:93",
+      "test/ptc_runner/kernel/cap_agent_main_test.exs:109",
+      "test/ptc_runner/kernel/cap_agent_main_test.exs:120",
       "test/ptc_runner/kernel/cap_agent_main_test.exs:144",
-      "test/ptc_runner/kernel/cap_agent_main_test.exs:147"
+      "test/ptc_runner/kernel/cap_agent_main_test.exs:147",
+      "test/ptc_runner/kernel/cap_agent_main_test.exs:151",
+      "test/ptc_runner/kernel/cap_agent_main_test.exs:168"
     ],
     "uncovered_paths": "Recorded branch reach is unknown. Test sources exercise completion, page bound, resume, changed snapshot, invalid bound/hash, cursor cycle, and large traversal; malformed items/cursor and other failures have no demonstrated replay recording (cap.clj:53-96).",
     "cost_measurability": "Kernel.run aggregate usage and trace duration_ms can measure a whole invocation, but no retained recording attributes evaluation steps, heap, or duration_ms to this function; an isolated no-model benchmark with frozen inputs is needed.",
-    "byte_equal_mechanism": "local strict JSON result-hash reconstruction possible with a frozen bundle and input; no existing candidate-specific recording"
+    "byte_equal_mechanism": "conditional: strict result-hash reconstruction works only with frozen pure fetch/step callbacks and every fetched page retained; changing capability results defeat it"
   },
   {
     "namespace": "debug.nav",
@@ -844,7 +900,7 @@
     "classification": "nondeterministic",
     "reason": "Reads capability-backed private run evidence that varies by capture (debug.nav.clj:5-29).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/debug_nav_test.exs:18",
@@ -862,7 +918,7 @@
     "classification": "nondeterministic",
     "reason": "Reads capability-backed private run evidence that varies by capture (debug.nav.clj:5-29).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/debug_nav_test.exs:40"
@@ -878,7 +934,7 @@
     "classification": "nondeterministic",
     "reason": "Reads capability-backed private run evidence that varies by capture (debug.nav.clj:5-29).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/debug_nav_test.exs:43",
@@ -895,7 +951,7 @@
     "classification": "nondeterministic",
     "reason": "Reads capability-backed private run evidence that varies by capture (debug.nav.clj:5-29).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/debug_nav_test.exs:29",
@@ -913,9 +969,14 @@
     "classification": "nondeterministic",
     "reason": "Reads capability-backed private run evidence that varies by capture (debug.nav.clj:5-29).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
+      "test/ptc_runner/kernel/debug_nav_test.exs:66",
+      "test/ptc_runner/kernel/debug_nav_test.exs:101",
+      "test/ptc_runner/kernel/debug_nav_test.exs:116",
+      "test/ptc_runner/kernel/debug_nav_test.exs:129",
+      "test/ptc_runner/kernel/debug_nav_test.exs:141",
       "test/ptc_runner/kernel/debug_nav_test.exs:162",
       "test/ptc_runner/kernel/debug_nav_test.exs:168"
     ],
@@ -930,7 +991,7 @@
     "classification": "nondeterministic",
     "reason": "Invokes a mission capability; evaluation or installed mission can vary (kernel.clj:3).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/debug_a_failed_run_example_test.exs:718",
@@ -949,7 +1010,7 @@
     "classification": "nondeterministic",
     "reason": "Invokes a mission capability; evaluation or installed mission can vary (kernel.clj:11).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/mix/tasks/ptc_repl_test.exs:609",
@@ -1003,9 +1064,10 @@
     "classification": "nondeterministic",
     "reason": "Invokes a mission capability; evaluation or installed mission can vary (kernel.clj:19).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
+      "test/ptc_runner/kernel/debug_a_failed_run_example_test.exs:554",
       "test/ptc_runner/kernel/core_contract_test.exs:3553"
     ],
     "uncovered_paths": "Unknown from recordings; structural branch forms: if. No per-function branch trace exists.",
@@ -1019,7 +1081,7 @@
     "classification": "nondeterministic",
     "reason": "Invokes a mission capability; evaluation or installed mission can vary (kernel.clj:30).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/debug_a_failed_run_example_test.exs:328",
@@ -1037,7 +1099,7 @@
     "classification": "nondeterministic",
     "reason": "Invokes a mission capability; evaluation or installed mission can vary (kernel.clj:41).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/core_contract_test.exs:3687",
@@ -1055,7 +1117,7 @@
     "classification": "nondeterministic",
     "reason": "Invokes a mission capability; evaluation or installed mission can vary (kernel.clj:49).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [],
     "uncovered_paths": "Unknown from recordings; structural branch forms: if. No per-function branch trace exists.",
@@ -1069,7 +1131,7 @@
     "classification": "nondeterministic",
     "reason": "Invokes a mission capability; evaluation or installed mission can vary (kernel.clj:59).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/mission_inventory_test.exs:59",
@@ -1086,7 +1148,7 @@
     "classification": "model-visible",
     "reason": "Frozen context is rendered into the next model system prompt (kernel.clj:67-73; agent.prompt.clj:311-367).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/mix/tasks/ptc_repl_test.exs:100",
@@ -1106,7 +1168,7 @@
     "classification": "deterministic",
     "reason": "Fixed manifest contract for supplied value, via result-contract tool (kernel.clj:75-81).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/result_keyword_projection_test.exs:171"
@@ -1122,7 +1184,7 @@
     "classification": "model-visible",
     "reason": "Fixed manifest result contract is placed in agent prompt state (kernel.clj:83-90; agent.core.clj:182).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [],
     "uncovered_paths": "Unknown from recordings; structural branch forms: if. No per-function branch trace exists.",
@@ -1136,7 +1198,7 @@
     "classification": "model-visible",
     "reason": "Fixed phase contract is placed in agent prompt state (kernel.clj:92-98; agent.core.clj:87,110).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [],
     "uncovered_paths": "Unknown from recordings; structural branch forms: if. No per-function branch trace exists.",
@@ -1150,7 +1212,7 @@
     "classification": "deterministic",
     "reason": "Fixed named contract for supplied value, via result-contract tool (kernel.clj:100-106).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [],
     "uncovered_paths": "Unknown from recordings; structural branch forms: if. No per-function branch trace exists.",
@@ -1163,9 +1225,14 @@
     "source": "priv/preludes/kernel/llm.clj:3",
     "classification": "nondeterministic",
     "reason": "Calls tool/llm-request (llm.clj:17).",
-    "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
-    "coverage_evidence": [],
+    "coverage_count": 23,
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
+    "coverage_evidence": [
+      "examples/dabstep-fraud/replay.jsonl: one full workflow, three agent loops, eleven model calls (evidence/STUDY.md:155-165)",
+      "examples/dabstep-fraud/reviewer-replay.jsonl: three reviewer runs, one agent loop and model call each (evidence/STUDY.md:150-155)",
+      "examples/dabstep-fraud/verification-replay.jsonl: two constructed full workflows, three agent loops each, four and three model calls (evidence/VERIFICATION.md:9-21; dabstep_reviewer_regression_test.exs:102-136)",
+      "examples/adaptive-web-parser/replay.jsonl: one repair run with one agent loop and two model calls (workflow.clj:61; README.md:1-48)"
+    ],
     "direct_test_call_sites": [
       "test/ptc_runner/live_status_test.exs:458",
       "test/ptc_runner/kernel/agent_library_test.exs:80",
@@ -1175,6 +1242,7 @@
       "test/ptc_runner/kernel/named_missions_diagnosis_test.exs:37",
       "test/ptc_runner/kernel/llm_replay_test.exs:1017",
       "test/ptc_runner/kernel/llm_replay_test.exs:1027",
+      "test/ptc_runner/kernel/llm_replay_test.exs:1190",
       "test/ptc_runner/kernel/llm_replay_test.exs:1406",
       "test/ptc_runner/kernel/llm_router_test.exs:55",
       "test/ptc_runner/kernel/llm_router_test.exs:64",
@@ -1208,7 +1276,7 @@
     "classification": "deterministic",
     "reason": "Pure string segmentation and arithmetic on supplied prompts (prompt.audit.clj:112,216,269).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/prompt_audit_test.exs:120",
@@ -1226,7 +1294,7 @@
     "classification": "deterministic",
     "reason": "Pure string segmentation and arithmetic on supplied prompts (prompt.audit.clj:112,216,269).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/agent_library_test.exs:6789",
@@ -1243,7 +1311,7 @@
     "classification": "deterministic",
     "reason": "Pure string segmentation and arithmetic on supplied prompts (prompt.audit.clj:112,216,269).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/prompt_audit_test.exs:313"
@@ -1259,7 +1327,7 @@
     "classification": "deterministic",
     "reason": "Pure map construction or inspection (result.clj:3-16).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [],
     "uncovered_paths": "No local branch form; failure/callback paths and indirect callees remain unverified by recordings.",
@@ -1273,7 +1341,7 @@
     "classification": "deterministic",
     "reason": "Pure map construction or inspection (result.clj:3-16).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/agent_evaluation_contention_test.exs:71"
@@ -1289,7 +1357,7 @@
     "classification": "deterministic",
     "reason": "Pure map construction or inspection (result.clj:3-16).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [],
     "uncovered_paths": "No local branch form; failure/callback paths and indirect callees remain unverified by recordings.",
@@ -1303,7 +1371,7 @@
     "classification": "nondeterministic",
     "reason": "Reads current run-resource counters, which vary over time (runtime.clj:3-11).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/core_contract_test.exs:3954",
@@ -1320,7 +1388,7 @@
     "classification": "nondeterministic",
     "reason": "Reads current run-resource counters, which vary over time (runtime.clj:3-11).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/core_contract_test.exs:3953"
@@ -1336,7 +1404,7 @@
     "classification": "nondeterministic",
     "reason": "Emits an annotation to the run trace (workflow.event.clj:11-12).",
     "coverage_count": 0,
-    "coverage_scope": "known distinct retained fixture executions of this helper; test invocation count unavailable",
+    "coverage_scope": "conservative count of distinct helper invocations in retained fixture scenarios, inferred from workflow control flow and request counts; test reruns excluded",
     "coverage_evidence": [],
     "direct_test_call_sites": [
       "test/ptc_runner/kernel/agent_library_test.exs:3632",

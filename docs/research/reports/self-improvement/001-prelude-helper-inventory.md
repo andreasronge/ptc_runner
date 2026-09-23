@@ -34,22 +34,35 @@ supplied values or a frozen manifest contract. A caller can still forward a
 deterministic result to a model; the classification does not license changing
 that result.
 
-`coverage_count` in the JSON is the number of **known distinct retained fixture
-executions of that shipped helper**, not a count of files, test source matches,
-or invocations estimated from a loop. It is zero where no such execution could
-be identified. `direct_test_call_sites` lists source locations that explicitly
-invoke a function in default test files. A site can execute many times; a
-helper can also execute indirectly with no site in its row. The current test
-and trace formats do not permit an honest exact per-function test execution
-count without instrumenting the evaluator, so this inventory does not present
-call-site counts as execution counts. Consequently, zero means **no known
-retained execution**, not proof that the function never ran. This is a material
-gap for b02.
+`coverage_count` in the JSON is a conservative number of **distinct public
+function invocations in retained fixture scenarios**, inferred from workflow
+control flow and recorded request counts. Test reruns do not add to this
+number. It is zero where no execution could be established from retained
+evidence. `direct_test_call_sites` lists explicit calls in non-E2E test files
+(including nightly tests),
+including multiline literals. A site can execute many times, and a helper can
+execute indirectly with no site in its row. Exact dynamic counts and branch
+paths still need evaluator instrumentation. Zero means **no established
+retained execution**, not proof that the function never ran. This remains a
+material gap for b02.
 
-The sole identified fixture execution is `cap/unwrap!` in
-`examples/llm-replay/workflow.clj:5-9`, paired with one response in
-`examples/llm-replay/replay.jsonl`. That example calls `tool/llm-request`
-directly; it does not execute `llm/request` or the agent loop. The three
+`examples/llm-replay/workflow.clj:5-9` invokes `cap/unwrap!` once, paired with
+one response in `examples/llm-replay/replay.jsonl`. It calls
+`tool/llm-request` directly, so it does not cover `llm/request` or the agent
+loop. Other retained fixtures do cover the agent loop:
+
+| Fixture/scenario | Distinct agent loops | Recorded model calls | Evidence |
+| --- | ---: | ---: | --- |
+| `examples/dabstep-fraud/replay.jsonl`, one full workflow | 3 | 11 | `workflow.clj:19-68`; `evidence/STUDY.md:155-165` |
+| `examples/dabstep-fraud/reviewer-replay.jsonl`, three reviewer cases | 3 | 3 | `reviewer-workflow.clj:15`; `evidence/STUDY.md:150-155` |
+| `examples/dabstep-fraud/verification-replay.jsonl`, correction and exhaustion cases | 6 | 7 | `evidence/VERIFICATION.md:9-21`; `dabstep_reviewer_regression_test.exs:102-136` |
+| `examples/adaptive-web-parser/replay.jsonl`, one repair run | 1 | 2 | `workflow.clj:61`; its README and fixture |
+
+These yield twelve `agent.core/run-outcome` calls, one
+`agent.core/run-value` call, thirteen `agent.machine/start` calls, and at least
+23 `llm/request`, `agent.native/normalize`, and prompt-render calls. The
+`coverage_count` rows show conservative per-function counts; they do not imply
+coverage of every branch. The three
 `scripts/labs/prelude-search/subjects/*.clj` are application preludes, not
 shipped kernel helpers. Their 300 of 300 byte-equal re-executions in
 [prelude-search/000](../prelude-search/000-reproducibility.md) therefore count
@@ -74,9 +87,9 @@ event table in `agent_machine_test.exs`, yet no per-event recording index.
 
 | Class | Public functions | Reason and replay consequence |
 | --- | ---: | --- |
-| Deterministic | 11 | `cap/unwrap!`, `cap/fold-pages`, `result/*`, `prompt.audit/*`, `agent.retry/backoff-ms`, and the fixed-contract validators are functions of supplied or frozen input. A strict result-hash judge is possible after frozen inputs are retained. |
+| Deterministic | 10 | `cap/unwrap!`, `result/*`, `prompt.audit/*`, `agent.retry/backoff-ms`, and the fixed-contract validators are functions of supplied or frozen input. A strict result-hash judge is possible after frozen inputs are retained. |
 | Model-visible | 20 | `agent.prompt/*`, `agent.feedback/*`, `agent.machine/*`, `agent.native/*`, `agent.retry/retry?`, and prompt-facing Kernel presentations can alter request bytes or the number of requests. Existing response fixtures cannot judge a changed request; exact request-hash matching fails. |
-| Nondeterministic | 30 | `agent.core/*`, `agent.main/run`, `llm/request`, analysis/debug navigation, runtime counters, workflow annotation, installed capability discovery, and mission evaluation/checks depend on model or capability/run state. They require frozen external outputs or a separate judge. |
+| Nondeterministic | 31 | `agent.core/*`, `agent.main/run`, `llm/request`, analysis/debug navigation, `cap/fold-pages`, runtime counters, workflow annotation, installed capability discovery, and mission evaluation/checks depend on model, callbacks, or capability/run state. They require frozen external outputs or a separate judge. |
 
 The row-level source lines and reasons are in `001.json`. A capability result
 can be repeatable within one frozen run, but that is weaker than intrinsic
@@ -86,6 +99,9 @@ frozen manifest but are `model-visible` because `agent.prompt/render` and
 `agent.core` place them into system-prompt state. `agent.retry/backoff-ms` is
 pure and no shipped caller was found; optimizing an unused helper has no
 measurable production gain.
+`cap/fold-pages` calls caller-provided `fetch` and `step` functions
+(`cap.clj:69,87`); `fetch` may call a changing capability. Its public call is
+therefore `nondeterministic` without frozen, pure callbacks and page fixtures.
 
 The current byte-equal mechanism for a deterministic candidate would freeze
 its bundle and input, re-execute them as prelude-search Phase 0 does, and
@@ -121,19 +137,20 @@ optimization candidates. Rank reflects pure behavior, meaningful work, and
 test inputs already available. Every entry needs a frozen input and withheld
 branch cases before model-proposed edits are scored.
 
-1. `cap/fold-pages` (`cap.clj:39`): real traversal and validation work,
-   including a 5,000-item test in `cap_agent_main_test.exs:168-180`. Its many
-   branches make it the strongest cost opportunity; retain deterministic page
-   callbacks and failure cases as private inputs.
-2. `prompt.audit/segments` (`prompt.audit.clj:112`): pure parsing of frozen
+1. `prompt.audit/segments` (`prompt.audit.clj:112`): pure parsing of frozen
    prompt text with recognized/unrecognized and malformed-boundary cases in
    `prompt_audit_test.exs`. Replay complete output, including segment order.
-3. `prompt.audit/measure` (`prompt.audit.clj:216`): pure counting over frozen
+2. `prompt.audit/measure` (`prompt.audit.clj:216`): pure counting over frozen
    prompt text, with ordinary/final prompt fixtures and newline/Unicode tests.
    Compare the full JSON result and aggregate isolated-run cost.
-4. `prompt.audit/delta` (`prompt.audit.clj:269`): pure paired-prompt arithmetic.
+3. `prompt.audit/delta` (`prompt.audit.clj:269`): pure paired-prompt arithmetic.
    It needs retained before/after pairs and zero-baseline cases; its expected
    cost opportunity is smaller than the parser's.
+4. `cap/fold-pages` (`cap.clj:39`), **conditional target**: real traversal and
+   validation work, including a 5,000-item test in
+   `cap_agent_main_test.exs:168-180`. Admit it only with pure `fetch` and
+   `step` callbacks, frozen page inputs, and retained failure cases. The
+   unrestricted public function is not replay-judgeable from today's fixtures.
 
 `cap/unwrap!` and `result/*` are pure but too small to justify a model search
 without a measured aggregate bottleneck. The contract validators use a Kernel
