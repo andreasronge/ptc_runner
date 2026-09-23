@@ -70,10 +70,13 @@ Project PLTs also have a shared snapshot cache at
 Initialization restores a private copy when the main-checkout seed did not
 provide one. `scripts/ci/core-dialyzer.sh`, used by pre-push, restores missing
 PLTs and publishes after successful analysis. Failed gates never publish.
-The cache key includes the actual Erlang/ERTS and Elixir versions, OS,
-architecture, `mix.exs`, and `mix.lock`; a lockfile change can use the newest
-snapshot with otherwise identical settings as an incremental starting point.
-Hashing all of `mix.exs` deliberately invalidates more than just PLT options.
+Snapshots are grouped by the actual Erlang/ERTS and Elixir versions, OS, and
+architecture, and named by `mix.lock`. Restore prefers the exact lockfile and
+otherwise takes the newest snapshot in the group as an incremental starting
+point; `mix.exs` is not part of the key, because Dialyxir reconciles the stored
+module set with the one `plt_add_apps` expects. Publishing keeps the newest
+four snapshots per group. Groups for runtimes no longer in use are never
+pruned automatically; delete them by hand.
 GitHub Actions retains its existing cache, and non-test Mix environments do
 not publish to this cache.
 
