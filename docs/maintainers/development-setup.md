@@ -46,8 +46,8 @@ The focused tests use only a loopback raw HTTP fixture and no credentials.
 ## Worktree seeding
 
 `scripts/worktree.sh new` seeds a fresh worktree with the main checkout's
-`deps/`, `_build/`, and `priv/plts/` (root, Viewer, and launcher), then runs
-`scripts/worktree.sh init` so the checkout is ready for tests. Initialization
+`deps/`, `_build/`, and `priv/plts/` (root, Viewer, launcher, and gateway),
+then runs `scripts/worktree.sh init` so the checkout is ready for tests. Initialization
 installs the shared Git hooks, installs the pinned toolchain through `mise`,
 fetches root/Viewer/launcher dependencies, compiles the root project, and
 removes group-write permissions under a `0022` umask so Linux cloud agents do
