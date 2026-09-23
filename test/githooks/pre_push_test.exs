@@ -420,6 +420,37 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     assert_core_gate_invocations(mix_marker, [], operator: true)
   end
 
+  test "the phase summary reports cgroup memory and memory.high events per phase" do
+    %{repo: repo, path: path} = git_repo_with_change("ptc_runner_launcher/c_src/launcher.c")
+    cgroup = Path.join(Path.dirname(fake_bin(path)), "cgroup")
+    File.mkdir_p!(cgroup)
+    File.write!(Path.join(cgroup, "memory.current"), "#{300 * 1_048_576}\n")
+    File.write!(Path.join(cgroup, "memory.peak"), "#{1_500 * 1_048_576}\n")
+    File.write!(Path.join(cgroup, "memory.events"), "low 0\nhigh 2\nmax 0\noom 0\n")
+
+    {output, status} =
+      run_hook(repo, path, [
+        {"PTC_PRE_PUSH_CGROUP_ROOT", cgroup},
+        # The gate crosses memory.high three more times while it runs.
+        {"MIX_SIDE_EFFECT",
+         "printf 'low 0\\nhigh 5\\nmax 0\\noom 0\\n' > #{Path.join(cgroup, "memory.events")}"}
+      ])
+
+    assert status == 0, output
+    assert output =~ ~r/launcher validation\s+\d+s  mem 300MiB  peak 1500MiB  high \+3\n/
+  end
+
+  test "the phase summary stays silent when no cgroup memory is readable" do
+    %{repo: repo, path: path} = git_repo_with_change("ptc_runner_launcher/c_src/launcher.c")
+    missing = Path.join(Path.dirname(fake_bin(path)), "no-cgroup")
+
+    {output, status} = run_hook(repo, path, [{"PTC_PRE_PUSH_CGROUP_ROOT", missing}])
+
+    assert status == 0, output
+    assert output =~ ~r/launcher validation\s+\d+s\n/
+    refute output =~ "MiB"
+  end
+
   test "documentation dependency setup rejects an uncommitted lockfile repair" do
     %{repo: repo, mix_marker: mix_marker, path: path} =
       git_repo_with_change("docs/guides/replay.md")
@@ -525,6 +556,9 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     File.write!(fake_mix, """
     #!/bin/sh
     printf '%s\n' "$*" >> "$MIX_MARKER"
+    if [ -n "${MIX_SIDE_EFFECT:-}" ]; then
+      sh -c "$MIX_SIDE_EFFECT"
+    fi
     if [ "${MIX_MUTATE_LOCK:-}" = "1" ] && [ "$*" = "deps.get --check-locked" ]; then
       exit 1
     fi
