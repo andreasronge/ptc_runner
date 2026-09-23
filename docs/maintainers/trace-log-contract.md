@@ -872,7 +872,7 @@ deterministically encoded JSON object with this exact envelope:
 
 ```json
 {
-  "schema_version": 11,
+  "schema_version": 12,
   "run_id": "run-id",
   "trace_id": "trace-id",
   "sequence": 1,
@@ -1039,10 +1039,15 @@ Prelude uniqueness is `(environment, mission_name, component_id)`, so the same
 component ID can be inspected independently in multiple missions. Every
 mission-owned query result preserves `mission_name`.
 
-Schema 11 adds `run-input` to the closed inspection vocabulary. It retains
-the successful terminal result introduced in schema 6 and the explicit-failure
-record introduced in schema 8. Older inspection schemas are rejected as
-unsupported; they are not silently interpreted as schema 11:
+Schema 12 adds mission `execution-error` records to the closed inspection
+vocabulary. Their payload has `environment: "mission"`, `mission_name`,
+`kind: "evaluation_failed"`, a reason, and exact details fields `message`,
+`message_truncated`, and `source_location`; the location is null or contains
+only a non-negative byte `offset`, and the UTF-8 message is bounded to 4,096
+bytes. Schema 12 retains the `run-input` added in schema 11, the successful
+terminal result introduced in schema 6, and the explicit-failure record
+introduced in schema 8. Older inspection schemas are rejected as unsupported;
+they are not silently interpreted as schema 12:
 
 | Record type | Correlation | Exact payload fields |
 | --- | --- | --- |

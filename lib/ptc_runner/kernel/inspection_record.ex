@@ -205,7 +205,7 @@ defmodule PtcRunner.Kernel.InspectionRecord do
     valid_execution_error_keys?(payload) and valid_id?(id) and
       payload["environment"] in ["workflow", "mission"] and valid_id?(payload["kind"]) and
       valid_id?(payload["reason"]) and is_map(payload["details"]) and
-      InspectionRecordTypes.valid_boundary_producer_details?(payload["details"])
+      valid_execution_error_details?(payload)
   end
 
   defp valid_shape?(%{
@@ -228,6 +228,18 @@ defmodule PtcRunner.Kernel.InspectionRecord do
   end
 
   defp valid_execution_error_keys?(_payload), do: false
+
+  defp valid_execution_error_details?(%{"environment" => "workflow", "details" => details}),
+    do: InspectionRecordTypes.valid_boundary_producer_details?(details)
+
+  defp valid_execution_error_details?(%{
+         "environment" => "mission",
+         "kind" => "evaluation_failed",
+         "details" => details
+       }),
+       do: InspectionRecordTypes.valid_mission_evaluation_error_details?(details)
+
+  defp valid_execution_error_details?(_payload), do: false
 
   defp validate_raw_result(type, payload) when type in ["run-input", "run-result"] do
     case {Map.fetch(payload, :value), Map.fetch(payload, "value")} do

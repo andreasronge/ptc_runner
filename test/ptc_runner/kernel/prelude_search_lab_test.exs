@@ -195,6 +195,14 @@ defmodule PtcRunner.Kernel.PreludeSearchLabTest do
     assert %{"filters" => %{"evaluation_id" => ^evaluation_id}, "state" => "complete"} =
              Enum.find(error["relationships"], &(&1["rel"] == "failed_generated_source"))
 
+    assert %{
+             "filters" => %{
+               "evaluation_id" => ^evaluation_id,
+               "status" => "evaluation_error"
+             },
+             "state" => "complete"
+           } = Enum.find(error["relationships"], &(&1["rel"] == "evaluation_failure"))
+
     replay =
       Phase1.run(
         [

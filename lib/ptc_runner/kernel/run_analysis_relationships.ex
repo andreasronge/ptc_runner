@@ -233,7 +233,7 @@ defmodule PtcRunner.Kernel.RunAnalysisRelationships do
     canonical_state = if complete_canonical?(trace_facts), do: "complete", else: "incomplete"
 
     {failure_state, failure_filters} =
-      boundary_failure_state_and_filters(trace_facts, evaluation_id, canonical_state)
+      mission_failure_state_and_filters(trace_facts, evaluation_id, canonical_state)
 
     source_matches = Enum.filter(generated_sources, &(&1["evaluation_id"] == evaluation_id))
 
@@ -294,6 +294,22 @@ defmodule PtcRunner.Kernel.RunAnalysisRelationships do
     case get_in(trace_facts, ["evaluation_statuses", evaluation_id]) do
       "error" ->
         {canonical_state, %{"evaluation_id" => evaluation_id, "status" => "error"}}
+
+      status when is_binary(status) ->
+        {"unavailable", nil}
+
+      _missing when canonical_state == "complete" ->
+        {"unavailable", nil}
+
+      _missing ->
+        {"incomplete", nil}
+    end
+  end
+
+  defp mission_failure_state_and_filters(trace_facts, evaluation_id, canonical_state) do
+    case get_in(trace_facts, ["evaluation_statuses", evaluation_id]) do
+      "evaluation_error" ->
+        {canonical_state, %{"evaluation_id" => evaluation_id, "status" => "evaluation_error"}}
 
       status when is_binary(status) ->
         {"unavailable", nil}
