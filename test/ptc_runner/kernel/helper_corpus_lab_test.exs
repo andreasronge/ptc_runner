@@ -3,12 +3,14 @@ defmodule PtcRunner.Kernel.HelperCorpusLabTest do
   @moduletag :operator
   @moduletag :nightly
 
+  alias PtcRunner.Labs.HelperCorpus
   alias PtcRunner.Labs.PreludeSearch
 
   lab = Path.expand("../../../scripts/labs/prelude-search", __DIR__)
   Code.require_file("support/mutations.exs", lab)
   Code.require_file("support/inputs.exs", lab)
   Code.require_file("support/lab.exs", lab)
+  Code.require_file("../../../scripts/labs/helper-corpus/support/corpus.exs", __DIR__)
 
   @tag :tmp_dir
   test "retained helper corpus replays byte-equal in a fresh VM and rejects a changed bundle", %{
@@ -27,6 +29,31 @@ defmodule PtcRunner.Kernel.HelperCorpusLabTest do
 
     assert status == 0, console
     assert console =~ "Replay equal:"
+
+    unrelated = Path.join(tmp, "unrelated")
+    File.mkdir_p!(unrelated)
+    File.write!(Path.join(unrelated, "index.json"), ~S|{"version":1}|)
+    File.write!(Path.join(unrelated, "keep.txt"), "keep")
+
+    assert_raise RuntimeError, ~r/not a helper corpus/, fn ->
+      HelperCorpus.generate(unrelated)
+    end
+
+    assert File.read!(Path.join(unrelated, "keep.txt")) == "keep"
+
+    incomplete = Path.join(tmp, "incomplete")
+    File.cp_r!(source, incomplete)
+    File.rm_rf!(Path.join(incomplete, "measure"))
+
+    {console, status} =
+      System.cmd(
+        System.find_executable("mix"),
+        ["run", "scripts/labs/helper-corpus/run.exs", "--replay-artifacts", incomplete],
+        stderr_to_stdout: true
+      )
+
+    refute status == 0
+    assert console =~ "incomplete helper corpus"
 
     failures =
       source

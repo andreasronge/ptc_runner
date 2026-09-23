@@ -4,14 +4,15 @@ defmodule PtcRunner.Labs.HelperCorpus do
 
   @fixture "test/fixtures/prompts/agent-prompt-final-turn.txt"
   @legend "In map types, field? means the field may be omitted; type? means nil is allowed.\n\n"
+  @corpus_id "ptc-shipped-helper-corpus"
+  @subjects ~w(segments measure delta fold-pages)
 
   def generate(output) do
     if File.exists?(output) do
       index = Path.join(output, "index.json")
 
       unless File.lstat!(output).type == :directory and
-               (File.ls!(output) == [] or
-                  (File.regular?(index) and Jason.decode!(File.read!(index))["version"] == 1)),
+               (File.ls!(output) == [] or recognized_index?(index)),
              do: raise("refusing to replace a directory that is not a helper corpus: #{output}")
 
       File.rm_rf!(output)
@@ -183,14 +184,13 @@ defmodule PtcRunner.Labs.HelperCorpus do
       fold_cases
     )
 
-    subjects = ~w(segments measure delta fold-pages)
-
     index = %{
+      "corpus_id" => @corpus_id,
       "version" => 1,
       "branch_labels_are" => "declared intent, not measured coverage",
       "measurement_boundary" =>
         "duration_ms measures execute_built through publication per invocation; kernel_usage is the aggregate Kernel.run snapshot; no helper-only attribution",
-      "subjects" => subjects,
+      "subjects" => @subjects,
       "unrepresented_arms" => %{
         "segments" => ["phase-return-contract", "api-notes-absent"],
         "measure" => ["phase-return-contract", "non-string"],
@@ -207,7 +207,7 @@ defmodule PtcRunner.Labs.HelperCorpus do
 
     File.write!(Path.join(output, "index.json"), Jason.encode!(index, pretty: true) <> "\n")
 
-    for subject <- subjects do
+    for subject <- @subjects do
       rows = output |> Path.join(subject <> "/executions.json") |> File.read!() |> Jason.decode!()
       visible = MapSet.new(for row <- rows, row["split"] == "visible", do: row["input"])
       withheld = MapSet.new(for row <- rows, row["split"] == "withheld", do: row["input"])
@@ -215,6 +215,34 @@ defmodule PtcRunner.Labs.HelperCorpus do
       unless MapSet.disjoint?(visible, withheld),
         do: raise("overlapping input values: #{subject}")
     end
+  end
+
+  def replay(output) do
+    index = Path.join(output, "index.json")
+    unless recognized_index?(index), do: raise("invalid helper corpus index: #{index}")
+
+    discovered =
+      output
+      |> Path.join("*/executions.json")
+      |> Path.wildcard()
+      |> Enum.map(&(Path.dirname(&1) |> Path.basename()))
+      |> Enum.sort()
+
+    unless discovered == Enum.sort(@subjects),
+      do: raise("incomplete helper corpus: expected #{Enum.join(@subjects, ", ")}")
+
+    PreludeSearch.replay(output)
+  end
+
+  defp recognized_index?(path) do
+    File.regular?(path) and
+      case Jason.decode(File.read!(path)) do
+        {:ok, %{"corpus_id" => @corpus_id, "version" => 1, "subjects" => @subjects}} ->
+          true
+
+        _ ->
+          false
+      end
   end
 
   defp case_row(input, branch, split),

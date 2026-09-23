@@ -33,4 +33,6 @@ and input digests, then compares result hashes. Failure outcomes use a strict
 JSON hash of the published Kernel failure envelope together with the explicit
 failure value; successful outcomes use the run-result hash. The test copies the
 corpus, runs replay in a fresh VM, and checks both bundle identity and changed
-results from a behavior-changing helper mutation.
+results from a behavior-changing helper mutation. Replay also rejects a missing
+subject, and regeneration replaces only an output directory bearing this lab's
+corpus identity.

@@ -11,7 +11,7 @@ if args != [] or invalid != [], do: raise("invalid helper-corpus arguments")
 
 case Keyword.fetch(opts, :replay_artifacts) do
   {:ok, directory} ->
-    {:ok, results} = PtcRunner.Labs.PreludeSearch.replay(Path.expand(directory))
+    {:ok, results} = PtcRunner.Labs.HelperCorpus.replay(Path.expand(directory))
     if Enum.any?(results, &(&1.unequal != [])), do: raise("helper corpus replay unequal")
     IO.puts("Replay equal: #{Enum.sum(Enum.map(results, & &1.equal))}")
 
