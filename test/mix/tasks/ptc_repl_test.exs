@@ -18,6 +18,10 @@ defmodule PtcRunner.ReplFrontendTest do
   @stdio_root Path.expand("../../..", __DIR__)
   @stdio_fixture Path.expand("../../support/mcp_stdio_source_fixture.sh", __DIR__)
 
+  setup_all do
+    PrivateInspectionFixture.seed_context(["private-run"])
+  end
+
   test "repeated evals preserve definitions, history, and captured output" do
     output =
       capture_io(fn ->
@@ -1235,9 +1239,10 @@ defmodule PtcRunner.ReplFrontendTest do
 
   @tag :tmp_dir
   test "private profile refusal for continue-on-error precedes the repeated-eval check", %{
-    tmp_dir: directory
+    tmp_dir: directory,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(directory)
+    fixture = PrivateInspectionFixture.copy!(seeded, directory)
 
     base_args = [
       "--profile",
@@ -1295,9 +1300,10 @@ defmodule PtcRunner.ReplFrontendTest do
 
   @tag :tmp_dir
   test "the private catalog profile pages safe rows through the JSONL entry point", %{
-    tmp_dir: directory
+    tmp_dir: directory,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(directory)
+    fixture = PrivateInspectionFixture.copy!(seeded, directory)
 
     output =
       capture_io(fn ->
@@ -1553,9 +1559,10 @@ defmodule PtcRunner.ReplFrontendTest do
 
   @tag :tmp_dir
   test "human private analysis keeps map keys whole and names the unabbreviated value", %{
-    tmp_dir: directory
+    tmp_dir: directory,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(directory)
+    fixture = PrivateInspectionFixture.copy!(seeded, directory)
 
     args = [
       "--profile",
@@ -1587,8 +1594,11 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
-  test "private analysis shows pre-execution invalid tool arguments", %{tmp_dir: root} do
-    fixture = PrivateInspectionFixture.create!(root)
+  test "private analysis shows pre-execution invalid tool arguments", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
 
     output =
       capture_io(fn ->
@@ -1627,9 +1637,10 @@ defmodule PtcRunner.ReplFrontendTest do
 
   @tag :tmp_dir
   test "private analysis redacts invalid tool arguments containing prior evaluation data", %{
-    tmp_dir: root
+    tmp_dir: root,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(root)
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
 
     output =
       capture_io(fn ->
@@ -1670,9 +1681,10 @@ defmodule PtcRunner.ReplFrontendTest do
 
   @tag :tmp_dir
   test "private analysis redacts invalid tool arguments after capability activity", %{
-    tmp_dir: root
+    tmp_dir: root,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(root)
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
 
     source =
       ~s|(do (analysis/open "#{fixture.run_id}") (analysis/counters "#{fixture.run_id}"))|
@@ -1711,9 +1723,10 @@ defmodule PtcRunner.ReplFrontendTest do
 
   @tag :tmp_dir
   test "a load-only session is not told to add a format its input mode refuses", %{
-    tmp_dir: directory
+    tmp_dir: directory,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(directory)
+    fixture = PrivateInspectionFixture.copy!(seeded, directory)
     setup_file = Path.join(directory, "setup.clj")
     File.write!(setup_file, ~s|(analysis/open "#{fixture.run_id}")|)
 
@@ -1742,9 +1755,10 @@ defmodule PtcRunner.ReplFrontendTest do
 
   @tag :tmp_dir
   test "a load form in a session that also evaluates is told where the whole value is", %{
-    tmp_dir: directory
+    tmp_dir: directory,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(directory)
+    fixture = PrivateInspectionFixture.copy!(seeded, directory)
     setup_file = Path.join(directory, "setup.clj")
     File.write!(setup_file, ~s|(analysis/open "#{fixture.run_id}")|)
 
@@ -1774,9 +1788,10 @@ defmodule PtcRunner.ReplFrontendTest do
 
   @tag :tmp_dir
   test "a value no JSON projection can carry is not offered as a structured field", %{
-    tmp_dir: directory
+    tmp_dir: directory,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(directory)
+    fixture = PrivateInspectionFixture.copy!(seeded, directory)
 
     output =
       capture_io(fn ->

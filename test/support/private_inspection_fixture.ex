@@ -40,6 +40,47 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
     fixture
   end
 
+  @doc "Builds sealed fixtures once for a test module's `setup_all`."
+  def seed!(run_ids) when is_list(run_ids) do
+    suffix = :crypto.strong_rand_bytes(8) |> Base.url_encode64(padding: false)
+    root = Path.join(System.tmp_dir!(), "private-inspection-#{suffix}")
+
+    fixtures =
+      Map.new(run_ids, fn run_id ->
+        {run_id, create!(Path.join(root, run_id), run_id)}
+      end)
+
+    {root, fixtures}
+  end
+
+  @doc "Returns setup_all context and cleans up its seed when the module finishes."
+  def seed_context(run_ids) do
+    seeded = seed!(run_ids)
+    ExUnit.Callbacks.on_exit(fn -> cleanup!(seeded) end)
+    {:ok, seeded: seeded}
+  end
+
+  @doc "Copies a sealed fixture into a case's private directory."
+  def copy!({_seed_root, fixtures}, root, run_id \\ "private-run") do
+    source = Map.fetch!(fixtures, run_id)
+    fixture = create_directories(root, run_id)
+
+    File.cp!(
+      Path.join(source.traces, "#{run_id}.jsonl"),
+      Path.join(fixture.traces, "#{run_id}.jsonl")
+    )
+
+    File.cp!(
+      Path.join(source.inspection, "#{run_id}.ptcins"),
+      Path.join(fixture.inspection, "#{run_id}.ptcins")
+    )
+
+    fixture
+  end
+
+  @doc "Removes the fixtures created by `seed!/1` after the module completes."
+  def cleanup!({root, _fixtures}), do: File.rm_rf!(root)
+
   @doc false
   def rewrite_legacy_float_cost!(%{traces: traces, run_id: run_id}) do
     path = Path.join(traces, "#{run_id}.jsonl")

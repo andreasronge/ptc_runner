@@ -13,6 +13,10 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
   alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
 
+  setup_all do
+    PrivateInspectionFixture.seed_context(["private-run"])
+  end
+
   @tag :tmp_dir
   test "run listing delegates the bounded native page", %{tmp_dir: root} do
     {:ok, trace} =
@@ -31,8 +35,11 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
   end
 
   @tag :tmp_dir
-  test "opens a run and reads its advertised primitive collections", %{tmp_dir: root} do
-    fixture = PrivateInspectionFixture.create!(root)
+  test "opens a run and reads its advertised primitive collections", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
     {:ok, trace} = TraceSnapshot.start({:private_authorized_directory, fixture.traces})
     {:ok, inspection} = InspectionSnapshot.start({:directory, fixture.inspection}, trace)
     on_exit(fn -> InspectionSnapshot.stop(inspection) end)
@@ -1267,8 +1274,8 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
   end
 
   @tag :tmp_dir
-  test "read returns primitive cursors for the caller to follow", %{tmp_dir: root} do
-    fixture = PrivateInspectionFixture.create!(root)
+  test "read returns primitive cursors for the caller to follow", %{tmp_dir: root, seeded: seeded} do
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
     {:ok, trace} = TraceSnapshot.start({:private_authorized_directory, fixture.traces})
     {:ok, inspection} = InspectionSnapshot.start({:directory, fixture.inspection}, trace)
     on_exit(fn -> InspectionSnapshot.stop(inspection) end)
@@ -1300,9 +1307,10 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
 
   @tag :tmp_dir
   test "internal collection rejects a multi-page aggregate above the result-byte limit", %{
-    tmp_dir: root
+    tmp_dir: root,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(root)
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
     max_result_bytes = 5_000
 
     {:ok, trace} =
@@ -1361,8 +1369,11 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
   end
 
   @tag :tmp_dir
-  test "read does not compose independently bounded private collections", %{tmp_dir: root} do
-    fixture = PrivateInspectionFixture.create!(root)
+  test "read does not compose independently bounded private collections", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
     {:ok, sizing_trace} = TraceSnapshot.start({:private_authorized_directory, fixture.traces})
 
     {:ok, sizing_inspection} =
@@ -1401,8 +1412,11 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
   end
 
   @tag :tmp_dir
-  test "one capability builder exposes runs, open, read, then counters", %{tmp_dir: root} do
-    fixture = PrivateInspectionFixture.create!(root)
+  test "one capability builder exposes runs, open, read, then counters", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
     {:ok, trace} = TraceSnapshot.start({:private_authorized_directory, fixture.traces})
     {:ok, inspection} = InspectionSnapshot.start({:directory, fixture.inspection}, trace)
     on_exit(fn -> InspectionSnapshot.stop(inspection) end)

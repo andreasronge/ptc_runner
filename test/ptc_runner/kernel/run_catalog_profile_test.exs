@@ -11,6 +11,10 @@ defmodule PtcRunner.Kernel.RunCatalogProfileTest do
 
   @profile_id "private-run-catalog-v1"
 
+  setup_all do
+    PrivateInspectionFixture.seed_context(["private-run"])
+  end
+
   test "the closed catalog profile declares one capability and two private resources" do
     assert AnalysisProfileRegistry.ids() == [
              "private-run-analysis-v2",
@@ -36,9 +40,10 @@ defmodule PtcRunner.Kernel.RunCatalogProfileTest do
 
   @tag :tmp_dir
   test "the profile exposes catalog rows through PTC-Lisp and no other analysis capability", %{
-    tmp_dir: root
+    tmp_dir: root,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(root)
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
     {:ok, session, info} = start_session(fixture)
     on_exit(fn -> AnalysisSession.stop(session) end)
 
@@ -93,8 +98,8 @@ defmodule PtcRunner.Kernel.RunCatalogProfileTest do
   end
 
   @tag :tmp_dir
-  test "normal close releases the transferred catalog owner", %{tmp_dir: root} do
-    fixture = PrivateInspectionFixture.create!(root)
+  test "normal close releases the transferred catalog owner", %{tmp_dir: root, seeded: seeded} do
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
     {:ok, session, _info} = start_session(fixture)
     state = :sys.get_state(session.pid)
     catalog = AnalysisResources.handle(state.resources, :catalog)
@@ -108,8 +113,11 @@ defmodule PtcRunner.Kernel.RunCatalogProfileTest do
   end
 
   @tag :tmp_dir
-  test "failed session construction releases the captured catalog owner", %{tmp_dir: root} do
-    fixture = PrivateInspectionFixture.create!(root)
+  test "failed session construction releases the captured catalog owner", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
     test = self()
 
     assert {:error, :private_run_catalog_session_failed} =

@@ -7,10 +7,19 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.TestSupport.PrivateInspectionFixture
 
+  setup_all do
+    PrivateInspectionFixture.seed_context(
+      Enum.map(0..3, &PrivateInspectionFixture.command_run_ref/1)
+    )
+  end
+
   @tag :tmp_dir
-  test "a paired cohort lists safe metadata without opening either payload", %{tmp_dir: root} do
-    first = fixture!(root, 1)
-    second = fixture!(root, 2)
+  test "a paired cohort lists safe metadata without opening either payload", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    first = fixture!(root, seeded, 0)
+    second = fixture!(root, seeded, 1)
 
     rows = rows!(root)
 
@@ -39,8 +48,11 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "rows carry no private payload content and no filesystem path", %{tmp_dir: root} do
-    fixture = fixture!(root, 3)
+  test "rows carry no private payload content and no filesystem path", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = fixture!(root, seeded, 0)
     encoded = root |> rows!() |> Jason.encode!()
 
     for secret <- [
@@ -60,10 +72,13 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "a row reports a missing half instead of refusing the generation", %{tmp_dir: root} do
-    paired = fixture!(root, 4)
-    trace_only = fixture!(root, 5)
-    inspection_only = fixture!(root, 6)
+  test "a row reports a missing half instead of refusing the generation", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    paired = fixture!(root, seeded, 0)
+    trace_only = fixture!(root, seeded, 1)
+    inspection_only = fixture!(root, seeded, 2)
 
     File.rm!(inspection_path(root, trace_only.run_id))
     File.rm!(trace_path(root, inspection_only.run_id))
@@ -87,9 +102,12 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "both trace filename variants isolate one row and no other", %{tmp_dir: root} do
-    healthy = fixture!(root, 7)
-    ambiguous = fixture!(root, 8)
+  test "both trace filename variants isolate one row and no other", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    healthy = fixture!(root, seeded, 0)
+    ambiguous = fixture!(root, seeded, 1)
 
     path = trace_path(root, ambiguous.run_id)
     File.cp!(path, Path.join(root, "traces/#{ambiguous.run_id}.private.jsonl"))
@@ -105,8 +123,11 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "an unsupported sealed schema shows its versions and isolates the row", %{tmp_dir: root} do
-    fixture = fixture!(root, 9)
+  test "an unsupported sealed schema shows its versions and isolates the row", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = fixture!(root, seeded, 0)
     rewrite_sealed_schema!(inspection_path(root, fixture.run_id), Format.schema_version() + 1)
 
     row = root |> rows!() |> row!(fixture.run_id)
@@ -120,8 +141,11 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "a header and footer that disagree about the schema isolate the row", %{tmp_dir: root} do
-    fixture = fixture!(root, 33)
+  test "a header and footer that disagree about the schema isolate the row", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = fixture!(root, seeded, 0)
     PrivateInspectionFixture.rewrite_schema!(Path.join(root, "inspection"), 1)
 
     row = root |> rows!() |> row!(fixture.run_id)
@@ -132,8 +156,8 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "an unsupported trace schema isolates the row", %{tmp_dir: root} do
-    fixture = fixture!(root, 10)
+  test "an unsupported trace schema isolates the row", %{tmp_dir: root, seeded: seeded} do
+    fixture = fixture!(root, seeded, 0)
     rewrite_trace!(root, fixture.run_id, &Map.put(&1, "schema_version", 3))
 
     row = root |> rows!() |> row!(fixture.run_id)
@@ -144,8 +168,8 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "a schema version of the wrong shape isolates the row", %{tmp_dir: root} do
-    fixture = fixture!(root, 36)
+  test "a schema version of the wrong shape isolates the row", %{tmp_dir: root, seeded: seeded} do
+    fixture = fixture!(root, seeded, 0)
 
     rewrite_trace!(
       root,
@@ -165,9 +189,9 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "a malformed head line isolates the row", %{tmp_dir: root} do
-    healthy = fixture!(root, 11)
-    broken = fixture!(root, 12)
+  test "a malformed head line isolates the row", %{tmp_dir: root, seeded: seeded} do
+    healthy = fixture!(root, seeded, 0)
+    broken = fixture!(root, seeded, 1)
     File.write!(trace_path(root, broken.run_id), "{not-json\n")
 
     rows = rows!(root)
@@ -181,8 +205,8 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "a truncated sealed artifact isolates the row", %{tmp_dir: root} do
-    fixture = fixture!(root, 13)
+  test "a truncated sealed artifact isolates the row", %{tmp_dir: root, seeded: seeded} do
+    fixture = fixture!(root, seeded, 0)
     path = inspection_path(root, fixture.run_id)
     bytes = File.read!(path)
     File.write!(path, binary_part(bytes, 0, byte_size(bytes) - 1))
@@ -194,8 +218,8 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "a filename that routes to another run isolates the row", %{tmp_dir: root} do
-    fixture = fixture!(root, 14)
+  test "a filename that routes to another run isolates the row", %{tmp_dir: root, seeded: seeded} do
+    fixture = fixture!(root, seeded, 0)
     impostor = PrivateInspectionFixture.command_run_ref(15)
 
     File.rename!(trace_path(root, fixture.run_id), trace_path(root, impostor))
@@ -208,9 +232,9 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "two entries claiming one trace identity isolate both", %{tmp_dir: root} do
-    first = fixture!(root, 16)
-    second = fixture!(root, 17)
+  test "two entries claiming one trace identity isolate both", %{tmp_dir: root, seeded: seeded} do
+    first = fixture!(root, seeded, 0)
+    second = fixture!(root, seeded, 1)
 
     rewrite_trace!(root, second.run_id, &Map.put(&1, "trace_id", "trace-#{first.run_id}"))
 
@@ -224,8 +248,11 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "a trace and artifact that disagree about the trace report a mismatch", %{tmp_dir: root} do
-    fixture = fixture!(root, 18)
+  test "a trace and artifact that disagree about the trace report a mismatch", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = fixture!(root, seeded, 0)
     rewrite_trace!(root, fixture.run_id, &Map.put(&1, "trace_id", "trace-unrelated"))
 
     row = root |> rows!() |> row!(fixture.run_id)
@@ -236,8 +263,11 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "an unbounded but well-formed timestamp cannot grow a row", %{tmp_dir: root} do
-    fixture = fixture!(root, 34)
+  test "an unbounded but well-formed timestamp cannot grow a row", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = fixture!(root, seeded, 0)
     padded = "2026-07-26T12:00:01." <> String.duplicate("1", 5_000) <> "Z"
     assert {:ok, _datetime, 0} = DateTime.from_iso8601(padded)
     rewrite_trace!(root, fixture.run_id, &Map.put(&1, "timestamp", padded))
@@ -250,8 +280,11 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "a label of the wrong shape reads as absent, never as a row field", %{tmp_dir: root} do
-    fixture = fixture!(root, 35)
+  test "a label of the wrong shape reads as absent, never as a row field", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = fixture!(root, seeded, 0)
 
     rewrite_trace!(root, fixture.run_id, fn event ->
       if event["type"] == "run-started" do
@@ -269,8 +302,11 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "files without a canonical stem are counted, never listed as rows", %{tmp_dir: root} do
-    fixture = fixture!(root, 19)
+  test "files without a canonical stem are counted, never listed as rows", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = fixture!(root, seeded, 0)
     assert {:ok, %{excluded_files: baseline}} = RunCatalogSnapshot.info(capture!(root))
 
     File.write!(Path.join(root, "traces/notes.txt"), "ignored\n")
@@ -286,13 +322,16 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "an open generation is unchanged by a run published after its capture", %{tmp_dir: root} do
-    first = fixture!(root, 20)
+  test "an open generation is unchanged by a run published after its capture", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    first = fixture!(root, seeded, 0)
 
     open = capture!(root)
     assert {:ok, %{catalog_digest: digest, row_count: 1}} = RunCatalogSnapshot.info(open)
 
-    second = fixture!(root, 21)
+    second = fixture!(root, seeded, 1)
 
     assert {:ok, %{catalog_digest: ^digest, row_count: 1}} = RunCatalogSnapshot.info(open)
     assert {:ok, [%{"run_id" => only}]} = RunCatalogSnapshot.rows(open)
@@ -305,9 +344,12 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "paging stays on one frozen generation while the roots grow", %{tmp_dir: root} do
-    first = fixture!(root, 44)
-    second = fixture!(root, 45)
+  test "paging stays on one frozen generation while the roots grow", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    first = fixture!(root, seeded, 0)
+    second = fixture!(root, seeded, 1)
     File.write!(Path.join(root, "traces/notes.txt"), "excluded\n")
 
     snapshot = capture!(root)
@@ -326,7 +368,7 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
     assert is_binary(cursor)
     assert excluded_files > 0
 
-    third = fixture!(root, 46)
+    third = fixture!(root, seeded, 2)
 
     assert {:ok,
             %{
@@ -350,15 +392,15 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "a cursor from another catalog generation is stale", %{tmp_dir: root} do
-    fixture!(root, 47)
-    fixture!(root, 48)
+  test "a cursor from another catalog generation is stale", %{tmp_dir: root, seeded: seeded} do
+    fixture!(root, seeded, 0)
+    fixture!(root, seeded, 1)
     first_generation = capture!(root)
 
     assert {:ok, %{"next_cursor" => cursor}} =
              RunCatalogSnapshot.query(first_generation, %{"limit" => 1})
 
-    fixture!(root, 49)
+    fixture!(root, seeded, 2)
     second_generation = capture!(root)
 
     assert {:error, :source_changed} =
@@ -366,9 +408,12 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "excluded-file accounting is part of the cursor generation", %{tmp_dir: root} do
-    fixture!(root, 84)
-    fixture!(root, 85)
+  test "excluded-file accounting is part of the cursor generation", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture!(root, seeded, 0)
+    fixture!(root, seeded, 1)
     first_generation = capture!(root)
 
     assert {:ok, %{"next_cursor" => cursor, "catalog_digest" => digest}} =
@@ -388,9 +433,9 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "cursors bind every filter but not the page limit", %{tmp_dir: root} do
-    fixture!(root, 50)
-    fixture!(root, 51)
+  test "cursors bind every filter but not the page limit", %{tmp_dir: root, seeded: seeded} do
+    fixture!(root, seeded, 0)
+    fixture!(root, seeded, 1)
     snapshot = capture!(root)
 
     assert {:ok, %{"next_cursor" => cursor}} =
@@ -418,12 +463,13 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
 
   @tag :tmp_dir
   test "catalog filters are exact, tags are a subset, and time bounds are inclusive", %{
-    tmp_dir: root
+    tmp_dir: root,
+    seeded: seeded
   } do
-    first = fixture!(root, 52)
-    second = fixture!(root, 53)
-    inspection_only = fixture!(root, 54)
-    isolated = fixture!(root, 55)
+    first = fixture!(root, seeded, 0)
+    second = fixture!(root, seeded, 1)
+    inspection_only = fixture!(root, seeded, 2)
+    isolated = fixture!(root, seeded, 3)
 
     rewrite_started!(root, first.run_id, "2026-07-26T12:00:01Z", %{
       "name" => "alpha",
@@ -468,8 +514,8 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "query and result limits fail closed", %{tmp_dir: root} do
-    fixture!(root, 56)
+  test "query and result limits fail closed", %{tmp_dir: root, seeded: seeded} do
+    fixture!(root, seeded, 0)
     snapshot = capture!(root)
 
     for arguments <- [
@@ -499,9 +545,12 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "the result byte bound returns the largest fitting page prefix", %{tmp_dir: root} do
-    fixture!(root, 58)
-    fixture!(root, 59)
+  test "the result byte bound returns the largest fitting page prefix", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture!(root, seeded, 0)
+    fixture!(root, seeded, 1)
     baseline = capture!(root)
 
     assert {:ok, %{"items" => [_], "truncated" => true} = one_item_page} =
@@ -531,8 +580,8 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "ownership can move exactly once to a live successor", %{tmp_dir: root} do
-    fixture!(root, 57)
+  test "ownership can move exactly once to a live successor", %{tmp_dir: root, seeded: seeded} do
+    fixture!(root, seeded, 0)
     test = self()
 
     first_owner =
@@ -564,16 +613,22 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "an unchanged root captures to the same generation digest", %{tmp_dir: root} do
-    fixture!(root, 22)
+  test "an unchanged root captures to the same generation digest", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture!(root, seeded, 0)
 
     assert {:ok, %{catalog_digest: digest}} = RunCatalogSnapshot.info(capture!(root))
     assert {:ok, %{catalog_digest: ^digest}} = RunCatalogSnapshot.info(capture!(root))
   end
 
   @tag :tmp_dir
-  test "rewriting an artifact in place changes the next generation digest", %{tmp_dir: root} do
-    fixture = fixture!(root, 23)
+  test "rewriting an artifact in place changes the next generation digest", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = fixture!(root, seeded, 0)
 
     assert {:ok, %{catalog_digest: digest}} = RunCatalogSnapshot.info(capture!(root))
 
@@ -584,18 +639,24 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "a cohort beyond the stem bound refuses the whole capture", %{tmp_dir: root} do
-    fixture!(root, 24)
-    fixture!(root, 25)
+  test "a cohort beyond the stem bound refuses the whole capture", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture!(root, seeded, 0)
+    fixture!(root, seeded, 1)
 
     assert {:error, :catalog_limit_exceeded} =
              RunCatalogSnapshot.start(catalog_source(root), owner: self(), max_files: 1)
   end
 
   @tag :tmp_dir
-  test "a listing beyond its entry bound refuses the whole capture", %{tmp_dir: root} do
-    fixture!(root, 26)
-    fixture!(root, 27)
+  test "a listing beyond its entry bound refuses the whole capture", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture!(root, seeded, 0)
+    fixture!(root, seeded, 1)
 
     assert {:error, :catalog_limit_exceeded} =
              RunCatalogSnapshot.start(catalog_source(root),
@@ -605,16 +666,19 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "a retained projection beyond its bound refuses the whole capture", %{tmp_dir: root} do
-    fixture!(root, 28)
+  test "a retained projection beyond its bound refuses the whole capture", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture!(root, seeded, 0)
 
     assert {:error, :catalog_limit_exceeded} =
              RunCatalogSnapshot.start(catalog_source(root), owner: self(), max_retained_bytes: 1)
   end
 
   @tag :tmp_dir
-  test "an unusable root refuses the whole capture", %{tmp_dir: root} do
-    fixture!(root, 29)
+  test "an unusable root refuses the whole capture", %{tmp_dir: root, seeded: seeded} do
+    fixture!(root, seeded, 0)
 
     assert {:error, :source_unavailable} =
              RunCatalogSnapshot.start(
@@ -625,8 +689,8 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "an owner's exit stops its generation", %{tmp_dir: root} do
-    fixture!(root, 30)
+  test "an owner's exit stops its generation", %{tmp_dir: root, seeded: seeded} do
+    fixture!(root, seeded, 0)
     test_pid = self()
 
     owner =
@@ -650,8 +714,8 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "an explicit stop releases the generation", %{tmp_dir: root} do
-    fixture!(root, 31)
+  test "an explicit stop releases the generation", %{tmp_dir: root, seeded: seeded} do
+    fixture!(root, seeded, 0)
     snapshot = capture!(root)
 
     assert :ok = RunCatalogSnapshot.stop(snapshot)
@@ -666,8 +730,8 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "capture bounds may be lowered but never raised", %{tmp_dir: root} do
-    fixture!(root, 32)
+  test "capture bounds may be lowered but never raised", %{tmp_dir: root, seeded: seeded} do
+    fixture!(root, seeded, 0)
 
     assert {:error, :invalid_catalog} =
              RunCatalogSnapshot.start(catalog_source(root), owner: self(), max_files: 1_025)
@@ -683,8 +747,11 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "a probed event that is not a canonical trace event isolates the row", %{tmp_dir: root} do
-    fixture = fixture!(root, 37)
+  test "a probed event that is not a canonical trace event isolates the row", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = fixture!(root, seeded, 0)
 
     rewrite_trace!(root, fixture.run_id, fn event ->
       if event["type"] == "run-stopped", do: Map.delete(event, "trace_id"), else: event
@@ -699,9 +766,10 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
 
   @tag :tmp_dir
   test "a run-stopped whose result hash contradicts its outcome isolates the row", %{
-    tmp_dir: root
+    tmp_dir: root,
+    seeded: seeded
   } do
-    fixture = fixture!(root, 38)
+    fixture = fixture!(root, seeded, 0)
 
     rewrite_trace!(root, fixture.run_id, fn event ->
       if event["type"] == "run-stopped",
@@ -716,8 +784,11 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "a rewritten footer field changes the next generation digest", %{tmp_dir: root} do
-    fixture = fixture!(root, 39)
+  test "a rewritten footer field changes the next generation digest", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = fixture!(root, seeded, 0)
     path = inspection_path(root, fixture.run_id)
 
     assert {:ok, %{catalog_digest: digest}} = RunCatalogSnapshot.info(capture!(root))
@@ -731,8 +802,11 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "a current-version header with invalid geometry isolates the row", %{tmp_dir: root} do
-    fixture = fixture!(root, 40)
+  test "a current-version header with invalid geometry isolates the row", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = fixture!(root, seeded, 0)
     path = inspection_path(root, fixture.run_id)
     <<prefix::binary-size(12), _declared::unsigned-big-32, rest::binary>> = File.read!(path)
     File.write!(path, <<prefix::binary, 17::unsigned-big-32, rest::binary>>)
@@ -744,9 +818,12 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "an artifact claiming another run's identity isolates every claimant", %{tmp_dir: root} do
-    first = fixture!(root, 41)
-    second = fixture!(root, 42)
+  test "an artifact claiming another run's identity isolates every claimant", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    first = fixture!(root, seeded, 0)
+    second = fixture!(root, seeded, 1)
 
     File.cp!(inspection_path(root, first.run_id), inspection_path(root, second.run_id))
 
@@ -766,9 +843,10 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
 
   @tag :tmp_dir
   test "a replacement opened under the inventoried path is detected by descriptor identity", %{
-    tmp_dir: root
+    tmp_dir: root,
+    seeded: seeded
   } do
-    fixture = fixture!(root, 43)
+    fixture = fixture!(root, seeded, 0)
     path = trace_path(root, fixture.run_id)
     original = Path.join(root, "inventoried-trace.jsonl")
     replacement = Path.join(root, "replacement-trace.jsonl")
@@ -849,9 +927,9 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   defp catalog_source(root),
     do: {:private_authorized_catalog, Path.join(root, "traces"), Path.join(root, "inspection")}
 
-  defp fixture!(root, seed) do
+  defp fixture!(root, seeded, slot) do
     fixture =
-      PrivateInspectionFixture.create!(root, PrivateInspectionFixture.command_run_ref(seed))
+      PrivateInspectionFixture.copy!(seeded, root, PrivateInspectionFixture.command_run_ref(slot))
 
     rewrite_trace!(root, fixture.run_id, fn event ->
       if event["type"] == "run-stopped",

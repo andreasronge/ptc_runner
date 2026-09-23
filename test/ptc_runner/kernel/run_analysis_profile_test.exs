@@ -21,6 +21,10 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
 
   @profile_id "private-run-analysis-v2"
 
+  setup_all do
+    PrivateInspectionFixture.seed_context(["private-run"])
+  end
+
   test "the profile registry is closed and describes fixed private authority" do
     assert AnalysisProfileRegistry.ids() == [
              "private-run-analysis-v2",
@@ -92,8 +96,11 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
   end
 
   @tag :tmp_dir
-  test "assembled analysis missions expose interned component catalogs", %{tmp_dir: root} do
-    fixture = PrivateInspectionFixture.create!(root)
+  test "assembled analysis missions expose interned component catalogs", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
     {:ok, session, _info} = start_internal_session(fixture)
     on_exit(fn -> AnalysisSession.stop(session) end)
 
@@ -105,8 +112,11 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
   end
 
   @tag :tmp_dir
-  test "analysis resources reject trace snapshots from the other authority", %{tmp_dir: root} do
-    fixture = PrivateInspectionFixture.create!(root)
+  test "analysis resources reject trace snapshots from the other authority", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
 
     assert {:ok, private_trace} =
              TraceSnapshot.start({:private_authorized_directory, fixture.traces})
@@ -271,8 +281,11 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
   end
 
   @tag :tmp_dir
-  test "private resource and output lineages must be physically separate", %{tmp_dir: root} do
-    fixture = PrivateInspectionFixture.create!(root)
+  test "private resource and output lineages must be physically separate", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
     {:ok, traces} = AnalysisDirectory.resolve(fixture.traces)
     {:ok, inspection} = AnalysisDirectory.resolve(fixture.inspection)
     {:ok, output} = AnalysisDirectory.resolve(fixture.output)
@@ -292,9 +305,10 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
 
   @tag :tmp_dir
   test "profile and manifest capabilities share navigation queries", %{
-    tmp_dir: root
+    tmp_dir: root,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(root)
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
     {:ok, resources} = capture(fixture)
 
     on_exit(fn -> AnalysisResources.stop(resources) end)
@@ -408,9 +422,10 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
 
   @tag :tmp_dir
   test "PTC-Lisp reaches exact evidence while its analysis trace stays payload-free", %{
-    tmp_dir: root
+    tmp_dir: root,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(root)
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
     {:ok, session, info} = start_internal_session(fixture)
     trace_path = Path.join(fixture.output, info.session_id <> ".jsonl")
 
@@ -599,8 +614,11 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
   end
 
   @tag :tmp_dir
-  test "private analysis evaluator errors expose only fixed diagnostics", %{tmp_dir: root} do
-    fixture = PrivateInspectionFixture.create!(root)
+  test "private analysis evaluator errors expose only fixed diagnostics", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
     {:ok, session, _info} = start_internal_session(fixture)
     on_exit(fn -> AnalysisSession.stop(session) end)
 
@@ -619,8 +637,11 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
   end
 
   @tag :tmp_dir
-  test "a private session reports the analyst's own undefined identifiers", %{tmp_dir: root} do
-    fixture = PrivateInspectionFixture.create!(root)
+  test "a private session reports the analyst's own undefined identifiers", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
     {:ok, session, info} = start_internal_session(fixture)
     on_exit(fn -> AnalysisSession.stop(session) end)
 
@@ -646,8 +667,11 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
   end
 
   @tag :tmp_dir
-  test "a private session admits pre-execution arity and form diagnostics", %{tmp_dir: root} do
-    fixture = PrivateInspectionFixture.create!(root)
+  test "a private session admits pre-execution arity and form diagnostics", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
     {:ok, session, info} = start_internal_session(fixture)
     on_exit(fn -> AnalysisSession.stop(session) end)
 
@@ -702,8 +726,11 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
   end
 
   @tag :tmp_dir
-  test "a private session names a prelude arity fault without opening evidence", %{tmp_dir: root} do
-    fixture = PrivateInspectionFixture.create!(root)
+  test "a private session names a prelude arity fault without opening evidence", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
     {:ok, session, _info} = start_internal_session(fixture)
     on_exit(fn -> AnalysisSession.stop(session) end)
 
@@ -727,9 +754,10 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
 
   @tag :tmp_dir
   test "a private session redacts a post-capability arity fault of an allowlisted kind", %{
-    tmp_dir: root
+    tmp_dir: root,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(root)
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
     {:ok, session, _info} = start_internal_session(fixture)
     on_exit(fn -> AnalysisSession.stop(session) end)
 
@@ -824,8 +852,8 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
   end
 
   @tag :tmp_dir
-  test "a refused capture leaves no snapshot owner behind", %{tmp_dir: root} do
-    fixture = PrivateInspectionFixture.create!(root)
+  test "a refused capture leaves no snapshot owner behind", %{tmp_dir: root, seeded: seeded} do
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
     empty_inspection = Path.join(root, "empty-inspection")
     File.mkdir_p!(empty_inspection)
 
@@ -847,9 +875,10 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
 
   @tag :tmp_dir
   test "session owner death closes both captures and persists an aborted canonical trace", %{
-    tmp_dir: root
+    tmp_dir: root,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(root)
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
     {:ok, session, info} = start_internal_session(fixture)
     state = :sys.get_state(session.pid)
     trace = AnalysisResources.handle(state.resources, :traces)
