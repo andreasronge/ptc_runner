@@ -180,10 +180,12 @@ These are planning constraints, not spending authority.
 | self-improvement/001 | [report](reports/self-improvement/001-prelude-helper-inventory.md) / [result](reports/self-improvement/001.json) | [001](https://github.com/andreasronge/ptc_runner/tree/research/self-improvement/001) | inconclusive; explore, no hypothesis tested | 0 | 0 |
 
 001 inventoried 61 public shipped prelude functions: 10 deterministic, 20
-model-visible, 31 nondeterministic. No retained recording executes any
-deterministic helper, so H1 cannot yet be judged by replay. It shortlisted
-`prompt.audit/segments`, `prompt.audit/measure`, `prompt.audit/delta` and,
-with pure callbacks, `cap/fold-pages`.
+model-visible, 31 nondeterministic. It shortlisted `prompt.audit/segments`,
+`prompt.audit/measure`, `prompt.audit/delta` and, with pure callbacks,
+`cap/fold-pages`. No retained recording executes any shortlisted helper, so
+H1 cannot yet be judged by replay. Of the deterministic helpers, only
+`cap/unwrap!` (1) and `validate-phase-return` (13) have recorded executions,
+and both are too small to justify a model search.
 
 Prelude-search 000–004 and any future debug-efficiency results are prior
 evidence, not measurements of this program.
