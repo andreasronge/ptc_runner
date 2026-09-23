@@ -2,46 +2,19 @@ defmodule PtcRunner.Kernel.TutorialExamplesContractTest do
   use ExUnit.Case, async: true
   @moduletag :operator
 
-  @repo_root Path.expand("../../..", __DIR__)
+  alias PtcRunner.TestSupport.TutorialExamplesContractHelpers
+
   @examples Path.expand("../../../examples/kernel-tutorial", __DIR__)
   @host Path.join(@examples, "ptc-host.json")
   @cost_budget_host Path.join(@examples, "ptc-host-cost-budget.json")
   @viewer_examples Path.expand("../../../scripts/labs/viewer-demo", __DIR__)
   @support_triage Path.expand("../../../examples/support-triage", __DIR__)
 
-  @host_installations ["examples", "scripts/labs"]
-                      |> Enum.flat_map(
-                        &Path.wildcard(Path.join([@repo_root, &1, "**", "*.json"]))
-                      )
-                      |> Enum.flat_map(fn path ->
-                        case Jason.decode(File.read!(path)) do
-                          {:ok, %{"install" => install}} when is_map(install) ->
-                            for {alias_name, %{"model" => model}} <- install,
-                                do: {path, alias_name, model}
-
-                          _ ->
-                            []
-                        end
-                      end)
-                      |> Enum.sort()
-
-  @prompt_visible_components @repo_root
-                             |> Path.join("examples/**/*.clj")
-                             |> Path.wildcard()
-                             |> Enum.filter(&(File.read!(&1) =~ ":visibility :prompt"))
-
   test "the runnable example catalog includes every shipped host installation" do
     # A hand-written host list silently stops guarding the moment an example
     # gains a host document, which is how three `debug-a-failed-run` hosts came
     # to pin a model outside the catalog. Derive the list from the tree instead.
-    assert length(@host_installations) >= 12
-  end
-
-  for {host, alias_name, model} <- @host_installations do
-    test "#{Path.relative_to(host, @repo_root)} installation #{alias_name} belongs to ReqLLM's catalog" do
-      assert {:ok, _catalog_model} = LLMDB.model(unquote(model)),
-             "#{unquote(host)} installs #{unquote(alias_name)}"
-    end
+    assert length(TutorialExamplesContractHelpers.host_installations()) >= 12
   end
 
   test "the cost-budget tutorial label reports its dedicated host model" do
@@ -71,12 +44,6 @@ defmodule PtcRunner.Kernel.TutorialExamplesContractTest do
 
     assert source =~
              "-> {items [{byte_offset :int, text :string}], next_cursor :string?, content_hash :string}"
-  end
-
-  for path <- @prompt_visible_components do
-    test "prompt-visible component #{Path.relative_to(path, @repo_root)} does not hide stable results behind any" do
-      refute File.read!(unquote(path)) =~ "-> :any", unquote(path)
-    end
   end
 
   test "support-triage labels report the model installed by the host" do

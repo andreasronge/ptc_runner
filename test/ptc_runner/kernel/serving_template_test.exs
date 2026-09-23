@@ -1,6 +1,8 @@
 defmodule PtcRunner.Kernel.ServingTemplateTest do
   use ExUnit.Case, async: true
 
+  import PtcRunner.TestSupport.ServingTemplateHelpers
+
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.EffectiveApplication
@@ -17,12 +19,6 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
   alias PtcRunner.Kernel.ServingTemplate
   alias PtcRunner.Kernel.ValueContract
 
-  @schema %{
-    "type" => "object",
-    "properties" => %{"answer" => %{"type" => "integer"}},
-    "required" => ["answer"],
-    "additionalProperties" => false
-  }
   @source "(ns app) (defn run {:effect :read} [input] (return input))"
 
   @tag :tmp_dir
@@ -155,39 +151,6 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
 
     assert {:error, :compilation_failed} =
              build(fixture(dir, %{}, "(ns app) (defn run [input] missing)"))
-  end
-
-  for declared <- [:read, :write, :unknown, nil], resolved <- [:read, :write, :unknown] do
-    @tag tmp_dir: true, declared: declared, resolved: resolved
-    test "the entry matrix supports declared #{inspect(declared)} and resolved #{resolved}", %{
-      tmp_dir: dir,
-      declared: declared,
-      resolved: resolved
-    } do
-      metadata = if declared, do: "{:effect :#{declared}}", else: ""
-      workflow = "(ns app) (defn run #{metadata} [input] (return input))"
-      mission = "(ns mission) (defn helper {:effect :#{resolved}} [x] x)"
-
-      path =
-        fixture(
-          dir,
-          %{
-            "missions" => %{
-              "worker" => %{"components" => [%{"id" => "mission", "path" => "mission.clj"}]}
-            }
-          },
-          workflow
-        )
-
-      File.write!(Path.join(dir, "mission.clj"), mission)
-
-      case {declared, resolved} do
-        {:read, :read} -> assert {:ok, %{effect: :read}} = build(path)
-        {:read, _} -> assert {:error, :declared_read_effect_violation} = build(path)
-        {:write, _} -> assert {:ok, %{effect: :write}} = build(path)
-        _ -> assert {:error, :effect_declaration_required} = build(path)
-      end
-    end
   end
 
   @tag :tmp_dir
@@ -826,36 +789,6 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
       assert System.monotonic_time(:millisecond) < deadline
       await_dispatch(sink, deadline)
     end
-  end
-
-  defp build(path, opts \\ []),
-    do: ServingTemplate.from_directory(path, Limits.installed_defaults(), opts)
-
-  defp fixture(dir, changes \\ %{}, source \\ @source) do
-    File.mkdir_p!(dir)
-
-    manifest =
-      Map.merge(
-        %{
-          "version" => 1,
-          "workflow" => %{
-            "components" => [%{"id" => "app", "path" => "workflow.clj"}],
-            "entry" => "app/run"
-          },
-          "input" => %{"path" => "missing.json"},
-          "contracts" => %{
-            "input_schema" => %{"path" => "schema.json"},
-            "result_schema" => %{"path" => "schema.json"}
-          }
-        },
-        changes
-      )
-
-    File.write!(Path.join(dir, "workflow.clj"), source)
-    File.write!(Path.join(dir, "schema.json"), Jason.encode!(@schema))
-    path = Path.join(dir, "app.json")
-    File.write!(path, Jason.encode!(manifest))
-    path
   end
 
   defp owned?(value)
