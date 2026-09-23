@@ -1,7 +1,7 @@
 defmodule PtcRunner.Kernel.MCPStdioTransportTest do
-  # async: false — 33 of 35 cases spawn a real launcher plus a child Elixir VM (over 3 s under CPU
-  # contention), and one case scans VM-global Port.list() (class C).
-  use ExUnit.Case, async: false
+  # Async: each case owns its launcher, child VM, and tmp dir. The one Port.list()
+  # scan filters on the stall launcher, which no other module starts.
+  use ExUnit.Case, async: true
 
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
 
@@ -17,6 +17,15 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   # not transport behavior. Tests that assert on timeouts set their own.
   @readiness_timeout_ms 30_000
   @fixture_start_timeout_ms 35_000
+
+  # Deadline for a step that must complete: a reply, an error the transport
+  # reports on its own, a close, or a DOWN. It is spent only when the step is
+  # already failing. Cases that assert a timeout pass their own short deadline.
+  @settle_timeout_ms 15_000
+
+  # Launcher drain window for cases that inject the terminal frame themselves:
+  # it must outlast the test's own reaction time on a saturated scheduler.
+  @drain_grace_ms 5_000
 
   @tag :tmp_dir
   test "correlates concurrent responses that arrive out of order", %{tmp_dir: tmp_dir} do
@@ -37,7 +46,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     requests =
       for _request <- 1..128 do
         Task.async(fn ->
-          MCPStdioTransport.request(transport, "never", %{}, %{}, 8_192, 5_000)
+          MCPStdioTransport.request(transport, "never", %{}, %{}, 8_192, @settle_timeout_ms)
         end)
       end
 
@@ -46,13 +55,13 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     end)
 
     assert {:error, :mcp_transport_busy} =
-             MCPStdioTransport.request(transport, "overflow", %{}, %{}, 8_192, 1_000)
+             MCPStdioTransport.request(transport, "overflow", %{}, %{}, 8_192, @settle_timeout_ms)
 
     assert Process.alive?(transport.pid)
     assert MCPStdioTransport.close(transport) in [:ok, {:error, :mcp_transport_error}]
 
     assert Enum.all?(requests, fn request ->
-             Task.await(request, 5_000) == {:error, :mcp_transport_error}
+             Task.await(request, @settle_timeout_ms) == {:error, :mcp_transport_error}
            end)
   end
 
@@ -82,7 +91,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
                %{},
                %{},
                8_192,
-               1_000
+               @settle_timeout_ms
              )
 
     assert stderr == "child diagnostic\n"
@@ -119,7 +128,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
                %{},
                %{},
                8_192,
-               1_000
+               @settle_timeout_ms
              )
 
     assert stderr == "efghijkl"
@@ -132,12 +141,26 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
 
     slow =
       Task.async(fn ->
-        MCPStdioTransport.request_exchange(transport, "stderr-slow", %{}, %{}, 8_192, 5_000)
+        MCPStdioTransport.request_exchange(
+          transport,
+          "stderr-slow",
+          %{},
+          %{},
+          8_192,
+          @settle_timeout_ms
+        )
       end)
 
     fast =
       Task.async(fn ->
-        MCPStdioTransport.request_exchange(transport, "stderr-fast", %{}, %{}, 8_192, 5_000)
+        MCPStdioTransport.request_exchange(
+          transport,
+          "stderr-fast",
+          %{},
+          %{},
+          8_192,
+          @settle_timeout_ms
+        )
       end)
 
     assert {:ok, %{stderr: slow_stderr, response: %{"result" => %{"method" => "stderr-slow"}}}} =
@@ -167,7 +190,14 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     end)
 
     assert {:ok, %{stderr: "", stderr_truncated?: false}} =
-             MCPStdioTransport.request_exchange(transport, "captured", %{}, %{}, 8_192, 1_000)
+             MCPStdioTransport.request_exchange(
+               transport,
+               "captured",
+               %{},
+               %{},
+               8_192,
+               @settle_timeout_ms
+             )
 
     assert_eventually(fn ->
       match?(%{stderr: ^head}, safe_state(transport.pid))
@@ -176,7 +206,14 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     send(transport.pid, {port, {:data, <<"E", tail::binary>>}})
 
     assert {:ok, %{stderr: ^euro, stderr_truncated?: false}} =
-             MCPStdioTransport.request_exchange(transport, "captured", %{}, %{}, 8_192, 1_000)
+             MCPStdioTransport.request_exchange(
+               transport,
+               "captured",
+               %{},
+               %{},
+               8_192,
+               @settle_timeout_ms
+             )
 
     assert :ok = MCPStdioTransport.close(transport)
   end
@@ -197,7 +234,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
                %{"value" => 7},
                metadata,
                8_192,
-               1_000
+               @settle_timeout_ms
              )
 
     assert %{
@@ -291,7 +328,14 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     end)
 
     assert {:error, :mcp_response_exceeded} =
-             MCPStdioTransport.request(transport, "notify-flood", %{}, %{}, 128, 1_000)
+             MCPStdioTransport.request(
+               transport,
+               "notify-flood",
+               %{},
+               %{},
+               128,
+               @settle_timeout_ms
+             )
 
     assert {:ok, %{"result" => %{"method" => "slow"}}} = Task.await(unrelated)
 
@@ -308,7 +352,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     transport = start_transport(tmp_dir)
 
     assert {:error, :mcp_response_exceeded} =
-             MCPStdioTransport.request(transport, "large", %{}, %{}, 128, 1_000)
+             MCPStdioTransport.request(transport, "large", %{}, %{}, 128, @settle_timeout_ms)
 
     assert {:ok, %{"result" => %{"method" => "small"}}} = request(transport, "small")
     assert :ok = MCPStdioTransport.close(transport)
@@ -326,7 +370,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
                  %{},
                  %{},
                  1_048_576,
-                 5_000
+                 @settle_timeout_ms
                )
     end
 
@@ -357,7 +401,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
                25
              )
 
-    assert_receive {:DOWN, ^ref, :process, _pid, :normal}, 5_000
+    assert_receive {:DOWN, ^ref, :process, _pid, :normal}, @settle_timeout_ms
     assert {:error, :closed} = request(transport, "after-timeout")
   end
 
@@ -387,7 +431,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     end)
 
     assert {:ok, %{"result" => %{"method" => "after-timeout"}}} =
-             request(transport, "after-timeout")
+             request(transport, "after-timeout", 8_192, @readiness_timeout_ms)
 
     assert :ok = MCPStdioTransport.close(transport)
   end
@@ -400,7 +444,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     assert {:error, :mcp_timeout} =
              MCPStdioTransport.request(transport, "never", %{}, %{}, 8_192, 25)
 
-    assert_receive {:DOWN, ^ref, :process, _pid, :normal}, 5_000
+    assert_receive {:DOWN, ^ref, :process, _pid, :normal}, @settle_timeout_ms
     assert {:error, :closed} = request(transport, "after-cancellation-stall")
   end
 
@@ -410,22 +454,22 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
 
     first =
       Task.async(fn ->
-        MCPStdioTransport.request(transport, "first", %{}, %{}, 8_192, 5_000)
+        MCPStdioTransport.request(transport, "first", %{}, %{}, 8_192, @settle_timeout_ms)
       end)
 
     assert_eventually(fn -> unacknowledged_request?(transport) end)
 
     second =
       Task.async(fn ->
-        MCPStdioTransport.request(transport, "second", %{}, %{}, 8_192, 5_000)
+        MCPStdioTransport.request(transport, "second", %{}, %{}, 8_192, @settle_timeout_ms)
       end)
 
     assert_eventually(fn ->
       match?(%{pending: %{2 => %{sent?: false}}}, safe_state(transport.pid))
     end)
 
-    assert {:error, :mcp_protocol_error} = Task.await(first, 5_000)
-    assert {:error, :mcp_protocol_error} = Task.await(second, 5_000)
+    assert {:error, :mcp_protocol_error} = Task.await(first, @settle_timeout_ms)
+    assert {:error, :mcp_protocol_error} = Task.await(second, @settle_timeout_ms)
   end
 
   @tag :tmp_dir
@@ -437,7 +481,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     caller =
       spawn(fn ->
         send(parent, :caller_started)
-        MCPStdioTransport.request(transport, "never", %{}, %{}, 8_192, 5_000)
+        MCPStdioTransport.request(transport, "never", %{}, %{}, 8_192, @settle_timeout_ms)
       end)
 
     assert_receive :caller_started
@@ -487,7 +531,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
 
     ref = Process.monitor(transport_pid)
     send(owner, :stop)
-    assert_receive {:DOWN, ^ref, :process, ^transport_pid, _reason}, 5_000
+    assert_receive {:DOWN, ^ref, :process, ^transport_pid, _reason}, @settle_timeout_ms
   end
 
   @tag :tmp_dir
@@ -505,7 +549,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
         end
       end)
 
-    assert_receive {:transport, transport}, 5_000
+    assert_receive {:transport, transport}, @fixture_start_timeout_ms
 
     request =
       Task.async(fn ->
@@ -514,7 +558,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
 
     assert_eventually(fn -> unacknowledged_request?(transport) end)
     Process.exit(owner, :kill)
-    assert {:error, :mcp_transport_error} = Task.await(request, 5_000)
+    assert {:error, :mcp_transport_error} = Task.await(request, @settle_timeout_ms)
     assert_partial_delivery(marker)
   end
 
@@ -554,7 +598,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
         Task.async(fn -> MCPStdioTransport.close(transport) end)
       end
 
-    assert [:ok, :ok] = Enum.map(closes, &Task.await(&1, 5_000))
+    assert [:ok, :ok] = Enum.map(closes, &Task.await(&1, @settle_timeout_ms))
     assert :ok = MCPStdioTransport.close(transport)
   end
 
@@ -562,11 +606,13 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   test "close acknowledges and discards trailing server stdout", %{tmp_dir: tmp_dir} do
     marker = Path.join(tmp_dir, "request-received")
     transport = start_transport(tmp_dir, marker, "close-output")
-    request = Task.async(fn -> request(transport, "wait-for-close", 8_192, 5_000) end)
+
+    request =
+      Task.async(fn -> request(transport, "wait-for-close", 8_192, @settle_timeout_ms) end)
 
     assert_eventually(fn -> File.exists?(marker) end)
     assert :ok = MCPStdioTransport.close(transport)
-    assert {:error, :mcp_transport_error} = Task.await(request, 5_000)
+    assert {:error, :mcp_transport_error} = Task.await(request, @settle_timeout_ms)
   end
 
   @tag :tmp_dir
@@ -577,7 +623,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
 
     assert_eventually(fn -> unacknowledged_request?(transport) end)
     assert {:error, :mcp_transport_error} = MCPStdioTransport.close(transport)
-    assert {:error, :mcp_transport_error} = Task.await(request, 5_000)
+    assert {:error, :mcp_transport_error} = Task.await(request, @settle_timeout_ms)
     assert_partial_delivery(marker)
   end
 
@@ -608,7 +654,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
                exit_status: 0,
                stderr: "",
                stderr_truncated?: false
-             }}} = Task.await(close, 5_000)
+             }}} = Task.await(close, @settle_timeout_ms)
   end
 
   @tag :tmp_dir
@@ -619,7 +665,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
 
     send(transport.pid, {state.port, {:data, <<"X", 5, 0::signed-big-32, 0>>}})
 
-    assert_receive {:DOWN, ^ref, :process, _pid, _reason}, 5_000
+    assert_receive {:DOWN, ^ref, :process, _pid, _reason}, @settle_timeout_ms
 
     assert {:error,
             {:mcp_transport_error,
@@ -636,14 +682,14 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
         MCPStdioTransport.start(launch_options(tmp_dir), owner, nil)
       end)
 
-    assert {:ok, transport} = Task.await(start, 5_000)
+    assert {:ok, transport} = Task.await(start, @fixture_start_timeout_ms)
     assert_receive {:"ETS-TRANSFER", _table, _worker, :cleanup_outcome}
 
     state = :sys.get_state(transport.pid)
     ref = Process.monitor(transport.pid)
     send(transport.pid, {state.port, {:data, <<"X", 5, 17::signed-big-32, 1>>}})
 
-    assert_receive {:DOWN, ^ref, :process, _pid, _reason}, 5_000
+    assert_receive {:DOWN, ^ref, :process, _pid, _reason}, @settle_timeout_ms
 
     assert {:error,
             {:mcp_transport_error,
@@ -656,7 +702,9 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
 
   @tag :tmp_dir
   test "waits for a delayed clean finish after port exit", %{tmp_dir: tmp_dir} do
-    transport = start_transport(tmp_dir)
+    # The frame below lands 25 ms after the exit status; the default 50 ms grace
+    # lets a saturated scheduler reach the termination deadline first.
+    transport = start_transport(tmp_dir, nil, "read", grace_ms: @drain_grace_ms)
     state = :sys.get_state(transport.pid)
     :sys.suspend(transport.pid)
     close = Task.async(fn -> MCPStdioTransport.close(transport) end)
@@ -678,8 +726,8 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     end)
 
     :sys.resume(transport.pid)
-    assert :ok = Task.await(close, 5_000)
-    assert :ok = Task.await(second_close, 5_000)
+    assert :ok = Task.await(close, @settle_timeout_ms)
+    assert :ok = Task.await(second_close, @settle_timeout_ms)
   end
 
   @tag :tmp_dir
@@ -689,7 +737,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     # termination deadline before the terminal frame below is injected, and
     # `close/1` then correctly reports a timeout rather than a clean finish —
     # failing a test that is about the clean path.
-    transport = start_transport(tmp_dir, nil, "read", grace_ms: 5_000)
+    transport = start_transport(tmp_dir, nil, "read", grace_ms: @drain_grace_ms)
     state = :sys.get_state(transport.pid)
     send(transport.pid, {state.port, {:exit_status, 0}})
     assert_eventually(fn -> match?(%{terminal_pending?: true}, safe_state(transport.pid)) end)
@@ -705,7 +753,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
 
     send(transport.pid, {state.port, {:data, <<"X", 1, 0::signed-big-32, 0>>}})
 
-    assert :ok = Task.await(close, 5_000)
+    assert :ok = Task.await(close, @settle_timeout_ms)
   end
 
   @tag :tmp_dir
@@ -714,7 +762,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
 
     active =
       Task.async(fn ->
-        MCPStdioTransport.request(transport, "never", %{}, %{}, 8_192, 5_000)
+        MCPStdioTransport.request(transport, "never", %{}, %{}, 8_192, @settle_timeout_ms)
       end)
 
     assert_eventually(fn ->
@@ -728,7 +776,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     send(transport.pid, {state.port, {:exit_status, 0}})
     assert_eventually(fn -> match?(%{terminal_pending?: true}, safe_state(transport.pid)) end)
 
-    assert {:error, :mcp_transport_error} = Task.await(active, 5_000)
+    assert {:error, :mcp_transport_error} = Task.await(active, @settle_timeout_ms)
     assert {:error, :mcp_transport_error} = request(transport, "after-exit")
   end
 
@@ -779,7 +827,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     assert overwritten["LC_ALL"] == "C.UTF-8"
   end
 
-  defp request(transport, method, max_bytes \\ 8_192, timeout_ms \\ 1_000),
+  defp request(transport, method, max_bytes \\ 8_192, timeout_ms \\ @settle_timeout_ms),
     do: MCPStdioTransport.request(transport, method, %{}, %{}, max_bytes, timeout_ms)
 
   defp blocked_request(transport) do
@@ -789,7 +837,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
       %{"payload" => String.duplicate("x", 900_000)},
       %{},
       1_000_000,
-      5_000
+      @settle_timeout_ms
     )
   end
 
@@ -858,7 +906,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
       args: [@fixture, marker, fixture_mode],
       env: inherited_environment(),
       grace_ms: Keyword.get(opts, :grace_ms, 50),
-      start_timeout_ms: 5_000
+      start_timeout_ms: @fixture_start_timeout_ms
     ]
     |> then(fn options ->
       case Keyword.get(opts, :stderr_bytes) do

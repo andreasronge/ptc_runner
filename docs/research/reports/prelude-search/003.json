@@ -1,0 +1,664 @@
+{
+  "schema_version": 1,
+  "experiment": "prelude-search/003",
+  "kind": "measure",
+  "purpose": "deadline_calibration",
+  "source_commit": "608c2a92d17a58164357d2d99f0cd201f5d8de7c",
+  "status": "completed",
+  "protocol": {
+    "seed": 20261020,
+    "instances": 1,
+    "budget_microusd": 400000,
+    "request_timeout_ms": 300000,
+    "subjects": [
+      "intervals"
+    ],
+    "conditions": [
+      [
+        "E1 one-turn",
+        1,
+        1
+      ],
+      [
+        "E1 three-turn",
+        1,
+        3
+      ],
+      [
+        "E2 K=2",
+        2,
+        1
+      ],
+      [
+        "E2 K=4",
+        4,
+        1
+      ]
+    ],
+    "wall_cap_ms": 21600000,
+    "proposal_identity": "candidate-index-v1",
+    "case_cap_microusd": 100000,
+    "total_token_ceiling": 320000,
+    "model": "openrouter:deepseek/deepseek-v4-flash",
+    "final_tests": "never used for selection"
+  },
+  "completion": {
+    "ended_at": "2026-09-19T18:37:09.970769+00:00",
+    "exit_status": 0,
+    "wall_ms": 479359
+  },
+  "summary": {
+    "mode": "live",
+    "rows": [
+      {
+        "instances": 1,
+        "subject": "intervals",
+        "experiment": "E1 one-turn",
+        "wall_ms": 131182,
+        "function_accuracy": 1.0,
+        "form_accuracy": 0.0,
+        "final_test_pass_rate": 1.0,
+        "citation_values_valid_rate": 0.0,
+        "tokens_in": 5137,
+        "tokens_out": 8722,
+        "cost_microusd": 917,
+        "cost_per_solved_microusd": 917.0,
+        "candidates_generated": 1,
+        "candidates_checked": 1,
+        "generated_per_solved": 1.0,
+        "checked_per_solved": 1.0
+      },
+      {
+        "instances": 0,
+        "subject": "normaliser",
+        "experiment": "E1 one-turn",
+        "wall_ms": 0,
+        "function_accuracy": null,
+        "form_accuracy": null,
+        "final_test_pass_rate": null,
+        "citation_values_valid_rate": null,
+        "tokens_in": null,
+        "tokens_out": null,
+        "cost_microusd": null,
+        "cost_per_solved_microusd": null,
+        "candidates_generated": 0,
+        "candidates_checked": 0,
+        "generated_per_solved": null,
+        "checked_per_solved": null
+      },
+      {
+        "instances": 0,
+        "subject": "reconciliation",
+        "experiment": "E1 one-turn",
+        "wall_ms": 0,
+        "function_accuracy": null,
+        "form_accuracy": null,
+        "final_test_pass_rate": null,
+        "citation_values_valid_rate": null,
+        "tokens_in": null,
+        "tokens_out": null,
+        "cost_microusd": null,
+        "cost_per_solved_microusd": null,
+        "candidates_generated": 0,
+        "candidates_checked": 0,
+        "generated_per_solved": null,
+        "checked_per_solved": null
+      },
+      {
+        "instances": 1,
+        "subject": "overall",
+        "experiment": "E1 one-turn",
+        "wall_ms": 131182,
+        "function_accuracy": 1.0,
+        "form_accuracy": 0.0,
+        "final_test_pass_rate": 1.0,
+        "citation_values_valid_rate": 0.0,
+        "tokens_in": 5137,
+        "tokens_out": 8722,
+        "cost_microusd": 917,
+        "cost_per_solved_microusd": 917.0,
+        "candidates_generated": 1,
+        "candidates_checked": 1,
+        "generated_per_solved": 1.0,
+        "checked_per_solved": 1.0
+      },
+      {
+        "instances": 1,
+        "subject": "intervals",
+        "experiment": "E1 three-turn",
+        "wall_ms": 133420,
+        "function_accuracy": 1.0,
+        "form_accuracy": 0.0,
+        "final_test_pass_rate": 0.0,
+        "citation_values_valid_rate": 1.0,
+        "tokens_in": 5118,
+        "tokens_out": 8629,
+        "cost_microusd": 909,
+        "cost_per_solved_microusd": null,
+        "candidates_generated": 1,
+        "candidates_checked": 1,
+        "generated_per_solved": null,
+        "checked_per_solved": null
+      },
+      {
+        "instances": 0,
+        "subject": "normaliser",
+        "experiment": "E1 three-turn",
+        "wall_ms": 0,
+        "function_accuracy": null,
+        "form_accuracy": null,
+        "final_test_pass_rate": null,
+        "citation_values_valid_rate": null,
+        "tokens_in": null,
+        "tokens_out": null,
+        "cost_microusd": null,
+        "cost_per_solved_microusd": null,
+        "candidates_generated": 0,
+        "candidates_checked": 0,
+        "generated_per_solved": null,
+        "checked_per_solved": null
+      },
+      {
+        "instances": 0,
+        "subject": "reconciliation",
+        "experiment": "E1 three-turn",
+        "wall_ms": 0,
+        "function_accuracy": null,
+        "form_accuracy": null,
+        "final_test_pass_rate": null,
+        "citation_values_valid_rate": null,
+        "tokens_in": null,
+        "tokens_out": null,
+        "cost_microusd": null,
+        "cost_per_solved_microusd": null,
+        "candidates_generated": 0,
+        "candidates_checked": 0,
+        "generated_per_solved": null,
+        "checked_per_solved": null
+      },
+      {
+        "instances": 1,
+        "subject": "overall",
+        "experiment": "E1 three-turn",
+        "wall_ms": 133420,
+        "function_accuracy": 1.0,
+        "form_accuracy": 0.0,
+        "final_test_pass_rate": 0.0,
+        "citation_values_valid_rate": 1.0,
+        "tokens_in": 5118,
+        "tokens_out": 8629,
+        "cost_microusd": 909,
+        "cost_per_solved_microusd": null,
+        "candidates_generated": 1,
+        "candidates_checked": 1,
+        "generated_per_solved": null,
+        "checked_per_solved": null
+      },
+      {
+        "instances": 1,
+        "subject": "intervals",
+        "experiment": "E2 K=2",
+        "wall_ms": 83486,
+        "function_accuracy": 0.0,
+        "form_accuracy": 0.0,
+        "final_test_pass_rate": 0.0,
+        "citation_values_valid_rate": 0.0,
+        "tokens_in": 10274,
+        "tokens_out": 7633,
+        "cost_microusd": 1038,
+        "cost_per_solved_microusd": null,
+        "candidates_generated": 0,
+        "candidates_checked": 0,
+        "generated_per_solved": null,
+        "checked_per_solved": null
+      },
+      {
+        "instances": 0,
+        "subject": "normaliser",
+        "experiment": "E2 K=2",
+        "wall_ms": 0,
+        "function_accuracy": null,
+        "form_accuracy": null,
+        "final_test_pass_rate": null,
+        "citation_values_valid_rate": null,
+        "tokens_in": null,
+        "tokens_out": null,
+        "cost_microusd": null,
+        "cost_per_solved_microusd": null,
+        "candidates_generated": 0,
+        "candidates_checked": 0,
+        "generated_per_solved": null,
+        "checked_per_solved": null
+      },
+      {
+        "instances": 0,
+        "subject": "reconciliation",
+        "experiment": "E2 K=2",
+        "wall_ms": 0,
+        "function_accuracy": null,
+        "form_accuracy": null,
+        "final_test_pass_rate": null,
+        "citation_values_valid_rate": null,
+        "tokens_in": null,
+        "tokens_out": null,
+        "cost_microusd": null,
+        "cost_per_solved_microusd": null,
+        "candidates_generated": 0,
+        "candidates_checked": 0,
+        "generated_per_solved": null,
+        "checked_per_solved": null
+      },
+      {
+        "instances": 1,
+        "subject": "overall",
+        "experiment": "E2 K=2",
+        "wall_ms": 83486,
+        "function_accuracy": 0.0,
+        "form_accuracy": 0.0,
+        "final_test_pass_rate": 0.0,
+        "citation_values_valid_rate": 0.0,
+        "tokens_in": 10274,
+        "tokens_out": 7633,
+        "cost_microusd": 1038,
+        "cost_per_solved_microusd": null,
+        "candidates_generated": 0,
+        "candidates_checked": 0,
+        "generated_per_solved": null,
+        "checked_per_solved": null
+      },
+      {
+        "instances": 1,
+        "subject": "intervals",
+        "experiment": "E2 K=4",
+        "wall_ms": 114577,
+        "function_accuracy": 0.5,
+        "form_accuracy": 0.0,
+        "final_test_pass_rate": 1.0,
+        "citation_values_valid_rate": 0.5,
+        "tokens_in": 20548,
+        "tokens_out": 28662,
+        "cost_microusd": 3000,
+        "cost_per_solved_microusd": 3000.0,
+        "candidates_generated": 2,
+        "candidates_checked": 2,
+        "generated_per_solved": 2.0,
+        "checked_per_solved": 2.0
+      },
+      {
+        "instances": 0,
+        "subject": "normaliser",
+        "experiment": "E2 K=4",
+        "wall_ms": 0,
+        "function_accuracy": null,
+        "form_accuracy": null,
+        "final_test_pass_rate": null,
+        "citation_values_valid_rate": null,
+        "tokens_in": null,
+        "tokens_out": null,
+        "cost_microusd": null,
+        "cost_per_solved_microusd": null,
+        "candidates_generated": 0,
+        "candidates_checked": 0,
+        "generated_per_solved": null,
+        "checked_per_solved": null
+      },
+      {
+        "instances": 0,
+        "subject": "reconciliation",
+        "experiment": "E2 K=4",
+        "wall_ms": 0,
+        "function_accuracy": null,
+        "form_accuracy": null,
+        "final_test_pass_rate": null,
+        "citation_values_valid_rate": null,
+        "tokens_in": null,
+        "tokens_out": null,
+        "cost_microusd": null,
+        "cost_per_solved_microusd": null,
+        "candidates_generated": 0,
+        "candidates_checked": 0,
+        "generated_per_solved": null,
+        "checked_per_solved": null
+      },
+      {
+        "instances": 1,
+        "subject": "overall",
+        "experiment": "E2 K=4",
+        "wall_ms": 114577,
+        "function_accuracy": 0.5,
+        "form_accuracy": 0.0,
+        "final_test_pass_rate": 1.0,
+        "citation_values_valid_rate": 0.5,
+        "tokens_in": 20548,
+        "tokens_out": 28662,
+        "cost_microusd": 3000,
+        "cost_per_solved_microusd": 3000.0,
+        "candidates_generated": 2,
+        "candidates_checked": 2,
+        "generated_per_solved": 2.0,
+        "checked_per_solved": 2.0
+      }
+    ],
+    "stop_reason": null,
+    "replayed_cost_microusd": null,
+    "comparisons": [
+      {
+        "baseline": 0.0,
+        "bootstrap_seed": [
+          2026,
+          9,
+          19
+        ],
+        "condition": "E2 K=2",
+        "difference": 0.0,
+        "interval_95": [
+          0.0,
+          0.0
+        ],
+        "method": "stratified paired percentile bootstrap",
+        "observed": 0.0,
+        "pairs": [
+          {
+            "baseline": 0,
+            "candidate": 0,
+            "difference": 0,
+            "seed": 20261020,
+            "subject": "intervals"
+          }
+        ],
+        "replicates": 2000,
+        "status": "descriptive_pilot",
+        "verdict": "inconclusive"
+      },
+      {
+        "baseline": 0.0,
+        "bootstrap_seed": [
+          2026,
+          9,
+          19
+        ],
+        "condition": "E2 K=4",
+        "difference": 1.0,
+        "interval_95": [
+          1.0,
+          1.0
+        ],
+        "method": "stratified paired percentile bootstrap",
+        "observed": 1.0,
+        "pairs": [
+          {
+            "baseline": 0,
+            "candidate": 1,
+            "difference": 1,
+            "seed": 20261020,
+            "subject": "intervals"
+          }
+        ],
+        "replicates": 2000,
+        "status": "descriptive_pilot",
+        "verdict": "inconclusive"
+      }
+    ],
+    "spent_or_reserved_microusd": 5864,
+    "completed_cases": 4,
+    "planned_cases": 4,
+    "unstarted_cases": 0,
+    "conclusion": "pilot; no automatic hypothesis verdict"
+  },
+  "observations": [
+    {
+      "experiment": "E1 one-turn",
+      "subject": "intervals",
+      "instance": 0,
+      "seed": 20261020,
+      "solved": true,
+      "winner": 0,
+      "wall_ms": 131182,
+      "llm_spend": {
+        "input": 5137,
+        "output": 8722,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 917
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261023,\"start\":20261020},{\"end\":20261028,\"start\":20261023}]}"
+              },
+              {
+                "index": 8,
+                "observed_json": "{\"intervals\":[{\"end\":20261083,\"start\":20261080},{\"end\":20261088,\"start\":20261083}]}"
+              }
+            ],
+            "form": "(< (get next \"start\") (+ (get current \"end\") tolerance))",
+            "function": "touches?"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "ec83680c438c5c7c64242815d0fd40b3baa48806d80bfb378954d36a5e09c04b"
+        }
+      ]
+    },
+    {
+      "experiment": "E1 three-turn",
+      "subject": "intervals",
+      "instance": 0,
+      "seed": 20261020,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 133420,
+      "llm_spend": {
+        "input": 5118,
+        "output": 8629,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 909
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261023,\"start\":20261020},{\"end\":20261028,\"start\":20261023}]}"
+              }
+            ],
+            "form": "(< (get next \"start\") (+ (get current \"end\") tolerance))",
+            "function": "touches?"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "7e47c4162bc8fb69d4a9e8320920981c00df33cc3ac76935abed4cdffdbb3e7a"
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=2",
+      "subject": "intervals",
+      "instance": 0,
+      "seed": 20261020,
+      "solved": false,
+      "winner": null,
+      "wall_ms": 83486,
+      "llm_spend": {
+        "input": 10274,
+        "output": 7633,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 1038
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        }
+      ]
+    },
+    {
+      "experiment": "E2 K=4",
+      "subject": "intervals",
+      "instance": 0,
+      "seed": 20261020,
+      "solved": true,
+      "winner": 3,
+      "wall_ms": 114577,
+      "llm_spend": {
+        "input": 20548,
+        "output": 28662,
+        "state": "available",
+        "total_cost": {
+          "currency": "USD",
+          "microunits": 3000
+        }
+      },
+      "candidates": [
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261023,\"start\":20261020},{\"end\":20261028,\"start\":20261023}]}"
+              }
+            ],
+            "form": "(< (get next \"start\") (+ (get current \"end\") tolerance))",
+            "function": "touches?"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "c0a79c20c0694844d9b523754387275bd6204baa8aaaa9b5e7c866f409ab8c77"
+        },
+        {
+          "citations_valid": false,
+          "diagnosis": {},
+          "failure_kind": "turn-limit",
+          "failure_reason": "evaluation-error",
+          "form_correct": false,
+          "function_correct": false,
+          "status": "subject-failure",
+          "candidate_source_sha256": null
+        },
+        {
+          "citations_valid": true,
+          "diagnosis": {
+            "cited_executions": [
+              {
+                "index": 0,
+                "observed_json": "{\"intervals\":[{\"end\":20261023,\"start\":20261020},{\"end\":20261028,\"start\":20261023}]}"
+              },
+              {
+                "index": 8,
+                "observed_json": "{\"intervals\":[{\"end\":20261183,\"start\":20261180},{\"end\":20261188,\"start\":20261183}]}"
+              }
+            ],
+            "form": "(< (get next \"start\") (+ (get current \"end\") tolerance))",
+            "function": "touches?"
+          },
+          "failure_kind": null,
+          "failure_reason": null,
+          "form_correct": false,
+          "function_correct": true,
+          "status": "returned",
+          "candidate_source_sha256": "ec83680c438c5c7c64242815d0fd40b3baa48806d80bfb378954d36a5e09c04b"
+        }
+      ]
+    }
+  ],
+  "raw_results_sha256": "864a0bda9a8035bc44846a1ab656637742d3bc5f5767321b36c9b73acd890de6",
+  "replay_verification": {
+    "completed_cases_verified": 4,
+    "comparison_fields": [
+      "experiment",
+      "subject",
+      "seed",
+      "ground_truth",
+      "candidates",
+      "solved",
+      "winner",
+      "selection",
+      "usage.llm_spend"
+    ],
+    "equal": true,
+    "excluded_fields": [
+      "run_ref",
+      "wall_ms",
+      "console",
+      "non-model run bookkeeping"
+    ],
+    "stopped_case_replayed": false,
+    "full_matrix_replayed": true,
+    "replay_new_spend_microusd": 0
+  },
+  "budget": {
+    "experiment": "prelude-search/003",
+    "kind": "deadline_calibration",
+    "authorization": "https://github.com/andreasronge/ptc_runner/issues/1996#issuecomment-5744271571",
+    "corrective_allowance_microusd": 5000000,
+    "prior_spent_or_reserved_microusd": 310574,
+    "recording_cap_microusd": 400000,
+    "known_completed_case_cost_microusd": 5864,
+    "retained_failed_case_reservation_microusd": 0,
+    "remaining_microusd": 4683562
+  },
+  "verdict": "inconclusive",
+  "hypotheses": [],
+  "latency_verification": {
+    "run_ref": "cmd-0d3zvyjyjyyfbmegjzrn5x4axd",
+    "source": "private-run-analysis-v2/model_exchanges",
+    "exchanges": [
+      {
+        "complete?": true,
+        "input_timestamp": "2026-09-19T18:29:20.062826Z",
+        "output_timestamp": "2026-09-19T18:31:25.961202Z",
+        "duration_ms": 125898
+      }
+    ]
+  }
+}

@@ -2,6 +2,7 @@ defmodule PtcRunner.ViewerLaunchAdapterTest do
   # async: false — the :mix launch path runs Mix.Task.run("app.config") and starts applications,
   # both VM-global (class D).
   use ExUnit.Case, async: false
+  @moduletag :operator
 
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandOutcome

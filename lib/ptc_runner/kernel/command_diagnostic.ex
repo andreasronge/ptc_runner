@@ -513,6 +513,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
        do:
          RuntimeLimitDiagnostic.subordinate_evaluations_message?(message) or
            RuntimeLimitDiagnostic.timeout_message?(message) or
+           RuntimeLimitDiagnostic.workflow_timeout_message?(message) or
            RuntimeLimitDiagnostic.heap_words_message?(message) or
            RuntimeLimitDiagnostic.protocol_errors_message?(message) or
            RuntimeLimitDiagnostic.budget_message?(message)

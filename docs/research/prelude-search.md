@@ -1,9 +1,11 @@
 # Program: prelude-search
 
-Status: active, methodology revised 2026-09-19. Harness under `scripts/labs/prelude-search/`;
-its design and the experiment ladder it was built for are in
-`docs/plans/reproducible-prelude-search.md`, which this document supersedes
-as the record of results and next steps.
+Status: paused, 2026-09-21. The corrective comparison closed with stopped,
+inconclusive evidence in #1996; no repair rerun is scheduled. The harness
+remains under `scripts/labs/prelude-search/`. This document owns its retained
+methodology and results. The proposed next investigation is the separate
+[debug-efficiency program](debug-efficiency.md), with protocol decision #2028.
+It does not inherit this program's observations or spending authorization.
 
 ## Question
 
@@ -32,7 +34,13 @@ issues by hand until then.
 | allowed kinds | measure, change, explore |
 | allowed models | `openrouter:deepseek/deepseek-v4-flash`; a second model only when a verdict depends on it |
 | filing depth | 3 experiments without a maintainer decision |
-| first run version | approves `prelude-search/b01` and `prelude-search/b05`; nothing else is filed without a new version |
+| current authorization | paused; historical approvals do not authorize another live run |
+
+The corrective USD 5 allowance has USD 0.486354 consumed or reserved, leaving
+USD 4.513646. This includes USD 0.209881 from earlier validation plus the three
+recordings below. Unused allowance is not authorization to restart or transfer
+spend to the debugging program. Historical 001 spend remains separately
+accounted against the original whole-issue USD 10 cap.
 
 ## Stop rules
 
@@ -49,7 +57,42 @@ issues by hand until then.
 
 ## Ledger
 
-No finished rows yet. A row requires the tag and the result file.
+| experiment | report / result | immutable tag | verdict | known USD | consumed or reserved USD |
+| --- | --- | --- | --- | ---: | ---: |
+| prelude-search/002 | [report](reports/prelude-search/002-corrected-e1-e2.md) / [result](reports/prelude-search/002.json) | [002](https://github.com/andreasronge/ptc_runner/tree/research/prelude-search/002) | stopped; H1 inconclusive | 0.000693 plus unknown timeout usage | 0.100693 |
+| prelude-search/003 | [report](reports/prelude-search/003-deadline-calibration.md) / [result](reports/prelude-search/003.json) | [003](https://github.com/andreasronge/ptc_runner/tree/research/prelude-search/003) | inconclusive; completed calibration, no hypothesis tested | 0.005864 | 0.005864 |
+| prelude-search/004 | [report](reports/prelude-search/004-stopped-e1-e2.md) / [result](reports/prelude-search/004.json) | [004](https://github.com/andreasronge/ptc_runner/tree/research/prelude-search/004) | stopped; H1 inconclusive | 0.073440 | 0.169916 |
+
+Verdicts follow the retained recording status and hypothesis assessments. The
+004 conservative amount is
+USD 0.069916 completed-case spend plus the full USD 0.10 stopped-case
+reservation. The recovered USD 0.003524 stopped-case cost is already covered
+by that reservation, not an additional charge. Actual known spend and budget
+reservations must not be conflated.
+
+### Findings and disposition
+
+- 002 completed one case before a Kernel request timeout. There are no paired
+  comparisons. It exposed missing traces and partial-result finalization.
+- 003 completed all four calibration cases, including a 125898 ms model
+  exchange beyond the former 120-second transport cutoff. It establishes
+  working deadline handling for those cases, not a repair advantage.
+- 004 completed 53 of 240 cases: thirteen complete interval instances and
+  one extra one-turn observation. Three-turn E1 and K=4 each solved 3/13;
+  K=2 solved 4/13. K=4 cost about twice as much as three-turn E1 on the
+  completed cases. Paired intervals span zero and the useful-improvement
+  threshold. The other subjects were never reached; stopping depended on
+  output truncation. No support, refutation, equivalence or transfer follows.
+- All 53 completed 004 cases matched network-free replay. Of 105 scored
+  candidate slots, 46 returned repair objects and 41 were valid for checking;
+  48 slots ended with evaluation errors. Investigating these concrete failures
+  is more actionable than assuming additional width will help.
+
+Report PRs #2010 and #2022 are merged. Artifact PRs #2009 and #2024 are
+closed without merging; their remote branches and permanent tags are retained.
+Overlapping harness PR #2019 is closed as superseded by merged #2020.
+The original implementation plan is retired; its historical ladder remains
+available in Git history rather than as a second source of current protocol.
 
 ### Pending migration
 
@@ -76,7 +119,9 @@ remains invalid; its original text is preserved as historical evidence.
 
 ### Corrective experiment protocol
 
-Freeze this protocol and its seed list before generating model answers:
+This retained protocol governs the interpretation of corrective recordings.
+Any future repair experiment needs a new issue freezing its seed list and
+conditions before generating model answers; this section does not restart it.
 
 - Partition distinct inputs into visible examples, selection/feedback tests,
   and final tests. Check disjointness by input value, not just by index or
@@ -121,26 +166,41 @@ before inspecting its final outcomes.
 
 ## Backlog
 
+All entries are deferred while the program is paused. The b01 attempts are
+recorded as 002–004; no automatic retry follows. The run-input implementation
+in b05 landed, but the historical 000 result/tag migration remains incomplete.
+H2/H3 remain open questions, not prerequisites for the debugging comparison.
+
 | id | kind | hypothesis | settles | priority | spawned_by | after |
 | --- | --- | --- | --- | --- | --- | --- |
 | prelude-search/b01 | measure | H1 | corrective rerun of 001 under the protocol above: three disjoint sets, effective mutations, recorded selection, matched budgets, capable E1, all-candidate scoring, complete replay, paired uncertainty | 1 | prelude-search/001 | |
 | prelude-search/b02 | measure | H2 | feedback depth 3 using selection failures only versus independent K=4 at matched total budgets, scored on untouched final tests | 2 | prelude-search/001 | b01 |
 | prelude-search/b03 | measure | H1 | soft evidence and the no-bug and spec-bug case classes: false-repair rate with and without an `authority` field on evidence | 3 | maintainer | b01 |
 | prelude-search/b04 | measure | H3 | a kept evidence-reading helper on an unseen subject, with and without | 4 | maintainer | b02 |
-| prelude-search/b05 | change | H0 | record the run input privately and reconstruct no-provider E0 runs from retained files in a fresh process; compare identities and result hashes | 2 | prelude-search/001 | |
+| prelude-search/b05 | change | H0 | run-input capture and fresh-process reconstruction implemented; independent result/tag migration still pending before an H0 verdict | 2 | prelude-search/001 | |
 | prelude-search/b06 | change | H1 | render `data/params` as its value to the model instead of its type; prompt tokens and pass rate on b01's fixtures | 3 | prelude-search/001 | b01 |
 | prelude-search/b07 | explore | H2 | which evidence-graph representation a feedback loop would need from the debugger prelude, from the captured failures of 001 | 5 | maintainer | |
 
 ## Pending proposals
 
-None. Entries the steward proposes land here until a run version approves
-them.
+No new repair experiment is proposed. #2028 prepares a separate bounded
+debugging-efficiency protocol; it does not reopen b01 or authorize the rest of
+the repair/search ladder.
 
 ## Runtime wants
 
 Historical observations from `prelude-search/001`, with current status below.
 Remaining gaps become ordinary issues with a reproduction when a run version
 approves filing them.
+
+- Resolved by #2020: authorized model deadlines propagate to the HTTP adapter;
+  model cases retain correlated traces and private inspection; stopped runs
+  finalize partial results and verified completed-prefix replay.
+- #2021 tracks missing detailed final mission evaluation diagnostics when a
+  workflow handles the failure. The failed outcome remains scored, but a
+  later investigator cannot retrieve the authoritative final-turn diagnostic.
+- #2023 tracks an intermittent inspection-fixture startup deadline. This is
+  a test reliability issue, not evidence about model repair quality.
 
 - Mission params passed with `kernel/eval-with` are recorded by identity
   hash only, and a mission's return value has no first-class inspection

@@ -1,5 +1,6 @@
 defmodule Mix.Tasks.Ptc.VerifyDocsTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   alias Mix.Tasks.Ptc.VerifyDocs
 

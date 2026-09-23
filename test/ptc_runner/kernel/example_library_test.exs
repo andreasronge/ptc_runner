@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
   # reinstall the :default logger handler (class D); the other 12 could run async in a sibling
   # module.
   use ExUnit.Case, async: false
+  @moduletag :operator
 
   import ExUnit.CaptureIO
 

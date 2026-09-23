@@ -767,39 +767,21 @@ defmodule PtcGatewayTest do
     state = :sys.get_state(owner)
     parent = self()
 
-    {:ok, socket} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
-    {:ok, port} = :inet.port(socket)
-    :gen_tcp.close(socket)
-    listen = %{config["listen"] | "port" => port}
+    {listener, %{"listen" => %{"port" => port}}} =
+      serve_router(state, config,
+        heartbeat_ms: 50,
+        serving_hooks: %{
+          after_activation: fn _execution ->
+            send(parent, {:activated, self()})
+            receive do: (:release_execution -> :ok)
+          end,
+          before_audit: fn outcome, disconnected ->
+            send(parent, {:audit_waiting, self(), outcome, disconnected})
+            receive do: (:release_audit -> :ok)
+          end
+        }
+      )
 
-    assert {:ok, listener} =
-             Bandit.start_link(
-               plug:
-                 {PtcGateway.Router,
-                  listen: listen,
-                  warm: state.warm,
-                  tools: state.metadata,
-                  tool_entries: state.tools,
-                  run_admission: state.run_admission,
-                  audit: state.audit,
-                  request_admission: state.request_admission,
-                  serving_hooks: %{
-                    after_activation: fn _execution ->
-                      send(parent, {:activated, self()})
-                      receive do: (:release_execution -> :ok)
-                    end,
-                    before_audit: fn outcome, disconnected ->
-                      send(parent, {:audit_waiting, self(), outcome, disconnected})
-                      receive do: (:release_audit -> :ok)
-                    end
-                  }},
-               ip: {127, 0, 0, 1},
-               port: port,
-               startup_log: false,
-               http_2_options: [enabled: false]
-             )
-
-    on_exit(fn -> stop(listener) end)
     body = call_body("a", %{})
 
     request = [
@@ -818,15 +800,15 @@ defmodule PtcGatewayTest do
     {:ok, client} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false])
     :ok = :gen_tcp.send(client, request)
     assert_receive {:activated, worker}, 2_000
+    {:ok, [connection]} = ThousandIsland.connection_pids(listener)
+    connection_ref = Process.monitor(connection)
     :ok = :gen_tcp.close(client)
     assert {:ok, %{in_use: 1}} = PtcRunner.Kernel.RunAdmission.snapshot(state.run_admission)
 
-    # The five-second heartbeat observes the closed loopback socket. Execution
-    # remains deliberately held until after that cancellation bound.
-    receive do
-    after
-      5_500 -> :ok
-    end
+    # The heartbeat observes the closed loopback socket, cancels the run, and
+    # only then lets the connection process end. Execution remains
+    # deliberately held until after that cancellation.
+    assert_receive {:DOWN, ^connection_ref, :process, ^connection, _reason}, 10_000
 
     send(worker, :release_execution)
     assert_receive {:audit_waiting, audit_worker, outcome, true}, 10_000
@@ -870,36 +852,15 @@ defmodule PtcGatewayTest do
     state = :sys.get_state(owner)
     parent = self()
 
-    {:ok, socket} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
-    {:ok, port} = :inet.port(socket)
-    :gen_tcp.close(socket)
-    listen = %{config["listen"] | "port" => port}
-    config = put_in(config, ["listen", "port"], port)
-
-    assert {:ok, listener} =
-             Bandit.start_link(
-               plug:
-                 {PtcGateway.Router,
-                  listen: listen,
-                  warm: state.warm,
-                  tools: state.metadata,
-                  tool_entries: state.tools,
-                  run_admission: state.run_admission,
-                  audit: state.audit,
-                  request_admission: state.request_admission,
-                  serving_hooks: %{
-                    before_audit: fn outcome, disconnected ->
-                      send(parent, {:audit_waiting, self(), outcome, disconnected})
-                      receive do: (:release_audit -> :ok)
-                    end
-                  }},
-               ip: {127, 0, 0, 1},
-               port: port,
-               startup_log: false,
-               http_2_options: [enabled: false]
-             )
-
-    on_exit(fn -> stop(listener) end)
+    {_listener, config} =
+      serve_router(state, config,
+        serving_hooks: %{
+          before_audit: fn outcome, disconnected ->
+            send(parent, {:audit_waiting, self(), outcome, disconnected})
+            receive do: (:release_audit -> :ok)
+          end
+        }
+      )
 
     first =
       mcp(config, "tools/call", 20,
@@ -1310,11 +1271,6 @@ defmodule PtcGatewayTest do
     assert failure["isError"] == true
   end
 
-  # ~4 s of deliberate waiting, so it is skipped only on the fast pre-commit
-  # path. It still runs in pre-push and CI, which is the point: the timeout
-  # budget it covers has no other regression case outside the :soak module,
-  # and :soak runs in neither.
-  @tag :slow
   @tag :tmp_dir
   test "an incomplete body is the client's timeout, never an internal error", %{tmp_dir: dir} do
     {path, config} = fixture(dir)
@@ -1322,6 +1278,12 @@ defmodule PtcGatewayTest do
     File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
     assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
     on_exit(fn -> stop(owner) end)
+
+    # The stalled cases below wait out the body-read budget itself; a short one
+    # keeps that wait out of the suite. The bounds asserted are the transport
+    # defaults this budget exists to beat, not the budget.
+    {_listener, config} =
+      serve_router(:sys.get_state(owner), config, body_read_timeout_ms: 250)
 
     # Headers promising a body that never arrives. The transport's own default
     # is 15 s, and the raise reaches the outer rescue as -32603 unless the body
@@ -1416,6 +1378,37 @@ defmodule PtcGatewayTest do
     assert length(kept) == 2
     refute oldest in kept
     refute next in kept
+  end
+
+  # A second listener over the owner's live state, with extra router options the
+  # production listener never sets. Returns it with `config` pointed at its port.
+  defp serve_router(state, config, router_opts) do
+    {:ok, socket} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
+    {:ok, port} = :inet.port(socket)
+    :gen_tcp.close(socket)
+    config = put_in(config, ["listen", "port"], port)
+
+    assert {:ok, listener} =
+             Bandit.start_link(
+               plug:
+                 {PtcGateway.Router,
+                  [
+                    listen: config["listen"],
+                    warm: state.warm,
+                    tools: state.metadata,
+                    tool_entries: state.tools,
+                    run_admission: state.run_admission,
+                    audit: state.audit,
+                    request_admission: state.request_admission
+                  ] ++ router_opts},
+               ip: {127, 0, 0, 1},
+               port: port,
+               startup_log: false,
+               http_2_options: [enabled: false]
+             )
+
+    on_exit(fn -> stop(listener) end)
+    {listener, config}
   end
 
   defp audit_config(directory) do

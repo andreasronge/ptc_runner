@@ -2,6 +2,7 @@ Code.require_file("../../scripts/hex_docs_artifact.ex", __DIR__)
 
 defmodule PtcRunner.Scripts.HexPublicationTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   @uploader Path.expand("../../scripts/publish_hex_artifact.sh", __DIR__)
 

@@ -24,8 +24,13 @@ name: Nightly
 # smoke; it sets `PTC_SKIP_PTY_GATE`. Docker verify and the packaging script
 # keep running the check without that skip.
 #
+# The launcher OS matrix and the ExDNA candidate probe run here for a different
+# reason: neither can block a merge, and both cost more per pull request than
+# the signal is worth at 6% and 1% of commits touching them.
+#
 # Like `soak.yml` this lives outside `test.yml` so it can be dispatched on its
-# own and so a red run never blocks an unrelated pull request.
+# own and so a red run never blocks an unrelated pull request. The flake hunt
+# has its own weekly workflow in `flake-hunt.yml`.
 on:
   schedule:
     - cron: "41 2 * * *"
@@ -122,15 +127,18 @@ jobs:
       - name: Verify the packaged interactive REPL
         run: scripts/verify_standalone_release.sh
 
-  # Runs the PR suite ten times at GitHub's four-scheduler shape without
-  # stopping at the first failure, and uploads every run's record and log.
-  # The summary names each failing test with its frequency and seeds, which
-  # is the number a flake investigation starts from; the job is red while
-  # that number is above zero. See docs/maintainers/development-setup.md.
-  flake-hunt:
-    runs-on: ubuntu-latest
-    name: Flake hunt
-    timeout-minutes: 180
+  # The launcher OS matrix and its release package. A pull request runs one
+  # Linux OS in test.yml; the macOS and arm64 builds are the most expensive
+  # jobs in the repository and only 6% of commits touch the launcher, so they
+  # run here against main instead.
+  launcher-matrix:
+    runs-on: ${{ matrix.os }}
+    name: MCP stdio launcher companion (${{ matrix.os }})
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
     env:
       MIX_ENV: test
       HEX_SPONSOR: false
@@ -142,16 +150,97 @@ jobs:
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
         with:
+          project-directory: ptc_runner_launcher
           cache-plt: 'false'
           install-babashka: 'false'
 
-      - name: Run the suite ten times at four schedulers
-        run: scripts/ci/flake-hunt.sh 10 --schedulers 4 --out "$RUNNER_TEMP/flake-hunt"
+      - name: Verify launcher package, process containment, and precompiled fallback
+        run: scripts/ci/launcher.sh "$RUNNER_TEMP/launcher-artifacts"
 
-      - name: Upload the run records and logs
-        if: always()
+      - name: Retain verified launcher artifact
         uses: actions/upload-artifact@v6
         with:
-          name: flake-hunt
-          path: ${{ runner.temp }}/flake-hunt
-          if-no-files-found: warn
+          name: launcher-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/launcher-artifacts/*
+          if-no-files-found: error
+
+  launcher-package:
+    needs: launcher-matrix
+    runs-on: ubuntu-latest
+    name: MCP stdio launcher release package
+    timeout-minutes: 20
+    env:
+      MIX_ENV: prod
+      HEX_SPONSOR: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup launcher packaging environment
+        uses: ./.github/actions/setup-elixir
+        with:
+          project-directory: ptc_runner_launcher
+          cache-plt: 'false'
+          install-babashka: 'false'
+
+      - name: Collect verified launcher artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: launcher-*
+          path: ${{ runner.temp }}/launcher-artifacts
+          merge-multiple: true
+
+      - name: Assemble checksums and verify the release package
+        working-directory: ptc_runner_launcher
+        run: bash scripts/build_release_package.sh "$RUNNER_TEMP/launcher-artifacts"
+
+      - name: Retain verified release package
+        uses: actions/upload-artifact@v6
+        with:
+          name: launcher-release-package
+          path: |
+            ${{ runner.temp }}/launcher-artifacts/checksum.exs
+            ${{ runner.temp }}/launcher-artifacts/ptc_runner_launcher-*.tar
+          if-no-files-found: error
+
+  # An upstream-compatibility probe against a pinned unreleased ExDNA commit.
+  # It is not in `required.needs` in test.yml, so it never gated a merge, and
+  # it re-ran a duplication gate that core-static had already run in the same
+  # CI run. A day is the right cadence for an upstream-dependency probe.
+  ex-dna-candidate:
+    runs-on: ubuntu-latest
+    name: ExDNA candidate compatibility
+    timeout-minutes: 20
+    env:
+      MIX_ENV: test
+      HEX_SPONSOR: false
+
+    steps:
+      - name: Checkout PtcRunner
+        uses: actions/checkout@v6
+
+      - name: Checkout pinned ExDNA candidate
+        uses: actions/checkout@v6
+        with:
+          repository: andreasronge/ex_dna
+          ref: 548b0fcf3f1ea191a5a7a5de562c4dcc74049d9b
+          path: .candidate/ex_dna
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+        with:
+          cache-plt: 'false'
+          install-babashka: 'false'
+
+      - name: Verify cold and warm duplication gates
+        env:
+          PTC_EX_DNA_PATH: ${{ github.workspace }}/.candidate/ex_dna
+        run: |
+          test "$(git -C "$PTC_EX_DNA_PATH" rev-parse HEAD)" = \
+            "548b0fcf3f1ea191a5a7a5de562c4dcc74049d9b"
+          mix deps.compile ex_dna --force
+          scripts/duplication_gate.sh check
+          sha256sum .ex_dna_cache > "$RUNNER_TEMP/ex-dna-cache.before"
+          scripts/duplication_gate.sh check
+          sha256sum --check "$RUNNER_TEMP/ex-dna-cache.before"

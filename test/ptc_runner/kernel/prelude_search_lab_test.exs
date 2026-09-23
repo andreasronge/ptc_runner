@@ -1,5 +1,6 @@
 defmodule PtcRunner.Kernel.PreludeSearchLabTest do
   use ExUnit.Case, async: false
+  @moduletag :operator
 
   alias PtcRunner.Kernel.LLMReplay
   alias PtcRunner.Labs.PreludeSearch
