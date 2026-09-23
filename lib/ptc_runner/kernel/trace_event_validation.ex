@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.TraceEventValidation do
   alias PtcRunner.Kernel.LLMBudget
   alias PtcRunner.Kernel.LLMUsageSummary
   alias PtcRunner.Kernel.ResultIdentity
+  alias PtcRunner.Kernel.RuntimeTools
 
   @event_type ~r/\A[a-z][a-z0-9-]{0,127}\z/
   @capability_call_key ~r/\A(?:workflow|mission)\/[a-z][a-z0-9._\/-]{0,127}\z/
@@ -142,8 +143,10 @@ defmodule PtcRunner.Kernel.TraceEventValidation do
   defp directory_lifecycle_identity?(run_id, type),
     do: valid_event_id(run_id) == :ok and type =~ @event_type
 
-  defp directory_malformed_event?(events),
-    do: Enum.any?(events, &match?({:error, _reason}, directory_event_shape(&1)))
+  defp directory_malformed_event?(events) do
+    Enum.any?(events, &match?({:error, _reason}, directory_event_shape(&1))) or
+      match?({:error, :malformed_source}, validate_call_count_consistency(events))
+  end
 
   defp directory_event_shape(event) when is_map(event) do
     event
@@ -494,13 +497,21 @@ defmodule PtcRunner.Kernel.TraceEventValidation do
   end
 
   defp terminal_counts_cover?(totals, observed) do
-    # Runtime-owned instrumented tools also emit capability events, but they do
-    # not consume the public capability quotas projected in terminal usage.
-    # Compare only names the terminal projection identifies as quota-backed.
     Enum.all?(observed, fn {name, count} ->
-      not Map.has_key?(totals, name) or Map.fetch!(totals, name) >= count
+      case Map.fetch(totals, name) do
+        {:ok, total} -> total >= count
+        :error -> runtime_instrumented_name?(name)
+      end
     end)
   end
+
+  defp runtime_instrumented_name?("workflow/" <> name),
+    do: RuntimeTools.instrumented_name?(:workflow, name)
+
+  defp runtime_instrumented_name?("mission/" <> name),
+    do: RuntimeTools.instrumented_name?(:mission, name)
+
+  defp runtime_instrumented_name?(_name), do: false
 
   defp terminal_call_totals(%{
          "usage" => %{

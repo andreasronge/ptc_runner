@@ -1390,8 +1390,13 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     tmp_dir: directory
   } do
     for {shape, capability_calls} <- [
-          flat: %{"workflow/llm-request" => 0},
-          nested: %{"workflow" => %{"llm-request" => 0}, "mission" => %{}}
+          flat_zero: %{"workflow/llm-request" => 0},
+          nested_zero: %{"workflow" => %{"llm-request" => 0}, "mission" => %{}},
+          flat_omitted: %{"workflow/workspace.read" => 1},
+          nested_omitted: %{
+            "workflow" => %{"workspace.read" => 1},
+            "mission" => %{}
+          }
         ] do
       path = Path.join(directory, "contradictory-capability-calls-#{shape}.jsonl")
 

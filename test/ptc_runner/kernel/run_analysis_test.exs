@@ -90,10 +90,27 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
       })
     ]
 
+    contradictory = [
+      counter_event("contradictory", 1, "run-started", %{"missions" => %{}}),
+      counter_event("contradictory", 2, "capability-started", %{
+        "capability_id" => "retained-workflow",
+        "environment" => "workflow",
+        "name" => "llm-request"
+      }),
+      counter_event("contradictory", 3, "run-stopped", %{
+        "outcome" => "ok",
+        "usage" => %{
+          "capability_calls" => %{},
+          "llm_budget" => %{"total_tokens" => nil, "cost" => nil}
+        }
+      })
+    ]
+
     for {run_id, events} <- [
           {"authoritative", authoritative},
           {"legacy", legacy},
-          {"native", native}
+          {"native", native},
+          {"contradictory", contradictory}
         ] do
       File.write!(
         Path.join(root, run_id <> ".jsonl"),
@@ -108,6 +125,7 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
     assert {:ok, %{"items" => summary_items}} = RunAnalysis.query(analysis, :runs, %{})
     summaries = Map.new(summary_items, &{&1["run_id"], &1})
 
+    refute Map.has_key?(summaries, "contradictory")
     assert summaries["authoritative"]["llm_calls"] == 3
     assert summaries["authoritative"]["call_counts_complete"]
     assert summaries["native"]["llm_calls"] == 3

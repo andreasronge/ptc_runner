@@ -17,6 +17,10 @@ defmodule PtcRunner.Kernel.Environment do
   @workflow_implicit ~w(kernel-check-source kernel-eval kernel-mission-inventory kernel-mission-model-context kernel-result-contract runtime-usage runtime-remaining cap-list cap-describe workflow-annotate)
   @agent_core_private ~w(kernel-agent-config-failure kernel-agent-outcome-failure kernel-agent-protocol-error kernel-llm-provider-failure kernel-phase-return-contract-failure kernel-result-contract-failure kernel-runtime-limit-failure)
 
+  @doc false
+  @spec reserved_capability_name?(term()) :: boolean()
+  def reserved_capability_name?(name), do: name in @reserved
+
   @doc """
   Validates common environment fields and returns normalized attributes.
 
