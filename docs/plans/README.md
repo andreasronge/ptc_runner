@@ -21,12 +21,10 @@ belongs in guides or retained specifications.
 
 ## Research direction
 
-- [`debug-efficiency.md`](debug-efficiency.md) stages a bounded comparison of
-  Jev-assisted debugging against simple reasoning-model baselines, with
-  explicit engineering-time, quality, cost and latency gates. Protocol
-  decision #2028 grants no live spend yet. The retained programs under
-  `docs/research/` own results and hypotheses; prelude-search is paused and
-  its original implementation ladder is retired.
+- The retained [debug-efficiency program](../research/debug-efficiency.md)
+  records the offline feasibility decision and a proposed bounded live
+  comparison. No live spend is authorized. Prelude-search is paused and its
+  original implementation ladder is retired.
 
 ## Future, trigger-gated
 
