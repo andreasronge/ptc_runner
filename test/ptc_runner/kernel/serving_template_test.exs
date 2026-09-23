@@ -157,11 +157,13 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
              build(fixture(dir, %{}, "(ns app) (defn run [input] missing)"))
   end
 
-  @tag :tmp_dir
-  test "the full declared and resolved entry matrix includes every selectable mission", %{
-    tmp_dir: dir
-  } do
-    for declared <- [:read, :write, :unknown, nil], resolved <- [:read, :write, :unknown] do
+  for declared <- [:read, :write, :unknown, nil], resolved <- [:read, :write, :unknown] do
+    @tag tmp_dir: true, declared: declared, resolved: resolved
+    test "the entry matrix supports declared #{inspect(declared)} and resolved #{resolved}", %{
+      tmp_dir: dir,
+      declared: declared,
+      resolved: resolved
+    } do
       metadata = if declared, do: "{:effect :#{declared}}", else: ""
       workflow = "(ns app) (defn run #{metadata} [input] (return input))"
       mission = "(ns mission) (defn helper {:effect :#{resolved}} [x] x)"

@@ -12,6 +12,72 @@ defmodule PtcRunner.Kernel.HostConfigEndpointTest do
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.MCPSource
 
+  @mirror_endpoints [
+                      "https://mcp.example.com/v1",
+                      "https://mcp.example.com:8443/v1",
+                      "https://mcp.example.com",
+                      "https://a.b.example.com/p?x=1",
+                      "https://EXAMPLE.test/x",
+                      "HTTPS://a.test/x",
+                      "https://a.test:bad/x",
+                      "https://a.test::443/x",
+                      "https://a.test:bad:443/x",
+                      "https://[2001:db8::1]garbage:443/x",
+                      "https://[2001:db8::1]:443/x",
+                      "https://a.test:99999",
+                      "https://a.test:0",
+                      "https://user@a.test/x",
+                      "https://a.test/x#f",
+                      "not-a-url",
+                      "",
+                      "ftp://a.test",
+                      "//a.test",
+                      "https://a.test/x\r\nX: 1",
+                      "http://127.0.0.1:8055",
+                      "http://127.0.0.1",
+                      "http://[::1]:8055/mcp",
+                      "http://[::1]",
+                      "HTTP://127.0.0.1",
+                      "http://localhost:8055",
+                      "http://10.0.0.7:8055",
+                      "http://[::1]:bad",
+                      "http://127.0.0.1:0",
+                      "http://127.0.0.1:65535",
+                      "http://127.0.0.1:8055\n",
+                      "http://127.0.0.1@evil.test/",
+                      "http://0177.0.0.1:8055"
+                    ] ++
+                      for(
+                        cp <- [
+                          0x09,
+                          0x0A,
+                          0x0D,
+                          0x20,
+                          0x7F,
+                          0x85,
+                          0xA0,
+                          0x1680,
+                          0x2000,
+                          0x200A,
+                          0x2028,
+                          0x2029,
+                          0x202F,
+                          0x205F,
+                          0x3000,
+                          0x200B,
+                          0xFEFF,
+                          0x61
+                        ],
+                        do: "https://a.test/x" <> <<cp::utf8>> <> "y"
+                      )
+  @mirror_credentials [:none, :empty_auth, :static_auth, :oauth]
+
+  setup_all do
+    # The schema is immutable, so all endpoint rows can share its compiled form.
+    {:ok, root} = JSV.build(HostConfig.schema(), atoms: false, warnings: :silent)
+    {:ok, mirror_schema: root}
+  end
+
   describe "endpoints refused at load time" do
     @tag :tmp_dir
     test "a string that is not a URL never reaches a connectivity check", %{tmp_dir: dir} do
@@ -143,108 +209,51 @@ defmodule PtcRunner.Kernel.HostConfigEndpointTest do
   end
 
   describe "the schema mirrors the decoder" do
-    @tag :tmp_dir
-    test "the schema never rejects an endpoint the decoder accepts", %{tmp_dir: dir} do
-      # The mirror is one-directional. Schema-stricter is a correctness bug: a
-      # valid document would fail as a generic schema fault at `/install`
-      # instead of the endpoint diagnostic. Schema-lenient is harmless, because
-      # decoding is authoritative and refuses it anyway.
-      {:ok, root} = JSV.build(HostConfig.schema(), atoms: false, warnings: :silent)
+    for endpoint <- @mirror_endpoints,
+        loopback <- [false, true],
+        credential <- @mirror_credentials do
+      @tag tmp_dir: true, loopback: loopback, credential: credential
+      test "the schema mirrors the decoder for endpoint #{inspect(endpoint)}, loopback #{loopback}, and #{credential}",
+           %{tmp_dir: dir, mirror_schema: root, loopback: loopback, credential: credential} do
+        endpoint = unquote(endpoint)
 
-      endpoints =
-        [
-          "https://mcp.example.com/v1",
-          "https://mcp.example.com:8443/v1",
-          "https://mcp.example.com",
-          "https://a.b.example.com/p?x=1",
-          "https://EXAMPLE.test/x",
-          "HTTPS://a.test/x",
-          "https://a.test:bad/x",
-          "https://a.test::443/x",
-          "https://a.test:bad:443/x",
-          "https://[2001:db8::1]garbage:443/x",
-          "https://[2001:db8::1]:443/x",
-          "https://a.test:99999",
-          "https://a.test:0",
-          "https://user@a.test/x",
-          "https://a.test/x#f",
-          "not-a-url",
-          "",
-          "ftp://a.test",
-          "//a.test",
-          "https://a.test/x\r\nX: 1",
-          "http://127.0.0.1:8055",
-          "http://127.0.0.1",
-          "http://[::1]:8055/mcp",
-          "http://[::1]",
-          "HTTP://127.0.0.1",
-          "http://localhost:8055",
-          "http://10.0.0.7:8055",
-          "http://[::1]:bad",
-          "http://127.0.0.1:0",
-          "http://127.0.0.1:65535",
-          "http://127.0.0.1:8055\n",
-          "http://127.0.0.1@evil.test/",
-          "http://0177.0.0.1:8055"
-        ] ++
-          for cp <- [
-                0x09,
-                0x0A,
-                0x0D,
-                0x20,
-                0x7F,
-                0x85,
-                0xA0,
-                0x1680,
-                0x2000,
-                0x200A,
-                0x2028,
-                0x2029,
-                0x202F,
-                0x205F,
-                0x3000,
-                0x200B,
-                0xFEFF,
-                0x61
-              ],
-              do: "https://a.test/x" <> <<cp::utf8>> <> "y"
+        # The mirror is one-directional. Schema-stricter is a correctness bug: a
+        # valid document would fail as a generic schema fault at `/install`
+        # instead of the endpoint diagnostic. Schema-lenient is harmless, because
+        # decoding is authoritative and refuses it anyway.
+        # The credential axis matters as much as the endpoint one, because the
+        # loopback allowance is defined in terms of it. These are the well-formed
+        # shapes; a malformed credential block is its own schema fault and is
+        # covered separately below.
+        credential =
+          case credential do
+            :none -> %{}
+            :empty_auth -> %{"auth" => []}
+            :static_auth -> %{"auth" => [%{"scheme" => "bearer", "binding" => "server_token"}]}
+            :oauth -> %{"oauth" => oauth_block()}
+          end
 
-      # The credential axis matters as much as the endpoint one, because the
-      # loopback allowance is defined in terms of it. These are the well-formed
-      # shapes; a malformed credential block is its own schema fault and is
-      # covered separately below.
-      credentials = [
-        %{},
-        %{"auth" => []},
-        %{"auth" => [%{"scheme" => "bearer", "binding" => "server_token"}]},
-        %{"oauth" => oauth_block()}
-      ]
+        # Stated in observable terms: in this corpus the only thing that can make
+        # the schema reject is the endpoint or its credential shape, so every
+        # rejection must arrive as the endpoint diagnostic. A document the schema
+        # refuses but the endpoint rule admits falls through to the generic
+        # `/install` schema fault instead, which is exactly the drift to catch.
+        document = config(endpoint, mirror_overrides(loopback, credential))
 
-      # Stated in observable terms: in this corpus the only thing that can make
-      # the schema reject is the endpoint or its credential shape, so every
-      # rejection must arrive as the endpoint diagnostic. A document the schema
-      # refuses but the endpoint rule admits falls through to the generic
-      # `/install` schema fault instead, which is exactly the drift to catch.
-      divergent =
-        for endpoint <- endpoints,
-            loopback <- [false, true],
-            credential <- credentials,
-            overrides = mirror_overrides(loopback, credential),
-            document = config(endpoint, overrides),
-            not match?({:ok, _validated}, JSV.validate(document, root, cast: false)),
-            not endpoint_diagnostic?(dir, document),
-            do: {endpoint, overrides}
-
-      assert divergent == []
+        if not match?({:ok, _validated}, JSV.validate(document, root, cast: false)) do
+          assert endpoint_diagnostic?(dir, document)
+        end
+      end
     end
 
     @tag :tmp_dir
-    test "an explicit null oauth key is refused by decoder and schema alike", %{tmp_dir: dir} do
+    test "an explicit null oauth key is refused by decoder and schema alike", %{
+      tmp_dir: dir,
+      mirror_schema: root
+    } do
       # JSON Schema counts a present key regardless of its value, so reading
       # `"oauth": null` as "absent" would have let decoding admit a transport
       # the schema refuses.
-      {:ok, root} = JSV.build(HostConfig.schema(), atoms: false, warnings: :silent)
-
       for overrides <- [
             %{"oauth" => nil},
             %{"allow_insecure_loopback" => true, "oauth" => nil}
