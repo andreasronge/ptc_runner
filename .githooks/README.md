@@ -44,9 +44,11 @@ because they own disjoint build trees: core static analysis followed by
 Dialyzer (`_build/test`), the Viewer (`ptc_viewer/_build/test`), and ExDoc
 (`_build/dev`). A forced full run adds release verification (`_build/prod`)
 as another lane. Core static analysis begins with the same quality gate as
-`mix precommit`; a clean tree that gate has already passed is stamped under
-`_build/test` and skipped, so running `mix precommit` before `git push` costs
-the gate once (`PTC_QUALITY_FORCE=1` reruns it). Each lane's
+`mix precommit`. A passing run stamps the index tree it checked under
+`_build/test`, and a later run on the same tree is skipped, so staging,
+running `mix precommit`, committing, and pushing costs the gate once
+(`PTC_QUALITY_FORCE=1` reruns it). Unstaged tracked changes neither stamp nor
+skip. Each lane's
 output is buffered and replayed under its own heading once it finishes, so a
 concurrent run reads like a serial one and every lane is reported even when an
 earlier one fails.

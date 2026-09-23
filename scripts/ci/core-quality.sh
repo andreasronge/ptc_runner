@@ -6,23 +6,25 @@ source "$script_dir/_common.sh"
 
 # `mix precommit` and the pre-push hook (through core-static.sh) both run
 # this gate. A passing run stamps the tree it checked, and the next run on
-# an identical clean tree is skipped, so the documented precommit-then-push
-# flow pays the gate once. A dirty tree never stamps and never skips;
+# the same tree is skipped, so the documented stage-precommit-commit-push
+# flow pays the gate once. The checked tree is the index tree: staged changes
+# are part of it, and after the commit it equals `HEAD^{tree}`. An unstaged
+# tracked change never stamps and never skips, and neither does a run whose
+# tree changed while it ran (a rewrite by `mix format`, say);
 # `PTC_QUALITY_FORCE=1` always runs.
 stamp_file="_build/test/.core-quality-stamp"
 
 current_tree() {
-  if [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then
-    return 1
-  fi
-  git rev-parse HEAD^{tree} 2>/dev/null
+  git diff --quiet 2>/dev/null || return 1
+  git write-tree 2>/dev/null
 }
 
-if [ -z "${PTC_QUALITY_FORCE:-}" ] && [ -f "$stamp_file" ]; then
-  if tree="$(current_tree)" && [ "$tree" = "$(cat "$stamp_file")" ]; then
-    echo "core quality: tree ${tree:0:12} already passed; skipping (PTC_QUALITY_FORCE=1 to rerun)"
-    exit 0
-  fi
+checked_tree="$(current_tree)" || checked_tree=""
+
+if [ -z "${PTC_QUALITY_FORCE:-}" ] && [ -n "$checked_tree" ] && [ -f "$stamp_file" ] &&
+  [ "$checked_tree" = "$(cat "$stamp_file")" ]; then
+  echo "core quality: tree ${checked_tree:0:12} already passed; skipping (PTC_QUALITY_FORCE=1 to rerun)"
+  exit 0
 fi
 rm -f "$stamp_file"
 
@@ -40,7 +42,7 @@ mix do compile --warnings-as-errors + \
 scripts/duplication_gate.sh check
 scripts/guide_budget.sh check
 
-if tree="$(current_tree)"; then
+if [ -n "$checked_tree" ] && tree="$(current_tree)" && [ "$tree" = "$checked_tree" ]; then
   mkdir -p "$(dirname "$stamp_file")"
   printf '%s\n' "$tree" > "$stamp_file"
 fi
