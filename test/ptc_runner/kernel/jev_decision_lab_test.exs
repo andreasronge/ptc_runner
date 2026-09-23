@@ -128,7 +128,15 @@ defmodule PtcRunner.Kernel.JevDecisionLabTest do
 
     capability_opts =
       if Keyword.get(opts, :default_recorder, false) do
-        [requester: requester]
+        [
+          requester: requester,
+          record_directory:
+            Keyword.get(
+              opts,
+              :record_directory,
+              Path.expand("../../../tmp/jev-decision-attempts", __DIR__)
+            )
+        ]
       else
         [requester: requester, recorder: Keyword.get(opts, :recorder, fn _ -> :ok end)]
       end
@@ -287,6 +295,24 @@ defmodule PtcRunner.Kernel.JevDecisionLabTest do
     assert Bitwise.band(File.stat!(dir).mode, 0o777) == 0o700
     assert Bitwise.band(File.stat!(path).mode, 0o777) == 0o600
     assert is_map(path |> File.read!() |> :erlang.binary_to_term([:safe]))
+  end
+
+  test "default recording creates a private hierarchy when its parent is absent" do
+    root = Path.join(System.tmp_dir!(), "jev-decision-#{System.unique_integer([:positive])}")
+    dir = Path.join(root, "attempts")
+    refute File.exists?(root)
+    on_exit(fn -> File.rm_rf!(root) end)
+
+    assert {:ok, _result} =
+             invoke_with_answers(valid_answers(),
+               default_recorder: true,
+               record_directory: dir
+             )
+
+    assert Bitwise.band(File.stat!(root).mode, 0o777) == 0o700
+    assert Bitwise.band(File.stat!(dir).mode, 0o777) == 0o700
+    assert [path] = Path.wildcard(Path.join(dir, "attempt-*.term"))
+    assert Bitwise.band(File.stat!(path).mode, 0o777) == 0o600
   end
 
   test "inconsistent score is rejected while rounded score and ties are accepted" do

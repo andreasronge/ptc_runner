@@ -158,7 +158,15 @@ defmodule PtcRunner.Examples.JevDecisionLab do
   def capability(opts \\ []) when is_list(opts) do
     model = Keyword.get(opts, :model, @model)
     requester = Keyword.get(opts, :requester, &openrouter_request/1)
-    recorder = Keyword.get(opts, :recorder, &record_attempt/1)
+
+    record_directory =
+      Keyword.get(
+        opts,
+        :record_directory,
+        Path.expand("../../../../tmp/jev-decision-attempts", __DIR__)
+      )
+
+    recorder = Keyword.get(opts, :recorder, &record_attempt(&1, record_directory))
 
     Capability.new(
       name: "decision-request",
@@ -394,8 +402,7 @@ defmodule PtcRunner.Examples.JevDecisionLab do
 
   defp allowed_headers(_), do: %{}
 
-  defp record_attempt(record) do
-    dir = Path.expand("../../../../tmp/jev-decision-attempts", __DIR__)
+  defp record_attempt(record, dir) do
     :ok = ensure_private_record_directory(dir)
 
     path =
@@ -411,18 +418,45 @@ defmodule PtcRunner.Examples.JevDecisionLab do
   end
 
   defp ensure_private_record_directory(dir) do
-    case File.lstat(dir, time: :posix) do
+    with :ok <- ensure_private_record_parent(Path.dirname(dir)) do
+      case File.lstat(dir, time: :posix) do
+        {:error, :enoent} ->
+          case PrivateDirectory.create(dir) do
+            :ok -> validate_private_record_directory(dir)
+            {:error, _race_or_failure} -> validate_private_record_directory(dir)
+          end
+
+        {:ok, _existing} ->
+          validate_private_record_directory(dir)
+
+        {:error, _reason} ->
+          {:error, :private_record_directory_unavailable}
+      end
+    end
+  end
+
+  defp ensure_private_record_parent(parent) do
+    case File.lstat(parent, time: :posix) do
       {:error, :enoent} ->
-        case PrivateDirectory.create(dir) do
-          :ok -> validate_private_record_directory(dir)
-          {:error, _race_or_failure} -> validate_private_record_directory(dir)
+        case PrivateDirectory.create(parent) do
+          :ok -> validate_private_record_parent(parent)
+          {:error, _race_or_failure} -> validate_private_record_parent(parent)
         end
 
       {:ok, _existing} ->
-        validate_private_record_directory(dir)
+        validate_private_record_parent(parent)
 
       {:error, _reason} ->
         {:error, :private_record_directory_unavailable}
+    end
+  end
+
+  defp validate_private_record_parent(parent) do
+    with {:ok, uid} <- PrivateDirectory.preflight_owner(Path.join(parent, "record-directory")),
+         {:ok, %File.Stat{type: :directory, uid: ^uid}} <- File.lstat(parent, time: :posix) do
+      :ok
+    else
+      _unsafe_or_unavailable -> {:error, :private_record_directory_unavailable}
     end
   end
 
