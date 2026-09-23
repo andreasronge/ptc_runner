@@ -25,6 +25,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
     :doctor,
     {:doctor, :connect},
     :models,
+    :catalog,
     :materialize,
     :transcript,
     :unknown
@@ -38,6 +39,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
     :doctor,
     {:doctor, :connect},
     :models,
+    :catalog,
     :materialize,
     :transcript
   ]
@@ -49,6 +51,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
     :validate,
     :doctor,
     :models,
+    :catalog,
     :materialize,
     :transcript,
     :unknown
@@ -84,6 +87,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
           | :doctor
           | {:doctor, :connect}
           | :models
+          | :catalog
           | :materialize
           | :transcript
           | :unknown

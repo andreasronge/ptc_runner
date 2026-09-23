@@ -66,7 +66,7 @@ defmodule PtcRunner.TestSupport.MCPStdioFixture do
 
     IO.write(
       :stdio,
-      ~s({"jsonrpc":"2.0","id":#{id},"result":{"resultType":"complete","tools":[{"name":"unicode","description":"Return non-ASCII text.","inputSchema":{"type":"object","properties":{}}}],"ttlMs":0,"cacheScope":"private"}}\n)
+      ~s({"jsonrpc":"2.0","id":#{id},"result":{"resultType":"complete","tools":[{"name":"unicode","description":"Return non-ASCII text.","inputSchema":{"type":"object","properties":{"source":{"type":"string","const":"html"}}},"outputSchema":{"type":"object","properties":{"text":{"type":"array","items":{"type":"string"}}}}}],"ttlMs":0,"cacheScope":"private"}}\n)
     )
   end
 
@@ -75,7 +75,7 @@ defmodule PtcRunner.TestSupport.MCPStdioFixture do
 
     IO.write(
       :stdio,
-      ~s({"jsonrpc":"2.0","id":#{id},"result":{"resultType":"complete","content":[{"type":"text","text":"behaviour — correct"}]}}\n)
+      ~s({"jsonrpc":"2.0","id":#{id},"result":{"resultType":"complete","structuredContent":{"text":["behaviour — correct"]},"content":[{"type":"text","text":"behaviour — correct"}]}}\n)
     )
   end
 

@@ -324,7 +324,8 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
 
   defp shipped_consistent?(%{source: :mcp} = descriptor),
     do:
-      descriptor.destinations == [:mission] and not descriptor.workflow_llm? and
+      descriptor.destinations in [[:mission], [:workflow, :mission]] and
+        not descriptor.workflow_llm? and
         descriptor.connectivity_mode == :acquisition
 
   defp shipped_consistent?(%{source: :llm} = descriptor),

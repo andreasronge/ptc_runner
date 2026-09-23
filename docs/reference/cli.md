@@ -20,6 +20,7 @@ grammar for each frontend.
 | `ptc run MANIFEST --env-file FILE` | Load environment-backed credentials from this exact file |
 | `ptc doctor [MANIFEST or PROJECT]` | Report application and provider readiness |
 | `ptc models PROJECT.json` or `--host-config HOST.json` | List public installed model-alias declarations, each with the safe selector it configured |
+| `ptc catalog PROVIDER --host-config HOST.json` | Acquire one installed MCP provider and return its bounded tool definitions without calling a tool |
 | `ptc transcript RUN_ID ...` | Publish one correlated private model transcript |
 | `ptc repl` | Open a direct, manifest-backed, or analysis session |
 | `ptc viewer PROJECT.json` | Browse a project's captured traces in a local web UI |

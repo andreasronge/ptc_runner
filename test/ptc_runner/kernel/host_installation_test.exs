@@ -57,6 +57,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.DoctorPlan
   alias PtcRunner.Kernel.HostConfig
@@ -1647,18 +1648,10 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     marker = Path.join(dir, "unicode-server-methods")
 
     config =
-      stdio_config(System.find_executable("elixir"))
-      |> put_in(["runtime", "stdio_launcher"], launcher)
-      |> put_in(["install", "workspace", "transport", "args"], [
-        @stdio_fixture,
-        marker,
-        "mcp-unicode"
-      ])
+      unicode_stdio_config(launcher, marker)
       # This test exercises locale propagation, not the default startup
       # deadline. Booting an Elixir source fixture can exceed five seconds
       # while the full CI suite is under load.
-      |> put_in(["install", "workspace", "ceilings"], %{"timeout_ms" => 20_000})
-      |> put_in(["install", "workspace", "transport", "start_timeout_ms"], 20_000)
       |> put_in(["install", "workspace", "transport", "inherit_environment"], true)
       |> put_in(["install", "workspace", "tools"], %{
         "unicode" => %{"as" => "workspace.unicode", "effect" => "read"}
@@ -1681,6 +1674,68 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
     assert {:ok, %{"text" => ["behaviour — correct"]}} = capability.callback.(%{}, nil)
     assert File.read!(marker) =~ "tools/call"
+  end
+
+  @tag :tmp_dir
+  test "authorized workflow and CLI catalogs preserve advertised output fields", %{tmp_dir: dir} do
+    {:ok, launcher} = PtcRunnerLauncher.executable_path()
+    marker = Path.join(dir, "catalog-server-methods")
+
+    config = unicode_stdio_config(launcher, marker)
+
+    host_path = Path.join(dir, "catalog-host.json")
+    File.write!(host_path, Jason.encode!(config))
+    {:ok, host} = HostConfig.load(host_path)
+    {:ok, catalog} = HostInstallation.catalog(host)
+    {:ok, registry} = HostInstallation.runtime_registry(host, catalog)
+    {:ok, limits} = Limits.new(workflow_timeout_ms: 20_000)
+
+    workflow_context = %{
+      context(dir, :workflow)
+      | limits: limits,
+        installed_limits: limits
+    }
+
+    assert {:ok, %{capabilities: [capability], close: close}} =
+             ProviderRegistry.build(
+               registry,
+               "workspace",
+               %{"catalog" => true},
+               workflow_context
+             )
+
+    assert capability.name == "workspace.catalog"
+    assert capability.effect == :read
+    assert capability.model_visible == false
+    assert {:ok, workflow_result} = capability.callback.(%{}, nil)
+
+    assert get_in(workflow_result, [
+             "tools",
+             Access.at(0),
+             "input_schema",
+             "properties",
+             "source",
+             "const"
+           ]) == "html"
+
+    assert workflow_result["pagination"] == %{"pages" => 1, "truncated" => false}
+    assert get_in(workflow_result, ["tools", Access.at(0), "output_schema", "properties", "text"])
+    refute File.read!(marker) =~ "tools/call"
+    assert :ok = close.()
+    assert :ok = ProviderRegistry.close(registry)
+    assert :ok = InstallationCatalog.close(catalog)
+
+    assert {:ok, outcome} =
+             CommandEngine.dispatch(["catalog", "workspace", "--host-config", host_path])
+
+    result = outcome.envelope["result"]
+
+    assert get_in(result, ["tools", Access.at(0), "input_schema", "properties", "source", "const"]) ==
+             "html"
+
+    assert result["pagination"] == %{"pages" => 1, "truncated" => false}
+    assert get_in(result, ["tools", Access.at(0), "output_schema", "properties", "text"])
+    refute File.read!(marker) =~ "tools/call"
   end
 
   @tag :tmp_dir
@@ -2135,6 +2190,18 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
         }
       }
     }
+  end
+
+  defp unicode_stdio_config(launcher, marker) do
+    stdio_config(System.find_executable("elixir"))
+    |> put_in(["runtime", "stdio_launcher"], launcher)
+    |> put_in(["install", "workspace", "transport", "args"], [
+      @stdio_fixture,
+      marker,
+      "mcp-unicode"
+    ])
+    |> put_in(["install", "workspace", "ceilings"], %{"timeout_ms" => 20_000})
+    |> put_in(["install", "workspace", "transport", "start_timeout_ms"], 20_000)
   end
 
   defp stdio_config(command) do

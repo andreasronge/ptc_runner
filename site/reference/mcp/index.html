@@ -158,7 +158,22 @@ object <code class="inline">outputSchema</code>. Binary resources, image and aud
 and server requests for sampling, elicitation, or roots are unsupported.
 Schema-valid <code class="inline">input_required</code> results are refused rather than fulfilled because
 the client advertises none of those capabilities.</p><p>The schema defines wire shape. The bounds and closed-result rules above remain
-runtime policy, so passing the schema alone is necessary but not sufficient.</p><p>A cold <code class="inline">npx</code> launch can spend more than the default budget before that protocol
+runtime policy, so passing the schema alone is necessary but not sufficient.</p><h2 id="read-a-catalog-while-authoring">Read a catalog while authoring</h2><p>Use the installed provider alias to retrieve its advertised tool definitions
+before writing manifest mappings:</p><pre><code class="console language-console">ptc catalog web --host-config ptc-host.json</code></pre><p>The result contains the provider alias, sorted tool names, descriptions, input
+schemas, advertised output schemas, a tool count, and <code class="inline">pagination</code> with the
+number of pages and <code class="inline">truncated: false</code>. Reaching the installation's
+<code class="inline">max_catalog_tools</code> or <code class="inline">max_pages</code> ceiling fails the operation instead of
+returning an incomplete catalog. The command uses the installed transport,
+credentials, authorization, timeout, response bounds, and cleanup path. It
+does not execute an upstream tool.</p><p>A workflow can receive the same catalog without shell access by selecting the
+installed MCP provider under <code class="inline">providers.workflow</code> with
+<code class="inline">{&quot;config&quot;:{&quot;catalog&quot;:true}}</code>. This grants one model-hidden read capability
+named <code class="inline">PROVIDER.catalog</code>. The setting is valid only for the workflow; normal
+MCP tool selections remain mission providers. Calling that capability with an
+empty object returns the command's catalog result.</p><p>This authoring catalog is current acquisition data. The private
+<code class="inline">provider_exchanges</code> inspection collection is retrospective evidence from an
+already captured run and may include exact MCP wire bodies; use it to debug a
+past exchange, not to discover definitions for a new manifest.</p><p>A cold <code class="inline">npx</code> launch can spend more than the default budget before that protocol
 response arrives. Acquisition derives one per-operation budget and then applies
 it to each step separately: once to starting the transport, which for stdio
 covers launcher staging and the child spawn, and again to each discovery request,

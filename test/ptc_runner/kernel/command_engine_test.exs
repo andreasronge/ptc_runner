@@ -187,7 +187,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       end)
 
     assert topics ==
-             ~w(docs doctor init materialize models repl root run run transcript validate version viewer)
+             ~w(catalog docs doctor init materialize models repl root run run transcript validate version viewer)
 
     run_options =
       help_branch
@@ -2929,7 +2929,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                  "installation_revision" => "alpha-v1",
                  "data_class" => "normal",
                  "accepts_data" => ["normal"],
-                 "destinations" => ["mission"]
+                 "destinations" => ["workflow", "mission"]
                },
                %{
                  "alias" => "zeta",
@@ -2937,7 +2937,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                  "installation_revision" => "zeta-v1",
                  "data_class" => "normal",
                  "accepts_data" => ["normal"],
-                 "destinations" => ["mission"]
+                 "destinations" => ["workflow", "mission"]
                }
              ]
            }

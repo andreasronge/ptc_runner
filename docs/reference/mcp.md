@@ -89,6 +89,35 @@ the client advertises none of those capabilities.
 The schema defines wire shape. The bounds and closed-result rules above remain
 runtime policy, so passing the schema alone is necessary but not sufficient.
 
+## Read a catalog while authoring
+
+Use the installed provider alias to retrieve its advertised tool definitions
+before writing manifest mappings:
+
+```console
+ptc catalog web --host-config ptc-host.json
+```
+
+The result contains the provider alias, sorted tool names, descriptions, input
+schemas, advertised output schemas, a tool count, and `pagination` with the
+number of pages and `truncated: false`. Reaching the installation's
+`max_catalog_tools` or `max_pages` ceiling fails the operation instead of
+returning an incomplete catalog. The command uses the installed transport,
+credentials, authorization, timeout, response bounds, and cleanup path. It
+does not execute an upstream tool.
+
+A workflow can receive the same catalog without shell access by selecting the
+installed MCP provider under `providers.workflow` with
+`{"config":{"catalog":true}}`. This grants one model-hidden read capability
+named `PROVIDER.catalog`. The setting is valid only for the workflow; normal
+MCP tool selections remain mission providers. Calling that capability with an
+empty object returns the command's catalog result.
+
+This authoring catalog is current acquisition data. The private
+`provider_exchanges` inspection collection is retrospective evidence from an
+already captured run and may include exact MCP wire bodies; use it to debug a
+past exchange, not to discover definitions for a new manifest.
+
 A cold `npx` launch can spend more than the default budget before that protocol
 response arrives. Acquisition derives one per-operation budget and then applies
 it to each step separately: once to starting the transport, which for stdio
