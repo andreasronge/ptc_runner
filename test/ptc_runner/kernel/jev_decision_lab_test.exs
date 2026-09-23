@@ -126,11 +126,14 @@ defmodule PtcRunner.Kernel.JevDecisionLabTest do
        }}
     end
 
-    {:ok, capability} =
-      JevDecisionLab.capability(
-        requester: requester,
-        recorder: Keyword.get(opts, :recorder, fn _ -> :ok end)
-      )
+    capability_opts =
+      if Keyword.get(opts, :default_recorder, false) do
+        [requester: requester]
+      else
+        [requester: requester, recorder: Keyword.get(opts, :recorder, fn _ -> :ok end)]
+      end
+
+    {:ok, capability} = JevDecisionLab.capability(capability_opts)
 
     capability.callback.(%{
       "state" => %{},
@@ -151,8 +154,10 @@ defmodule PtcRunner.Kernel.JevDecisionLabTest do
   end
 
   test "direct maps reject malformed criteria before requester dispatch" do
+    parent = self()
+
     {:ok, capability} =
-      JevDecisionLab.capability(requester: fn _ -> send(self(), :dispatched) end)
+      JevDecisionLab.capability(requester: fn _ -> send(parent, :dispatched) end)
 
     base = %{
       "state" => %{},
@@ -172,30 +177,36 @@ defmodule PtcRunner.Kernel.JevDecisionLabTest do
                })
              )
 
-    for criteria <- [%{}, Map.new(1..256, &{Integer.to_string(&1), "x"})] do
-      assert {:error, _} =
-               capability.validate.(put_in(base, ["questions", "q", "criteria"], criteria))
-    end
+    invalid_requests =
+      Enum.map([%{}, Map.new(1..256, &{Integer.to_string(&1), "x"})], fn criteria ->
+        put_in(base, ["questions", "q", "criteria"], criteria)
+      end) ++
+        Enum.map([["one"], Enum.map(1..11, &Integer.to_string/1)], fn criteria ->
+          put_in(base, ["questions", "q"], %{
+            "type" => "score",
+            "instructions" => "Rate",
+            "criteria" => criteria
+          })
+        end) ++
+        [
+          put_in(base, ["questions", "q"], %{
+            "type" => "boolean",
+            "instructions" => "Yes?",
+            "criteria" => %{"true" => "yes"}
+          })
+        ]
 
-    for criteria <- [["one"], Enum.map(1..11, &Integer.to_string/1)] do
-      request =
-        put_in(base, ["questions", "q"], %{
-          "type" => "score",
-          "instructions" => "Rate",
-          "criteria" => criteria
-        })
-
+    for request <- invalid_requests do
       assert {:error, _} = capability.validate.(request)
-    end
 
-    assert {:error, _} =
-             capability.validate.(
-               put_in(base, ["questions", "q"], %{
-                 "type" => "boolean",
-                 "instructions" => "Yes?",
-                 "criteria" => %{"true" => "yes"}
-               })
-             )
+      assert {:ok, result} =
+               JevDecisionLab.run_request(request,
+                 requester: fn _ -> send(parent, :dispatched) end,
+                 recorder: fn _ -> :ok end
+               )
+
+      assert result.value["reason"] == "invalid_arguments"
+    end
 
     refute_received :dispatched
   end
@@ -235,6 +246,21 @@ defmodule PtcRunner.Kernel.JevDecisionLabTest do
       assert record.usage == expected_usage
       assert record.cost == if(is_number(usage["cost"]), do: usage["cost"], else: :unknown)
     end
+  end
+
+  test "default records are written only inside an owner-only directory" do
+    dir = Path.expand("../../../tmp/jev-decision-attempts", __DIR__)
+    before = dir |> Path.join("attempt-*.term") |> Path.wildcard() |> MapSet.new()
+
+    assert {:ok, _result} = invoke_with_answers(valid_answers(), default_recorder: true)
+
+    after_paths = dir |> Path.join("attempt-*.term") |> Path.wildcard() |> MapSet.new()
+    [path] = MapSet.to_list(MapSet.difference(after_paths, before))
+    on_exit(fn -> File.rm(path) end)
+
+    assert Bitwise.band(File.stat!(dir).mode, 0o777) == 0o700
+    assert Bitwise.band(File.stat!(path).mode, 0o777) == 0o600
+    assert is_map(path |> File.read!() |> :erlang.binary_to_term([:safe]))
   end
 
   test "inconsistent score is rejected while rounded score and ties are accepted" do
@@ -323,6 +349,15 @@ defmodule PtcRunner.Kernel.JevDecisionLabTest do
       })
 
     assert {:ok, _result} = invoke_with_answers(rounded)
+
+    exact_boundary =
+      put_in(answers, ["department", "probabilities"], %{
+        "billing" => 0.33,
+        "sales" => 0.34,
+        "support" => 0.32
+      })
+
+    assert {:ok, _result} = invoke_with_answers(exact_boundary)
   end
 
   test "score levels, legends, finite values, sums, and weighted means are validated" do
@@ -347,6 +382,8 @@ defmodule PtcRunner.Kernel.JevDecisionLabTest do
 
     rounded = put_in(answers, ["severity", "score"], 1.309)
     assert {:ok, _result} = invoke_with_answers(rounded)
+    exact_boundary = put_in(answers, ["severity", "score"], 1.31)
+    assert {:ok, _result} = invoke_with_answers(exact_boundary)
   end
 
   test "boolean probabilities and provider usage must be bounded" do

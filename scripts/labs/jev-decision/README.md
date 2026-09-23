@@ -45,9 +45,10 @@ questions travel in one request. It then keeps answers whose probability is at
 least `0.5`:
 
 ```clojure
-(->> ticket-ids
-     (filter (fn [ticket-id]
-               (>= (get-in answers [ticket-id "probability"]) 0.5)))
+(->> tickets
+     (filter (fn [ticket]
+               (>= (get-in answers [(get ticket "answer_id") "probability"]) 0.5)))
+     (map (fn [ticket] (get ticket "ticket_id")))
      vec)
 ```
 

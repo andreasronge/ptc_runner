@@ -14,6 +14,7 @@ defmodule PtcRunner.Examples.JevDecisionLab do
   @endpoint "https://openrouter.ai/api/alpha/decisions"
   @model "typesafe/jev-1.13"
   @rounding_tolerance 0.01
+  @float_epsilon 1.0e-12
 
   @input_schema %{
     "type" => "object",
@@ -118,6 +119,16 @@ defmodule PtcRunner.Examples.JevDecisionLab do
 
   def run_refund_triage(opts \\ []) when is_list(opts) do
     run_program(@refund_triage_program, opts, "jev-refund-triage-lab")
+  end
+
+  def run_request(request, opts \\ []) when is_map(request) and is_list(opts) do
+    encoded_request = request |> Jason.encode!() |> inspect()
+
+    run_program(
+      "(return (decision/request (json/parse-string #{encoded_request})))",
+      opts,
+      "jev-request-lab"
+    )
   end
 
   defp run_program(program, opts, run_id) do
@@ -291,7 +302,7 @@ defmodule PtcRunner.Examples.JevDecisionLab do
        ) do
     valid_distribution?(probabilities, Map.keys(criteria)) and probability?(confidence) and
       Map.has_key?(probabilities, choice) and
-      probabilities[choice] >= Enum.max(Map.values(probabilities)) - @rounding_tolerance
+      within_rounding_tolerance?(Enum.max(Map.values(probabilities)) - probabilities[choice])
   end
 
   defp valid_answer?(
@@ -310,12 +321,12 @@ defmodule PtcRunner.Examples.JevDecisionLab do
     valid_distribution?(probabilities, levels) and legend == expected_legend and
       probability?(confidence) and finite_number?(score) and score >= 0 and
       score <= length(criteria) - 1 and
-      abs(
+      within_rounding_tolerance?(
         score -
           Enum.reduce(0..(length(criteria) - 1), 0.0, fn level, sum ->
             sum + level * probabilities[Integer.to_string(level)]
           end)
-      ) <= @rounding_tolerance
+      )
   end
 
   defp valid_answer?(_, _), do: false
@@ -323,12 +334,16 @@ defmodule PtcRunner.Examples.JevDecisionLab do
   defp valid_distribution?(values, keys) when is_map(values) do
     MapSet.new(Map.keys(values)) == MapSet.new(keys) and
       Enum.all?(Map.values(values), &probability?/1) and
-      abs(Enum.sum(Map.values(values)) - 1.0) <= @rounding_tolerance
+      within_rounding_tolerance?(Enum.sum(Map.values(values)) - 1.0)
   end
 
   defp valid_distribution?(_, _), do: false
 
   defp probability?(value), do: finite_number?(value) and value >= 0 and value <= 1
+
+  defp within_rounding_tolerance?(difference),
+    do: abs(difference) <= @rounding_tolerance + @float_epsilon
+
   defp finite_number?(value) when is_integer(value), do: true
   defp finite_number?(value) when is_float(value), do: value == value and abs(value) < 1.0e308
   defp finite_number?(_), do: false
@@ -380,6 +395,10 @@ defmodule PtcRunner.Examples.JevDecisionLab do
   defp record_attempt(record) do
     dir = Path.expand("../../../../tmp/jev-decision-attempts", __DIR__)
     File.mkdir_p!(dir)
+    File.chmod!(dir, 0o700)
+
+    %{type: :directory, mode: mode} = File.lstat!(dir)
+    true = Bitwise.band(mode, 0o777) == 0o700
 
     path =
       Path.join(
@@ -387,8 +406,10 @@ defmodule PtcRunner.Examples.JevDecisionLab do
         "attempt-#{System.os_time(:microsecond)}-#{System.unique_integer([:positive])}.term"
       )
 
-    File.write!(path, :erlang.term_to_binary(record), [:exclusive])
-    File.chmod!(path, 0o600)
+    File.open!(path, [:write, :exclusive], fn io ->
+      File.chmod!(path, 0o600)
+      :ok = IO.binwrite(io, :erlang.term_to_binary(record))
+    end)
   end
 
   defp normalize_answers(answers) do
