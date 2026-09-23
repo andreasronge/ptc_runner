@@ -1,6 +1,6 @@
 # Debugging corpus feasibility inventory
 
-This inventory was screened for #2028 on 2026-09-23. It contains **33 candidates and zero admission-ready incidents**. Candidate is not a scored observation. No private run captures or adjudicated case packets are committed here. The runnable six-case fixture in `scripts/labs/debug-efficiency/` is synthetic and is not part of this corpus. Repair reports 002–004 and their artifacts remain outside this cohort.
+This inventory was screened for #2028 on 2026-09-23. It contains **33 candidates and zero admission-ready incidents**. Candidate is not a scored observation. No private run captures or adjudicated case packets are committed here. The runnable seven-case fixture in `scripts/labs/debug-efficiency/` is synthetic and is not part of this corpus. Repair reports 002–004 and their artifacts remain outside this cohort.
 
 An admission-ready packet needs a frozen application/source revision, the incident input, a canonical trace and authorized private inspection snapshot, a checkable cause or a documented insufficiency, the expected supporting evidence IDs, and an independent adjudicator's sign-off. The source mutation or issue reporter supplies a candidate label, never a substitute for this review. Missing capture is an **eligibility failure**, not a wrong diagnosis. None of the 33 enters a denominator until this packet exists.
 

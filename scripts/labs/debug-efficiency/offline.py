@@ -34,6 +34,12 @@ def score_case(case, arm):
                 raise ValueError(f'{case["id"]}: invalid cost')
 
     response = record.get("response")
+    if arm == "fixed" and response is not None and (
+        len(attempts) != 1 or attempts[0]["status"] != "accepted" or dispatched != 1
+    ):
+        raise ValueError(f'{case["id"]}: fixed response requires one accepted dispatched attempt')
+    if arm == "deterministic" and attempts:
+        raise ValueError(f'{case["id"]}: deterministic arm cannot dispatch')
     if any(a["status"] != "accepted" for a in attempts) and response is not None:
         raise ValueError(f'{case["id"]}: failed attempt cannot publish a response')
     if response is None:
