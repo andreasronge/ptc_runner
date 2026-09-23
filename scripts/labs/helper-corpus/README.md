@@ -36,3 +36,9 @@ corpus, runs replay in a fresh VM, and checks both bundle identity and changed
 results from a behavior-changing helper mutation. Replay also rejects a missing
 subject, and regeneration replaces only an output directory bearing this lab's
 corpus identity.
+
+Each frozen bundle is the shipped prelude source plus one `corpus` entry. A
+fast test in the ordinary suite fails when a shipped helper changes and the
+corpus was not regenerated, so the judge never scores a stale copy. The
+withheld inputs are committed in plain text: a later proposer must not have
+access to this directory.
