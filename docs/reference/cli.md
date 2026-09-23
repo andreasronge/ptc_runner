@@ -856,7 +856,12 @@ Public analysis supports `runs`, `open`, `read`, and `counters`; the public
 collections
 but they require a correlated inspection snapshot and private authority.
 `analysis/runs` defaults to a compact projection containing run ID, status,
-duration, LLM calls, evaluations, terminal reason, and completeness flags. Pass
+duration, LLM calls, evaluations, terminal reason, and completeness flags.
+`call_counts_complete` applies to `llm_calls` and the workflow and mission
+capability counts in the full view: `true` means terminal usage supplied run
+totals; `false` means the values count retained events and may be low after
+retention loss. `complete` only reports whether the run has a terminal event.
+Pass
 `{"view" "full"}` when selecting by the complete metadata record:
 
 ```clojure

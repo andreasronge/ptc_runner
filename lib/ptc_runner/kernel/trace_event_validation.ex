@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.TraceEventValidation do
   @moduledoc false
 
+  alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.LLMBudget
@@ -8,6 +9,7 @@ defmodule PtcRunner.Kernel.TraceEventValidation do
   alias PtcRunner.Kernel.ResultIdentity
 
   @event_type ~r/\A[a-z][a-z0-9-]{0,127}\z/
+  @capability_call_key ~r/\A(?:workflow|mission)\/[a-z][a-z0-9._\/-]{0,127}\z/
   @bundle_hash ~r/\A[0-9a-f]{64}\z/
   @event_keys ~w(schema_version run_id trace_id sequence timestamp type data)
   @max_string_bytes 256
@@ -391,6 +393,7 @@ defmodule PtcRunner.Kernel.TraceEventValidation do
 
       {:ok, usage} when is_map(usage) ->
         with :ok <- validate_subordinate_source_checks(usage),
+             :ok <- validate_capability_calls(usage),
              :ok <- validate_terminal_llm_budget(usage),
              do: validate_terminal_llm_spend(usage)
 
@@ -408,6 +411,51 @@ defmodule PtcRunner.Kernel.TraceEventValidation do
       _invalid_count -> {:error, :malformed_source}
     end
   end
+
+  defp validate_capability_calls(usage) do
+    case Map.fetch(usage, "capability_calls") do
+      :error ->
+        :ok
+
+      {:ok, calls} when is_map(calls) and map_size(calls) <= 512 ->
+        if valid_capability_calls?(calls),
+          do: :ok,
+          else: {:error, :malformed_source}
+
+      _invalid_calls ->
+        {:error, :malformed_source}
+    end
+  end
+
+  defp valid_capability_calls?(%{"workflow" => workflow, "mission" => mission} = calls)
+       when map_size(calls) == 2 and is_map(workflow) and is_map(mission) do
+    Enum.all?([workflow, mission], fn scoped ->
+      map_size(scoped) <= 512 and
+        Enum.all?(scoped, fn {name, count} ->
+          is_binary(name) and Regex.match?(@capability_call_key, "workflow/" <> name) and
+            is_integer(count) and count >= 0
+        end)
+    end)
+  end
+
+  defp valid_capability_calls?(calls), do: Enum.all?(calls, &valid_capability_call_entry?/1)
+
+  defp valid_capability_call_entry?({name, count}) when is_binary(name) and is_integer(count),
+    do: Regex.match?(@capability_call_key, name) and count >= 0
+
+  # Analysis sessions retain per-capability quota snapshots here, not run
+  # totals. TraceLog leaves their run counts as retained-event observations.
+  defp valid_capability_call_entry?({name, quota}) when is_binary(name) and is_map(quota) do
+    Capability.valid_name?(name) and
+      Enum.all?(~w(used limit remaining), fn key ->
+        case Map.get(quota, key) do
+          value when is_integer(value) and value >= 0 -> true
+          _ -> false
+        end
+      end)
+  end
+
+  defp valid_capability_call_entry?(_entry), do: false
 
   defp validate_terminal_llm_budget(usage) do
     case LLMBudget.validate_terminal_projection(Map.get(usage, "llm_budget")) do

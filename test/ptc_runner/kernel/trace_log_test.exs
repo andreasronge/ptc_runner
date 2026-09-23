@@ -1353,6 +1353,39 @@ defmodule PtcRunner.Kernel.TraceLogTest do
   end
 
   @tag :tmp_dir
+  test "canonical validation rejects malformed terminal capability-call totals", %{
+    tmp_dir: directory
+  } do
+    invalid_counts = [
+      "invalid",
+      %{"workflow/llm-request" => -1},
+      %{"workflow" => %{"llm-request" => -1}, "mission" => %{}},
+      %{"workflow" => %{}, "mission" => %{"Uppercase" => 1}},
+      %{"other/llm-request" => 1},
+      %{"workflow/Uppercase" => 1}
+    ]
+
+    for {capability_calls, index} <- Enum.with_index(invalid_counts) do
+      path = Path.join(directory, "invalid-capability-calls-#{index}.jsonl")
+
+      events = [
+        decoded_event("invalid-capability-calls-#{index}", 1, "run-started"),
+        decoded_event("invalid-capability-calls-#{index}", 2, "run-stopped", %{
+          "usage" => %{
+            "capability_calls" => capability_calls,
+            "llm_budget" => %{"total_tokens" => nil, "cost" => nil}
+          }
+        })
+      ]
+
+      File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
+      {:ok, trace_log} = TraceLog.new(source: {:file, path})
+
+      assert {:error, :malformed_source} = TraceLog.query(trace_log, :list_runs, %{})
+    end
+  end
+
+  @tag :tmp_dir
   test "canonical validation rejects terminal events without usage", %{tmp_dir: directory} do
     path = Path.join(directory, "missing-terminal-usage.jsonl")
 

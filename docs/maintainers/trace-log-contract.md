@@ -333,8 +333,15 @@ sufficient to select a run without loading its activity:
 - workflow/agent name when supplied;
 - model and provider identifiers when recorded by a provider;
 - total and subordinate-evaluation counts;
-- workflow and mission capability-call counts;
-- LLM-call summary derived from named `llm-request` events when applicable;
+- workflow and mission capability-call counts, taken from validated terminal
+  usage when available;
+- an LLM-call count for workflow `llm-request` calls (a mission capability with
+  that name is not an LLM call);
+- `call_counts_complete`, which is `true` when all three call counts are
+  authoritative terminal-usage totals. When `false`, the counts are only
+  observations from retained `capability-started` events and may be lower than
+  the run totals after retention loss. Legacy traces without terminal
+  `capability_calls` never invent the missing totals;
 - the exact closed `llm_spend` projection retained by `run-stopped`, so the
   Viewer distinguishes empty, incomplete, unpriced, available, and overflow
   spend without reconstructing or guessing pricing state;
@@ -411,9 +418,9 @@ status, bounded exact-match tags, workflow/agent name, workflow bundle hash,
 model/provider when present, timestamp range, limit, and cursor.
 
 The default `view` is `"summary"` and projects each item to `run_id`, `status`,
-`duration_ms`, `llm_calls`, `evaluations`, `terminal_reason`, `complete`, and
-`truncated`. Set `"view"` to `"full"` for the complete sanitized metadata
-record described above. Pagination and filtering are applied before this
+`duration_ms`, `llm_calls`, `call_counts_complete`, `evaluations`,
+`terminal_reason`, `complete`, and `truncated`. Set `"view"` to `"full"` for the
+complete sanitized metadata record described above. Pagination and filtering are applied before this
 presentation projection, so the cursor and selected run set are identical in
 both views.
 
