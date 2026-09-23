@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.CommandCatalog do
   alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandOutcome
+  alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.ProviderRegistry
@@ -39,41 +40,75 @@ defmodule PtcRunner.Kernel.CommandCatalog do
 
           with {:ok, built} <-
                  ProviderRegistry.build(registry, provider, %{"catalog" => true}, context),
-               result <- catalog_result(built, run_ref) do
+               result <- catalog_result(built, provider, run_ref) do
             result
           else
-            _reason -> error(run_ref, :provider_unavailable)
+            _reason -> error(run_ref, provider, :provider_unavailable)
           end
         after
           ProviderRegistry.close(registry)
         end
 
       _error ->
-        error(run_ref, :provider_unavailable)
+        error(run_ref, provider, :provider_unavailable)
     end
   end
 
-  defp catalog_result(built, run_ref) do
+  defp catalog_result(built, provider, run_ref) do
     result =
       with [capability] <- built.capabilities,
            {:ok, catalog} <- capability.callback.(%{}, nil),
            do: {:ok, CommandOutcome.success(:catalog, run_ref, catalog)}
 
-    close_result = if built.close, do: built.close.(), else: :ok
-
-    cond do
-      close_result != :ok -> error(run_ref, :result_cleanup, :provider_cleanup_error)
-      match?({:ok, _outcome}, result) -> result
-      true -> error(run_ref, :provider_unavailable)
-    end
+    finish_catalog(result, close(built), provider, run_ref)
+  rescue
+    _exception ->
+      close(built)
+      error(run_ref, provider, :provider_unavailable)
+  catch
+    _kind, _reason ->
+      close(built)
+      error(run_ref, provider, :provider_unavailable)
   end
 
-  defp error(run_ref, code) do
-    error(run_ref, :provider_acquisition, code)
+  defp finish_catalog(_result, close_result, provider, run_ref) when close_result != :ok,
+    do: error(run_ref, provider, :result_cleanup, :provider_cleanup_failed)
+
+  defp finish_catalog({:ok, _outcome} = result, :ok, _provider, _run_ref), do: result
+
+  defp finish_catalog(_result, :ok, provider, run_ref),
+    do: error(run_ref, provider, :provider_unavailable)
+
+  defp close(%{close: close}) when is_function(close, 0) do
+    close.()
+  rescue
+    _exception -> {:error, :provider_cleanup_error}
+  catch
+    _kind, _reason -> {:error, :provider_cleanup_error}
   end
 
-  defp error(run_ref, phase, code) do
-    diagnostic = CommandDiagnostic.new!(phase, code)
+  defp close(_built), do: :ok
+
+  defp error(run_ref, provider, code) do
+    error(run_ref, provider, :provider_acquisition, code)
+  end
+
+  defp error(run_ref, provider, :provider_acquisition = phase, code) do
+    {:ok, subject} =
+      CommandSubject.provider(provider, :acquisition, %{destination: :workflow, index: 0})
+
+    diagnostic =
+      CommandDiagnostic.new!(phase, code, subject: subject, provider_activity: true)
+
+    {:error, CommandOutcome.error(:catalog, run_ref, diagnostic)}
+  end
+
+  defp error(run_ref, provider, :result_cleanup = phase, code) do
+    {:ok, subject} = CommandSubject.provider(provider, :cleanup)
+
+    diagnostic =
+      CommandDiagnostic.new!(phase, code, subject: subject, provider_activity: true)
+
     {:error, CommandOutcome.error(:catalog, run_ref, diagnostic)}
   end
 end

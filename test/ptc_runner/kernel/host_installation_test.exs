@@ -56,8 +56,10 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Attestation
+  alias PtcRunner.Kernel.CommandCatalog
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandEngine
+  alias PtcRunner.Kernel.CommandParser
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.DoctorPlan
   alias PtcRunner.Kernel.HostConfig
@@ -1681,7 +1683,11 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     {:ok, launcher} = PtcRunnerLauncher.executable_path()
     marker = Path.join(dir, "catalog-server-methods")
 
-    config = unicode_stdio_config(launcher, marker)
+    config =
+      unicode_stdio_config(launcher, marker)
+      |> put_in(["install", "workspace", "tools"], %{
+        "unicode" => %{"as" => "workspace.unicode", "effect" => "write"}
+      })
 
     host_path = Path.join(dir, "catalog-host.json")
     File.write!(host_path, Jason.encode!(config))
@@ -1695,6 +1701,16 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       | limits: limits,
         installed_limits: limits
     }
+
+    assert {:ok, prepared} =
+             ProviderRegistry.prepare(
+               registry,
+               "workspace",
+               %{"catalog" => true},
+               workflow_context
+             )
+
+    assert prepared.capability_effects == %{"workspace.catalog" => :read}
 
     assert {:ok, %{capabilities: [capability], close: close}} =
              ProviderRegistry.build(
@@ -1736,6 +1752,45 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert result["pagination"] == %{"pages" => 1, "truncated" => false}
     assert get_in(result, ["tools", Access.at(0), "output_schema", "properties", "text"])
     refute File.read!(marker) =~ "tools/call"
+  end
+
+  @tag :tmp_dir
+  test "catalog rejects malformed advertised schemas and closes the provider", %{tmp_dir: dir} do
+    {:ok, launcher} = PtcRunnerLauncher.executable_path()
+    marker = Path.join(dir, "invalid-catalog-server-methods")
+
+    config =
+      unicode_stdio_config(launcher, marker)
+      |> put_in(["install", "workspace", "transport", "args"], [
+        @stdio_fixture,
+        marker,
+        "mcp-invalid-catalog"
+      ])
+
+    host_path = Path.join(dir, "invalid-catalog-host.json")
+    File.write!(host_path, Jason.encode!(config))
+
+    assert {:ok, arguments} =
+             CommandParser.parse([
+               "catalog",
+               "workspace",
+               "--host-config",
+               host_path
+             ])
+
+    assert {:error, direct_outcome} =
+             CommandCatalog.dispatch(
+               arguments,
+               "cmd-00000000000000000000000001"
+             )
+
+    assert direct_outcome.envelope["error"]["code"] == "provider_unavailable"
+
+    assert {:error, outcome} =
+             CommandEngine.dispatch(["catalog", "workspace", "--host-config", host_path])
+
+    assert outcome.envelope["error"]["code"] == "provider_unavailable"
+    assert File.read!(marker) =~ "closed"
   end
 
   @tag :tmp_dir

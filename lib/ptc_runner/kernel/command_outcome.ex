@@ -478,6 +478,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
     end)
   end
 
+  defp valid_mode_activity?(:catalog, activity), do: is_boolean(activity)
   defp valid_mode_activity?(mode, false) when mode in @static_modes, do: true
   defp valid_mode_activity?(mode, _activity) when mode in @static_modes, do: false
   defp valid_mode_activity?({:doctor, :connect}, activity), do: is_boolean(activity)

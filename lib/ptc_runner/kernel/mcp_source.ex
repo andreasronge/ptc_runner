@@ -273,7 +273,7 @@ defmodule PtcRunner.Kernel.MCPSource do
             {:ok,
              %{
                credential_names: [],
-               capability_effects: selected_effects(installed, selected),
+               capability_effects: selected_effects(installed, selected, context.provider),
                preflight: fn ->
                  {:ok, fn %{} -> build_selected(installed, selected, context) end}
                end
@@ -578,7 +578,10 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp selected_effects(installed, selected) do
+  defp selected_effects(_installed, %{catalog?: true}, provider),
+    do: %{(provider <> ".catalog") => :read}
+
+  defp selected_effects(installed, selected, _provider) do
     installed.tools
     |> Enum.filter(fn {_upstream, mapping} -> MapSet.member?(selected.allow, mapping.as) end)
     |> Map.new(fn {_upstream, mapping} -> {mapping.as, mapping.effect} end)
@@ -1037,22 +1040,38 @@ defmodule PtcRunner.Kernel.MCPSource do
   end
 
   defp catalog_projection(provider, discovered, pagination) do
-    tools =
-      discovered
-      |> Enum.sort_by(&elem(&1, 0))
-      |> Enum.map(fn {name, tool} ->
-        %{"name" => name, "input_schema" => tool["inputSchema"]}
-        |> maybe_put_catalog("description", tool["description"])
-        |> maybe_put_catalog("output_schema", tool["outputSchema"])
-      end)
+    discovered
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.reduce_while({:ok, []}, fn {name, tool}, {:ok, tools} ->
+      case catalog_tool(name, tool) do
+        {:ok, projected} -> {:cont, {:ok, [projected | tools]}}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, tools} ->
+        tools = Enum.reverse(tools)
 
-    {:ok,
-     %{
-       "provider" => provider,
-       "tools" => tools,
-       "pagination" => pagination,
-       "tool_count" => length(tools)
-     }}
+        {:ok,
+         %{
+           "provider" => provider,
+           "tools" => tools,
+           "pagination" => pagination,
+           "tool_count" => length(tools)
+         }}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp catalog_tool(name, tool) do
+    with {:ok, contract} <- MCPProtocol.selected_tool(tool) do
+      {:ok,
+       %{"name" => name, "input_schema" => contract.input_schema}
+       |> maybe_put_catalog("description", contract.description)
+       |> maybe_put_catalog("output_schema", contract.output_schema)}
+    end
   end
 
   defp maybe_put_catalog(map, _key, nil), do: map

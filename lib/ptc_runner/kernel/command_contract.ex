@@ -40,7 +40,7 @@ defmodule PtcRunner.Kernel.CommandContract do
     {"validate", :validate, false, false},
     {"doctor", {:doctor, :connect}, :catalog, true},
     {"models", :models, false, false},
-    {"catalog", :catalog, false, false},
+    {"catalog", :catalog, :catalog, false},
     {"materialize", :materialize, false, false},
     {"transcript", :transcript, false, false},
     {"unknown", :unknown, false, false}
@@ -1258,7 +1258,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   defp diagnostic_pair_allowed?(:models, :provider_declaration, :dependency_invalid), do: true
 
   defp diagnostic_pair_allowed?(:catalog, :provider_acquisition, :provider_unavailable), do: true
-  defp diagnostic_pair_allowed?(:catalog, :result_cleanup, :provider_cleanup_error), do: true
+  defp diagnostic_pair_allowed?(:catalog, :result_cleanup, :provider_cleanup_failed), do: true
 
   # A run needs no clause here. `local_preflight` is a classified phase, so a
   # post-marker failure renders through the classified branch, which admits

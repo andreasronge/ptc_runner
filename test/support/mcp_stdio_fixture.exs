@@ -34,25 +34,32 @@ defmodule PtcRunner.TestSupport.MCPStdioFixture do
 
   def main([marker, "mcp-unicode"]) do
     marker
-    |> mcp_loop()
+    |> mcp_loop(:valid)
     |> System.halt()
   end
 
-  defp mcp_loop(marker) do
+  def main([marker, "mcp-invalid-catalog"]) do
+    marker
+    |> mcp_loop(:invalid_catalog)
+    |> System.halt()
+  end
+
+  defp mcp_loop(marker, mode) do
     case IO.read(:stdio, :line) do
       :eof ->
+        File.write!(marker, "closed\n", [:append])
         0
 
       {:error, _reason} ->
         1
 
       line when is_binary(line) ->
-        handle_mcp_request(extract_id(line), extract_method(line), marker)
-        mcp_loop(marker)
+        handle_mcp_request(extract_id(line), extract_method(line), marker, mode)
+        mcp_loop(marker, mode)
     end
   end
 
-  defp handle_mcp_request(id, "server/discover", marker) when is_integer(id) do
+  defp handle_mcp_request(id, "server/discover", marker, _mode) when is_integer(id) do
     File.write!(marker, "server/discover\n", [:append])
 
     IO.write(
@@ -61,7 +68,7 @@ defmodule PtcRunner.TestSupport.MCPStdioFixture do
     )
   end
 
-  defp handle_mcp_request(id, "tools/list", marker) when is_integer(id) do
+  defp handle_mcp_request(id, "tools/list", marker, :valid) when is_integer(id) do
     File.write!(marker, "tools/list\n", [:append])
 
     IO.write(
@@ -70,7 +77,16 @@ defmodule PtcRunner.TestSupport.MCPStdioFixture do
     )
   end
 
-  defp handle_mcp_request(id, "tools/call", marker) when is_integer(id) do
+  defp handle_mcp_request(id, "tools/list", marker, :invalid_catalog) when is_integer(id) do
+    File.write!(marker, "tools/list\n", [:append])
+
+    IO.write(
+      :stdio,
+      ~s({"jsonrpc":"2.0","id":#{id},"result":{"resultType":"complete","tools":[{"name":"unicode","description":false,"inputSchema":42}],"ttlMs":0,"cacheScope":"private"}}\n)
+    )
+  end
+
+  defp handle_mcp_request(id, "tools/call", marker, _mode) when is_integer(id) do
     File.write!(marker, "tools/call\n", [:append])
 
     IO.write(
@@ -79,7 +95,7 @@ defmodule PtcRunner.TestSupport.MCPStdioFixture do
     )
   end
 
-  defp handle_mcp_request(_id, _method, _marker), do: System.halt(65)
+  defp handle_mcp_request(_id, _method, _marker, _mode), do: System.halt(65)
 
   defp loop(marker) do
     case IO.read(:stdio, :line) do
