@@ -54,7 +54,10 @@ earlier one fails.
 The test suite and the launcher gate deliberately do not share the machine.
 Both own load-sensitive assertions, and a gate that flakes costs more than a
 gate that is slow. Set `PTC_PRE_PUSH_SERIAL=1` to run every gate serially when
-diagnosing a failure or pushing from a machine too small to overlap them.
+diagnosing a failure or pushing from a machine too small to overlap them. A
+managed push (`PTC_MANAGED_OPERATION_CONTEXT` set) runs its memory-bounded
+operation serially by default; `PTC_PRE_PUSH_SERIAL=0` restores concurrent
+lanes there.
 
 For an ordinary push, run `git push` and let the hook execute the local gate
 once. Root `:nightly` tests, which spawn Mix/OS processes or wait on
