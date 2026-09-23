@@ -366,9 +366,64 @@ START_TIME=$(date +%s)
 # deciding where the time went.
 PHASE_LABELS=()
 PHASE_TIMES=()
+PHASE_MEMS=()
 record_phase() {
   PHASE_LABELS+=("$1")
   PHASE_TIMES+=("$2")
+  phase_memory
+  PHASE_MEMS+=("$PHASE_MEMORY")
+}
+
+# Cgroup v2 memory at each phase boundary, when the hook can read its own
+# cgroup (a PtcManager operation on Linux); elsewhere the summary is unchanged.
+# Concurrent lanes share the hook's cgroup, so a lane's reading covers the
+# whole overlap window up to its reap, not that lane alone. `high` counts
+# memory.high throttling events since the previous boundary.
+# PTC_PRE_PUSH_CGROUP_ROOT names a directory holding the memory files.
+PHASE_CGROUP="${PTC_PRE_PUSH_CGROUP_ROOT:-}"
+if [ -z "$PHASE_CGROUP" ] && [ -r /proc/self/cgroup ]; then
+  PHASE_CGROUP="/sys/fs/cgroup$(sed -n 's/^0:://p' /proc/self/cgroup 2>/dev/null || true)"
+fi
+
+cgroup_number() {
+  local value
+  value="$(cat "$PHASE_CGROUP/$1" 2>/dev/null || true)"
+  case "$value" in
+    '' | *[!0-9]*) ;;
+    *) echo "$value" ;;
+  esac
+}
+
+cgroup_high_events() {
+  local value
+  value="$(awk '$1 == "high" { print $2 }' "$PHASE_CGROUP/memory.events" 2>/dev/null || true)"
+  case "$value" in
+    '' | *[!0-9]*) ;;
+    *) echo "$value" ;;
+  esac
+}
+
+PHASE_HIGH_MARK="$(cgroup_high_events)"
+
+# Sets PHASE_MEMORY rather than printing it: the `high` mark must advance in
+# this shell, not in a command-substitution subshell.
+phase_memory() {
+  PHASE_MEMORY=""
+  local current peak high
+  current="$(cgroup_number memory.current)"
+  peak="$(cgroup_number memory.peak)"
+  high="$(cgroup_high_events)"
+
+  if [ -n "$current" ]; then
+    PHASE_MEMORY="$PHASE_MEMORY  mem $((current / 1048576))MiB"
+  fi
+  if [ -n "$peak" ]; then
+    PHASE_MEMORY="$PHASE_MEMORY  peak $((peak / 1048576))MiB"
+  fi
+  if [ -n "$high" ] && [ -n "$PHASE_HIGH_MARK" ]; then
+    PHASE_MEMORY="$PHASE_MEMORY  high +$((high - PHASE_HIGH_MARK))"
+  fi
+  PHASE_HIGH_MARK="$high"
 }
 
 print_phase_summary() {
@@ -377,7 +432,7 @@ print_phase_summary() {
   echo "⏱  Phase timings:"
   local i
   for i in "${!PHASE_LABELS[@]}"; do
-    printf '   %-36s %5ss\n' "${PHASE_LABELS[$i]}" "${PHASE_TIMES[$i]}"
+    printf '   %-36s %5ss%s\n' "${PHASE_LABELS[$i]}" "${PHASE_TIMES[$i]}" "${PHASE_MEMS[$i]}"
   done
 }
 
