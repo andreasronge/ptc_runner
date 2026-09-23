@@ -13,7 +13,7 @@ page holds whether a program is driven by that console or by a person.
 | Program | Question | Status |
 | --- | --- | --- |
 | [prelude-search](prelude-search.md) | Does checked candidate search improve repair on unseen executions under matched budget ceilings? | paused; corrective pilot inconclusive |
-| [debug-efficiency](debug-efficiency.md) | Can Jev-assisted evidence selection reduce time and cost to a correct diagnosis without increasing wrong conclusions? | proposed; protocol decision #2028, no live run authorized |
+| [debug-efficiency](debug-efficiency.md) | Can Jev-assisted evidence selection reduce time and cost to a correct diagnosis without increasing wrong conclusions? | offline preparation; no live run authorized |
 | [self-improvement](self-improvement.md) | Can workflows and tools improve from execution evidence, judged outside the loop, with gains that compound across layers? | draft; discussion #2034, no experiment authorized |
 
 ## Layout
