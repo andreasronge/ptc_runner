@@ -288,6 +288,27 @@ defmodule PtcRunner.GitHooks.PrePushTest do
   end
 
   @tag :slow
+  test "a managed push runs the deterministic gates serially unless told otherwise" do
+    managed = [
+      {"PTC_MANAGED_OPERATION_CONTEXT", "/managed/context.json"},
+      {"PTC_OPERATION_ACTIVE", "1"}
+    ]
+
+    for {extra_env, concurrent?} <- [
+          {managed, false},
+          {managed ++ [{"PTC_PRE_PUSH_SERIAL", "0"}], true},
+          {[], true}
+        ] do
+      %{repo: repo, path: path} = git_repo_with_change("lib/example.ex")
+
+      {output, status} = run_hook(repo, path, extra_env)
+
+      assert status == 0, output
+      assert output =~ "Deterministic gates (concurrent lanes)" == concurrent?, output
+    end
+  end
+
+  @tag :slow
   test "forced full mode adds release and launcher verification" do
     %{repo: repo, mix_marker: mix_marker, path: path} =
       git_repo_with_change("lib/example.ex")

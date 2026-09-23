@@ -519,9 +519,23 @@ run_gate() {
 # CI runner.
 #
 # Lane output is buffered and replayed in lane order, so a concurrent run
-# reads like a serial one. PTC_PRE_PUSH_SERIAL=1 restores serial execution
-# for diagnosis or for a machine too small to share.
+# reads like a serial one.
+#
+# A managed push runs under an operation wrapper with a bounded memory
+# budget, too small for concurrent lanes to share, so it runs the gates
+# serially by default. An explicit PTC_PRE_PUSH_SERIAL wins either way:
+# 0 forces concurrent lanes, and any other value (conventionally 1) forces
+# serial execution for diagnosis or a machine too small to share.
 # ----------------------------------------------------------------------
+
+case "${PTC_PRE_PUSH_SERIAL:-}" in
+  0) serial_gates=false ;;
+  "")
+    serial_gates=false
+    [ -z "${PTC_MANAGED_OPERATION_CONTEXT:-}" ] || serial_gates=true
+    ;;
+  *) serial_gates=true ;;
+esac
 
 LANE_PIDS=()
 LANE_LABELS=()
@@ -693,7 +707,7 @@ if [ "$run_core_gates" = true ]; then
   fi
 fi
 
-if [ -n "${PTC_PRE_PUSH_SERIAL:-}" ]; then
+if [ "$serial_gates" = true ]; then
   if [ "$run_docs_gate_selected" = true ]; then
     run_gate "Documentation (ExDoc)" "$HOOK_REPO_ROOT/scripts/ci/docs.sh"
   fi
