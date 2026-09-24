@@ -394,6 +394,10 @@ Observability has separate planes:
 | `EventSink` / `TraceLog` | sanitized canonical events and immutable queries |
 | `InspectionSink` / `InspectionArtifact` | explicit private model, source, capability, and eligible result evidence |
 
+The CLI installs one Logger warning for each publication
+`destination_unavailable` event. It prints only operation, destination kind, and
+the atom-only cause to stderr; managed operation logs retain that line.
+
 Do not move private data into canonical events for convenience. Add safe
 correlation metadata to the canonical plane and retain exact payloads only
 under private authority.

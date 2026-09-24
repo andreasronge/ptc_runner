@@ -1,6 +1,8 @@
 defmodule PtcRunner.Kernel.PublicationHandleTest do
   use ExUnit.Case, async: true
 
+  import ExUnit.CaptureIO
+
   alias PtcRunner.Kernel.PublicationHandle
 
   @event [:ptc_runner, :publication, :destination_unavailable]
@@ -16,8 +18,13 @@ defmodule PtcRunner.Kernel.PublicationHandleTest do
       _stage -> :ok
     end
 
-    assert {:error, :destination_unavailable} =
-             PublicationHandle.reserve_direct(destination, :result, 0o600, self(), fault_hook)
+    stderr =
+      capture_io(:stderr, fn ->
+        assert {:error, :destination_unavailable} =
+                 PublicationHandle.reserve_direct(destination, :result, 0o600, self(), fault_hook)
+      end)
+
+    assert stderr == "destination unavailable: operation=reserve kind=result cause=reason:eio\n"
 
     assert_receive {@event, ^ref, %{}, metadata}
     assert metadata == %{operation: :reserve, kind: :result, cause: {:reason, :eio}}
