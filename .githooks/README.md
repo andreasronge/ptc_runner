@@ -3,6 +3,9 @@
 Run `./scripts/install-hooks.sh` once per clone. The installed hooks are small
 wrappers around the tracked implementations in this directory, so hook updates
 take effect without reinstalling them.
+The shared hook runtime clears Git's worktree-specific environment before
+running either hook, so nested Git commands can initialize dependencies in
+their own directories when the hook starts from a linked worktree.
 
 The pre-commit hook is the fast path: it runs format, compile, and credo
 only when staged Elixir, config, or Mix files belong to a project, and it

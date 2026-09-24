@@ -17,6 +17,11 @@ TARGET="${1:-}"
 }
 shift
 
+# Git exports these for linked-worktree hooks. Child git commands must discover
+# their repository from their own working directory, especially when Mix
+# initializes a git dependency inside deps/.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
+
 umask 0022
 
 if command -v mix >/dev/null 2>&1; then
