@@ -113,10 +113,11 @@ defmodule PtcRunner.Kernel.PublicationHandle do
       reserve_staged(path, kind, mode, parent, parent_identity, owner, false, fault_hook)
     else
       {:ok, _stat} -> {:error, :destination_exists}
-      {:error, _reason} = error -> normalize_error(error)
+      {:error, _reason} = error -> error
     end
+    |> normalize_reservation_result(:reserve, kind)
   rescue
-    _exception -> {:error, :destination_unavailable}
+    exception -> exception_failure(exception, :reserve, kind)
   end
 
   def reserve_direct(_path, _kind, _mode, _owner, _fault_hook),
@@ -160,10 +161,11 @@ defmodule PtcRunner.Kernel.PublicationHandle do
       reserve_visible_file(path, kind, mode, parent, parent_identity, owner)
     else
       {:ok, _stat} -> {:error, :destination_exists}
-      {:error, _reason} = error -> normalize_error(error)
+      {:error, _reason} = error -> error
     end
+    |> normalize_reservation_result(:reserve_visible, kind)
   rescue
-    _exception -> {:error, :destination_unavailable}
+    exception -> exception_failure(exception, :reserve_visible, kind)
   end
 
   def reserve_visible_direct(_path, _kind, _mode, _owner), do: {:error, :invalid_destination}
@@ -204,14 +206,15 @@ defmodule PtcRunner.Kernel.PublicationHandle do
         {:ok, _stat} ->
           {:error, :invalid_destination}
 
-        {:error, _reason} ->
-          {:error, :destination_unavailable}
+        {:error, reason} ->
+          collapsed_failure(reason)
       end
     else
-      {:error, _reason} = error -> normalize_error(error)
+      {:error, _reason} = error -> error
     end
+    |> normalize_reservation_result(:reserve_append, :trace)
   rescue
-    _exception -> {:error, :destination_unavailable}
+    exception -> exception_failure(exception, :reserve_append, :trace)
   end
 
   def reserve_append_direct(_path, _kind, _mode, _owner, _fault_hook),
@@ -954,7 +957,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     else
       {:ok, _stat} -> {:error, :destination_exists}
       {:error, reason} -> {:error, reason}
-      _other -> {:error, :destination_unavailable}
+      other -> collapsed_failure(other)
     end
   end
 
@@ -1022,7 +1025,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
        }}
     else
       {:error, reason} -> {:error, reason}
-      _other -> {:error, :destination_unavailable}
+      other -> collapsed_failure(other)
     end
   end
 
@@ -1088,7 +1091,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     case fault_hook.(:after_open) do
       :ok -> :ok
       {:error, _reason} = error -> error
-      _other -> {:error, :destination_unavailable}
+      other -> collapsed_failure(other)
     end
   end
 
@@ -1128,7 +1131,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
        }}
     else
       {:error, reason} -> {:error, reason}
-      _other -> {:error, :destination_unavailable}
+      other -> collapsed_failure(other)
     end
   end
 
@@ -1141,7 +1144,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
          end) do
       {:ok, _device, _identity} = success -> success
       {:error, reason} -> {:error, filesystem_destination_failure(reason)}
-      _unavailable -> {:error, :destination_unavailable}
+      unavailable -> collapsed_failure(unavailable)
     end
   end
 
@@ -1242,7 +1245,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
           {:error, filesystem_destination_failure(reason)}
       end
     else
-      _unidentified -> {:error, :destination_unavailable}
+      unidentified -> collapsed_failure(unidentified)
     end
   end
 
@@ -1257,11 +1260,11 @@ defmodule PtcRunner.Kernel.PublicationHandle do
       {:ok, %{type: :directory} = stat} ->
         case same_identity(stat, identity) do
           :ok -> {:ok, path, identity}
-          _replaced -> {:error, :destination_unavailable}
+          replaced -> collapsed_failure(replaced)
         end
 
-      _other ->
-        {:error, :destination_unavailable}
+      other ->
+        collapsed_failure(other)
     end
   end
 
@@ -1295,7 +1298,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     case fault_hook.(:reservation_owner) do
       :ok -> :ok
       {:error, reason} -> {:error, reason}
-      _other -> {:error, :destination_unavailable}
+      other -> collapsed_failure(other)
     end
   end
 
@@ -1343,15 +1346,15 @@ defmodule PtcRunner.Kernel.PublicationHandle do
              :ok <- PrivateDirectory.preflight_writable_file(path) do
           :ok
         else
-          false -> {:error, :destination_unavailable}
-          {:error, _reason} -> {:error, :destination_unavailable}
+          false -> collapsed_failure(false)
+          {:error, reason} -> collapsed_failure(reason)
         end
 
       {:ok, _stat} ->
         {:error, :invalid_destination}
 
-      {:error, _reason} ->
-        {:error, :destination_unavailable}
+      {:error, reason} ->
+        collapsed_failure(reason)
     end
   end
 
@@ -1374,7 +1377,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     case File.lstat(path) do
       {:error, :enoent} -> :ok
       {:ok, _stat} -> {:error, :destination_exists}
-      _other -> {:error, :destination_unavailable}
+      other -> collapsed_failure(other)
     end
   end
 
@@ -1430,7 +1433,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     case fault_hook.(:staging_file) do
       :ok -> :ok
       {:error, reason} -> {:error, reason}
-      _other -> {:error, :destination_unavailable}
+      other -> collapsed_failure(other)
     end
   end
 
@@ -1438,7 +1441,12 @@ defmodule PtcRunner.Kernel.PublicationHandle do
        when reason in @filesystem_destination_failures,
        do: reason
 
-  defp filesystem_destination_failure(_reason), do: :destination_unavailable
+  defp filesystem_destination_failure({:destination_unavailable, {:reason, reason}})
+       when is_atom(reason),
+       do: {:destination_unavailable, {:reason, reason}}
+
+  defp filesystem_destination_failure(reason),
+    do: {:destination_unavailable, reason_cause(reason)}
 
   # Decided before the private-directory preflight, which answers for a missing
   # parent with the same reason it uses for every unusable one. `--trace-dir`
@@ -1462,7 +1470,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
       {:ok, %{type: :directory} = stat} ->
         case stat_identity(stat) do
           {:ok, identity} -> {:ok, parent, identity}
-          :error -> {:error, :destination_unavailable}
+          :error -> collapsed_failure(:error)
         end
 
       # An absent parent directory is the ordinary operator mistake here, and
@@ -1471,15 +1479,15 @@ defmodule PtcRunner.Kernel.PublicationHandle do
       {:error, :enoent} ->
         {:error, :destination_directory_missing}
 
-      _other ->
-        {:error, :destination_unavailable}
+      other ->
+        collapsed_failure(other)
     end
   end
 
   defp device_identity(device) do
     case :file.read_file_info(device, time: :posix) do
       {:ok, info} -> stat_identity(File.Stat.from_record(info))
-      _other -> {:error, :destination_unavailable}
+      other -> collapsed_failure(other)
     end
   end
 
@@ -1538,7 +1546,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     else
       case File.chmod(path, mode) do
         :ok -> :ok
-        {:error, _reason} -> {:error, :destination_unavailable}
+        {:error, reason} -> collapsed_failure(reason)
       end
     end
   end
@@ -1674,7 +1682,52 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     end
   end
 
-  defp normalize_error({:error, :destination_exists}), do: {:error, :destination_exists}
-  defp normalize_error({:error, :invalid_destination}), do: {:error, :invalid_destination}
-  defp normalize_error({:error, reason}) when is_atom(reason), do: {:error, reason}
+  defp collapsed_failure({:error, reason}), do: collapsed_failure(reason)
+  defp collapsed_failure(reason), do: {:error, filesystem_destination_failure(reason)}
+
+  defp reason_cause(reason) when is_atom(reason), do: {:reason, reason}
+  defp reason_cause(_reason), do: {:reason, :unexpected_reply}
+
+  defp exception_failure(exception, operation, kind) do
+    emit_destination_unavailable(operation, kind, {:exception, exception.__struct__})
+    {:error, :destination_unavailable}
+  end
+
+  defp normalize_reservation_result({:ok, _handle} = success, _operation, _kind), do: success
+
+  defp normalize_reservation_result({:error, _reason} = error, operation, kind),
+    do: normalize_error(error, operation, kind)
+
+  defp normalize_error({:error, {:destination_unavailable, {:reason, reason}}}, operation, kind)
+       when is_atom(reason) do
+    emit_destination_unavailable(operation, kind, {:reason, reason})
+    {:error, :destination_unavailable}
+  end
+
+  defp normalize_error({:error, {:destination_unavailable, _cause}}, operation, kind) do
+    emit_destination_unavailable(operation, kind, {:reason, :unexpected_reply})
+    {:error, :destination_unavailable}
+  end
+
+  defp normalize_error({:error, :destination_unavailable}, operation, kind) do
+    emit_destination_unavailable(operation, kind, {:reason, :destination_unavailable})
+    {:error, :destination_unavailable}
+  end
+
+  defp normalize_error({:error, :destination_exists}, _operation, _kind),
+    do: {:error, :destination_exists}
+
+  defp normalize_error({:error, :invalid_destination}, _operation, _kind),
+    do: {:error, :invalid_destination}
+
+  defp normalize_error({:error, reason}, _operation, _kind) when is_atom(reason),
+    do: {:error, reason}
+
+  defp emit_destination_unavailable(operation, kind, cause) do
+    :telemetry.execute(
+      [:ptc_runner, :publication, :destination_unavailable],
+      %{},
+      %{operation: operation, kind: kind, cause: cause}
+    )
+  end
 end
