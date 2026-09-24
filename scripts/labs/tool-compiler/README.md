@@ -11,14 +11,21 @@ mission component with a compiled tool and runs the same tasks.
 
 ## What it measures
 
-Per page, from the canonical trace and the V4 command envelope:
+Per page, from the command envelope's terminal usage:
 
-- `calls` — `capability-started` events for `web.*`, so how many round trips the
-  page cost.
-- `model` — `llm-request` capability events, so how many turns the loop took.
-- `in_tokens` / `out_tokens` — from `usage.llm_usage`. Input tokens are the
+- `calls` — the `web.*` counts in `usage.capability_calls`, so how many round
+  trips the page cost.
+- `model` — the `llm-request` count in `usage.capability_calls`, so how many
+  turns the loop took.
+- `in_tokens` / `out_tokens` — from `usage.llm_spend`. Input tokens are the
   honest measure of how much page noise reached the model's context.
 - `correct` — whether the records match the fixture exactly.
+
+An arm total is exact only when every contributing row has the required spend
+accounting. Otherwise the table labels the known value as a subtotal and gives
+the number of unaccounted runs, or prints `n/a` when no subtotal is known. An
+`empty` spend state is authoritative zero usage; missing, incomplete, and
+overflowed accounting never becomes zero.
 
 `arm-a-results.json` keeps the same rows for comparison against Arm B.
 

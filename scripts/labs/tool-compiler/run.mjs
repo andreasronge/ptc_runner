@@ -12,6 +12,7 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expected, startFixture } from "./fixture.mjs";
+import { aggregate, formatAggregate, usageOf } from "./reporting.mjs";
 
 const execute = promisify(execFile);
 const directory = dirname(fileURLToPath(import.meta.url));
@@ -32,36 +33,6 @@ async function commandPath(name) {
     } catch {}
   }
   throw new Error(`${name} is not available on PATH`);
-}
-
-// The envelope already counts every capability call and every token, so the
-// trace is kept for the Arm B authoring agent rather than for arithmetic.
-function usageOf(envelope) {
-  const usage = envelope?.execution?.usage ?? {};
-  const calls = usage.capability_calls ?? {};
-  const byTool = {};
-  let model = 0;
-  for (const [key, count] of Object.entries(calls)) {
-    if (key.endsWith("/llm-request")) model += count;
-    else byTool[key.replace(/^mission\//, "")] = count;
-  }
-  const spend = usage.llm_spend ?? {};
-  // A run closed by a limit reports `incomplete`, and its token counts are not
-  // accounted. Reporting zero there would understate the arm.
-  const accounted = spend.state !== "incomplete";
-  return {
-    by_tool: byTool,
-    page_tool_calls: Object.values(byTool).reduce((a, b) => a + b, 0),
-    model_requests: model,
-    input_tokens: accounted ? (spend.input ?? 0) : null,
-    output_tokens: accounted ? (spend.output ?? 0) : null,
-    micro_usd: accounted ? (spend.total_cost?.microunits ?? 0) : null,
-    spend_state: spend.state ?? "unknown",
-    refusals: Object.values(usage.capability_refusals ?? {}).reduce(
-      (a, b) => a + b,
-      0,
-    ),
-  };
 }
 
 function correct(path, records) {
@@ -212,23 +183,24 @@ try {
     );
   }
   }
-  const total = (arm, key) =>
-    results
-      .filter((r) => r.arm === arm)
-      .reduce((sum, r) => sum + (r[key] ?? 0), 0);
+  const rowsFor = (arm) => results.filter((r) => r.arm === arm);
+  const total = (arm, key) => rowsFor(arm).reduce((sum, r) => sum + r[key], 0);
+  const spendTotal = (arm, key) => formatAggregate(aggregate(rowsFor(arm), key));
   const right = (arm) =>
-    results.filter((r) => r.arm === arm && r.correct).length;
+    rowsFor(arm).filter((r) => r.correct).length;
   process.stdout.write("\ntotals\n\n");
-  process.stdout.write("arm          calls  model  in_tokens  micro_usd  correct\n");
+  process.stdout.write(
+    "arm          calls  model  in_tokens                         micro_usd                         correct\n",
+  );
   for (const arm of arms) {
     process.stdout.write(
       [
         arm.padEnd(13),
         String(total(arm, "page_tool_calls")).padStart(5),
         String(total(arm, "model_requests")).padStart(7),
-        String(total(arm, "input_tokens")).padStart(11),
-        String(total(arm, "micro_usd")).padStart(11),
-        `${right(arm)}/${results.filter((r) => r.arm === arm).length}`.padStart(9),
+        spendTotal(arm, "input_tokens").padStart(35),
+        spendTotal(arm, "micro_usd").padStart(34),
+        `${right(arm)}/${rowsFor(arm).length}`.padStart(9),
       ].join("") + "\n",
     );
   }

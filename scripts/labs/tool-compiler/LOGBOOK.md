@@ -232,3 +232,18 @@ written for it, found a recipe, and an independent run verified it.
 `analysis/runs` reported `llm_calls: 8` with `truncated: true` for this run,
 while both the envelope's `capability_calls` and the `turns` collection
 (`item_count: 11`) say eleven. The summary view undercounts.
+
+## 2026-09-20 — Historical spend totals are not completeness claims
+
+The three Arm A rows retained in `arm-a-results.json` say
+`llm_spend.state: "available"`, so their token and cost sums are authoritative
+for those rows. The later Arm B and Arm C totals, and other exploratory runs
+mentioned only in prose, do not have contributing envelopes retained here to
+establish completeness. Treat those numbers as historical reported values, not
+as authoritative complete arm totals, and do not infer omitted-run costs from
+them.
+
+The harness now keeps a total exact only when every contributing row has the
+required accounting. Mixed totals are labelled as known subtotals with the
+number of unaccounted runs, all-unknown totals remain `n/a`, and only an
+authoritative `empty` spend state contributes zero tokens and zero cost.
