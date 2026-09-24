@@ -19,7 +19,8 @@ defmodule PtcRunner.Kernel.RunAnalysis do
 
   Public captures expose only canonical `activity`. Private captures add exact
   exchanges, reconstructed turns, generated source with static prelude-call
-  facts, effective prelude source, and workflow execution diagnostics. The
+  facts, effective prelude source, and workflow or mission execution
+  diagnostics. The
   catalog identifies snapshot and sequence domains, identifier locations, and
   raw collections whose items carry an explicit completeness field. Each
   collection the private inspection record counts also reports the `item_count`

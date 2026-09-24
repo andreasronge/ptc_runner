@@ -784,7 +784,10 @@ execution prints and any provider-backed private activity that occurred. A
 failure can add detailed `execution-error` evidence. A raised capability
 callback additionally records its bounded exception class, message, and
 formatted stacktrace while the trace retains only the closed
-`provider_error / exception` category. Exception text and stacktrace paths can
+`provider_error / exception` category. Failed mission evaluations retain their
+bounded evaluator diagnostic and available source offset under the exact
+generated-source evaluation identity, even when the workflow handles the
+failure and returns normally. Exception text and stacktrace paths can
 contain sensitive data and are not reliably redactable; read the artifact only
 through an authorized private sink.
 
