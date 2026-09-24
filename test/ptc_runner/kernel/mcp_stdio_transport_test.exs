@@ -1,6 +1,6 @@
 defmodule PtcRunner.Kernel.MCPStdioTransportTest do
-  # Async: each case owns its launcher, child VM, and tmp dir. The one Port.list()
-  # scan filters on the stall launcher, which no other module starts.
+  # Async: each case owns its launcher, child VM, and tmp dir. The VM-global
+  # Port.list() case lives in MCPStdioTransportSerialTest.
   use ExUnit.Case, async: true
 
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
@@ -8,7 +8,6 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   alias PtcRunner.Kernel.MCPStdioTransport
 
   @fixture Path.expand("../../support/mcp_stdio_fixture.exs", __DIR__)
-  @stall_launcher Path.expand("../../support/mcp_stdio_stall_launcher.sh", __DIR__)
   @test_launcher Path.expand("../../support/mcp_stdio_test_launcher.exs", __DIR__)
   @root Path.expand("../../..", __DIR__)
   @inherited_environment ~w(HOME LOGNAME PATH SHELL TERM USER)
@@ -563,33 +562,6 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   end
 
   @tag :tmp_dir
-  test "owner death aborts a launcher that is still starting", %{tmp_dir: tmp_dir} do
-    existing = matching_ports(@stall_launcher)
-    parent = self()
-
-    owner =
-      spawn(fn ->
-        send(parent, :starting_transport)
-
-        result =
-          MCPStdioTransport.start(
-            tmp_dir
-            |> launch_options()
-            |> Keyword.put(:launcher, @stall_launcher)
-            |> Keyword.put(:start_timeout_ms, 60_000)
-          )
-
-        send(parent, {:start_result, result})
-      end)
-
-    assert_receive :starting_transport
-    assert_eventually(fn -> matching_ports(@stall_launcher) -- existing != [] end)
-    Process.exit(owner, :kill)
-    assert_eventually(fn -> matching_ports(@stall_launcher) -- existing == [] end)
-    refute_receive {:start_result, _result}
-  end
-
-  @tag :tmp_dir
   test "concurrent close calls are exact-once and idempotent to callers", %{tmp_dir: tmp_dir} do
     transport = start_transport(tmp_dir)
 
@@ -892,7 +864,8 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     :ok
   end
 
-  defp launch_options(tmp_dir, marker \\ nil, fixture_mode \\ "read", opts \\ []) do
+  @doc false
+  def launch_options(tmp_dir, marker \\ nil, fixture_mode \\ "read", opts \\ []) do
     marker = marker || Path.join(tmp_dir, "unused")
     {:ok, launcher} = PtcRunnerLauncher.executable_path()
     executable = System.find_executable("elixir")
@@ -953,15 +926,6 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
       end
     end)
     |> Map.new()
-  end
-
-  defp matching_ports(executable) do
-    Enum.filter(Port.list(), fn port ->
-      case Port.info(port, :name) do
-        {:name, name} -> List.to_string(name) == executable
-        _closed -> false
-      end
-    end)
   end
 
   # A polling predicate must survive the owner exiting mid-poll. `:sys.get_state/1`
