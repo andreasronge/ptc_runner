@@ -11,8 +11,7 @@
     "root": "06-cost-budget/.ptc",
     "trace": true,
     "inspection": true,
-    "result": false,
-    "envelope": true
+    "result": false
   },
   "viewer": {"port": 0, "open": true, "repl": true, "private": true}
 }

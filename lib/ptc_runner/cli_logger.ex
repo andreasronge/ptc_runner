@@ -43,6 +43,12 @@ defmodule PtcRunner.CLILogger do
       message =
         "destination unavailable: operation=#{operation} kind=#{kind} cause=#{tag}:#{value}"
 
+      message =
+        case metadata do
+          %{run_ref: "cmd-" <> _ = run_ref} -> "#{message} run_ref=#{run_ref}"
+          _ -> message
+        end
+
       case output do
         :logger -> Logger.warning(message)
         :stderr -> IO.puts(:stderr, message)

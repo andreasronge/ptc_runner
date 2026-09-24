@@ -8,8 +8,7 @@
     "root": ".ptc-reviewer",
     "trace": true,
     "inspection": true,
-    "result": true,
-    "envelope": true
+    "result": true
   },
   "viewer": {
     "port": 0,

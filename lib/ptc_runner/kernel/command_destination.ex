@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.CommandDestination do
   @moduledoc false
 
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandFailureCause
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandPreparation
   alias PtcRunner.Kernel.CommandRejection
@@ -9,6 +10,7 @@ defmodule PtcRunner.Kernel.CommandDestination do
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.ProjectArtifactRoot
   alias PtcRunner.Kernel.PublicationAuthority
+  alias PtcRunner.Kernel.PublicationHandle
 
   @artifact_names ["trace", "inspection", "result"]
   @result_keys [:output, :private_output]
@@ -88,7 +90,8 @@ defmodule PtcRunner.Kernel.CommandDestination do
           {:error, outcome} =
             destination_failure(
               preparation,
-              destination_diagnostic({:invalid_destination, artifact_name(failure)})
+              destination_diagnostic({:invalid_destination, artifact_name(failure)}),
+              :invalid_destination
             )
 
           {:error, outcome, nil}
@@ -102,32 +105,40 @@ defmodule PtcRunner.Kernel.CommandDestination do
     options = preparation.artifact_destinations
 
     result =
-      with :ok <- ensure_project_artifact_root(preparation),
-           :ok <- ensure_private_result_destination(preparation, options) do
-        PublicationAuthority.authorize_with_context(
-          preparation.run_ref,
-          Map.to_list(options),
-          preparation.prepared_run.effective_event_policy,
-          preparation.prepared_run.effective_data_class
-        )
-      end
+      PublicationHandle.with_run_ref(preparation.run_ref, fn ->
+        with :ok <- ensure_project_artifact_root(preparation),
+             :ok <- ensure_private_result_destination(preparation, options) do
+          PublicationAuthority.authorize_with_context(
+            preparation.run_ref,
+            Map.to_list(options),
+            preparation.prepared_run.effective_event_policy,
+            preparation.prepared_run.effective_data_class
+          )
+        end
+      end)
 
     case result do
       {:ok, authority} ->
         {:ok, authority, nil}
 
       {:error, {:conflicting_destinations, [first, second]} = reason} ->
-        {:error, outcome} = destination_failure(preparation, destination_diagnostic(reason))
+        {:error, outcome} =
+          destination_failure(preparation, destination_diagnostic(reason), reason)
+
         rejection = collision_rejection(frontend, first, second)
         {:error, outcome, rejection}
 
       {:error, {:destination_exists, destination, path} = reason} ->
-        {:error, outcome} = destination_failure(preparation, destination_diagnostic(reason))
+        {:error, outcome} =
+          destination_failure(preparation, destination_diagnostic(reason), reason)
+
         rejection = destination_exists_rejection(preparation, frontend, destination, path)
         {:error, outcome, rejection}
 
       {:error, reason} ->
-        {:error, outcome} = destination_failure(preparation, destination_diagnostic(reason))
+        {:error, outcome} =
+          destination_failure(preparation, destination_diagnostic(reason), reason)
+
         {:error, outcome, nil}
     end
   end
@@ -137,7 +148,7 @@ defmodule PtcRunner.Kernel.CommandDestination do
   defp ensure_project_artifact_root(%{project_artifact_root: root}),
     do: ProjectArtifactRoot.ensure(root)
 
-  defp destination_failure(preparation, {phase, code}) do
+  defp destination_failure(preparation, {phase, code}, reason) do
     CommandPreparation.close(preparation)
 
     options =
@@ -149,10 +160,23 @@ defmodule PtcRunner.Kernel.CommandDestination do
     {:error,
      CommandOutcome.run_error(
        preparation.run_ref,
-       diagnostic(phase, code),
+       CommandDiagnostic.new!(phase, code, cause: destination_cause(reason)),
        requested_artifact_state(options)
      )}
   end
+
+  defp destination_cause({:conflicting_destinations, _keys}), do: nil
+  defp destination_cause(:conflicting_trace_destinations), do: nil
+  defp destination_cause(:conflicting_result_destinations), do: nil
+
+  defp destination_cause({:destination_exists, _destination, _path}),
+    do: :destination_exists
+
+  defp destination_cause({{:destination_unavailable, cause}, _destination}),
+    do: CommandFailureCause.from_reason(cause)
+
+  defp destination_cause({reason, _destination}), do: CommandFailureCause.from_reason(reason)
+  defp destination_cause(reason), do: CommandFailureCause.from_reason(reason)
 
   defp destination_diagnostic({:conflicting_destinations, _keys}),
     do: {:arguments, :conflicting_arguments}
@@ -165,6 +189,9 @@ defmodule PtcRunner.Kernel.CommandDestination do
 
   defp destination_diagnostic({:invalid_destination, destination}),
     do: {:destination, invalid_destination_code(destination)}
+
+  defp destination_diagnostic({{:destination_unavailable, _cause}, destination}),
+    do: {:destination, unavailable_destination_code(destination)}
 
   defp destination_diagnostic({reason, destination})
        when reason in [

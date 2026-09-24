@@ -1050,7 +1050,7 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
   end
 
   @tag :tmp_dir
-  test "an uncataloged model warning reaches the V4 envelope and trace", %{tmp_dir: directory} do
+  test "an uncataloged model warning reaches the V5 envelope and trace", %{tmp_dir: directory} do
     keys = [
       :llm_adapter,
       :host_llm_test_owner,
@@ -1123,7 +1123,7 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
       "model" => "openrouter:test/model"
     }
 
-    assert outcome.envelope["schema_version"] == 4
+    assert outcome.envelope["schema_version"] == 5
     assert outcome.envelope["warnings"] == [warning]
     assert_schema_valid(outcome.envelope)
 

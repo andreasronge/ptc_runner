@@ -9,8 +9,7 @@
     "root": "mission-boundary-check/.ptc",
     "trace": true,
     "inspection": true,
-    "result": false,
-    "envelope": true
+    "result": false
   },
   "viewer": {
     "port": 4134,

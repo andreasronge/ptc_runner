@@ -61,6 +61,7 @@ defmodule PtcRunner.Kernel.ProjectConfigTest do
 
     assert {:ok, project} = ProjectConfig.load(path)
     assert project.viewer.port == 0
+    assert project.artifacts.envelope == true
     assert ProjectConfig.schema()["properties"]["viewer"]["properties"]["port"]["default"] == 0
   end
 

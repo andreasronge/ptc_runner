@@ -12,8 +12,7 @@
     "root": "self-repair/.ptc",
     "trace": true,
     "inspection": true,
-    "result": true,
-    "envelope": true
+    "result": true
   },
   "viewer": {
     "private": true

@@ -9,8 +9,7 @@
     "root": "01-orders/.ptc",
     "trace": true,
     "inspection": true,
-    "result": false,
-    "envelope": true
+    "result": false
   },
   "viewer": {
     "port": 0,

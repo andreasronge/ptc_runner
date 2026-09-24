@@ -15,8 +15,7 @@
     "root": "03-specialists/.ptc",
     "trace": true,
     "inspection": true,
-    "result": false,
-    "envelope": true
+    "result": false
   },
   "viewer": {
     "port": 4133,

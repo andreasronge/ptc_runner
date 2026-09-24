@@ -63,7 +63,7 @@ defmodule Mix.Tasks.PtcTranscriptTest do
     assert path == Path.expand(relative_output)
 
     assert %{
-             "schema_version" => 4,
+             "schema_version" => 5,
              "command" => "transcript",
              "status" => "ok",
              "result" => %{
@@ -698,7 +698,7 @@ defmodule Mix.Tasks.PtcTranscriptTest do
 
     File.write!(
       Path.join(fixture.inspection, "broken.ptcins"),
-      ~s({"schema_version":4}\n)
+      ~s({"schema_version":999}\n)
     )
 
     File.write!(Path.join(fixture.traces, "oversized.jsonl"), :binary.copy("x", 9_000_001))

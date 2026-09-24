@@ -395,8 +395,12 @@ Observability has separate planes:
 | `InspectionSink` / `InspectionArtifact` | explicit private model, source, capability, and eligible result evidence |
 
 The CLI installs one Logger warning for each publication
-`destination_unavailable` event. It prints only operation, destination kind, and
-the atom-only cause to stderr; managed operation logs retain that line.
+`destination_unavailable` event. It prints operation, destination kind, the
+atom-only cause, and the command `run_ref` when present to stderr; managed
+operation logs retain that line. A project run attempts a public V5 command
+envelope in `.ptc/envelopes/<run_ref>.json` by default. Known failures before
+trace or inspection creation include a closed `error.cause` in that envelope
+and print the envelope on stdout as one JSON line.
 
 Do not move private data into canonical events for convenience. Add safe
 correlation metadata to the canonical plane and retain exact payloads only
@@ -445,7 +449,7 @@ refuses with `{:terminal_payload_capacity_exceeded, payload, required}`, which
 provider-free owner path and the active provider path — to
 `application/limit_capacity_invalid` at exit 3, execution `not_started`, and no
 trace requirement. Every other application-phase code is decided before a run
-has a result class, so this one gets its own V4 envelope branch — pinned to a
+has a result class, so this one gets its own V5 envelope branch — pinned to a
 result class, `not_started`, and unwritten artifacts — rather than joining the
 general classified union, which would let the schema admit it after execution.
 
@@ -458,8 +462,9 @@ arguments, or result. Publication reservation failures emit
 `[:ptc_runner, :publication, :destination_unavailable]` once when a direct
 reservation returns `:destination_unavailable`. Measurements are empty; metadata
 contains the closed `operation` (`:reserve`, `:reserve_visible`, or
-`:reserve_append`), destination `kind`, and `cause` (`{:exception, module}` or
-`{:reason, atom}`). Non-atom reasons become `{:reason, :unexpected_reply}`.
+`:reserve_append`), destination `kind`, `run_ref` when a command owns the
+reservation, and `cause` (`{:exception, module}` or `{:reason, atom}`). Non-atom
+reasons become `{:reason, :unexpected_reply}`.
 Paths, exception messages, and stacktraces are excluded.
 
 Canonical events are not implemented by forwarding Logger or Telemetry callbacks,

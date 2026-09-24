@@ -4,6 +4,6 @@
   "version": 1,
   "application": {"path": "ptc.json"},
   "host": {"path": "ptc-host.json"},
-  "artifacts": {"root": ".ptc", "trace": true, "inspection": true, "result": true, "envelope": true},
+  "artifacts": {"root": ".ptc", "trace": true, "inspection": true, "result": true},
   "viewer": {"private": true}
 }

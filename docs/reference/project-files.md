@@ -66,8 +66,7 @@ file. Project choices do not become part of application content identity.
     "root": ".ptc",
     "trace": true,
     "inspection": false,
-    "result": false,
-    "envelope": true
+    "result": false
   },
   "viewer": {
     "port": 0,
@@ -108,6 +107,10 @@ displayed elsewhere in the Viewer.
 ## Artifact layout
 
 For `run`, enabled project artifacts derive from the command run reference:
+
+`artifacts.envelope` defaults to `true`; every project run attempts to write
+its public command envelope at `.ptc/envelopes/<run-ref>.json`. Set it to
+`false` only when the caller deliberately owns durable envelope retention.
 
 ```text
 .ptc/traces/<run-ref>.jsonl

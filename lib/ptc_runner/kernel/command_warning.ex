@@ -1,6 +1,6 @@
 defmodule PtcRunner.Kernel.CommandWarning do
   @moduledoc """
-  Closed machine-readable warning published by command envelope V4.
+  Closed machine-readable warning published by command envelope V5.
 
   Warnings are non-terminal operator facts. They never contain credentials,
   provider payloads, or dependency errors. The installed provider alias and an

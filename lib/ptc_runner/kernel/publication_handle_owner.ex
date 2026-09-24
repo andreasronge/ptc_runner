@@ -8,27 +8,31 @@ defmodule PtcRunner.Kernel.PublicationHandleOwner do
 
   @spec start(pid()) :: {:ok, pid()} | {:error, term()}
   def start(controller) when is_pid(controller),
-    do: GenServer.start(__MODULE__, controller)
+    do:
+      GenServer.start(
+        __MODULE__,
+        {controller, Process.get(:ptc_command_run_ref), Process.get(:ptc_publication_fault_hook)}
+      )
 
   @spec reserve(pid(), binary(), PublicationHandle.kind(), non_neg_integer()) ::
-          {:ok, PublicationHandle.t()} | {:error, atom()}
+          {:ok, PublicationHandle.t()} | {:error, PublicationHandle.reservation_error()}
   def reserve(owner, path, kind, mode),
     do: GenServer.call(owner, {:reserve, path, kind, mode}, :infinity)
 
   @doc false
   @spec reserve_stream(pid(), binary(), :inspection, non_neg_integer()) ::
-          {:ok, PublicationHandle.t()} | {:error, atom()}
+          {:ok, PublicationHandle.t()} | {:error, PublicationHandle.reservation_error()}
   def reserve_stream(owner, path, kind, mode),
     do: GenServer.call(owner, {:reserve_stream, path, kind, mode}, :infinity)
 
   @spec reserve_visible(pid(), binary(), PublicationHandle.kind(), non_neg_integer()) ::
-          {:ok, PublicationHandle.t()} | {:error, atom()}
+          {:ok, PublicationHandle.t()} | {:error, PublicationHandle.reservation_error()}
   def reserve_visible(owner, path, kind, mode),
     do: GenServer.call(owner, {:reserve_visible, path, kind, mode}, :infinity)
 
   @doc false
   @spec reserve_append(pid(), binary(), :trace, non_neg_integer()) ::
-          {:ok, PublicationHandle.t()} | {:error, atom()}
+          {:ok, PublicationHandle.t()} | {:error, PublicationHandle.reservation_error()}
   def reserve_append(owner, path, kind, mode),
     do: GenServer.call(owner, {:reserve_append, path, kind, mode}, :infinity)
 
@@ -36,7 +40,10 @@ defmodule PtcRunner.Kernel.PublicationHandleOwner do
   def call(owner, operation), do: GenServer.call(owner, {:operation, operation}, :infinity)
 
   @impl GenServer
-  def init(controller) do
+  def init({controller, run_ref, fault_hook}) do
+    Process.put(:ptc_command_run_ref, run_ref)
+    Process.put(:ptc_publication_fault_hook, fault_hook)
+
     {:ok,
      %{
        controller_ref: Process.monitor(controller),
@@ -48,9 +55,9 @@ defmodule PtcRunner.Kernel.PublicationHandleOwner do
 
   @impl GenServer
   def handle_call({:reserve, path, kind, mode}, _from, %{handle: nil} = state) do
-    case PublicationHandle.reserve_direct(path, kind, mode, self()) do
+    case PublicationHandle.reserve_direct(path, kind, mode, self(), fault_hook(path)) do
       {:ok, handle} -> {:reply, {:ok, handle}, %{state | handle: handle}}
-      {:error, _reason} = error -> {:stop, :normal, error, state}
+      {:error, _reason} = error -> {:stop, :normal, reservation_failure(error), state}
     end
   end
 
@@ -58,9 +65,9 @@ defmodule PtcRunner.Kernel.PublicationHandleOwner do
     do: {:reply, {:error, :destination_unavailable}, state}
 
   def handle_call({:reserve_stream, path, :inspection, mode}, _from, %{handle: nil} = state) do
-    case PublicationHandle.reserve_direct(path, :inspection, mode, self()) do
+    case PublicationHandle.reserve_direct(path, :inspection, mode, self(), fault_hook(path)) do
       {:ok, handle} -> {:reply, {:ok, handle}, %{state | handle: handle}}
-      {:error, _reason} = error -> {:stop, :normal, error, state}
+      {:error, _reason} = error -> {:stop, :normal, reservation_failure(error), state}
     end
   end
 
@@ -70,7 +77,7 @@ defmodule PtcRunner.Kernel.PublicationHandleOwner do
   def handle_call({:reserve_visible, path, kind, mode}, _from, %{handle: nil} = state) do
     case PublicationHandle.reserve_visible_direct(path, kind, mode, self()) do
       {:ok, handle} -> {:reply, {:ok, handle}, %{state | handle: handle}}
-      {:error, _reason} = error -> {:stop, :normal, error, state}
+      {:error, _reason} = error -> {:stop, :normal, reservation_failure(error), state}
     end
   end
 
@@ -80,7 +87,7 @@ defmodule PtcRunner.Kernel.PublicationHandleOwner do
   def handle_call({:reserve_append, path, :trace, mode}, _from, %{handle: nil} = state) do
     case PublicationHandle.reserve_append_direct(path, :trace, mode, self()) do
       {:ok, handle} -> {:reply, {:ok, handle}, %{state | handle: handle}}
-      {:error, _reason} = error -> {:stop, :normal, error, state}
+      {:error, _reason} = error -> {:stop, :normal, reservation_failure(error), state}
     end
   end
 
@@ -214,4 +221,20 @@ defmodule PtcRunner.Kernel.PublicationHandleOwner do
   # them a second time.
   defp close_after(:ok), do: :close_device
   defp close_after(_result), do: :close
+
+  defp reservation_failure({:error, :destination_unavailable}) do
+    case Process.delete(:ptc_publication_failure_cause) do
+      nil -> {:error, :destination_unavailable}
+      cause -> {:error, {:destination_unavailable, cause}}
+    end
+  end
+
+  defp reservation_failure(error), do: error
+
+  defp fault_hook(path) do
+    case Process.get(:ptc_publication_fault_hook) do
+      hook when is_function(hook, 2) -> fn stage -> hook.(path, stage) end
+      _ -> nil
+    end
+  end
 end

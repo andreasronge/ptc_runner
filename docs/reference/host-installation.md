@@ -258,7 +258,7 @@ ReqLLM supports its provider unless `llm_cost_microusd` requires reservation
 rates the catalog cannot supply. PtcRunner emits one `model_uncataloged` warning
 for that requester or refusal. Catalog metadata such as pricing, limits, token
 estimation, and capability detection may then be incomplete; the warning alone
-does not mean the provider request is known to fail. Run envelopes V4 publish
+does not mean the provider request is known to fail. Run envelopes V5 publish
 the same fact in their closed `warnings` array, and canonical `run-started`
 metadata retains it for trace consumers. Failed plain-doctor envelopes publish
 the same locally derived warning for each affected provider check without

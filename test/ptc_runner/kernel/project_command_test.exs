@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
   use ExUnit.Case, async: true
   @moduletag :operator
 
+  alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandEntry
   alias PtcRunner.Kernel.CommandFrontend
@@ -10,8 +11,77 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
   alias PtcRunner.Kernel.CommandPreparation
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.PrivateDirectory
+  alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.TestSupport.Eventually
+
+  @tag :tmp_dir
+  test "a staging reservation failure reaches the default V5 ledger with its cause", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
+    output = Path.join(directory, "result.json")
+    event = [:ptc_runner, :publication, :destination_unavailable]
+    ref = :telemetry_test.attach_event_handlers(self(), [event])
+    on_exit(fn -> :telemetry.detach(ref) end)
+
+    presentation =
+      PublicationHandle.with_fault_hook(
+        fn path, stage ->
+          if path == output and stage == :staging_file, do: {:error, :eio}, else: :ok
+        end,
+        fn ->
+          CommandFrontend.execute(["run", project, "--output", output], :standalone, fn _ ->
+            {:ok, CommandRuntime.standalone()}
+          end)
+        end
+      )
+
+    assert presentation.exit_status != 0
+    envelope = CommandOutcome.to_map(presentation.outcome)
+    assert envelope["schema_version"] == 5
+    assert envelope["error"]["code"] == "result_destination_unavailable"
+    assert envelope["error"]["cause"] == "filesystem_error"
+    assert Jason.decode!(presentation.stdout) == envelope
+    assert {:ok, schema} = JSV.build(CommandContract.published_schema(), atoms: false)
+    assert {:ok, _validated} = JSV.validate(envelope, schema, cast: false)
+    refute Jason.encode!(envelope) =~ directory
+    run_ref = envelope["run_ref"]
+    ledger = Path.join([target, ".ptc", "envelopes", run_ref <> ".json"])
+    assert Jason.decode!(File.read!(ledger)) == envelope
+    assert_receive {^event, ^ref, %{}, %{run_ref: ^run_ref, cause: {:reason, :eio}}}
+  end
+
+  @tag :tmp_dir
+  test "a missing host before sink creation reaches the default V5 ledger", %{tmp_dir: directory} do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
+
+    document = project |> File.read!() |> Jason.decode!()
+
+    File.write!(
+      project,
+      Jason.encode!(Map.put(document, "host", %{"path" => "missing-host.json"}))
+    )
+
+    presentation =
+      CommandFrontend.execute(["run", project], :standalone, fn _ ->
+        {:ok, CommandRuntime.standalone()}
+      end)
+
+    assert presentation.exit_status != 0
+    envelope = CommandOutcome.to_map(presentation.outcome)
+    assert envelope["schema_version"] == 5
+    assert envelope["error"]["code"] == "host_unavailable"
+    assert envelope["error"]["cause"] == "resource_unavailable"
+    assert Jason.decode!(presentation.stdout) == envelope
+    refute Jason.encode!(envelope) =~ directory
+    ledger = Path.join([target, ".ptc", "envelopes", envelope["run_ref"] <> ".json"])
+    assert Jason.decode!(File.read!(ledger)) == envelope
+  end
 
   @tag :tmp_dir
   test "run admission reclaims interrupted staging with a dead owner", %{tmp_dir: directory} do

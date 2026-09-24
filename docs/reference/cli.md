@@ -165,7 +165,7 @@ Useful run switches are:
   `<run_ref>.private.jsonl` according to the run's artifact class.
 - `--inspect FILE` writes sensitive execution evidence to an owner-only
   `.ptcins` file.
-- `--envelope FILE` atomically publishes a convenience copy of the stable V4
+- `--envelope FILE` atomically publishes a convenience copy of the stable V5
   command envelope. When a project enables `artifacts.envelope`, the project's
   `.ptc/envelopes/<run_ref>.json` ledger entry is written independently for that
   run. The explicit path is reserved before artifact admission, so concurrent
@@ -302,7 +302,7 @@ grammar — a leading dot, an uppercase segment — restricts neither
 ## Read results and failures
 
 A successful normal run prints the compact JSON result value. A private run
-does not print its value. The V4 envelope records the result class, artifact
+does not print its value. The V5 envelope records the result class, artifact
 states, bounded usage, retained-memory counts, and the closed diagnostic when
 one exists.
 
@@ -380,8 +380,30 @@ ptc run ptc.json --envelope command-envelope.json
 The standalone streams are human presentation channels and may also contain
 output from applications or children. The envelope is an atomic, no-replace
 file whose JSON Schema this executable serves as `ptc docs schema-envelope`
-(`priv/schemas/ptc-command-envelope-v4.schema.json` in the repository). Its
+(`priv/schemas/ptc-command-envelope-v5.schema.json` in the repository). Its
 status and exit-code relationship is sealed by the same command contract.
+
+When a `run` fails with a known pre-sink cause, stdout also receives the V5
+envelope as one JSON line, and stderr retains the human diagnostic. Project
+runs attempt to store that same envelope in the default ledger.
+
+<!-- BEGIN GENERATED: command failure causes (mix ptc.gen_docs) -->
+
+The optional `error.cause` in a V5 envelope gives a closed, public reason
+for failures known before a trace or inspection sink begins writing. It
+contains no path, exception name, or provider response.
+
+| Cause | Meaning |
+| --- | --- |
+| `lock_timeout` | A reservation or admission lock expired. |
+| `filesystem_error` | A filesystem operation failed. |
+| `permission` | The operating system denied access. |
+| `unexpected_exception` | A bounded operation raised or returned an unknown failure. |
+| `subprocess_failed` | A subprocess failed before execution evidence began. |
+| `invalid_configuration` | A configuration value could not be used. |
+| `resource_unavailable` | A required local resource was unavailable. |
+| `destination_exists` | An output destination was already occupied. |
+<!-- END GENERATED: command failure causes -->
 
 After arguments parse, an ordinary or caught shared-engine command outcome
 publishes one requested envelope. This includes a recognized `run`, `validate`, `doctor`, or
@@ -961,7 +983,7 @@ Read `RUN_ID` from the command envelope. Use exactly one inspection selector:
 
 On success the command prints one JSON line containing `command`, the selected
 run under `run_ref`, the absolute output `path`, and the number of published
-`turns`. The optional envelope receives the same result in the V4 command
+`turns`. The optional envelope receives the same result in the V5 command
 contract.
 The frontend-owned transcript command publishes this success envelope only
 after its private document is complete; a transcript refusal retains its
