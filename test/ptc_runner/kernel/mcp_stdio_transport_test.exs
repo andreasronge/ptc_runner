@@ -6,11 +6,9 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
 
   alias PtcRunner.Kernel.MCPStdioTransport
+  alias PtcRunner.TestSupport.MCPStdioTransportHelpers
 
-  @fixture Path.expand("../../support/mcp_stdio_fixture.exs", __DIR__)
   @test_launcher Path.expand("../../support/mcp_stdio_test_launcher.exs", __DIR__)
-  @root Path.expand("../../..", __DIR__)
-  @inherited_environment ~w(HOME LOGNAME PATH SHELL TERM USER)
 
   # Generous on purpose: this covers child VM startup on a saturated machine,
   # not transport behavior. Tests that assert on timeouts set their own.
@@ -651,7 +649,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
 
     start =
       Task.async(fn ->
-        MCPStdioTransport.start(launch_options(tmp_dir), owner, nil)
+        MCPStdioTransport.start(MCPStdioTransportHelpers.launch_options(tmp_dir), owner, nil)
       end)
 
     assert {:ok, transport} = Task.await(start, @fixture_start_timeout_ms)
@@ -756,7 +754,11 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   test "rejects a launcher protocol mismatch before spawning", %{tmp_dir: tmp_dir} do
     assert {:error, :invalid_mcp_stdio_launch} =
              MCPStdioTransport.start(
-               Keyword.put(launch_options(tmp_dir), :launcher_protocol_version, 1)
+               Keyword.put(
+                 MCPStdioTransportHelpers.launch_options(tmp_dir),
+                 :launcher_protocol_version,
+                 1
+               )
              )
   end
 
@@ -764,7 +766,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   test "status does not expose process arguments or environment values", %{tmp_dir: tmp_dir} do
     options =
       tmp_dir
-      |> launch_options()
+      |> MCPStdioTransportHelpers.launch_options()
       |> Keyword.update!(:args, &(&1 ++ ["private-argument"]))
       |> Keyword.update!(:env, &Map.put(&1, "PRIVATE_VALUE", "private-environment"))
 
@@ -779,7 +781,11 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   @tag :tmp_dir
   test "validation reserves the bounded environment for the UTF-8 locale", %{tmp_dir: tmp_dir} do
     caller_environment = Map.new(1..255, &{"NAME_#{&1}", "value"})
-    options = Keyword.put(launch_options(tmp_dir), :env, caller_environment)
+
+    options =
+      tmp_dir
+      |> MCPStdioTransportHelpers.launch_options()
+      |> Keyword.put(:env, caller_environment)
 
     assert {:ok, %{env: environment}} = MCPStdioTransport.validate_options(options)
     assert map_size(environment) == 256
@@ -843,7 +849,9 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     marker = marker || Path.join(tmp_dir, "unused")
 
     assert {:ok, transport} =
-             MCPStdioTransport.start(launch_options(tmp_dir, marker, fixture_mode, opts))
+             MCPStdioTransport.start(
+               MCPStdioTransportHelpers.launch_options(tmp_dir, marker, fixture_mode, opts)
+             )
 
     if Keyword.get(opts, :warm?, fixture_mode == "read"), do: await_serving(transport)
 
@@ -864,31 +872,6 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     :ok
   end
 
-  @doc false
-  def launch_options(tmp_dir, marker \\ nil, fixture_mode \\ "read", opts \\ []) do
-    marker = marker || Path.join(tmp_dir, "unused")
-    {:ok, launcher} = PtcRunnerLauncher.executable_path()
-    executable = System.find_executable("elixir")
-
-    [
-      launcher: launcher,
-      launcher_protocol_version: PtcRunnerLauncher.protocol_version(),
-      executable: executable,
-      executable_sha256: executable |> File.read!() |> then(&:crypto.hash(:sha256, &1)),
-      cwd: @root,
-      args: [@fixture, marker, fixture_mode],
-      env: inherited_environment(),
-      grace_ms: Keyword.get(opts, :grace_ms, 50),
-      start_timeout_ms: @fixture_start_timeout_ms
-    ]
-    |> then(fn options ->
-      case Keyword.get(opts, :stderr_bytes) do
-        nil -> options
-        bytes -> Keyword.put(options, :stderr_bytes, bytes)
-      end
-    end)
-  end
-
   defp start_test_launcher(tmp_dir, mode) do
     launcher = Path.join(tmp_dir, "mcp-stdio-test-launcher")
     interpreter = System.find_executable("elixir")
@@ -907,7 +890,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
 
     options =
       tmp_dir
-      |> launch_options()
+      |> MCPStdioTransportHelpers.launch_options()
       |> Keyword.put(:launcher, launcher)
       |> Keyword.put(:args, [mode])
 
@@ -916,17 +899,6 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   end
 
   defp shell_quote(value), do: "'" <> String.replace(value, "'", "'\\''") <> "'"
-
-  defp inherited_environment do
-    @inherited_environment
-    |> Enum.flat_map(fn name ->
-      case System.get_env(name) do
-        value when is_binary(value) -> [{name, value}]
-        _missing -> []
-      end
-    end)
-    |> Map.new()
-  end
 
   # A polling predicate must survive the owner exiting mid-poll. `:sys.get_state/1`
   # exits when its target is gone, which would crash the test rather than let the

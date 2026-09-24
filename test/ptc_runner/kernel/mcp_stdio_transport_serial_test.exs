@@ -5,7 +5,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportSerialTest do
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
 
   alias PtcRunner.Kernel.MCPStdioTransport
-  alias PtcRunner.Kernel.MCPStdioTransportTest
+  alias PtcRunner.TestSupport.MCPStdioTransportHelpers
 
   @stall_launcher Path.expand("../../support/mcp_stdio_stall_launcher.sh", __DIR__)
 
@@ -21,7 +21,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportSerialTest do
         result =
           MCPStdioTransport.start(
             tmp_dir
-            |> MCPStdioTransportTest.launch_options()
+            |> MCPStdioTransportHelpers.launch_options()
             |> Keyword.put(:launcher, @stall_launcher)
             |> Keyword.put(:start_timeout_ms, 60_000)
           )
