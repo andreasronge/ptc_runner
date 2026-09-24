@@ -1657,7 +1657,6 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       # This test exercises locale propagation, not the default startup
       # deadline. Booting an Elixir source fixture can exceed five seconds
       # while the full CI suite is under load.
-      |> put_in(["install", "workspace", "transport", "inherit_environment"], true)
       |> put_in(["install", "workspace", "tools"], %{
         "unicode" => %{"as" => "workspace.unicode", "effect" => "read"}
       })
@@ -2299,6 +2298,8 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   defp unicode_stdio_config(launcher, marker) do
     stdio_config(System.find_executable("elixir"))
     |> put_in(["runtime", "stdio_launcher"], launcher)
+    # The Elixir fixture finds erl through PATH before it can serve MCP requests.
+    |> put_in(["install", "workspace", "transport", "inherit_environment"], true)
     |> put_in(["install", "workspace", "transport", "args"], [
       @stdio_fixture,
       marker,
