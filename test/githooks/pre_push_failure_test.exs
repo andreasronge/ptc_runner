@@ -1,5 +1,6 @@
 defmodule PtcRunner.GitHooks.PrePushFailureTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
   import PtcRunner.TestSupport.PrePushFixture
 
   @tag :slow

@@ -1,5 +1,6 @@
 defmodule PtcRunner.GitHooks.PrePushDocsTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
   import PtcRunner.TestSupport.PrePushFixture
 
   test "guide-only changes run only the documentation gate" do

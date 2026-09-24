@@ -1,5 +1,6 @@
 defmodule PtcRunner.GitHooks.PrePushCoreTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
   import PtcRunner.TestSupport.PrePushFixture
 
   test "managed validation preserves manager-owned worktrees without running garbage collection" do

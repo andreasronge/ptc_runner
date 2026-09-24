@@ -1,5 +1,6 @@
 defmodule PtcRunner.GitHooks.PrePushPlanTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
   import PtcRunner.TestSupport.PrePushFixture
 
   test "managed pushes coordinate the complete hook exactly once" do
