@@ -646,6 +646,8 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     assert presentation.stderr =~ root
     assert presentation.stderr =~ "owner-only (0700)"
     assert presentation.stderr =~ "chmod 700"
+    assert presentation.outcome.envelope["error"]["cause"] == "permission"
+    assert Jason.decode!(presentation.stdout) == presentation.outcome.envelope
   end
 
   @tag :tmp_dir
@@ -720,6 +722,8 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     assert presentation.stderr =~ Path.join(root, "envelopes")
     assert presentation.stderr =~ "owner-only (0700)"
     assert presentation.stderr =~ "chmod 700"
+    assert presentation.outcome.envelope["error"]["cause"] == "permission"
+    assert Jason.decode!(presentation.stdout) == presentation.outcome.envelope
   end
 
   @tag :tmp_dir

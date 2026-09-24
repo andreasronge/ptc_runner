@@ -178,7 +178,13 @@ defmodule PtcRunner.Kernel.CommandDestination do
   defp destination_cause({{:destination_unavailable, cause}, _destination}),
     do: CommandFailureCause.from_reason(cause)
 
-  defp destination_cause({reason, _destination}), do: CommandFailureCause.from_reason(reason)
+  defp destination_cause({reason, _destination} = tagged_reason) do
+    case CommandFailureCause.from_reason(tagged_reason) do
+      :unexpected_exception -> CommandFailureCause.from_reason(reason)
+      cause -> cause
+    end
+  end
+
   defp destination_cause(reason), do: CommandFailureCause.from_reason(reason)
 
   defp destination_diagnostic({:conflicting_destinations, _keys}),
