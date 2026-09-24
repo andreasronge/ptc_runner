@@ -12,7 +12,7 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expected, startFixture } from "./fixture.mjs";
-import { recordsAreCorrect } from "./driver.mjs";
+import { accountedTotal, recordsAreCorrect } from "./driver.mjs";
 
 const execute = promisify(execFile);
 const directory = dirname(fileURLToPath(import.meta.url));
@@ -202,9 +202,7 @@ try {
   }
   }
   const total = (arm, key) =>
-    results
-      .filter((r) => r.arm === arm)
-      .reduce((sum, r) => sum + (r[key] ?? 0), 0);
+    accountedTotal(results.filter((r) => r.arm === arm), key);
   const right = (arm) =>
     results.filter((r) => r.arm === arm && r.correct).length;
   process.stdout.write("\ntotals\n\n");
@@ -215,8 +213,8 @@ try {
         arm.padEnd(13),
         String(total(arm, "page_tool_calls")).padStart(5),
         String(total(arm, "model_requests")).padStart(7),
-        String(total(arm, "input_tokens")).padStart(11),
-        String(total(arm, "micro_usd")).padStart(11),
+        String(total(arm, "input_tokens") ?? "n/a").padStart(11),
+        String(total(arm, "micro_usd") ?? "n/a").padStart(11),
         `${right(arm)}/${results.filter((r) => r.arm === arm).length}`.padStart(9),
       ].join("") + "\n",
     );

@@ -3,7 +3,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { promoteCandidate } from "./driver.mjs";
+import { accountedTotal, promoteCandidate } from "./driver.mjs";
 
 const expected = {
   "/learn": [{ text: "Learn", author: "Ada" }],
@@ -86,4 +86,9 @@ test("promotes only after every independent check passes", async () => {
   assert.equal(result.promoted, true);
   const manifest = JSON.parse(await readFile(accepted.path, "utf8"));
   assert.deepEqual(manifest.missions.default.data.recipe, candidate);
+});
+
+test("does not understate totals when any result is unaccounted", () => {
+  assert.equal(accountedTotal([{ cost: 12 }, { cost: null }], "cost"), null);
+  assert.equal(accountedTotal([{ cost: 12 }, { cost: 8 }], "cost"), 20);
 });

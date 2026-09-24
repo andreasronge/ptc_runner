@@ -24,6 +24,11 @@ export function verificationPassed(expected, rows) {
   });
 }
 
+export function accountedTotal(rows, key) {
+  if (rows.some((row) => row[key] == null)) return null;
+  return rows.reduce((sum, row) => sum + row[key], 0);
+}
+
 export async function promoteCandidate({
   acceptedManifestPath,
   candidate,
