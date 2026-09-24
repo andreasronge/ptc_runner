@@ -35,7 +35,7 @@ async function commandPath(name) {
 }
 
 const output = await mkdtemp(join(directory, ".arm-c-"));
-const fixture = await startFixture();
+const fixture = await startFixture({ acceptanceEnabled: false });
 const candidateManifestPath = join(directory, "compiled/.candidate.ptc.json");
 let failure;
 
@@ -122,6 +122,7 @@ try {
   const verificationRows = [];
 
   if (compilationSucceeded && validRecipe(recipe)) {
+    fixture.enableAcceptance();
     const acceptedManifestPath = join(directory, "compiled/ptc.json");
     const candidateManifest = JSON.parse(
       await readFile(acceptedManifestPath, "utf8"),

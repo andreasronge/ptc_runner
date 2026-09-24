@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { accountedTotal, promoteCandidate } from "./driver.mjs";
+import { startFixture } from "./fixture.mjs";
 
 const expected = {
   "/learn": [{ text: "Learn", author: "Ada" }],
@@ -91,4 +92,17 @@ test("promotes only after every independent check passes", async () => {
 test("does not understate totals when any result is unaccounted", () => {
   assert.equal(accountedTotal([{ cost: 12 }, { cost: null }], "cost"), null);
   assert.equal(accountedTotal([{ cost: 12 }, { cost: 8 }], "cost"), 20);
+});
+
+test("keeps the acceptance page unavailable until independent verification", async () => {
+  const web = await startFixture({ acceptanceEnabled: false });
+  try {
+    assert.equal((await fetch(`${web.origin}/acceptance`)).status, 404);
+    assert.equal((await fetch(`${web.origin}/acceptance?/quotes`)).status, 404);
+    assert.equal((await fetch(`${web.origin}/acceptance#/quotes`)).status, 404);
+    web.enableAcceptance();
+    assert.equal((await fetch(`${web.origin}/acceptance`)).status, 200);
+  } finally {
+    await web.close();
+  }
 });

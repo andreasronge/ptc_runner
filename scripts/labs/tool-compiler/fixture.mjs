@@ -46,10 +46,11 @@ function page(path) {
   return `<!doctype html><html><head><title>Quotation board</title></head><body><nav><span class="speaker">Navigation editor</span></nav><main><h1>Quotations</h1>${bulk}${cards}</main></body></html>`
 }
 
-export async function startFixture() {
+export async function startFixture({ acceptanceEnabled = true } = {}) {
+  let serveAcceptance = acceptanceEnabled
   const server = createServer((request, response) => {
     const path = new URL(request.url, 'http://fixture.invalid').pathname
-    const html = page(path)
+    const html = path === '/acceptance' && !serveAcceptance ? null : page(path)
     response.writeHead(html ? 200 : 404, {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-store',
@@ -59,6 +60,7 @@ export async function startFixture() {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
   return {
     origin: `http://127.0.0.1:${server.address().port}`,
+    enableAcceptance: () => { serveAcceptance = true },
     close: () =>
       new Promise((resolve, reject) => {
         server.closeAllConnections()

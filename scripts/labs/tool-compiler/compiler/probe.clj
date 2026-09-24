@@ -6,14 +6,8 @@
 (defn- value! [response]
   (if (= :ok (get response :status)) (get response :value) (fail response)))
 
-(defn- search-url! [url]
-  (if (or (ends-with? url "/quotes") (ends-with? url "/validation"))
-    url
-    (fail {"code" "url_not_search_visible"
-           "message" "compiler probes are limited to the learning and validation pages"})))
-
 (defn- snapshot-of [url]
-  (let [handle (get (value! (tool/web.open {"url" (search-url! url)})) "handle_id")
+  (let [handle (get (value! (tool/web.open {"url" url})) "handle_id")
         captured (value! (tool/web.capture {"handle_id" handle}))]
     {"handle" handle "snapshot_id" (get captured "snapshot_id")}))
 
