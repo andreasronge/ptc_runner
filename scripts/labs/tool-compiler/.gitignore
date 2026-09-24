@@ -3,3 +3,5 @@
 .arm-a-*/
 results.json
 .arm-c-*/
+compiled/.candidate.ptc.json
+compiled/.candidate.ptc.json.pending

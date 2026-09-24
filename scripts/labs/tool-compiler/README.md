@@ -24,11 +24,13 @@ Per page, from the canonical trace and the V4 command envelope:
 
 ## The fixture
 
-`fixture.mjs` serves a quotation board on loopback with three pages:
+`fixture.mjs` serves a quotation board on loopback with four pages:
 
 - `/quotes` — records as `article.entry > p.words` plus a sibling `span.speaker`.
-- `/held-out` — the same records nested under `header`/`section`, so a selector
-  learned from `/quotes` does not transfer.
+- `/validation` — search-visible records nested under `header`/`section`, used
+  to refine candidate selectors without pretending the data is held out.
+- `/acceptance` — records in a third DOM shape that is never exposed to the
+  compiler and is checked by the driver before promotion.
 - `/ledger` — the `/quotes` shape behind forty filler rows, long enough that one
   `page_read` cannot return the whole page.
 
@@ -44,6 +46,17 @@ in `passthrough/ptc.json` exposes exactly those six functions.
 
 The result contract requires `{"records": [{"text", "author"}]}`, so an answer
 in the wrong shape is a recorded failure rather than a judgement call.
+
+## Compiling and verification
+
+`compile.mjs` gives the compiler only `/quotes` and `/validation`. Its output is
+a candidate, not the accepted recipe. The driver puts it in a transient
+manifest, runs the model-free compiled arm over all four fixtures, and updates
+`compiled/ptc.json` only when every run succeeds with exact records. A failed
+compile or check exits nonzero and leaves the accepted manifest unchanged.
+
+`run.mjs` is also an enforcing verifier: any failed run, missing record, or
+wrong record makes the process exit nonzero after it writes the report.
 
 ## Running it
 

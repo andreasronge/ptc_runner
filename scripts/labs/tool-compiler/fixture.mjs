@@ -1,8 +1,7 @@
 import { createServer } from 'node:http'
 
-// Two DOM shapes for the same records, plus a decoy `.speaker` in the nav that
-// punishes a selector guessed from the first element that matches. `/ledger`
-// carries enough records that one `page_read` cannot return the whole page.
+// Search sees two DOM shapes. Acceptance adds a third, unseen shape, while a
+// decoy `.speaker` in the nav punishes the first selector that happens to match.
 const filler = Array.from({ length: 40 }, (_, index) =>
   `Row ${index + 1}: archival note, no quotation, retained for bulk only.`,
 )
@@ -12,9 +11,13 @@ export const expected = {
     { text: 'Measure the change before changing the measure.', author: 'Ada North' },
     { text: 'A useful question leaves room for evidence.', author: 'Ben West' },
   ],
-  '/held-out': [
+  '/validation': [
     { text: 'Keep the observation separate from the guess.', author: 'Eli River' },
     { text: 'A repair earns trust through another test.', author: 'Gus Lake' },
+  ],
+  '/acceptance': [
+    { text: 'An unseen shape keeps selection honest.', author: 'Mia Stone' },
+    { text: 'Promotion follows proof, not promise.', author: 'Ned Grove' },
   ],
   '/ledger': [
     { text: 'Bulk hides the signal until someone counts it.', author: 'Ida Frost' },
@@ -23,10 +26,11 @@ export const expected = {
   ],
 }
 
-const nested = (path) => path === '/held-out'
-
 function card(path, { text, author }) {
-  return nested(path)
+  if (path === '/acceptance') {
+    return `<article class="entry"><div class="copy"><p class="words">${text}</p></div><footer><strong>By</strong><span class="speaker">${author}</span></footer></article>`
+  }
+  return path === '/validation'
     ? `<article class="entry"><header><span class="speaker">${author}</span></header><section><p class="words">${text}</p></section></article>`
     : `<article class="entry"><p class="words">${text}</p><span class="speaker">${author}</span></article>`
 }
