@@ -81,4 +81,10 @@ exunit_opts = Keyword.put(exunit_opts, :formatters, formatters)
 
 ExUnit.configure(exunit_opts)
 
+# `MixCommandAdapter.run_task/2` moves the VM-global :default logger handler to
+# standard_error by removing and re-adding it. Only the first move does work;
+# later calls see standard_error and return. Doing that move here keeps async
+# modules that call `run_task` concurrently from racing on it.
+PtcRunner.CLILogger.install_stderr_handler()
+
 ExUnit.start()

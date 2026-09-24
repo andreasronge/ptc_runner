@@ -1,8 +1,7 @@
 defmodule PtcRunner.Kernel.CommandMaterializeTest do
-  # async: false — no VM-global state found: the filesystem cases work in their own :tmp_dir and the
-  # rest are pure parser and validation cases through in-process dispatch. Tranche 1 candidate for
-  # async: true (see docs/plans/test-suite-flake-first.md).
-  use ExUnit.Case, async: false
+  # The filesystem cases work in their own :tmp_dir and the rest are pure parser and validation
+  # cases through in-process dispatch; none touches VM-global state.
+  use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.CommandApplicationDiagnostic
   alias PtcRunner.Kernel.CommandEngine

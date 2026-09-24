@@ -334,7 +334,6 @@ defmodule PtcRunner.Kernel.CommandParser do
          [run_id],
          %{
            traces: traces,
-           inspection: inspection,
            private_unattended: true,
            private_output: private_output
          } = options,
@@ -343,7 +342,10 @@ defmodule PtcRunner.Kernel.CommandParser do
          frontend
        )
        when map_size(options) == 4 do
-    if Enum.all?([run_id, traces, inspection, private_output], &valid_nonempty_string?/1) do
+    inspection = Map.get(options, :inspection) || Map.get(options, :inspection_file)
+
+    if Enum.all?([run_id, traces, inspection, private_output], &valid_nonempty_string?/1) and
+         Map.has_key?(options, :inspection) != Map.has_key?(options, :inspection_file) do
       arguments(:transcript,
         application: run_id,
         options: options,

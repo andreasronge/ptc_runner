@@ -54,7 +54,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
         "ptc init DIRECTORY [--example NAME]",
         "ptc docs [PAGE] | --search TERM",
         "ptc help [COMMAND]",
-        "ptc transcript RUN_ID --traces DIRECTORY --inspection DIRECTORY --private-unattended --private-output FILE",
+        "ptc transcript RUN_ID --traces DIRECTORY (--inspection DIRECTORY | --inspection-file FILE.ptcins) --private-unattended --private-output FILE",
         "ptc repl [OPTIONS] [SCRIPT|-]",
         "ptc viewer PROJECT.json [--port PORT] [--listen ADDRESS] [--env-file FILE]",
         "ptc materialize MANIFEST.json|PROJECT.json (--workflow | --target-mission NAME) --component ID (--source-out PATH | --out DIR (--source PATH | --from-result PATH --result-pointer POINTER))",
@@ -245,7 +245,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
     },
     transcript: %{
       usage: [
-        "ptc transcript RUN_ID --traces DIRECTORY --inspection DIRECTORY --private-unattended --private-output FILE [--envelope ENVELOPE.json]"
+        "ptc transcript RUN_ID --traces DIRECTORY (--inspection DIRECTORY | --inspection-file FILE.ptcins) --private-unattended --private-output FILE [--envelope ENVELOPE.json]"
       ],
       options: [
         %{
@@ -261,6 +261,12 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           description: "inspection directory; transcript selects RUN_ID.ptcins"
         },
         %{
+          key: :inspection_file,
+          type: :string,
+          syntax: ["--inspection-file FILE.ptcins"],
+          description: "exact inspection artifact produced by an explicitly named --inspect file"
+        },
+        %{
           key: :private_unattended,
           type: :boolean,
           syntax: ["--private-unattended"],
@@ -271,7 +277,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           type: :string,
           syntax: ["--private-output TRANSCRIPT.json"],
           description:
-            "new owner-only file; parent must exist without a symlink (macOS /tmp is one) and be physically separate from --traces and --inspection"
+            "new owner-only file; parent must exist without a symlink (macOS /tmp is one) and be physically separate from --traces and the inspection source"
         },
         @envelope_option,
         @help_option

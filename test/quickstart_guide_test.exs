@@ -1,54 +1,20 @@
 defmodule PtcRunner.QuickstartGuideTest do
-  # async: false — every guide example shells out to bash and `mix ptc` in the repo root, sharing
-  # _build/test (class C).
-  use ExUnit.Case, async: false
+  # Each example writes only to its own 0700 temporary directory. Its `mix ptc`
+  # child takes Mix's lock on this checkout's build directory and reports any
+  # wait on stderr, which the example asserts is empty, so every other test
+  # that runs `mix` in this checkout stays `async: false` or `:nightly`. The
+  # credentialed examples load the OS environment and live in
+  # QuickstartGuideGlobalStateTest.
+  use ExUnit.Case, async: true
   @moduletag :operator
 
   @moduletag timeout: 180_000
 
   alias PtcRunner.TestSupport.GuideExamples
-  alias PtcRunner.TestSupport.LLMSupport
 
   require GuideExamples
 
-  setup context do
-    case context[:requires_env] do
-      nil ->
-        :ok
-
-      variable ->
-        previous_environment = System.get_env()
-        on_exit(fn -> restore_environment(previous_environment) end)
-        :ok = load_environment()
-        require_environment(variable)
-    end
-  end
-
-  GuideExamples.test_registered_examples("test/support/executable_guides.txt")
-
-  defp load_environment do
-    case System.get_env("PTC_ENV_FILE") do
-      nil -> LLMSupport.load_dotenv()
-      path -> PtcRunner.Dotenv.load_file(path)
-    end
-  end
-
-  defp require_environment(variable) do
-    if System.get_env(variable) in [nil, ""] do
-      raise "#{variable} was available when guide tests were compiled but could not be loaded"
-    else
-      :ok
-    end
-  end
-
-  defp restore_environment(previous) do
-    current_names = System.get_env() |> Map.keys() |> MapSet.new()
-    previous_names = previous |> Map.keys() |> MapSet.new()
-
-    current_names
-    |> MapSet.difference(previous_names)
-    |> Enum.each(&System.delete_env/1)
-
-    Enum.each(previous, fn {name, value} -> System.put_env(name, value) end)
-  end
+  GuideExamples.test_registered_examples("test/support/executable_guides.txt",
+    credentials: :none
+  )
 end
