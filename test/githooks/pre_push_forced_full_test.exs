@@ -19,6 +19,7 @@ defmodule PtcRunner.GitHooks.PrePushForcedFullTest do
                "docs --warnings-as-errors",
                "ci-gate core-static",
                "ci-gate core-dialyzer",
+               "ci-gate gateway",
                "ci-gate viewer"
              ]
   end
@@ -35,12 +36,15 @@ defmodule PtcRunner.GitHooks.PrePushForcedFullTest do
           {managed ++ [{"PTC_PRE_PUSH_SERIAL", "0"}], true},
           {[], true}
         ] do
-      %{repo: repo, path: path} = git_repo_with_change("lib/example.ex")
+      %{repo: repo, mix_marker: mix_marker, path: path} = git_repo_with_change("lib/example.ex")
 
       {output, status} = run_hook(repo, path, extra_env)
 
       assert status == 0, output
       assert output =~ "Deterministic gates (concurrent lanes)" == concurrent?, output
+      assert output =~ "Gateway validation started" == concurrent?, output
+      assert output =~ ~r/Gateway validation passed in \d+s/
+      assert "ci-gate gateway" in (mix_marker |> File.read!() |> String.split("\n", trim: true))
     end
   end
 
@@ -61,6 +65,7 @@ defmodule PtcRunner.GitHooks.PrePushForcedFullTest do
                "docs --warnings-as-errors",
                "ci-gate core-static",
                "ci-gate core-dialyzer",
+               "ci-gate gateway",
                "ci-gate core-release",
                "ci-gate viewer",
                "ci-gate launcher"

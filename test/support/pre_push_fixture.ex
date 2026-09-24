@@ -18,6 +18,7 @@ defmodule PtcRunner.TestSupport.PrePushFixture do
     "docs --warnings-as-errors",
     "ci-gate core-static",
     "ci-gate core-dialyzer",
+    "ci-gate gateway",
     "ci-gate viewer"
   ]
 
@@ -41,7 +42,12 @@ defmodule PtcRunner.TestSupport.PrePushFixture do
     assert_runs_before(invocations, "deps.get --check-locked", "docs --warnings-as-errors")
 
     # The suite owns the machine: no lane starts until it has finished.
-    for lane <- ["ci-gate core-static", "ci-gate viewer", "docs --warnings-as-errors"] do
+    for lane <- [
+          "ci-gate core-static",
+          "ci-gate gateway",
+          "ci-gate viewer",
+          "docs --warnings-as-errors"
+        ] do
       assert_runs_before(invocations, core_tests, lane)
     end
 
@@ -218,7 +224,7 @@ defmodule PtcRunner.TestSupport.PrePushFixture do
     mix deps.get --check-locked && mix docs --warnings-as-errors
     """)
 
-    for gate <- ~w(core-tests core-static core-dialyzer core-release viewer launcher) do
+    for gate <- ~w(core-tests core-static core-dialyzer gateway core-release viewer launcher) do
       write_executable!(Path.join(repo, "scripts/ci/#{gate}.sh"), """
       #!/bin/sh
       mix ci-gate #{gate}${PTC_TEST_LANE:+ lane=$PTC_TEST_LANE}

@@ -26,8 +26,8 @@ The Viewer and gateway each use their own project formatter and compiler.
 The pre-push hook classifies the pushed and dirty paths, then invokes the
 repository-owned root, Viewer, launcher, or documentation entry points. The
 required pull-request CI also runs release-package verification in parallel;
-ordinary local pushes leave that production build to CI. The core static gate
-also runs the sibling gateway format, compile, and test gate, including its
+ordinary local pushes leave that production build to CI. A core change also
+selects the sibling gateway format, compile, and test gate, including its
 short startup CLI smoke test.
 Plan-only changes skip the
 expensive gate. Scheduled workflows (`nightly.yml`, `soak.yml`, `e2e.yml`,
@@ -46,8 +46,9 @@ always does.
 
 After the test suite, the deterministic local gates run as concurrent lanes,
 because they own disjoint build trees: core static analysis followed by
-Dialyzer (`_build/test`), the Viewer (`ptc_viewer/_build/test`), and ExDoc
-(`_build/dev`). A forced full run adds release verification (`_build/prod`)
+Dialyzer (`_build/test`), the gateway (`ptc_gateway/_build/test`), the Viewer
+(`ptc_viewer/_build/test`), and ExDoc (`_build/dev`). A forced full run adds
+release verification (`_build/prod`)
 as another lane. Core static analysis begins with the same quality gate as
 `mix precommit`. A passing run stamps the index tree it checked under
 `_build/test`, and a later run on the same tree is skipped, so staging,
