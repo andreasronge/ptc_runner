@@ -85,6 +85,6 @@ ExUnit.configure(exunit_opts)
 # standard_error by removing and re-adding it. Only the first move does work;
 # later calls see standard_error and return. Doing that move here keeps async
 # modules that call `run_task` concurrently from racing on it.
-PtcRunner.CLILogger.install_stderr_handler()
+PtcRunner.CLILogger.install_stderr_handler(:stderr)
 
 ExUnit.start()
