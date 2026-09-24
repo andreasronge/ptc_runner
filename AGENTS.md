@@ -122,7 +122,10 @@ experiment issue also carries the `experiment` label and follows the shape in
   operator-path Mix/OS subprocess or an intentional multi-second wait, not an
   in-process case that takes a few hundred milliseconds. `:slow` only skips
   the pre-commit hook's scoped test run; those tests still run in pre-push
-  and CI.
+  and CI. `:operator` marks a module that drives the repository through its
+  Mix tasks, hooks, scripts, Viewer, guides, or examples; pre-push leaves
+  those out (`PTC_TEST_LANE=library`) when the push touches none of those
+  surfaces, and CI always runs them.
 - Fix all failures before committing or pushing.
 
 ### Worktrees

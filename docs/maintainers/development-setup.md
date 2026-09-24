@@ -46,8 +46,8 @@ The focused tests use only a loopback raw HTTP fixture and no credentials.
 ## Worktree seeding
 
 `scripts/worktree.sh new` seeds a fresh worktree with the main checkout's
-`deps/`, `_build/`, and `priv/plts/` (root, Viewer, and launcher), then runs
-`scripts/worktree.sh init` so the checkout is ready for tests. Initialization
+`deps/`, `_build/`, and `priv/plts/` (root, Viewer, launcher, and gateway),
+then runs `scripts/worktree.sh init` so the checkout is ready for tests. Initialization
 installs the shared Git hooks, installs the pinned toolchain through `mise`,
 fetches root/Viewer/launcher dependencies, compiles the root project, and
 removes group-write permissions under a `0022` umask so Linux cloud agents do
@@ -70,10 +70,13 @@ Project PLTs also have a shared snapshot cache at
 Initialization restores a private copy when the main-checkout seed did not
 provide one. `scripts/ci/core-dialyzer.sh`, used by pre-push, restores missing
 PLTs and publishes after successful analysis. Failed gates never publish.
-The cache key includes the actual Erlang/ERTS and Elixir versions, OS,
-architecture, `mix.exs`, and `mix.lock`; a lockfile change can use the newest
-snapshot with otherwise identical settings as an incremental starting point.
-Hashing all of `mix.exs` deliberately invalidates more than just PLT options.
+Snapshots are grouped by the actual Erlang/ERTS and Elixir versions, OS, and
+architecture, and named by `mix.lock`. Restore prefers the exact lockfile and
+otherwise takes the newest snapshot in the group as an incremental starting
+point; `mix.exs` is not part of the key, because Dialyxir reconciles the stored
+module set with the one `plt_add_apps` expects. Publishing keeps the newest
+four snapshots per group. Groups for runtimes no longer in use are never
+pruned automatically; delete them by hand.
 GitHub Actions retains its existing cache, and non-test Mix environments do
 not publish to this cache.
 
@@ -158,9 +161,10 @@ scripts/ci/flake-hunt.sh 5 --out /tmp/flake-hunt
 
 Every run appends one JSON line to `runs.jsonl` in that directory through
 the `PTC_TEST_RUN_LOG` formatter, carrying the seed, scheduler count, the
-wall/async/sync split, and each failure's location. The `Nightly` workflow
-runs the same script on `main` and uploads the directory as the `flake-hunt`
-artifact. Reproduce a named failure with `mix test FILE:LINE --seed SEED`,
+wall/async/sync split, and each failure's location. The weekly `Flake hunt`
+workflow runs the same script on `main` and uploads the directory as the
+`flake-hunt` artifact; dispatch it by hand, with a run count, when a failure
+needs a verdict sooner. Reproduce a named failure with `mix test FILE:LINE --seed SEED`,
 then `--repeat-until-failure 100`; a test that passes alone with its seed is a
 load flake, not an ordering bug.
 
@@ -232,7 +236,7 @@ workflow adds `--include scheduled_e2e` on scheduled and manual runs, but not on
 pull requests. Run those probes directly with:
 
 ```bash
-mix test test/quickstart_guide_test.exs \
+mix test test/quickstart_guide_global_state_test.exs \
   test/ptc_runner/kernel/tutorial_examples_e2e_test.exs \
   --include scheduled_e2e
 ```

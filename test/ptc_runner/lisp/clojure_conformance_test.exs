@@ -9,6 +9,7 @@ defmodule PtcRunner.Lisp.ClojureConformanceTest do
   Skip with: mix test --exclude clojure
   """
   use ExUnit.Case, async: true
+  @moduletag :operator
   import PtcRunner.TestSupport.ClojureTestHelpers
 
   alias PtcRunner.Lisp.ClojureValidator

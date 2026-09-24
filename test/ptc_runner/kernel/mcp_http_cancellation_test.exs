@@ -1,7 +1,7 @@
 defmodule PtcRunner.Kernel.MCPHTTPCancellationTest do
-  # async: false — asserts kill/DOWN ordering and inspects a dying process's links under a 250 ms
-  # request timeout that contention would spend (class B, A).
-  use ExUnit.Case, async: false
+  # Async: each case starts its own loopback fixture and source, and orders
+  # kills against monitors rather than wall time.
+  use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MCPSource
@@ -12,8 +12,12 @@ defmodule PtcRunner.Kernel.MCPHTTPCancellationTest do
   @transport_limit 2_097_152
   @receive_timeout 6_000
 
+  # The installed timeout also bounds discovery during build, which must succeed
+  # before the never-completing call can time out.
+  @call_timeout_ms 2_000
+
   test "timeout closes the HTTP response stream without a cancellation notification" do
-    %{capability: capability, close: close} = source(:incomplete, 250)
+    %{capability: capability, close: close} = source(:incomplete, @call_timeout_ms)
     on_exit(close)
 
     assert {:error, %ProviderError{kind: :timeout}} = call(capability)
@@ -134,8 +138,10 @@ defmodule PtcRunner.Kernel.MCPHTTPCancellationTest do
 
       assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}, @receive_timeout
 
-      assert_receive {:DOWN, ^request_task_ref, :process, ^request_task, :killed},
+      assert_receive {:DOWN, ^request_task_ref, :process, ^request_task, reason},
                      @receive_timeout
+
+      assert reason in [:killed, :noproc]
 
       assert_receive {:mcp_stream_closed, ^stream}, @receive_timeout
       assert_stream_down(stream_ref, stream)

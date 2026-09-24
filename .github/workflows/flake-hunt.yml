@@ -1,0 +1,58 @@
+name: Flake hunt
+
+# Runs the PR suite ten times at GitHub's four-scheduler shape without stopping
+# at the first failure, and uploads every run's record and log. The summary
+# names each failing test with its frequency and seeds, which is the number a
+# flake investigation starts from; the job is red while that number is above
+# zero. See docs/maintainers/development-setup.md.
+#
+# Weekly, not nightly: the output is a rate over ten samples, and recomputing
+# it every 24 hours against five new commits does not sharpen it. Reach for it
+# on demand through workflow_dispatch, or run `scripts/ci/flake-hunt.sh N`
+# locally, when a failure needs a verdict now.
+on:
+  schedule:
+    - cron: "41 2 * * 0"
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: "How many suite runs"
+        required: false
+        default: "10"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flake-hunt-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  flake-hunt:
+    runs-on: ubuntu-latest
+    name: Flake hunt
+    timeout-minutes: 180
+    env:
+      MIX_ENV: test
+      HEX_SPONSOR: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+        with:
+          cache-plt: 'false'
+          install-babashka: 'false'
+
+      - name: Run the suite at four schedulers
+        run: scripts/ci/flake-hunt.sh "${{ inputs.runs || 10 }}" --schedulers 4 --out "$RUNNER_TEMP/flake-hunt"
+
+      - name: Upload the run records and logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: flake-hunt
+          path: ${{ runner.temp }}/flake-hunt
+          if-no-files-found: warn

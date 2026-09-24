@@ -394,6 +394,10 @@ Observability has separate planes:
 | `EventSink` / `TraceLog` | sanitized canonical events and immutable queries |
 | `InspectionSink` / `InspectionArtifact` | explicit private model, source, capability, and eligible result evidence |
 
+The CLI installs one Logger warning for each publication
+`destination_unavailable` event. It prints only operation, destination kind, and
+the atom-only cause to stderr; managed operation logs retain that line.
+
 Do not move private data into canonical events for convenience. Add safe
 correlation metadata to the canonical plane and retain exact payloads only
 under private authority.
@@ -425,7 +429,9 @@ policy's dropped-event byte relationship.
 `event_payload_bytes` has its own floor, and it has two parts.
 `TerminalUsage.maximum/4` builds the largest `run-stopped` projection a
 configuration can emit. Its fixed part — the bounded terminal reason, the
-saturated reachable drop map, and every key `RunState.usage/1` produces plus the
+saturated reachable drop map, the closed runtime-limit identity and configured
+value (plus only the bounded fields needed to render its diagnostic), and every
+key `RunState.usage/1` produces plus the
 `errors` count a REPL close adds, each at its catalog maximum with an empty
 inventory — is application-independent, so it is the catalog minimum
 `EventBudget.minimum_normal_payload_bytes/0` publishes and the manifest and host
@@ -448,8 +454,16 @@ closed `caller` values are `:direct`, `:kernel`, and `:repl`. Stop metadata
 carries the semantic `outcome` while measurements carry duration, program and
 result byte counts, and print count. Exception telemetry may identify the
 exception class but never attaches the raw reason, stacktrace, source,
-arguments, or result. Canonical events are not implemented by forwarding Logger
-or Telemetry callbacks, and are not mirrored wholesale back into them: neither
+arguments, or result. Publication reservation failures emit
+`[:ptc_runner, :publication, :destination_unavailable]` once when a direct
+reservation returns `:destination_unavailable`. Measurements are empty; metadata
+contains the closed `operation` (`:reserve`, `:reserve_visible`, or
+`:reserve_append`), destination `kind`, and `cause` (`{:exception, module}` or
+`{:reason, atom}`). Non-atom reasons become `{:reason, :unexpected_reply}`.
+Paths, exception messages, and stacktraces are excluded.
+
+Canonical events are not implemented by forwarding Logger or Telemetry callbacks,
+and are not mirrored wholesale back into them: neither
 plane supplies the retention, sequencing, bounds, source grants, or fail-closed
 policy the trace contract requires. All planes may share run, evaluation, and
 capability correlation IDs, subject to their own cardinality rules. Owner

@@ -1,5 +1,6 @@
 defmodule PtcRunner.Scripts.GuideBudgetTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   @gate Path.expand("../../scripts/guide_budget.py", __DIR__)
 

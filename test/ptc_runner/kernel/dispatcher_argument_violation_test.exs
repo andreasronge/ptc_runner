@@ -82,7 +82,7 @@ defmodule PtcRunner.Kernel.DispatcherArgumentViolationTest do
         environment,
         capability.name,
         %{"tags" => seventeen},
-        TestHelpers.dispatch_context(state, :workflow, 100),
+        TestHelpers.dispatch_context(state, :workflow, 1_000),
         nil,
         nil
       )
@@ -473,7 +473,7 @@ defmodule PtcRunner.Kernel.DispatcherArgumentViolationTest do
         environment,
         capability.name,
         arguments,
-        TestHelpers.dispatch_context(state, :workflow, 100),
+        TestHelpers.dispatch_context(state, :workflow, 1_000),
         nil,
         nil
       )

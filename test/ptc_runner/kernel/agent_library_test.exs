@@ -4541,14 +4541,34 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute_receive {:provider_closed, :llm_quota}
 
     {:ok, evaluation_limited} =
-      agent_config([continue, finish], [subordinate_evaluations: 1],
+      agent_config(
+        [continue, finish],
+        [subordinate_evaluations: 1, normal_event_count: 3],
         provider_closers: [close_counter(self(), :evaluation_quota)]
       )
 
-    assert {:error, %{kind: :workflow_failed, usage: evaluation_usage}} =
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              reason: :runtime_limit_exceeded,
+              details: %{limit: :subordinate_evaluations, limit_value: 1},
+              usage: evaluation_usage
+            }} =
              Kernel.run(~S|(agent.core/run "Quota" {"max_turns" 4})|, evaluation_limited)
 
     assert evaluation_usage.subordinate_evaluations == 1
+    assert evaluation_usage.events_dropped["limit-exceeded"] == 1
+
+    assert [started, dropped, stopped] = EventSink.events(evaluation_limited.event_sink)
+    assert started.type == "run-started"
+    assert dropped.type == "events-dropped"
+
+    assert %{
+             reason: :runtime_limit_exceeded,
+             limit: :subordinate_evaluations,
+             limit_value: 1
+           } = stopped.data
+
     assert_receive {:agent_request, _first}
     assert_receive {:agent_request, _second}
     assert_receive {:provider_closed, :evaluation_quota}

@@ -757,6 +757,35 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
              )
   end
 
+  test "authoring catalog pages retain schemas with execution-only header annotations" do
+    tool = %{
+      "name" => "vendor.lookup",
+      "inputSchema" => %{
+        "type" => "object",
+        "properties" => %{
+          "query" => %{"type" => "string", "x-mcp-header" => "bad header"}
+        }
+      }
+    }
+
+    state = %{
+      tools: %{},
+      names: %{},
+      seen: %{},
+      received_tools: 0,
+      received_bytes: 0,
+      cache_scope: nil
+    }
+
+    assert {:done, %{"vendor.lookup" => ^tool}} =
+             MCPProtocol.authoring_catalog_page(
+               %{"tools" => [tool], "cacheScope" => "private"},
+               state,
+               10,
+               10_000
+             )
+  end
+
   test "rejects a valid tool that repeats a discarded tool name on a later page" do
     invalid = %{
       "name" => "vendor.lookup",

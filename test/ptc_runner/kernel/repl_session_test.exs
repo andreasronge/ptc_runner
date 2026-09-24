@@ -488,7 +488,13 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
         receive do: (:finish -> :ok)
       end)
 
-    assert_receive {:foreign_config, foreign_config}, 2_000
+    # This wait and the inspection-sink wait below bound a whole spawned
+    # setup -- a sink start that reserves a publication handle and fsyncs --
+    # not message delivery. That start measures 66 ms alone and 535 ms at the
+    # 99th percentile with 20 cases in flight; inside the suite under disk
+    # load it measured 1.2 s, 2.2 s and 4.5 s, which is what expired the 2 s
+    # budget this test used to carry.
+    assert_receive {:foreign_config, foreign_config}, 10_000
     foreign_sink_ref = Process.monitor(foreign_config.event_sink.pid)
     assert {:error, :session_owner_mismatch} = ReplSession.new(config: foreign_config)
     assert Process.alive?(foreign_config.event_sink.pid)
@@ -496,7 +502,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
 
     send(config_owner.pid, :stop_sink)
     assert_receive :foreign_sink_stopped
-    assert_receive {:DOWN, ^foreign_sink_ref, :process, _, :normal}, 2_000
+    assert_receive {:DOWN, ^foreign_sink_ref, :process, _, :normal}
 
     assert {:error, :session_owner_mismatch} = ReplSession.new(config: foreign_config)
     refute_receive :foreign_config_resource_closed
@@ -512,11 +518,13 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
             trace_id: "foreign-inspection"
           )
 
-        send(parent, {:foreign_inspection_sink, sink})
+        send(parent, {:foreign_inspection_fixture_ready, sink})
         receive do: (:finish -> :ok)
       end)
 
-    assert_receive {:foreign_inspection_sink, foreign_inspection}, 2_000
+    assert_receive {:foreign_inspection_fixture_ready, foreign_inspection},
+                   10_000
+
     inspection_ref = Process.monitor(foreign_inspection.pid)
 
     {:ok, workflow} = WorkflowEnvironment.new([])
@@ -539,7 +547,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert :ok = EventSink.stop(local_sink)
     send(inspection_owner.pid, :finish)
     assert :ok = Task.await(inspection_owner)
-    assert_receive {:DOWN, ^inspection_ref, :process, _, _reason}, 2_000
+    assert_receive {:DOWN, ^inspection_ref, :process, _, _reason}
   end
 
   # The owned sink is `:sys.suspend`ed, so setup waits the EventSink call
@@ -713,12 +721,12 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
         :ok
       end)
 
-    assert_receive {:owner_exit_session, sink_pid, creator_pid}, 2_000
+    assert_receive {:owner_exit_session, sink_pid, creator_pid}
     sink_ref = Process.monitor(sink_pid)
     send(creator_pid, :finish)
     assert :ok = Task.await(creator)
-    assert_receive {:DOWN, ^sink_ref, :process, ^sink_pid, :normal}, 2_000
-    assert_receive :owner_exit_resource_closed, 2_000
+    assert_receive {:DOWN, ^sink_ref, :process, ^sink_pid, :normal}
+    assert_receive :owner_exit_resource_closed
   end
 
   test "owner exit cancels an in-flight evaluation sandbox" do
@@ -774,16 +782,16 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     # deadline.
     on_exit(fn -> if Process.alive?(creator), do: Process.exit(creator, :kill) end)
 
-    assert_receive {:owner_exit_evaluation_ready, ^creator}, 2_000
+    assert_receive {:owner_exit_evaluation_ready, ^creator}
     assert {:trap_exit, false} = Process.info(creator, :trap_exit)
     assert 1 = :erlang.trace(creator, true, [:procs])
     send(creator, :evaluate)
 
-    assert_receive {:trace, ^creator, :spawn, compile_worker, _mfa}, 2_000
+    assert_receive {:trace, ^creator, :spawn, compile_worker, _mfa}
     compile_ref = Process.monitor(compile_worker)
-    assert_receive {:DOWN, ^compile_ref, :process, ^compile_worker, _reason}, 2_000
+    assert_receive {:DOWN, ^compile_ref, :process, ^compile_worker, _reason}
 
-    assert_receive {:trace, ^creator, :spawn, evaluation_worker, _mfa}, 2_000
+    assert_receive {:trace, ^creator, :spawn, evaluation_worker, _mfa}
     evaluation_ref = Process.monitor(evaluation_worker)
     assert Process.alive?(evaluation_worker)
 
@@ -792,8 +800,8 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     end)
 
     Process.exit(creator, :shutdown)
-    assert_receive {:DOWN, ^creator_ref, :process, ^creator, :shutdown}, 2_000
-    assert_receive {:DOWN, ^evaluation_ref, :process, ^evaluation_worker, _reason}, 2_000
+    assert_receive {:DOWN, ^creator_ref, :process, ^creator, :shutdown}
+    assert_receive {:DOWN, ^evaluation_ref, :process, ^evaluation_worker, _reason}
   end
 
   test "REPL session-owner death drains provider work before closing its resource" do
