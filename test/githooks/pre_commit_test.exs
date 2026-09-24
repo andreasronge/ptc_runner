@@ -5,7 +5,37 @@ defmodule PtcRunner.GitHooks.PreCommitTest do
   alias PtcRunner.TestSupport.GitEnv
 
   @hook Path.expand("../../.githooks/pre-commit", __DIR__)
+  @repo_root Path.expand("../..", __DIR__)
   @git_env GitEnv.clear()
+
+  test "path-specific commits check the selected temporary index" do
+    %{repo: repo, path: path, mix_marker: mix_marker} =
+      git_repo_with_staged(["lib/example.ex"])
+
+    git!(repo, ["commit", "--quiet", "-m", "track file"])
+    File.write!(Path.join(repo, "lib/example.ex"), "changed\n")
+
+    File.mkdir_p!(Path.join(repo, "scripts"))
+
+    for script <- ~w(hook-runtime.sh mise-runtime.sh) do
+      File.cp!(Path.join([@repo_root, "scripts", script]), Path.join([repo, "scripts", script]))
+    end
+
+    File.cp!(
+      Path.join([@repo_root, "scripts", "pre-commit.template"]),
+      Path.join([repo, ".git", "hooks", "pre-commit"])
+    )
+
+    {output, status} =
+      System.cmd("git", ["commit", "--only", "-m", "selected file", "--", "lib/example.ex"],
+        cd: repo,
+        env: @git_env ++ [{"MIX_MARKER", mix_marker}, {"PATH", path}],
+        stderr_to_stdout: true
+      )
+
+    assert status == 0, output
+    assert File.read!(mix_marker) =~ "arg=lib/example.ex\n"
+  end
 
   test "passes staged Elixir files to format and credo, not the whole tree" do
     %{repo: repo, path: path, mix_marker: mix_marker} =
