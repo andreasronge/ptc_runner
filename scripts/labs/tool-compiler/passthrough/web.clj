@@ -38,13 +38,19 @@
     (value! (tool/web.find arguments))))
 
 (defn extract
-  "Extract records with CSS selectors. fields is a vector of
-  {\"name\" :string, \"selector\" :string}."
-  {:signature "(snapshot_id :string, container :string, fields [{name :string, selector :string}]) -> {records [:map]}" :effect :read}
-  [snapshot-id container fields]
-  (value!
-    (tool/web.extract
-      {"snapshot_id" snapshot-id "container" container "fields" fields "limit" 20})))
+  "Extract one page of records with CSS selectors. Each field accepts an
+  optional selector, source (text, html, or attribute), attribute name,
+  multiple flag, and required flag. Pass nil as cursor for the first page, then
+  next_cursor until it is nil."
+  {:signature "(snapshot_id :string, container :string, fields [{name :string, selector :string?, source :string?, attribute :string?, multiple :bool?, required :bool?}], limit :int, cursor :string?) -> {records [:map], next_cursor :string?, matched_containers :int, omitted_records :int, result_truncated :bool, recipe_hash :string}" :effect :read}
+  [snapshot-id container fields limit cursor]
+  (let [arguments {"snapshot_id" snapshot-id
+                   "container" container
+                   "fields" fields
+                   "limit" limit}]
+    (value!
+      (tool/web.extract
+        (if cursor (assoc arguments "cursor" cursor) arguments)))))
 
 (defn close
   "Release the page handle."

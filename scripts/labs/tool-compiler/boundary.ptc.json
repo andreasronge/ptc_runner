@@ -1,0 +1,24 @@
+{
+  "$schema": "https://ptc-runner.dev/schemas/ptc-application-manifest.schema.json",
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "lab.boundary", "path": "boundary/agent.clj", "dependencies": ["kernel"]},
+      {"library": "kernel"}
+    ],
+    "entry": "lab.boundary/run"
+  },
+  "input": {"value": {"url": "http://127.0.0.1/unset"}},
+  "contracts": {
+    "input_schema": {"path": "boundary/input.schema.json"},
+    "result_schema": {"path": "boundary/result.schema.json"}
+  },
+  "providers": {"mission": [{"name": "web"}]},
+  "missions": {
+    "default": {
+      "components": [{"id": "lab.web", "path": "passthrough/web.clj"}],
+      "data": {},
+      "providers": ["web"]
+    }
+  }
+}

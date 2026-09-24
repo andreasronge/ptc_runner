@@ -232,3 +232,25 @@ written for it, found a recipe, and an independent run verified it.
 `analysis/runs` reported `llm_calls: 8` with `truncated: true` for this run,
 while both the envelope's `capability_calls` and the `turns` collection
 (`item_count: 11`) say eleven. The summary view undercounts.
+
+## 2026-09-20 — Correction: Arm A restricted upstream extraction
+
+The earlier claim that `ptc-web` never exposes markup was wrong. The pinned
+`ptc-web@0.1.0` `page_extract` schema accepts field sources `text`, `html`, and
+`attribute`; `html` returns the selected node's inner HTML. A field without a
+selector selects its container. The upstream extraction call also accepts a
+caller-selected limit and cursor, and fields can request an attribute, multiple
+values, or required-value filtering.
+
+The original `passthrough/web.clj` did not preserve that interface. It described
+fields as name/selector pairs, always sent a limit of 20, and offered no
+extraction cursor. Blind selector probing was therefore forced by the lab's
+restricted wrapper, not by the upstream tool. The wrapper now exposes those
+domain-neutral upstream options, and `boundary-check.mjs` verifies without a
+model credential that inner HTML and extraction pagination survive both the
+wrapper signature and a real `ptc-web@0.1.0` call.
+
+The existing **0 of 9** result and the later passthrough-versus-compiled cost
+tables are measurements of that restricted interface. They remain useful
+evidence about blind probing, but do not measure the corrected raw-tool
+baseline. No corrected-baseline success or cost result has been measured yet.
