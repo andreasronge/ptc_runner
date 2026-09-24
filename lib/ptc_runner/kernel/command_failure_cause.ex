@@ -38,6 +38,17 @@ defmodule PtcRunner.Kernel.CommandFailureCause do
   def from_reason(:destination_collision), do: :destination_exists
   def from_reason(:subprocess_failed), do: :subprocess_failed
   def from_reason(:invalid_destination), do: :invalid_configuration
+  def from_reason(:project_artifact_root_invalid), do: :invalid_configuration
+  def from_reason({:project_artifact_root_incomplete, _path}), do: :invalid_configuration
+  def from_reason({:project_artifact_root_not_owner_only, _path}), do: :permission
+  def from_reason({:project_artifact_root_parent_missing, _path, _parent}), do: :filesystem_error
+  def from_reason({:project_artifact_root_parent_unsafe_mode, _path}), do: :permission
+  def from_reason({:project_artifact_root_parent_foreign_owner, _path}), do: :permission
+  def from_reason({:project_artifact_root_parent_unwritable, _path}), do: :permission
+
+  def from_reason({:project_artifact_root_parent_creation_refused, _path}),
+    do: :resource_unavailable
+
   def from_reason(:private_destination_required), do: :invalid_configuration
   def from_reason(:private_directory_unsupported), do: :invalid_configuration
   def from_reason(:invalid_trace_path), do: :invalid_configuration

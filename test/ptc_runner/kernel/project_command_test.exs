@@ -736,6 +736,8 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     assert presentation.stderr =~ "envelope/destination_parent_unavailable"
     assert presentation.stderr =~ missing
     assert presentation.stderr =~ "mkdir -p '#{missing}'"
+    assert presentation.outcome.envelope["error"]["cause"] == "filesystem_error"
+    assert Jason.decode!(presentation.stdout) == presentation.outcome.envelope
     refute presentation.stderr =~ "owner-only (0700)"
     refute File.exists?(missing)
   end
@@ -756,6 +758,7 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     assert presentation.exit_status == 7
     assert presentation.envelope_path == explicit
     assert Jason.decode!(File.read!(explicit)) == presentation.outcome.envelope
+    assert presentation.outcome.envelope["error"]["cause"] == "filesystem_error"
     assert presentation.stderr =~ "destination/invalid_destination"
     assert presentation.stderr =~ "envelope/destination_parent_unavailable"
     assert presentation.stderr =~ "missing-artifact-parent"

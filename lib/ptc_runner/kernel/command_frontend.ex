@@ -148,7 +148,7 @@ defmodule PtcRunner.Kernel.CommandFrontend do
         presentation(
           outcome,
           nil,
-          "",
+          cause_envelope_stdout(entry, outcome, rejection, named_env_file?),
           CommandRenderer.envelope_failure(entry.run_ref, reason),
           @envelope_failure_exit_status
         )
@@ -176,7 +176,7 @@ defmodule PtcRunner.Kernel.CommandFrontend do
                 presentation(
                   outcome,
                   nil,
-                  "",
+                  cause_envelope_stdout(entry, outcome, rejection, named_env_file?),
                   CommandRenderer.envelope_failure(entry.run_ref, reason),
                   @envelope_failure_exit_status
                 )
@@ -184,7 +184,23 @@ defmodule PtcRunner.Kernel.CommandFrontend do
         end
 
       stderr ->
-        presentation(outcome, nil, "", stderr, outcome.exit_status)
+        presentation(
+          outcome,
+          nil,
+          cause_envelope_stdout(entry, outcome, rejection, named_env_file?),
+          stderr,
+          outcome.exit_status
+        )
+    end
+  end
+
+  defp cause_envelope_stdout(entry, outcome, rejection, named_env_file?) do
+    case CommandOutcome.to_map(outcome) do
+      %{"command" => "run", "error" => %{"cause" => _cause}} ->
+        rendered_presentation(entry, outcome, nil, rejection, named_env_file?).stdout
+
+      _other ->
+        ""
     end
   end
 
