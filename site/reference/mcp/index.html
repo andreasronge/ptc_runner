@@ -164,8 +164,12 @@ schemas, advertised output schemas, a tool count, and <code class="inline">pagin
 number of pages and <code class="inline">truncated: false</code>. Reaching the installation's
 <code class="inline">max_catalog_tools</code> or <code class="inline">max_pages</code> ceiling fails the operation instead of
 returning an incomplete catalog. The command uses the installed transport,
-credentials, authorization, timeout, response bounds, and cleanup path. It
-does not execute an upstream tool.</p><p>A workflow can receive the same catalog without shell access by selecting the
+static credentials, timeout, response bounds, and cleanup path. It does not
+execute an upstream tool. The one-shot command cannot initiate OAuth and
+refuses an OAuth-protected installation with <code class="inline">authorization_required</code>; use the
+workflow capability below with the ordinary
+<code class="inline">mix ptc run --authorize-mcp PROVIDER</code> flow when interactive authorization is
+required.</p><p>A workflow can receive the same catalog without shell access by selecting the
 installed MCP provider under <code class="inline">providers.workflow</code> with
 <code class="inline">{&quot;config&quot;:{&quot;catalog&quot;:true}}</code>. This grants one model-hidden read capability
 named <code class="inline">PROVIDER.catalog</code>. The setting is valid only for the workflow; normal

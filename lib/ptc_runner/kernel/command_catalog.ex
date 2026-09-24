@@ -29,34 +29,54 @@ defmodule PtcRunner.Kernel.CommandCatalog do
   end
 
   defp build(host, catalog, provider, run_ref) do
-    with {:ok, services} <- HostInstallation.runtime_services(host),
+    with {:ok, descriptor} <- InstallationCatalog.fetch(catalog, provider),
+         :ok <- catalog_cli_authorization(descriptor),
+         {:ok, services} <- HostInstallation.runtime_services(host),
          {:ok, execution} <- ProviderExecution.new(catalog, services, []) do
-      ProviderExecution.with_selected_registry(
-        execution,
+      execution
+      |> ProviderExecution.with_selected_registry(
         provider,
         Deadline.new(5_000),
-        fn registry ->
-          context = %{
-            application_content_digest: @digest,
-            destination: :workflow,
-            owner: self(),
-            limits: host.limits,
-            installed_limits: host.limits
-          }
-
-          with {:ok, built} <-
-                 ProviderRegistry.build(registry, provider, %{"catalog" => true}, context),
-               result <- catalog_result(built, provider, run_ref) do
-            result
-          else
-            _reason -> error(run_ref, provider, :provider_unavailable)
-          end
-        end
+        &build_catalog(&1, host, provider, run_ref)
       )
+      |> normalize_result(provider, run_ref)
     else
-      _error -> error(run_ref, provider, :provider_unavailable)
+      {:error, :authorization_required} ->
+        error(run_ref, provider, :active_preflight, :authorization_required)
+
+      _error ->
+        error(run_ref, provider, :provider_unavailable)
     end
   end
+
+  defp build_catalog(registry, host, provider, run_ref) do
+    context = %{
+      application_content_digest: @digest,
+      destination: :workflow,
+      owner: self(),
+      limits: host.limits,
+      installed_limits: host.limits
+    }
+
+    with {:ok, built} <- ProviderRegistry.build(registry, provider, %{"catalog" => true}, context),
+         result <- catalog_result(built, provider, run_ref) do
+      result
+    else
+      _reason -> error(run_ref, provider, :provider_unavailable)
+    end
+  end
+
+  defp normalize_result({status, %CommandOutcome{}} = result, _provider, _run_ref)
+       when status in [:ok, :error],
+       do: result
+
+  defp normalize_result(_result, provider, run_ref),
+    do: error(run_ref, provider, :provider_unavailable)
+
+  defp catalog_cli_authorization(%{authorization_mode: :none}), do: :ok
+
+  defp catalog_cli_authorization(%{authorization_mode: :oauth}),
+    do: {:error, :authorization_required}
 
   defp catalog_result(built, provider, run_ref) do
     result =
@@ -103,6 +123,15 @@ defmodule PtcRunner.Kernel.CommandCatalog do
 
     diagnostic =
       CommandDiagnostic.new!(phase, code, subject: subject, provider_activity: true)
+
+    {:error, CommandOutcome.error(:catalog, run_ref, diagnostic)}
+  end
+
+  defp error(run_ref, provider, :active_preflight = phase, code) do
+    {:ok, subject} = CommandSubject.provider(provider, :authorization)
+
+    diagnostic =
+      CommandDiagnostic.new!(phase, code, subject: subject, provider_activity: false)
 
     {:error, CommandOutcome.error(:catalog, run_ref, diagnostic)}
   end

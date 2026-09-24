@@ -1796,6 +1796,11 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert result["pagination"] == %{"pages" => 1, "truncated" => false}
     assert get_in(result, ["tools", Access.at(0), "output_schema", "properties", "text"])
     refute File.read!(marker) =~ "tools/call"
+
+    assert {:error, unknown} =
+             CommandEngine.dispatch(["catalog", "missing", "--host-config", host_path])
+
+    assert unknown.envelope["error"]["code"] == "provider_unavailable"
   end
 
   @tag :tmp_dir

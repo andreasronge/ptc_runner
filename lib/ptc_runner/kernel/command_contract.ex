@@ -1258,6 +1258,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   defp diagnostic_pair_allowed?(:models, :provider_declaration, :dependency_invalid), do: true
 
   defp diagnostic_pair_allowed?(:catalog, :provider_acquisition, :provider_unavailable), do: true
+  defp diagnostic_pair_allowed?(:catalog, :active_preflight, :authorization_required), do: true
   defp diagnostic_pair_allowed?(:catalog, :result_cleanup, :provider_cleanup_failed), do: true
 
   # A run needs no clause here. `local_preflight` is a classified phase, so a
