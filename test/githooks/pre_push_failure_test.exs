@@ -42,6 +42,22 @@ defmodule PtcRunner.GitHooks.PrePushFailureTest do
     assert "ci-gate core-dialyzer" in invocations
   end
 
+  @tag :slow
+  test "a failing gateway lane still reports the core static lane" do
+    %{repo: repo, mix_marker: mix_marker, path: path} =
+      git_repo_with_change("lib/example.ex")
+
+    {output, status} = run_hook(repo, path, [{"MIX_FAIL_GATE", "gateway"}])
+
+    refute status == 0
+    assert output =~ "Gateway validation failed"
+    assert output =~ "core static analysis + Dialyzer passed"
+
+    invocations = mix_marker |> File.read!() |> String.split("\n", trim: true)
+    assert "ci-gate gateway" in invocations
+    assert "ci-gate core-dialyzer" in invocations
+  end
+
   test "documentation dependency setup rejects an uncommitted lockfile repair" do
     %{repo: repo, mix_marker: mix_marker, path: path} =
       git_repo_with_change("docs/guides/replay.md")

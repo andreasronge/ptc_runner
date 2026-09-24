@@ -321,6 +321,9 @@ jobs:
       - name: Run static analysis and generated-artifact checks
         run: scripts/ci/core-static.sh
 
+      - name: Run gateway validation
+        run: scripts/ci/gateway.sh
+
   # Measured on CI: the PLT cache restores in 0.2 s, then 94 s goes on removing
   # the 465 project modules baked into the cached PLT and adding this commit's
   # 479, and 27 s on the analysis itself. Caching only the core PLT and

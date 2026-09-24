@@ -164,18 +164,24 @@ defmodule PtcRunner.TestSupport.ProviderExecutionFixture do
   end
 
   def scoped_root(parent, context) do
-    spawn(fn ->
-      signal = Process.monitor(context.owner)
+    caller = self()
 
-      send(
-        parent,
-        {:provider_root, self(), ResourceRegistrar.register_root(context.resource_registrar)}
-      )
+    root =
+      spawn(fn ->
+        signal = Process.monitor(context.owner)
+        result = ResourceRegistrar.register_root(context.resource_registrar)
+        send(parent, {:provider_root, self(), result})
+        send(caller, {:provider_root_registered, self(), result})
 
-      receive do
-        {:DOWN, ^signal, :process, _pid, _reason} -> :ok
-      end
-    end)
+        receive do
+          {:DOWN, ^signal, :process, _pid, _reason} -> :ok
+        end
+      end)
+
+    receive do
+      {:provider_root_registered, ^root, :ok} -> root
+      {:provider_root_registered, ^root, error} -> error
+    end
   end
 
   def fixture_capability do

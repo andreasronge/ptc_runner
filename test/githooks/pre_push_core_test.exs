@@ -73,12 +73,27 @@ defmodule PtcRunner.GitHooks.PrePushCoreTest do
     assert status == 0, output
     assert output =~ ~r/core tests \(library lane\) passed in \d+s/
     assert output =~ ~r/core static analysis \+ Dialyzer passed in \d+s/
+    assert output =~ ~r/Gateway validation started/
+    assert output =~ ~r/Gateway validation passed in \d+s/
     refute output =~ "core release verification"
 
     assert output =~ "Phase timings:"
     assert output =~ ~r/core tests \(library lane\)\s+\d+s/
     assert output =~ ~r/core static analysis \+ Dialyzer\s+\d+s/
 
+    assert_core_gate_invocations(mix_marker)
+  end
+
+  @tag :slow
+  test "gateway starts as its own concurrent lane on an unmanaged core push" do
+    %{repo: repo, mix_marker: mix_marker, path: path} =
+      git_repo_with_change("lib/example.ex")
+
+    {output, status} = run_hook(repo, path)
+
+    assert status == 0, output
+    assert output =~ "Gateway validation started"
+    assert output =~ "core static analysis + Dialyzer started"
     assert_core_gate_invocations(mix_marker)
   end
 

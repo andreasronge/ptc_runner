@@ -507,6 +507,7 @@ run_gate() {
 #   lane B   core-release                   _build/prod  (forced full run only)
 #   lane C   Viewer                         ptc_viewer/_build/test
 #   lane D   documentation (ExDoc)          _build/dev
+#   lane E   Gateway                        ptc_gateway/_build/test
 #
 # Documentation is the only stage that touches the root `deps/`, through
 # `mix deps.get --check-locked`; with a lockfile that matches `mix.exs` that
@@ -715,6 +716,7 @@ if [ "$serial_gates" = true ]; then
   if [ "$run_core_gates" = true ]; then
     run_gate "core static analysis" "$HOOK_REPO_ROOT/scripts/ci/core-static.sh"
     run_gate "core Dialyzer" "$HOOK_REPO_ROOT/scripts/ci/core-dialyzer.sh"
+    run_gate "Gateway validation" "$HOOK_REPO_ROOT/scripts/ci/gateway.sh"
   fi
 
   if [ "$run_release_gate" = true ]; then
@@ -731,6 +733,7 @@ elif [ "$run_core_gates" = true ] || [ "$run_viewer_gate" = true ] ||
 
   if [ "$run_core_gates" = true ]; then
     start_lane "core static analysis + Dialyzer" core_static_and_dialyzer
+    start_lane "Gateway validation" "$HOOK_REPO_ROOT/scripts/ci/gateway.sh"
   fi
 
   if [ "$run_docs_gate_selected" = true ]; then

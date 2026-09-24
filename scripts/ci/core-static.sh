@@ -7,5 +7,3 @@ source "$script_dir/_common.sh"
 "$script_dir/core-quality.sh"
 mix ptc.audit_upstream
 mix deps.unlock --check-unused
-
-"$script_dir/gateway.sh"
