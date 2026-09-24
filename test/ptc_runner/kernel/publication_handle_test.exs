@@ -129,4 +129,28 @@ defmodule PtcRunner.Kernel.PublicationHandleTest do
 
     refute_receive {@event, ^ref, _, _}
   end
+
+  @tag :tmp_dir
+  test "an unexpected mapped errno reply still collapses", %{tmp_dir: dir} do
+    ref = :telemetry_test.attach_event_handlers(self(), [@event])
+    on_exit(fn -> :telemetry.detach(ref) end)
+
+    fault_hook = fn
+      :staging_file -> :eacces
+      _stage -> :ok
+    end
+
+    assert {:error, :destination_unavailable} =
+             PublicationHandle.reserve_direct(
+               Path.join(dir, "result.json"),
+               :result,
+               0o600,
+               self(),
+               fault_hook
+             )
+
+    assert_receive {@event, ^ref, %{}, metadata}
+    assert metadata == %{operation: :reserve, kind: :result, cause: {:reason, :eacces}}
+    refute_receive {@event, ^ref, _, _}
+  end
 end

@@ -1683,7 +1683,12 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   end
 
   defp collapsed_failure({:error, reason}), do: collapsed_failure(reason)
-  defp collapsed_failure(reason), do: {:error, filesystem_destination_failure(reason)}
+
+  defp collapsed_failure({:destination_unavailable, {:reason, reason}})
+       when is_atom(reason),
+       do: {:error, {:destination_unavailable, {:reason, reason}}}
+
+  defp collapsed_failure(reason), do: {:error, {:destination_unavailable, reason_cause(reason)}}
 
   defp reason_cause(reason) when is_atom(reason), do: {:reason, reason}
   defp reason_cause(_reason), do: {:reason, :unexpected_reply}
