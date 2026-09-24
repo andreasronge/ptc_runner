@@ -105,6 +105,40 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   def non_interactive?(%__MODULE__{authorizations: []} = execution), do: valid?(execution)
   def non_interactive?(_execution), do: false
 
+  @doc false
+  @spec with_selected_registry(t(), binary(), Deadline.t(), (ProviderRegistry.t() -> term())) ::
+          term()
+  def with_selected_registry(
+        %__MODULE__{} = execution,
+        name,
+        deadline,
+        callback
+      )
+      when is_binary(name) and is_function(callback, 1) do
+    tracker = fn _operation, _kind, _resource -> :ok end
+
+    with true <- valid?(execution),
+         true <- Map.has_key?(execution.catalog.descriptors, name),
+         {:ok, authorities} <- oauth_authorities(execution, [name]) do
+      with_runtime_registry(
+        execution,
+        self(),
+        [name],
+        authorities,
+        deadline,
+        tracker,
+        {:catalog, :all},
+        callback
+      )
+    else
+      false -> {:error, :invalid_provider_execution}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  def with_selected_registry(_execution, _name, _deadline, _callback),
+    do: {:error, :invalid_provider_execution}
+
   @doc """
   Checks that this execution belongs to the exact preparation it will run.
 

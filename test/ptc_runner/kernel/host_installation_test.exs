@@ -68,6 +68,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   alias PtcRunner.Kernel.HostRuntimePayload
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderCallAdmission
   alias PtcRunner.Kernel.ProviderCallbackBoundary
   alias PtcRunner.Kernel.ProviderError
@@ -76,9 +77,11 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ProviderSnapshot
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.TestSupport.RunLifecycle
+  alias PtcRunner.TestSupport.TestHelpers
 
   @tag :tmp_dir
   test "installs only declared aliases and enforces MCP mission placement", %{tmp_dir: dir} do
@@ -1685,9 +1688,22 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
     config =
       unicode_stdio_config(launcher, marker)
+      |> put_in(["install", "workspace", "transport", "args"], [
+        @stdio_fixture,
+        marker,
+        "mcp-catalog-header"
+      ])
       |> put_in(["install", "workspace", "tools"], %{
         "unicode" => %{"as" => "workspace.unicode", "effect" => "write"}
       })
+
+    config =
+      put_in(
+        config,
+        ["install", "unused"],
+        config["install"]["workspace"]
+        |> put_in(["transport", "command"], "/provider-that-must-not-start")
+      )
 
     host_path = Path.join(dir, "catalog-host.json")
     File.write!(host_path, Jason.encode!(config))
@@ -1701,6 +1717,25 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       | limits: limits,
         installed_limits: limits
     }
+
+    manifest =
+      TestHelpers.valid_manifest(%{
+        "providers" => %{
+          "workflow" => [%{"name" => "workspace", "config" => %{"catalog" => true}}],
+          "mission" => []
+        }
+      })
+
+    documents = %{
+      "ptc.json" => Jason.encode!(manifest),
+      "main.clj" => "(ns app) (defn run [input] (tool/workspace.catalog {}))"
+    }
+
+    assert {:ok, request} =
+             ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+
+    assert {:ok, run_prepared} = RunCoordinator.prepare(request, catalog)
+    assert :ok = PreparedRun.close(run_prepared)
 
     assert {:ok, prepared} =
              ProviderRegistry.prepare(
@@ -1733,6 +1768,15 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
              "source",
              "const"
            ]) == "html"
+
+    assert get_in(workflow_result, [
+             "tools",
+             Access.at(0),
+             "input_schema",
+             "properties",
+             "source",
+             "x-mcp-header"
+           ]) == "invalid header"
 
     assert workflow_result["pagination"] == %{"pages" => 1, "truncated" => false}
     assert get_in(workflow_result, ["tools", Access.at(0), "output_schema", "properties", "text"])

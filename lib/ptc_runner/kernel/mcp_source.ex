@@ -554,7 +554,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   end
 
   defp catalog_build(transport, installed, selected, provider) do
-    with {:ok, _server, discovered, pagination} <- discover_catalog(transport, installed),
+    with {:ok, _server, discovered, pagination} <- discover_catalog(transport, installed, true),
          {:ok, catalog} <- catalog_projection(provider, discovered, pagination),
          {:ok, encoded} <- DeterministicJSON.encode(catalog),
          true <- byte_size(encoded) <= selected.max_result_bytes,
@@ -987,11 +987,11 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp discover_catalog(transport, installed) do
+  defp discover_catalog(transport, installed, authoring) do
     with {:ok, discovery} <- rpc(transport, "server/discover", %{}, @max_discovery_bytes),
          {:ok, server} <- MCPProtocol.discover_result(discovery, @protocol),
          true <- Map.has_key?(server.capabilities, "tools"),
-         {:ok, discovered, pagination} <- list_tools(transport, installed) do
+         {:ok, discovered, pagination} <- list_tools(transport, installed, authoring) do
       {:ok, server, discovered, pagination}
     else
       {:error, reason, _provenance} -> {:error, reason}
@@ -1000,7 +1000,7 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp list_tools(transport, installed) do
+  defp list_tools(transport, installed, authoring \\ false) do
     state = %{
       tools: %{},
       names: %{},
@@ -1010,28 +1010,40 @@ defmodule PtcRunner.Kernel.MCPSource do
       cache_scope: nil
     }
 
-    list_tools(transport, installed, nil, state, 0)
+    list_tools(transport, installed, nil, state, 0, authoring)
   end
 
-  defp list_tools(_request, installed, _cursor, state, pages)
+  defp list_tools(_request, installed, _cursor, state, pages, _authoring)
        when pages >= installed.max_pages or state.received_tools > installed.max_catalog_tools,
        do: {:error, :mcp_catalog_exceeded}
 
-  defp list_tools(transport, installed, cursor, state, pages) do
+  defp list_tools(transport, installed, cursor, state, pages, authoring) do
     params = if is_nil(cursor), do: %{}, else: %{"cursor" => cursor}
 
     with {:ok, result} <- rpc(transport, "tools/list", params, @max_discovery_bytes) do
-      case MCPProtocol.catalog_page(
-             result,
-             state,
-             installed.max_catalog_tools,
-             @max_discovery_bytes
-           ) do
+      page_result =
+        if authoring do
+          MCPProtocol.authoring_catalog_page(
+            result,
+            state,
+            installed.max_catalog_tools,
+            @max_discovery_bytes
+          )
+        else
+          MCPProtocol.catalog_page(
+            result,
+            state,
+            installed.max_catalog_tools,
+            @max_discovery_bytes
+          )
+        end
+
+      case page_result do
         {:done, tools} ->
           {:ok, tools, %{"pages" => pages + 1, "truncated" => false}}
 
         {:continue, next, state} ->
-          list_tools(transport, installed, next, state, pages + 1)
+          list_tools(transport, installed, next, state, pages + 1, authoring)
 
         {:error, _reason} = error ->
           error
@@ -1066,7 +1078,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   end
 
   defp catalog_tool(name, tool) do
-    with {:ok, contract} <- MCPProtocol.selected_tool(tool) do
+    with {:ok, contract} <- catalog_contract(tool) do
       {:ok,
        %{"name" => name, "input_schema" => contract.input_schema}
        |> maybe_put_catalog("description", contract.description)
@@ -1076,6 +1088,31 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   defp maybe_put_catalog(map, _key, nil), do: map
   defp maybe_put_catalog(map, key, value), do: Map.put(map, key, value)
+
+  defp catalog_contract(tool) when is_map(tool) and not is_struct(tool) do
+    with description <- Map.get(tool, "description"),
+         true <-
+           is_nil(description) or (is_binary(description) and byte_size(description) <= 4_096),
+         input when is_map(input) and not is_struct(input) <- tool["inputSchema"],
+         {:ok, output} <- catalog_output_schema(tool) do
+      {:ok, %{description: description, input_schema: input, output_schema: output}}
+    else
+      _reason -> {:error, :mcp_invalid_tool_schema}
+    end
+  end
+
+  defp catalog_contract(_tool), do: {:error, :mcp_invalid_tool_schema}
+
+  defp catalog_output_schema(%{"outputSchema" => output})
+       when is_map(output) and not is_struct(output),
+       do: {:ok, output}
+
+  defp catalog_output_schema(tool),
+    do:
+      if(Map.has_key?(tool, "outputSchema"),
+        do: {:error, :mcp_invalid_tool_schema},
+        else: {:ok, nil}
+      )
 
   defp catalog_snapshot(%{type: type}, catalog) do
     %{

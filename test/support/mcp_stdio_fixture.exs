@@ -44,6 +44,12 @@ defmodule PtcRunner.TestSupport.MCPStdioFixture do
     |> System.halt()
   end
 
+  def main([marker, "mcp-catalog-header"]) do
+    marker
+    |> mcp_loop(:catalog_header)
+    |> System.halt()
+  end
+
   defp mcp_loop(marker, mode) do
     case IO.read(:stdio, :line) do
       :eof ->
@@ -83,6 +89,15 @@ defmodule PtcRunner.TestSupport.MCPStdioFixture do
     IO.write(
       :stdio,
       ~s({"jsonrpc":"2.0","id":#{id},"result":{"resultType":"complete","tools":[{"name":"unicode","description":false,"inputSchema":42}],"ttlMs":0,"cacheScope":"private"}}\n)
+    )
+  end
+
+  defp handle_mcp_request(id, "tools/list", marker, :catalog_header) when is_integer(id) do
+    File.write!(marker, "tools/list\n", [:append])
+
+    IO.write(
+      :stdio,
+      ~s({"jsonrpc":"2.0","id":#{id},"result":{"resultType":"complete","tools":[{"name":"unicode","description":"Return non-ASCII text.","inputSchema":{"type":"object","properties":{"source":{"type":"string","const":"html","x-mcp-header":"invalid header"}}},"outputSchema":{"type":"object","properties":{"text":{"type":"array","items":{"type":"string"}}}}}],"ttlMs":0,"cacheScope":"private"}}\n)
     )
   end
 

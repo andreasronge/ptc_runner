@@ -6,8 +6,10 @@ defmodule PtcRunner.Kernel.CommandCatalog do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.ProviderRegistry
 
   @digest String.duplicate("0", 64)
@@ -27,9 +29,13 @@ defmodule PtcRunner.Kernel.CommandCatalog do
   end
 
   defp build(host, catalog, provider, run_ref) do
-    case HostInstallation.runtime_registry(host, catalog) do
-      {:ok, registry} ->
-        try do
+    with {:ok, services} <- HostInstallation.runtime_services(host),
+         {:ok, execution} <- ProviderExecution.new(catalog, services, []) do
+      ProviderExecution.with_selected_registry(
+        execution,
+        provider,
+        Deadline.new(5_000),
+        fn registry ->
           context = %{
             application_content_digest: @digest,
             destination: :workflow,
@@ -45,12 +51,10 @@ defmodule PtcRunner.Kernel.CommandCatalog do
           else
             _reason -> error(run_ref, provider, :provider_unavailable)
           end
-        after
-          ProviderRegistry.close(registry)
         end
-
-      _error ->
-        error(run_ref, provider, :provider_unavailable)
+      )
+    else
+      _error -> error(run_ref, provider, :provider_unavailable)
     end
   end
 

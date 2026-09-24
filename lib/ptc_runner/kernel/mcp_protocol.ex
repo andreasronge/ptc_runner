@@ -383,7 +383,8 @@ defmodule PtcRunner.Kernel.MCPProtocol do
          page when is_list(page) <- result["tools"],
          {:ok, received_tools, received_bytes} <-
            catalog_usage(page, received_tools, received_bytes, max_tools, max_bytes),
-         {:ok, tools, names} <- merge_tools(tools, names, page),
+         {:ok, tools, names} <-
+           merge_tools(tools, names, page, Map.get(state, :authoring, false)),
          next <- result["nextCursor"],
          true <- is_nil(next) or (is_binary(next) and byte_size(next) in 1..1_024),
          false <- is_binary(next) and Map.has_key?(seen, next) do
@@ -405,6 +406,11 @@ defmodule PtcRunner.Kernel.MCPProtocol do
 
   def catalog_page(_result, _state, _max_tools, _max_bytes),
     do: {:error, :mcp_invalid_catalog}
+
+  @doc false
+  @spec authoring_catalog_page(map(), map(), pos_integer(), pos_integer()) :: catalog_result()
+  def authoring_catalog_page(result, state, max_tools, max_bytes),
+    do: catalog_page(result, Map.put(state, :authoring, true), max_tools, max_bytes)
 
   @spec selected_tool(map()) ::
           {:ok,
@@ -621,31 +627,41 @@ defmodule PtcRunner.Kernel.MCPProtocol do
     end
   end
 
-  defp merge_tools(existing, names, page) do
+  defp merge_tools(existing, names, page, authoring) do
     Enum.reduce_while(page, {:ok, existing, names}, fn tool, {:ok, tools, seen_names} ->
-      merge_tool(tool, tools, seen_names)
+      merge_tool(tool, tools, seen_names, authoring)
     end)
   end
 
-  defp merge_tool(tool, tools, names) do
+  defp merge_tool(tool, tools, names, authoring) do
     with true <- is_map(tool) and not is_struct(tool),
          name when is_binary(name) <- tool["name"],
          true <- valid_tool_name?(name),
          false <- Map.has_key?(names, name) do
-      merge_tool_schema(tool["inputSchema"], name, tool, tools, Map.put(names, name, true))
+      merge_tool_schema(
+        tool["inputSchema"],
+        name,
+        tool,
+        tools,
+        Map.put(names, name, true),
+        authoring
+      )
     else
       _reason -> {:halt, {:error, :mcp_invalid_catalog}}
     end
   end
 
-  defp merge_tool_schema(schema, name, tool, tools, names) when is_map(schema) do
+  defp merge_tool_schema(schema, name, tool, tools, names, true) when is_map(schema),
+    do: {:cont, {:ok, Map.put(tools, name, tool), names}}
+
+  defp merge_tool_schema(schema, name, tool, tools, names, false) when is_map(schema) do
     case header_parameters(schema) do
       {:ok, _parameters} -> {:cont, {:ok, Map.put(tools, name, tool), names}}
       {:error, :mcp_invalid_tool_schema} -> {:cont, {:ok, tools, names}}
     end
   end
 
-  defp merge_tool_schema(_schema, name, tool, tools, names),
+  defp merge_tool_schema(_schema, name, tool, tools, names, _authoring),
     do: {:cont, {:ok, Map.put(tools, name, tool), names}}
 
   defp optional_output_schema(%{"outputSchema" => output}) when is_map(output),

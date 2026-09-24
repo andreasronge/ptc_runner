@@ -168,6 +168,31 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
   def data_policy(%__MODULE__{} = descriptor),
     do: %{data_class: descriptor.data_class, accepts_data: descriptor.accepts_data}
 
+  @doc false
+  @spec explain_selection(t(), map(), map()) :: {:ok, map()} | {:error, atom()}
+  def explain_selection(%__MODULE__{} = descriptor, value, limits) do
+    with {:ok, rules} <- selection_rules_for_mode(descriptor, value) do
+      SelectionRules.explain(rules, value, limits)
+    end
+  end
+
+  defp selection_rules_for_mode(
+         %__MODULE__{source: :mcp, selection_rules: rules},
+         %{"catalog" => true}
+       ) do
+    SelectionRules.new(
+      fields: rules.fields,
+      cross_rules:
+        Enum.reject(
+          rules.cross_rules,
+          &match?({:required_when_set_nonempty, "allow", "write"}, &1)
+        ),
+      named_sets: rules.named_sets
+    )
+  end
+
+  defp selection_rules_for_mode(%__MODULE__{selection_rules: rules}, _value), do: {:ok, rules}
+
   @spec public_projection(t(), binary(), map()) :: map()
   @doc "Projects only selector-safe declaration identity for one occurrence."
   def public_projection(%__MODULE__{} = descriptor, name, normalized_config)
