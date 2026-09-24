@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
   alias PtcRunner.Kernel.InspectionArtifact.Format
   alias PtcRunner.Kernel.InspectionArtifact.Indexes
   alias PtcRunner.Kernel.InspectionArtifact.Limits
+  alias PtcRunner.Kernel.InspectionRecord
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.PublicationHandle
@@ -32,6 +33,54 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     assert {:error, :invalid_limits} = Limits.merge(max_total_bytes: 536_870_913)
     assert {:ok, %{cleanup_deadline_ms: 5_000}} = Limits.merge(cleanup_deadline_ms: 5_000)
     assert {:error, :invalid_limits} = Limits.merge(cleanup_deadline_ms: 5_001)
+  end
+
+  test "mission execution errors admit only the bounded closed diagnostic shape" do
+    payload = %{
+      "environment" => "mission",
+      "mission_name" => "repair",
+      "kind" => "evaluation_failed",
+      "reason" => "parse_error",
+      "details" => %{
+        "message" => "unexpected token",
+        "message_truncated" => false,
+        "source_location" => %{"offset" => 4}
+      }
+    }
+
+    assert {:ok, _record, _encoded} =
+             InspectionRecord.build(
+               "run-id",
+               "trace-id",
+               1,
+               "execution-error",
+               %{"evaluation_id" => "evaluation-id"},
+               payload,
+               16_384
+             )
+
+    invalid_payloads = [
+      put_in(payload, ["kind"], "other"),
+      put_in(payload, ["details", "message"], String.duplicate("x", 4_097)),
+      put_in(payload, ["details", "message_truncated"], "false"),
+      put_in(payload, ["details", "source_location"], %{"offset" => -1}),
+      put_in(payload, ["details", "source_location"], %{"offset" => 4, "line" => 1}),
+      update_in(payload, ["details"], &Map.delete(&1, "message")),
+      put_in(payload, ["details", "extra"], true)
+    ]
+
+    for invalid <- invalid_payloads do
+      assert {:error, :invalid_record} =
+               InspectionRecord.build(
+                 "run-id",
+                 "trace-id",
+                 1,
+                 "execution-error",
+                 %{"evaluation_id" => "evaluation-id"},
+                 invalid,
+                 16_384
+               )
+    end
   end
 
   @tag :tmp_dir

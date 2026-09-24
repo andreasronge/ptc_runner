@@ -54,6 +54,15 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     }
   end
 
+  @doc false
+  @spec instrumented_name?(:workflow | :mission, binary()) :: boolean()
+  def instrumented_name?(environment, name)
+      when environment in [:workflow, :mission] and is_binary(name) do
+    mission_route? = Enum.any?(@mission_routes, &(elem(&1, 0) == name))
+
+    mission_route? or (environment == :workflow and Environment.reserved_capability_name?(name))
+  end
+
   @doc """
   Builds the reserved runtime-tool map for one environment.
 

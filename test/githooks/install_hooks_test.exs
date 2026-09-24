@@ -176,6 +176,54 @@ defmodule PtcRunner.GitHooks.InstallHooksTest do
            ]
   end
 
+  @tag :tmp_dir
+  test "linked worktree hooks keep a nested git init out of shared metadata", %{tmp_dir: dir} do
+    for hook <- ~w(pre-push pre-commit) do
+      base = Path.join(dir, hook)
+      repo = init_repo(base)
+      remote = Path.join(base, "remote.git")
+      linked = Path.join(base, "linked")
+
+      write_executable!(
+        Path.join([repo, ".githooks", hook]),
+        "#!/usr/bin/env bash\nset -e\nmkdir -p deps/dep\ncd deps/dep\ngit init -q\n"
+      )
+
+      commit_fixture(repo)
+      assert {_, 0} = install(repo)
+      assert {_, 0} = System.cmd("git", ["init", "-q", "--bare", remote], env: @git_env)
+      git(repo, ["remote", "add", "origin", remote])
+      git(repo, ["worktree", "add", "-qb", "feature", linked])
+
+      {output, status} =
+        case hook do
+          "pre-push" ->
+            System.cmd("git", ["push", "origin", "HEAD:refs/heads/feature"],
+              cd: linked,
+              env: @git_env,
+              stderr_to_stdout: true
+            )
+
+          "pre-commit" ->
+            System.cmd("git", ["commit", "--allow-empty", "-m", "from linked worktree"],
+              cd: linked,
+              env:
+                GitEnv.clear(
+                  GIT_AUTHOR_NAME: "Test",
+                  GIT_AUTHOR_EMAIL: "test@example.com",
+                  GIT_COMMITTER_NAME: "Test",
+                  GIT_COMMITTER_EMAIL: "test@example.com"
+                ),
+              stderr_to_stdout: true
+            )
+        end
+
+      assert status == 0, "#{hook}: #{output}"
+      assert File.dir?(Path.join([linked, "deps", "dep", ".git"]))
+      assert git(repo, ["config", "--get", "core.bare"]) == "false"
+    end
+  end
+
   defp init_repo(dir) do
     repo = Path.join(dir, "clone")
     File.mkdir_p!(Path.join(repo, "scripts"))

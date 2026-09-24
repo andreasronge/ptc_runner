@@ -1133,7 +1133,7 @@ defmodule PtcRunner.Lisp do
       |> Enum.map(fn {name, _tool} -> name end)
 
     compile_fn = fn ->
-      with {:ok, raw_ast} <- Parser.parse(source),
+      with {:ok, raw_ast} <- Parser.parse_with_position(source),
            :ok <- check_symbol_limit(raw_ast, max_symbols),
            {:ok, core_ast} <- Analyze.analyze(raw_ast, prelude, prelude_filtered_exports),
            :ok <- CoreAST.validate(core_ast) do
@@ -1205,6 +1205,11 @@ defmodule PtcRunner.Lisp do
 
   defp handle_compile_error({:error, {:parse_error, msg}}, memory) do
     {:error, Step.error(:parse_error, msg, memory, %{})}
+  end
+
+  defp handle_compile_error({:error, {:parse_error, msg, position}}, memory) do
+    details = if is_integer(position) and position >= 0, do: %{source_offset: position}, else: %{}
+    {:error, Step.error(:parse_error, msg, memory, details)}
   end
 
   # Compile-sandbox Steps are built with placeholder memory so the compile

@@ -1,7 +1,8 @@
 defmodule PtcRunner.Kernel.ApplicationPackageTest do
-  # async: false — one case overrides the :ptc_runner :default_max_heap app env for the whole VM
-  # (class D); the other 30 cases could run async in a sibling module.
-  use ExUnit.Case, async: false
+  # The case that overrides the VM-wide :default_max_heap app env lives in
+  # ApplicationPackageGlobalStateTest. The attestation case below uses a
+  # :persistent_term key private to this module.
+  use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.ApplicationSource
@@ -402,31 +403,6 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
 
     assert {:error, :invalid_application_options} =
              ApplicationPackage.request_directory(manifest_path, repl_interactive_loop: true)
-  end
-
-  test "sealed Kernel runs ignore the ambient default compile heap" do
-    previous = Application.get_env(:ptc_runner, :default_max_heap)
-
-    on_exit(fn ->
-      if is_nil(previous),
-        do: Application.delete_env(:ptc_runner, :default_max_heap),
-        else: Application.put_env(:ptc_runner, :default_max_heap, previous)
-    end)
-
-    Application.put_env(:ptc_runner, :default_max_heap, 1)
-
-    assert {:ok, request} =
-             ApplicationPackage.request_memory("app.json", fixture_documents(),
-               result_projection: :native
-             )
-
-    {:ok, registry} = ProviderRegistry.new()
-    assert {:ok, built} = RunBuilder.build(request, registry)
-
-    assert {:ok, %{value: %{"answer" => 1}}} =
-             PtcRunner.Kernel.run(built.entry_source, built.config)
-
-    assert :ok = RunBuilder.close(built)
   end
 
   test "selected override input bypasses the unselected manifest-path input" do
