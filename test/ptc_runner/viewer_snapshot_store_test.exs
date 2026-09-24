@@ -8,6 +8,10 @@ defmodule PtcRunner.ViewerSnapshotStoreTest do
   alias PtcRunner.TestSupport.PrivateInspectionFixture
   alias PtcRunner.ViewerSnapshotStore
 
+  setup_all do
+    PrivateInspectionFixture.seed_context(["granted-run"])
+  end
+
   @tag :tmp_dir
   test "a requested refresh atomically exposes a newly completed run", %{tmp_dir: directory} do
     write_events(Path.join(directory, "first.jsonl"), [event("first", 1, "run-started")])
@@ -60,9 +64,10 @@ defmodule PtcRunner.ViewerSnapshotStoreTest do
 
   @tag :tmp_dir
   test "revoking viewer.private withholds inspection and stops the held snapshot", %{
-    tmp_dir: directory
+    tmp_dir: directory,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(Path.join(directory, ".ptc"), "granted-run")
+    fixture = PrivateInspectionFixture.copy!(seeded, Path.join(directory, ".ptc"), "granted-run")
     path = write_project(directory, true)
     {:ok, project} = ProjectConfig.load(path)
     {:ok, store} = start_granted_store(project, path, fixture)
@@ -134,9 +139,10 @@ defmodule PtcRunner.ViewerSnapshotStoreTest do
 
   @tag :tmp_dir
   test "a revocation written before the first serving call takes effect immediately", %{
-    tmp_dir: directory
+    tmp_dir: directory,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(Path.join(directory, ".ptc"), "granted-run")
+    fixture = PrivateInspectionFixture.copy!(seeded, Path.join(directory, ".ptc"), "granted-run")
     path = write_project(directory, true)
     {:ok, project} = ProjectConfig.load(path)
     write_project(directory, false)
@@ -313,9 +319,10 @@ defmodule PtcRunner.ViewerSnapshotStoreTest do
 
   @tag :tmp_dir
   test "widening viewer.private does not capture inspection until refresh", %{
-    tmp_dir: directory
+    tmp_dir: directory,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(Path.join(directory, ".ptc"), "granted-run")
+    fixture = PrivateInspectionFixture.copy!(seeded, Path.join(directory, ".ptc"), "granted-run")
     path = write_project(directory, false)
     {:ok, project} = ProjectConfig.load(path)
     {:ok, store} = start_granted_store(project, path, fixture)
@@ -339,8 +346,11 @@ defmodule PtcRunner.ViewerSnapshotStoreTest do
   end
 
   @tag :tmp_dir
-  test "an unchanged document digest does not reload the project grant", %{tmp_dir: directory} do
-    fixture = PrivateInspectionFixture.create!(Path.join(directory, ".ptc"), "granted-run")
+  test "an unchanged document digest does not reload the project grant", %{
+    tmp_dir: directory,
+    seeded: seeded
+  } do
+    fixture = PrivateInspectionFixture.copy!(seeded, Path.join(directory, ".ptc"), "granted-run")
     path = write_project(directory, true)
     {:ok, project} = ProjectConfig.load(path)
     revoked = %{project | viewer: %{project.viewer | private: false}}
@@ -364,9 +374,10 @@ defmodule PtcRunner.ViewerSnapshotStoreTest do
 
   @tag :tmp_dir
   test "every project-load failure withholds private routes and keeps the trace snapshot", %{
-    tmp_dir: directory
+    tmp_dir: directory,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(Path.join(directory, ".ptc"), "granted-run")
+    fixture = PrivateInspectionFixture.copy!(seeded, Path.join(directory, ".ptc"), "granted-run")
     path = write_project(directory, true)
     {:ok, project} = ProjectConfig.load(path)
 
@@ -404,9 +415,10 @@ defmodule PtcRunner.ViewerSnapshotStoreTest do
 
   @tag :tmp_dir
   test "an unreadable project document fails closed without dropping held evidence", %{
-    tmp_dir: directory
+    tmp_dir: directory,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(Path.join(directory, ".ptc"), "granted-run")
+    fixture = PrivateInspectionFixture.copy!(seeded, Path.join(directory, ".ptc"), "granted-run")
     path = write_project(directory, true)
     {:ok, project} = ProjectConfig.load(path)
     {:ok, store} = start_granted_store(project, path, fixture)
