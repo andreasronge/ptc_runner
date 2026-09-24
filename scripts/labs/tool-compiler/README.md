@@ -66,5 +66,6 @@ The credential-free boundary check installs the same pinned upstream release,
 extracts inner HTML through the wrapper, and follows its extraction cursor:
 
 ```console
+node measurement-check.mjs
 node boundary-check.mjs
 ```
