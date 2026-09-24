@@ -518,11 +518,13 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
             trace_id: "foreign-inspection"
           )
 
-        send(parent, {:foreign_inspection_sink, sink})
+        send(parent, {:foreign_inspection_fixture_ready, sink})
         receive do: (:finish -> :ok)
       end)
 
-    assert_receive {:foreign_inspection_sink, foreign_inspection}, 10_000
+    assert_receive {:foreign_inspection_fixture_ready, foreign_inspection},
+                   10_000
+
     inspection_ref = Process.monitor(foreign_inspection.pid)
 
     {:ok, workflow} = WorkflowEnvironment.new([])
