@@ -447,7 +447,10 @@ execution prints and any provider-backed private activity that occurred. A
 failure can add detailed <code class="inline">execution-error</code> evidence. A raised capability
 callback additionally records its bounded exception class, message, and
 formatted stacktrace while the trace retains only the closed
-<code class="inline">provider_error / exception</code> category. Exception text and stacktrace paths can
+<code class="inline">provider_error / exception</code> category. Failed mission evaluations retain their
+bounded evaluator diagnostic and available source offset under the exact
+generated-source evaluation identity, even when the workflow handles the
+failure and returns normally. Exception text and stacktrace paths can
 contain sensitive data and are not reliably redactable; read the artifact only
 through an authorized private sink.</p><p>To debug compilation with the manifest bundle, use manifest mode:</p><pre><code class="console language-console">ptc repl -m ptc.json</code></pre><p><code class="inline">-l</code> dynamically evaluates setup code and does not accept component-only forms
 such as <code class="inline">ns</code> or <code class="inline">defn-</code>.</p><h2 id="use-workflow-repl-sessions">Use workflow REPL sessions</h2><p>Start a scratch session or attach the manifest's frozen workflow environment:</p><pre><code class="console language-console">ptc repl
@@ -482,7 +485,12 @@ directory capture through the fixed public profile:</p><pre><code class="console
 collections
 but they require a correlated inspection snapshot and private authority.
 <code class="inline">analysis/runs</code> defaults to a compact projection containing run ID, status,
-duration, LLM calls, evaluations, terminal reason, and completeness flags. Pass
+duration, LLM calls, evaluations, terminal reason, and completeness flags.
+<code class="inline">call_counts_complete</code> applies to <code class="inline">llm_calls</code> and the workflow and mission
+capability counts in the full view: <code class="inline">true</code> means terminal usage supplied run
+totals; <code class="inline">false</code> means the values count retained events and may be low after
+retention loss. <code class="inline">complete</code> only reports whether the run has a terminal event.
+Pass
 <code class="inline">{&quot;view&quot; &quot;full&quot;}</code> when selecting by the complete metadata record:</p><pre><code class="clojure language-clojure">(analysis/runs {&quot;status&quot; &quot;error&quot;})
 (analysis/runs {&quot;status&quot; &quot;error&quot; &quot;view&quot; &quot;full&quot;})</code></pre><p>When a project already declares its artifact root, reuse it instead of
 repeating resource paths:</p><pre><code class="console language-console">ptc repl --project ptc-project.json \
@@ -520,7 +528,20 @@ ptc transcript RUN_ID \
   --inspection tmp/inspection \
   --private-unattended \
   --private-output tmp/transcript/conversation.private.json \
-  --envelope tmp/transcript/command-envelope.json</code></pre><p>On success the command prints one JSON line containing <code class="inline">command</code>, the selected
+  --envelope tmp/transcript/command-envelope.json</code></pre><p>When the producer uses an explicitly named inspection file, pass that exact
+file back to the reader instead of renaming it to the run reference. Keep the
+trace, inspection, and transcript output in separate sibling directories:</p><pre><code class="console language-console">mkdir -p tmp/traces tmp/inspection tmp/transcript
+ptc run application.json \
+  --trace-dir tmp/traces \
+  --inspect tmp/inspection/compile.ptcins \
+  --envelope tmp/envelope.json
+ptc transcript RUN_ID \
+  --traces tmp/traces \
+  --inspection-file tmp/inspection/compile.ptcins \
+  --private-unattended \
+  --private-output tmp/transcript/conversation.private.json</code></pre><p>Read <code class="inline">RUN_ID</code> from the command envelope. Use exactly one inspection selector:
+<code class="inline">--inspection DIRECTORY</code> selects <code class="inline">DIRECTORY/RUN_ID.ptcins</code>, while
+<code class="inline">--inspection-file FILE.ptcins</code> opens only that explicit file.</p><p>On success the command prints one JSON line containing <code class="inline">command</code>, the selected
 run under <code class="inline">run_ref</code>, the absolute output <code class="inline">path</code>, and the number of published
 <code class="inline">turns</code>. The optional envelope receives the same result in the V4 command
 contract.
@@ -541,8 +562,9 @@ characters). Capture then opens only these exact candidates, without listing
 either directory:</p><pre><code class="text language-text">TRACE_DIRECTORY/RUN_ID.jsonl
 TRACE_DIRECTORY/RUN_ID.private.jsonl
 INSPECTION_DIRECTORY/RUN_ID.ptcins</code></pre><p>Exactly one of the two trace candidates must exist as a regular file; both
-present is an ambiguous selected source. The inspection candidate must exist as
-a regular file. Filenames are routing hints: embedded run and trace identities
+present is an ambiguous selected source. The inspection candidate, whether
+selected by directory or explicit path, must exist as a regular file. Filenames
+are routing hints: embedded run and trace identities
 remain authoritative, and unrelated directory members are not listed, opened,
 sized, decoded, or counted toward directory or aggregate source limits. The
 selected files still keep their individual source, record, retained-memory,

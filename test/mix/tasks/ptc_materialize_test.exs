@@ -1,7 +1,6 @@
 defmodule Mix.Tasks.Ptc.MaterializeTest do
-  # async: false — every case reenables and runs a Mix task, sharing the global Mix.TasksServer
-  # state (class D).
-  use ExUnit.Case, async: false
+  # Each case calls the task modules' run/1 directly and works in its own tmp_dir.
+  use ExUnit.Case, async: true
   @moduletag :operator
 
   @moduledoc """
@@ -50,8 +49,6 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
     output =
       capture_io(fn ->
-        Mix.Task.reenable("ptc.materialize")
-
         Materialize.run([
           manifest,
           "--workflow",
@@ -79,7 +76,6 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
     # compiled, hash-verified, and executed by a later one.
     run_output =
       capture_io(fn ->
-        Mix.Task.reenable("ptc")
         Ptc.run(["run", manifest, "--component-override-descriptor", descriptor])
       end)
 
@@ -95,8 +91,6 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
     out = Path.join(dir, "mission-candidate")
 
     capture_io(fn ->
-      Mix.Task.reenable("ptc.materialize")
-
       Materialize.run([
         manifest,
         "--target-mission",
@@ -140,8 +134,6 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
     assert_raise Mix.Error, ~r/candidate refused/, fn ->
       capture_io(fn ->
-        Mix.Task.reenable("ptc.materialize")
-
         Materialize.run([
           manifest,
           "--workflow",
@@ -182,8 +174,6 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
     output =
       capture_io(fn ->
-        Mix.Task.reenable("ptc.materialize")
-
         Materialize.run([
           manifest,
           "--workflow",
@@ -217,8 +207,6 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
     output =
       capture_io(fn ->
-        Mix.Task.reenable("ptc.materialize")
-
         Materialize.run([
           manifest,
           "--workflow",
@@ -244,8 +232,6 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
     assert_raise Mix.Error, ~r/result_pointer_not_a_string/, fn ->
       capture_io(fn ->
-        Mix.Task.reenable("ptc.materialize")
-
         Materialize.run([
           manifest,
           "--workflow",
@@ -276,8 +262,6 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
     assert_raise Mix.Error, ~r/candidate refused/, fn ->
       capture_io(fn ->
-        Mix.Task.reenable("ptc.materialize")
-
         Materialize.run([
           manifest,
           "--workflow",
@@ -310,8 +294,6 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
           {"array.json", "/value/0/src", "candidate-array"}
         ] do
       capture_io(fn ->
-        Mix.Task.reenable("ptc.materialize")
-
         Materialize.run([
           manifest,
           "--workflow",
@@ -338,8 +320,6 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
     for pointer <- ["/~2", "/~", "/value/01"] do
       assert_raise Mix.Error, ~r/invalid_result_pointer/, fn ->
         capture_io(fn ->
-          Mix.Task.reenable("ptc.materialize")
-
           Materialize.run([
             manifest,
             "--workflow",
@@ -366,8 +346,6 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
     output =
       capture_io(fn ->
-        Mix.Task.reenable("ptc.materialize")
-
         Materialize.run([
           manifest,
           "--workflow",
@@ -384,8 +362,6 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
     assert_raise Mix.Error, ~r/source_out_destination_exists/, fn ->
       capture_io(fn ->
-        Mix.Task.reenable("ptc.materialize")
-
         Materialize.run([
           manifest,
           "--workflow",
@@ -405,8 +381,6 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
     assert_raise Mix.Error, ~r/conflicting_materialize_mode/, fn ->
       capture_io(fn ->
-        Mix.Task.reenable("ptc.materialize")
-
         Materialize.run([
           manifest,
           "--workflow",
@@ -430,8 +404,6 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
     assert_raise Mix.Error, ~r/candidate_source_too_large/, fn ->
       capture_io(fn ->
-        Mix.Task.reenable("ptc.materialize")
-
         Materialize.run([
           manifest,
           "--workflow",
@@ -461,8 +433,6 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
     output =
       capture_io(fn ->
-        Mix.Task.reenable("ptc.repair")
-
         Repair.run([
           manifest,
           "--report",
@@ -536,8 +506,6 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
     assert_raise Mix.Error, ~r/1 of 2 host-owned validation cases failed/, fn ->
       capture_io(fn ->
-        Mix.Task.reenable("ptc.repair")
-
         Repair.run([
           manifest,
           "--report",
@@ -604,8 +572,6 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
     assert_raise Mix.Error, ~r/allow-live-validation/, fn ->
       capture_io(fn ->
-        Mix.Task.reenable("ptc.repair")
-
         Repair.run([
           manifest,
           "--report",
@@ -635,8 +601,6 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
     assert_raise Mix.Error, ~r/1 of 1 host-owned validation cases failed/, fn ->
       capture_io(fn ->
-        Mix.Task.reenable("ptc.repair")
-
         Repair.run([
           manifest,
           "--report",
@@ -668,8 +632,6 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
       File.write!(suite, Jason.encode!(%{"version" => 1, "cases" => bad_cases}))
 
       assert_raise Mix.Error, ~r/invalid_validation_suite/, fn ->
-        Mix.Task.reenable("ptc.repair")
-
         Repair.run([
           manifest,
           "--report",
@@ -698,7 +660,6 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
     assert_raise Mix.Error, ~r/captured base hash does not match/, fn ->
       capture_io(fn ->
-        Mix.Task.reenable("ptc.repair")
         Repair.run([manifest, "--report", report, "--out", out])
       end)
     end

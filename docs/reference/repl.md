@@ -573,8 +573,9 @@ adding smart diagnosis APIs:
 (analysis/counters {"run_id" run-id})
 ```
 
-An execution error carries the workflow `evaluation_id`. Follow its exact
-children without comparing collection-local sequence numbers:
+An execution error carries its workflow or mission `evaluation_id`. A workflow
+error can be followed to its exact children without comparing collection-local
+sequence numbers:
 
 ```clojure
 (def error (first (get (analysis/read run-id {"collection" "execution_errors"})
@@ -589,6 +590,12 @@ children without comparing collection-local sequence numbers:
 `parent_evaluation_id` proves that the workflow evaluation launched the
 subordinate evaluation. It does not claim that every child caused the eventual
 workflow error.
+
+A mission evaluation error instead provides `evaluation_failure` and
+`failed_generated_source` relationships. They associate the retained diagnostic
+with the canonical failed activity and the exact generated program; follow
+their supplied collection and filters as described below. This diagnostic is
+retained on the final agent turn and does not depend on a later model request.
 
 When the retained evaluator ledger proves that a successful `kernel-eval`
 result reached the workflow boundary unchanged, the error also provides typed

@@ -15,6 +15,26 @@ defmodule PtcRunner.TestSupport.PreludeSearchLLMAdapter do
   def ensure_ready, do: :ok
 
   def call(_target, _invocation) do
+    if Application.get_env(:ptc_runner, :prelude_search_malformed_program, false) do
+      {:ok,
+       %{
+         content: "",
+         finish_reason: "tool_calls",
+         tool_calls: [
+           %{
+             id: "malformed",
+             name: "run_ptc_lisp",
+             args: %{"program" => "(+ 1"}
+           }
+         ],
+         tokens: %{input: 10, output: 10, total_cost: %{currency: "USD", microunits: 1}}
+       }}
+    else
+      call_from_counter()
+    end
+  end
+
+  defp call_from_counter do
     counter = Application.fetch_env!(:ptc_runner, :prelude_search_test_counter)
     index = Agent.get_and_update(counter, &{&1, &1 + 1})
 

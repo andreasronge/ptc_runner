@@ -36,7 +36,11 @@ defmodule PtcRunner.TestSupport.GuideExamples do
           scratch: String.t() | nil
         }
 
-  defmacro test_registered_examples(registry_path) do
+  # `credentials: :none` defines the examples that need no credential and
+  # `credentials: :required` the ones that do. The second set loads a
+  # credential into the OS environment, so its module must be `async: false`.
+  defmacro test_registered_examples(registry_path, credentials: credentials)
+           when credentials in [:none, :required] do
     root = File.cwd!()
 
     examples =
@@ -54,7 +58,9 @@ defmodule PtcRunner.TestSupport.GuideExamples do
       raise ArgumentError, "ptc-guide-e2e ids must be unique in #{registry_path}"
     end
 
-    build_tests(examples, root)
+    examples
+    |> Enum.filter(&(is_nil(&1.requires) == (credentials == :none)))
+    |> build_tests(root)
   end
 
   @doc false

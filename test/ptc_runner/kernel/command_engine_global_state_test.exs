@@ -499,7 +499,7 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
       write_host_config(
         directory,
         "connect-missing-credential",
-        stdio_credential_host(environment_name)
+        short_acquisition_stdio_host(environment_name)
       )
 
     application =
@@ -552,7 +552,7 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
       write_host_config(
         directory,
         "run-missing-named-env",
-        stdio_credential_host(environment_name)
+        short_acquisition_stdio_host(environment_name)
       )
 
     application = doctor_application(directory, "run-missing-named-env", mission: ["workspace"])
@@ -573,7 +573,7 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
     without_file = StandaloneCLI.execute(["run", application, "--host-config", host_path])
 
     file_credential_host =
-      stdio_credential_host(environment_name)
+      short_acquisition_stdio_host(environment_name)
       |> put_in(["credentials", "key"], %{"file" => "missing-token"})
 
     file_credential_host_path =
@@ -590,7 +590,7 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
       ])
 
     mixed_credential_host =
-      stdio_credential_host(environment_name)
+      short_acquisition_stdio_host(environment_name)
       |> put_in(["credentials", "file_key"], %{"file" => "missing-token"})
       |> put_in(["install", "workspace", "transport", "env", "FILE_TOKEN"], %{
         "binding" => "file_key"
@@ -635,7 +635,7 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
     end)
 
     host_path =
-      write_host_config(directory, "mcp-env-file", stdio_credential_host(environment_name))
+      write_host_config(directory, "mcp-env-file", short_acquisition_stdio_host(environment_name))
 
     application = doctor_application(directory, "mcp-env-file", mission: ["workspace"])
     env_file = Path.join(directory, "mcp.env")
@@ -1280,6 +1280,17 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
 
     refute_received {:host_llm_request, _, _}
     assert_schema_valid(doctor.envelope)
+  end
+
+  # The stdio fixture runs `sh`, which never answers the MCP handshake. A case
+  # that reaches acquisition would otherwise spend the default 5 s acquisition
+  # ceiling; none of them asserts on that budget.
+  defp short_acquisition_stdio_host(environment_name) do
+    put_in(
+      stdio_credential_host(environment_name),
+      ["install", "workspace", "ceilings"],
+      %{"timeout_ms" => 250}
+    )
   end
 
   defp restore_application_env(previous) do
