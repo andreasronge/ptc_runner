@@ -21,6 +21,8 @@ defmodule PtcRunner.CLILogger do
   end
 
   defp install_publication_handler(output) do
+    {:ok, _started} = Application.ensure_all_started(:telemetry)
+
     case :telemetry.attach(
            @publication_handler,
            @publication_event,
