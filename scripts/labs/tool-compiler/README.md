@@ -45,9 +45,12 @@ wrong.
 ## Arm A
 
 `passthrough/web.clj` wraps each `ptc-web` tool and nothing else: no
-orchestration, no selectors, no cursor handling. The model must open, capture,
-inspect, guess selectors, follow cursors, extract, and close. The mission grant
-in `passthrough/ptc.json` exposes exactly those six functions.
+orchestration, selectors, or cursor handling. Its extraction wrapper preserves
+the upstream field options (`text`, `html`, attributes, multiple values, and
+required fields), caller-selected limits, and pagination cursor. The model must
+open, capture, inspect, choose extraction options, follow cursors, extract, and
+close. The mission grant in `passthrough/ptc.json` exposes exactly those six
+functions.
 
 The result contract requires `{"records": [{"text", "author"}]}`, so an answer
 in the wrong shape is a recorded failure rather than a judgement call.
@@ -65,3 +68,10 @@ nothing reaches the public internet.
 
 The model is `openrouter:deepseek/deepseek-v4-flash`, pinned in `ptc-host.json`.
 Runs cost real tokens.
+
+The credential-free boundary check installs the same pinned upstream release,
+extracts inner HTML through the wrapper, and follows its extraction cursor:
+
+```console
+node boundary-check.mjs
+```
