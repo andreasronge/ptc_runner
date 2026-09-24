@@ -310,6 +310,26 @@ defmodule PtcRunner.Kernel.CommandParser do
   end
 
   defp validate_command(
+         :catalog,
+         [provider],
+         %{host_config: _host_config} = options,
+         ordered,
+         frontend_options,
+         frontend
+       ) do
+    if allowed?(:catalog, options, frontend) and valid_nonempty_string?(provider),
+      do:
+        arguments(:catalog,
+          application: provider,
+          options: options,
+          ordered_options: ordered,
+          frontend_options: frontend_options,
+          frontend: frontend
+        ),
+      else: reject(:catalog, :invalid_arguments)
+  end
+
+  defp validate_command(
          :transcript,
          [run_id],
          %{

@@ -50,6 +50,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
         "ptc run MANIFEST.json|PROJECT.json [OPTIONS]",
         "ptc doctor [MANIFEST.json|PROJECT.json] [--host-config HOST.json] [--connect]",
         "ptc models PROJECT.json | --host-config HOST.json",
+        "ptc catalog PROVIDER --host-config HOST.json",
         "ptc init DIRECTORY [--example NAME]",
         "ptc docs [PAGE] | --search TERM",
         "ptc help [COMMAND]",
@@ -224,6 +225,20 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           syntax: ["--host-config HOST.json"],
           description: "trusted provider installation document"
         },
+        @envelope_option,
+        @help_option
+      ]
+    },
+    catalog: %{
+      usage: ["ptc catalog PROVIDER --host-config HOST.json"],
+      options: [
+        %{
+          key: :host_config,
+          type: :string,
+          syntax: ["--host-config HOST.json"],
+          description: "trusted provider installation document"
+        },
+        @env_file_option,
         @envelope_option,
         @help_option
       ]
@@ -523,6 +538,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
     :run,
     :doctor,
     :models,
+    :catalog,
     :transcript,
     :repl,
     :viewer,
@@ -542,6 +558,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           | :run
           | :doctor
           | :models
+          | :catalog
           | :transcript
           | :repl
           | :viewer

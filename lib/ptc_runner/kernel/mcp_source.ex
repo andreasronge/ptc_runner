@@ -273,7 +273,7 @@ defmodule PtcRunner.Kernel.MCPSource do
             {:ok,
              %{
                credential_names: [],
-               capability_effects: selected_effects(installed, selected),
+               capability_effects: selected_effects(installed, selected, context.provider),
                preflight: fn ->
                  {:ok, fn %{} -> build_selected(installed, selected, context) end}
                end
@@ -526,7 +526,14 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   defp build_selected(installed, selected, context) do
     with {:ok, transport} <- acquire_transport(installed.transport, context, selected) do
-      case discover(transport, installed, selected, context.provider) do
+      discovery =
+        if selected.catalog? do
+          catalog_build(transport, installed, selected, context.provider)
+        else
+          discover(transport, installed, selected, context.provider)
+        end
+
+      case discovery do
         {:ok, capabilities, snapshot} ->
           {:ok,
            %{
@@ -546,7 +553,35 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp selected_effects(installed, selected) do
+  defp catalog_build(transport, installed, selected, provider) do
+    with {:ok, _server, discovered, pagination} <- discover_catalog(transport, installed, true),
+         {:ok, catalog} <- catalog_projection(provider, discovered, pagination),
+         {:ok, encoded} <- DeterministicJSON.encode(catalog),
+         true <- byte_size(encoded) <= selected.max_result_bytes,
+         {:ok, capability} <-
+           Capability.new(
+             name: provider <> ".catalog",
+             description: "Return the authorized MCP tool catalog for " <> provider,
+             model_visible: false,
+             input_schema: %{
+               "type" => "object",
+               "properties" => %{},
+               "additionalProperties" => false
+             },
+             effect: :read,
+             callback: fn %{}, _context -> {:ok, catalog} end
+           ) do
+      {:ok, [capability], catalog_snapshot(transport, catalog)}
+    else
+      false -> {:error, :mcp_response_exceeded}
+      _reason -> {:error, :mcp_invalid_catalog}
+    end
+  end
+
+  defp selected_effects(_installed, %{catalog?: true}, provider),
+    do: %{(provider <> ".catalog") => :read}
+
+  defp selected_effects(installed, selected, _provider) do
     installed.tools
     |> Enum.filter(fn {_upstream, mapping} -> MapSet.member?(selected.allow, mapping.as) end)
     |> Map.new(fn {_upstream, mapping} -> {mapping.as, mapping.effect} end)
@@ -856,10 +891,15 @@ defmodule PtcRunner.Kernel.MCPSource do
   end
 
   defp selection(installed, selection, context) do
-    with true <- context.destination == :mission,
-         true <- is_map(selection) and not is_struct(selection),
+    with true <- is_map(selection) and not is_struct(selection),
+         catalog? <- Map.get(selection, "catalog", false),
          true <-
-           Map.keys(selection) -- ~w(allow model_visible timeout_ms max_result_bytes) == [],
+           (context.destination == :mission and catalog? == false) or
+             (context.destination == :workflow and catalog? == true),
+         true <-
+           Map.keys(selection) -- ~w(allow catalog model_visible timeout_ms max_result_bytes) ==
+             [],
+         true <- is_boolean(catalog?),
          true <- read_only_installation?(installed) or Map.has_key?(selection, "allow"),
          public_names =
            Map.new(installed.tools, fn {_upstream, mapping} -> {mapping.as, mapping} end),
@@ -896,7 +936,8 @@ defmodule PtcRunner.Kernel.MCPSource do
          allow: MapSet.new(allow),
          model_visible: MapSet.new(model_visible),
          timeout_ms: timeout_ms,
-         max_result_bytes: max_result_bytes
+         max_result_bytes: max_result_bytes,
+         catalog?: catalog?
        }}
     else
       _reason -> {:error, :invalid_mcp_selection}
@@ -905,6 +946,9 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   defp destination_timeout(%{destination: :mission, limits: limits}),
     do: limits.evaluation_timeout_ms
+
+  defp destination_timeout(%{destination: :workflow, limits: limits}),
+    do: limits.workflow_timeout_ms
 
   defp read_only_installation?(installed),
     do: Enum.all?(installed.tools, fn {_upstream, mapping} -> mapping.effect == :read end)
@@ -919,7 +963,7 @@ defmodule PtcRunner.Kernel.MCPSource do
            ),
          {:ok, server} <- MCPProtocol.discover_result(discovery, @protocol),
          true <- Map.has_key?(server.capabilities, "tools"),
-         {:ok, discovered} <- list_tools(transport, installed),
+         {:ok, discovered, _pagination} <- list_tools(transport, installed),
          {:ok, capabilities, tools} <-
            capabilities(transport, installed, selected, discovered),
          {:ok, content_snapshot_hash} <-
@@ -943,7 +987,20 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp list_tools(transport, installed) do
+  defp discover_catalog(transport, installed, authoring) do
+    with {:ok, discovery} <- rpc(transport, "server/discover", %{}, @max_discovery_bytes),
+         {:ok, server} <- MCPProtocol.discover_result(discovery, @protocol),
+         true <- Map.has_key?(server.capabilities, "tools"),
+         {:ok, discovered, pagination} <- list_tools(transport, installed, authoring) do
+      {:ok, server, discovered, pagination}
+    else
+      {:error, reason, _provenance} -> {:error, reason}
+      {:error, _reason} = error -> error
+      _reason -> {:error, :mcp_protocol_error}
+    end
+  end
+
+  defp list_tools(transport, installed, authoring \\ false) do
     state = %{
       tools: %{},
       names: %{},
@@ -953,33 +1010,137 @@ defmodule PtcRunner.Kernel.MCPSource do
       cache_scope: nil
     }
 
-    list_tools(transport, installed, nil, state, 0)
+    list_tools(transport, installed, nil, state, 0, authoring)
   end
 
-  defp list_tools(_request, installed, _cursor, state, pages)
+  defp list_tools(_request, installed, _cursor, state, pages, _authoring)
        when pages >= installed.max_pages or state.received_tools > installed.max_catalog_tools,
        do: {:error, :mcp_catalog_exceeded}
 
-  defp list_tools(transport, installed, cursor, state, pages) do
+  defp list_tools(transport, installed, cursor, state, pages, authoring) do
     params = if is_nil(cursor), do: %{}, else: %{"cursor" => cursor}
 
     with {:ok, result} <- rpc(transport, "tools/list", params, @max_discovery_bytes) do
-      case MCPProtocol.catalog_page(
-             result,
-             state,
-             installed.max_catalog_tools,
-             @max_discovery_bytes
-           ) do
+      page_result =
+        if authoring do
+          MCPProtocol.authoring_catalog_page(
+            result,
+            state,
+            installed.max_catalog_tools,
+            @max_discovery_bytes
+          )
+        else
+          MCPProtocol.catalog_page(
+            result,
+            state,
+            installed.max_catalog_tools,
+            @max_discovery_bytes
+          )
+        end
+
+      case page_result do
         {:done, tools} ->
-          {:ok, tools}
+          {:ok, tools, %{"pages" => pages + 1, "truncated" => false}}
 
         {:continue, next, state} ->
-          list_tools(transport, installed, next, state, pages + 1)
+          list_tools(transport, installed, next, state, pages + 1, authoring)
 
         {:error, _reason} = error ->
           error
       end
     end
+  end
+
+  defp catalog_projection(provider, discovered, pagination) do
+    discovered
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.reduce_while({:ok, []}, fn {name, tool}, {:ok, tools} ->
+      case catalog_tool(name, tool) do
+        {:ok, projected} -> {:cont, {:ok, [projected | tools]}}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, tools} ->
+        tools = Enum.reverse(tools)
+
+        {:ok,
+         %{
+           "provider" => provider,
+           "tools" => tools,
+           "pagination" => pagination,
+           "tool_count" => length(tools)
+         }}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp catalog_tool(name, tool) do
+    with {:ok, contract} <- catalog_contract(tool) do
+      {:ok,
+       %{"name" => name, "input_schema" => contract.input_schema}
+       |> maybe_put_catalog("description", contract.description)
+       |> maybe_put_catalog("output_schema", contract.output_schema)}
+    end
+  end
+
+  defp maybe_put_catalog(map, _key, nil), do: map
+  defp maybe_put_catalog(map, key, value), do: Map.put(map, key, value)
+
+  defp catalog_contract(tool) when is_map(tool) and not is_struct(tool) do
+    with description <- Map.get(tool, "description"),
+         true <-
+           is_nil(description) or (is_binary(description) and byte_size(description) <= 4_096),
+         input when is_map(input) and not is_struct(input) <- tool["inputSchema"],
+         {:ok, output} <- catalog_output_schema(tool) do
+      {:ok, %{description: description, input_schema: input, output_schema: output}}
+    else
+      _reason -> {:error, :mcp_invalid_tool_schema}
+    end
+  end
+
+  defp catalog_contract(_tool), do: {:error, :mcp_invalid_tool_schema}
+
+  defp catalog_output_schema(%{"outputSchema" => output})
+       when is_map(output) and not is_struct(output),
+       do: {:ok, output}
+
+  defp catalog_output_schema(tool),
+    do:
+      if(Map.has_key?(tool, "outputSchema"),
+        do: {:error, :mcp_invalid_tool_schema},
+        else: {:ok, nil}
+      )
+
+  defp catalog_snapshot(%{type: type}, catalog) do
+    %{
+      "protocol" => "mcp-#{@protocol}",
+      "transport" => Atom.to_string(type),
+      "server_info_hash" => nil,
+      "tools" =>
+        Enum.map(catalog["tools"], fn tool ->
+          %{
+            "name" => tool["name"],
+            "description_hash" => optional_text_hash(tool["description"]),
+            "input_schema_hash" => schema_hash_value(tool["input_schema"]),
+            "output_schema_hash" => optional_schema_hash_value(tool["output_schema"])
+          }
+        end)
+    }
+  end
+
+  defp schema_hash_value(schema) do
+    {:ok, hash} = schema_hash(schema)
+    hash
+  end
+
+  defp optional_schema_hash_value(nil), do: nil
+
+  defp optional_schema_hash_value(schema) do
+    {:ok, hash} = optional_schema_hash(schema)
+    hash
   end
 
   defp capabilities(transport, installed, selected, discovered) do

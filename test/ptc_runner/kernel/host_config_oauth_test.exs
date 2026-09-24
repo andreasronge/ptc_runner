@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.HostConfigOAuthTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
@@ -38,6 +39,18 @@ defmodule PtcRunner.Kernel.HostConfigOAuthTest do
                [%{"scheme" => "bearer", "binding" => "token"}]
              )
              |> HostConfig.decode("/tmp")
+  end
+
+  @tag :tmp_dir
+  test "catalog command refuses OAuth before provider activity", %{tmp_dir: dir} do
+    path = Path.join(dir, "ptc-host.json")
+    File.write!(path, Jason.encode!(host_config()))
+
+    assert {:error, outcome} =
+             CommandEngine.dispatch(["catalog", "github", "--host-config", path])
+
+    assert outcome.envelope["error"]["code"] == "authorization_required"
+    assert outcome.envelope["error"]["provider_activity"] == false
   end
 
   test "client secret bindings are validated but not added to static auth" do
