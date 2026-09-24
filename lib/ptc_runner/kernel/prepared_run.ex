@@ -18,7 +18,6 @@ defmodule PtcRunner.Kernel.PreparedRun do
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.ProviderPlan
   alias PtcRunner.Kernel.RunRequest
-  alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.Kernel.ServingRequest
   alias PtcRunner.Lisp.Prelude
 
@@ -461,8 +460,8 @@ defmodule PtcRunner.Kernel.PreparedRun do
            ),
          true <- validation_state == expected_state,
          {:ok, ^config} <-
-           SelectionRules.normalize(
-             descriptor.selection_rules,
+           ProviderDescriptor.explain_selection(
+             descriptor,
              original_config,
              request.package.limits
            ),

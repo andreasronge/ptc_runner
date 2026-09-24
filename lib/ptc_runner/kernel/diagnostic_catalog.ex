@@ -94,7 +94,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:application, :limit_configuration_invalid, 3, false,
      "normal_event_bytes effective limit 4000000 is below the required 12003450 bytes for event_payload_bytes 4000000; raise limits.normal_event_bytes, and its installed host ceiling if it is lower, or lower limits.event_payload_bytes"},
     {:application, :limit_capacity_invalid, 3, false,
-     "event_payload_bytes effective limit 8662 is below the required 12000 bytes for this application's resolved terminal usage; raise limits.event_payload_bytes, and its installed host ceiling if it is lower, or declare fewer capabilities or missions"},
+     "event_payload_bytes effective limit 9092 is below the required 12000 bytes for this application's resolved terminal usage; raise limits.event_payload_bytes, and its installed host ceiling if it is lower, or declare fewer capabilities or missions"},
     {:application, :declared_read_effect_invalid, 3, false,
      "export `example/read` declares effect read but resolves to write; change the declaration or use only read capabilities"},
     {:application, :required_property_missing, 3, false,

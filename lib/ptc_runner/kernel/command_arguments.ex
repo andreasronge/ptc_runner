@@ -30,6 +30,7 @@ defmodule PtcRunner.Kernel.CommandArguments do
           | :run
           | :doctor
           | :models
+          | :catalog
           | :transcript
           | :repl
           | :viewer

@@ -310,11 +310,30 @@ defmodule PtcRunner.Kernel.CommandParser do
   end
 
   defp validate_command(
+         :catalog,
+         [provider],
+         %{host_config: _host_config} = options,
+         ordered,
+         frontend_options,
+         frontend
+       ) do
+    if allowed?(:catalog, options, frontend) and valid_nonempty_string?(provider),
+      do:
+        arguments(:catalog,
+          application: provider,
+          options: options,
+          ordered_options: ordered,
+          frontend_options: frontend_options,
+          frontend: frontend
+        ),
+      else: reject(:catalog, :invalid_arguments)
+  end
+
+  defp validate_command(
          :transcript,
          [run_id],
          %{
            traces: traces,
-           inspection: inspection,
            private_unattended: true,
            private_output: private_output
          } = options,
@@ -323,7 +342,10 @@ defmodule PtcRunner.Kernel.CommandParser do
          frontend
        )
        when map_size(options) == 4 do
-    if Enum.all?([run_id, traces, inspection, private_output], &valid_nonempty_string?/1) do
+    inspection = Map.get(options, :inspection) || Map.get(options, :inspection_file)
+
+    if Enum.all?([run_id, traces, inspection, private_output], &valid_nonempty_string?/1) and
+         Map.has_key?(options, :inspection) != Map.has_key?(options, :inspection_file) do
       arguments(:transcript,
         application: run_id,
         options: options,

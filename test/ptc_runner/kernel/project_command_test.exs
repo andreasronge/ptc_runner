@@ -1,5 +1,6 @@
 defmodule PtcRunner.Kernel.ProjectCommandTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandEntry

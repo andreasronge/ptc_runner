@@ -5,12 +5,12 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  schedule:
-    - cron: "23 4 * * 0"
   workflow_dispatch:
 
 permissions:
   contents: read
+  # The settled-tree probe below lists this workflow's earlier runs.
+  actions: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -28,6 +28,7 @@ jobs:
       java: ${{ steps.scopes.outputs.java }}
       viewer: ${{ steps.scopes.outputs.viewer }}
       docs: ${{ steps.scopes.outputs.docs }}
+      release: ${{ steps.scopes.outputs.release }}
 
     steps:
       - name: Checkout repository history
@@ -35,16 +36,77 @@ jobs:
         with:
           fetch-depth: 0
 
+      # A pull_request run checks out refs/pull/N/merge -- the pull request
+      # merged into main as it stood then -- not the pull request head. A squash
+      # merge onto that same parent produces a commit carrying exactly that
+      # merge's tree, so every gate below would recompute a settled answer.
+      # Recompute the merge here rather than trusting `base.sha`, which records
+      # the base at the last synchronise, not the commit the squash landed on.
+      # A push with no pull request, or a base that moved, still runs in full.
+      - name: Detect a tree a green pull-request run already proved
+        id: settled
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Every probe below tolerates its own failure: an unanswered API call
+          # or an unfetchable head leaves `settled` false and runs everything.
+          settled=false
+          pr="$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+                  --jq '.[0].number // empty' 2>/dev/null || true)"
+          head=""
+          if [ -n "$pr" ]; then
+            head="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr" \
+                      --jq .head.sha 2>/dev/null || true)"
+          fi
+
+          if [ -n "$head" ]; then
+            git fetch --no-tags --depth=50 origin \
+              "refs/pull/$pr/head:refs/ptc/settled-head" 2>/dev/null || true
+
+            # `git merge-tree` exits non-zero on a conflicting merge, which is
+            # not a tree CI can have tested.
+            merged="$(git merge-tree --write-tree \
+                        "$GITHUB_SHA^" refs/ptc/settled-head 2>/dev/null || true)"
+            # The green run tested the head merged onto main as it stood when
+            # the run started, so it proves this push only if the parent was
+            # already main's tip then: a parent committed after the run began
+            # is a base that moved, and the merge onto it was never tested.
+            proven_at="$(gh api \
+              "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?head_sha=$head&status=completed&conclusion=success&per_page=1" \
+              --jq '.workflow_runs[0].run_started_at // empty' 2>/dev/null || true)"
+            parent_at="$(git show -s --format=%cI "$GITHUB_SHA^" 2>/dev/null || true)"
+
+            if [ -n "$merged" ] &&
+               [ "$merged" = "$(git rev-parse "$GITHUB_SHA^{tree}")" ] &&
+               [ -n "$proven_at" ] && [ -n "$parent_at" ] &&
+               [ "$(date -u -d "$parent_at" +%s)" -lt "$(date -u -d "$proven_at" +%s)" ]; then
+              settled=true
+            fi
+          fi
+
+          echo "settled=$settled" >> "$GITHUB_OUTPUT"
+          echo "settled tree: $settled"
+
       - name: Classify changed paths
         id: scopes
         env:
           BEFORE_SHA: ${{ github.event.before }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_NAME: ${{ github.event_name }}
+          SETTLED: ${{ steps.settled.outputs.settled }}
         run: |
+          # An empty path list selects every scope through the classifier's
+          # fail-safe; inverting that output selects nothing.
+          if [ "$SETTLED" = "true" ]; then
+            scripts/ci/classify-changes.sh /dev/null \
+              | sed 's/=true/=false/' | tee -a "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           paths_file="$(mktemp)"
 
-          if [ "$EVENT_NAME" = "schedule" ] || [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             printf '%s\n' '.github/workflows/test.yml' > "$paths_file"
           else
             base_sha="$BEFORE_SHA"
@@ -67,15 +129,16 @@ jobs:
 
           scripts/ci/classify-changes.sh "$paths_file" | tee -a "$GITHUB_OUTPUT"
 
+  # One Linux OS here; the four-OS matrix and the release-package assembly run
+  # on Nightly. The macOS pair cost more than any other job in this workflow
+  # and 76% of their firings came from the `mix.lock` fan-out, not from a
+  # launcher change. The packaging contract and process containment still gate
+  # every pull request through this job.
   mcp-stdio-launcher:
     needs: changes
     if: needs.changes.outputs.launcher == 'true'
-    runs-on: ${{ matrix.os }}
-    name: MCP stdio launcher companion (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-22.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
+    runs-on: ubuntu-22.04
+    name: MCP stdio launcher companion
     env:
       MIX_ENV: test
       HEX_SPONSOR: false
@@ -93,53 +156,6 @@ jobs:
 
       - name: Verify launcher package, process containment, and precompiled fallback
         run: scripts/ci/launcher.sh "$RUNNER_TEMP/launcher-artifacts"
-
-      - name: Retain verified launcher artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: launcher-${{ runner.os }}-${{ runner.arch }}
-          path: ${{ runner.temp }}/launcher-artifacts/*
-          if-no-files-found: error
-
-  mcp-stdio-launcher-package:
-    needs: [changes, mcp-stdio-launcher]
-    if: needs.changes.outputs.launcher == 'true' && needs.mcp-stdio-launcher.result == 'success'
-    runs-on: ubuntu-latest
-    name: MCP stdio launcher release package
-    env:
-      MIX_ENV: prod
-      HEX_SPONSOR: false
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
-      - name: Setup launcher packaging environment
-        uses: ./.github/actions/setup-elixir
-        with:
-          project-directory: ptc_runner_launcher
-          cache-plt: 'false'
-          install-babashka: 'false'
-
-      - name: Collect verified launcher artifacts
-        uses: actions/download-artifact@v7
-        with:
-          pattern: launcher-*
-          path: ${{ runner.temp }}/launcher-artifacts
-          merge-multiple: true
-
-      - name: Assemble checksums and verify the release package
-        working-directory: ptc_runner_launcher
-        run: bash scripts/build_release_package.sh "$RUNNER_TEMP/launcher-artifacts"
-
-      - name: Retain verified release package
-        uses: actions/upload-artifact@v6
-        with:
-          name: launcher-release-package
-          path: |
-            ${{ runner.temp }}/launcher-artifacts/checksum.exs
-            ${{ runner.temp }}/launcher-artifacts/ptc_runner_launcher-*.tar
-          if-no-files-found: error
 
   mcp-http-interop:
     needs: changes
@@ -285,9 +301,34 @@ jobs:
         with:
           cache-plt: 'false'
 
+      # `scripts/ci/gateway.sh` compiles ptc_gateway, which carries ptc_runner
+      # as a path dependency. The setup action caches only the project
+      # directory it is given, so without this the nested project cold-compiles
+      # the whole library on every run -- 70 s of the 94 s the gateway gate
+      # spends. Both lockfiles are in the key, so a restored build cannot drift
+      # past its dependencies.
+      - name: Cache the gateway build
+        uses: actions/cache@v5
+        with:
+          path: |
+            ptc_gateway/deps
+            ptc_gateway/_build
+            ptc_gateway/test/support/mcp_conformance/node_modules
+          key: ${{ runner.os }}-${{ runner.arch }}-gateway-envtest-${{ hashFiles('mix.lock', 'ptc_gateway/mix.lock', 'ptc_gateway/test/support/mcp_conformance/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-gateway-envtest-
+
       - name: Run static analysis and generated-artifact checks
         run: scripts/ci/core-static.sh
 
+      - name: Run gateway validation
+        run: scripts/ci/gateway.sh
+
+  # Measured on CI: the PLT cache restores in 0.2 s, then 94 s goes on removing
+  # the 465 project modules baked into the cached PLT and adding this commit's
+  # 479, and 27 s on the analysis itself. Caching only the core PLT and
+  # rebuilding `project.plt` each run may be cheaper, but the rebuild has not
+  # been measured, so the change is deliberately not made here.
   core-dialyzer:
     needs: changes
     if: needs.changes.outputs.core == 'true'
@@ -312,7 +353,16 @@ jobs:
 
   core-release:
     needs: changes
-    if: needs.changes.outputs.core == 'true'
+    # Unconditional on a push to main and on a manual run; on a pull request
+    # only when a packaging input moved, or when the author labels the pull
+    # request `release`. This job builds two production trees from cold and is
+    # the second most expensive in the workflow, and a pure `lib/` change
+    # cannot alter what it verifies without `core-test` catching it first.
+    if: >-
+      needs.changes.outputs.core == 'true' &&
+      (github.event_name != 'pull_request' ||
+       needs.changes.outputs.release == 'true' ||
+       contains(github.event.pull_request.labels.*.name, 'release'))
     runs-on: ubuntu-latest
     name: Core release verification
     timeout-minutes: 20
@@ -330,48 +380,23 @@ jobs:
           cache-plt: 'false'
           install-babashka: 'false'
 
+      # The setup action's cache key carries MIX_ENV and this job runs as
+      # `test`, so `_build/prod` is cold every run and the standalone release
+      # recompiles every dependency. The package gate's own prod build happens
+      # inside the extracted tarball under $TMPDIR and stays cold on purpose --
+      # that build is the thing under test.
+      - name: Cache the production build
+        uses: actions/cache@v5
+        with:
+          path: _build/prod
+          key: ${{ runner.os }}-${{ runner.arch }}-mix-.-envprod-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-mix-.-envprod-
+
       # core-release.sh skips the interactive PTY REPL; that check lives on
       # Nightly because it needs a real terminal and timed keystrokes.
       - name: Verify release packages
         run: scripts/ci/core-release.sh
-
-  ex-dna-candidate:
-    needs: changes
-    if: needs.changes.outputs.core == 'true'
-    runs-on: ubuntu-latest
-    name: ExDNA candidate compatibility
-    env:
-      MIX_ENV: test
-      HEX_SPONSOR: false
-
-    steps:
-      - name: Checkout PtcRunner
-        uses: actions/checkout@v6
-
-      - name: Checkout pinned ExDNA candidate
-        uses: actions/checkout@v6
-        with:
-          repository: andreasronge/ex_dna
-          ref: 8fe513647329bff792a3a3d2d20c3810f9e30269
-          path: .candidate/ex_dna
-
-      - name: Setup Elixir environment
-        uses: ./.github/actions/setup-elixir
-        with:
-          cache-plt: 'false'
-          install-babashka: 'false'
-
-      - name: Verify cold and warm duplication gates
-        env:
-          PTC_EX_DNA_PATH: ${{ github.workspace }}/.candidate/ex_dna
-        run: |
-          test "$(git -C "$PTC_EX_DNA_PATH" rev-parse HEAD)" = \
-            "8fe513647329bff792a3a3d2d20c3810f9e30269"
-          mix deps.compile ex_dna --force
-          scripts/duplication_gate.sh check
-          sha256sum .ex_dna_cache .ex_dna_cache.fingerprints > "$RUNNER_TEMP/ex-dna-cache.before"
-          scripts/duplication_gate.sh check
-          sha256sum --check "$RUNNER_TEMP/ex-dna-cache.before"
 
   java-interop-conformance:
     needs: changes
@@ -394,6 +419,8 @@ jobs:
 
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
+        with:
+          cache-plt: 'false'
 
       - name: Cache pinned JVM Clojure
         uses: actions/cache@v5
@@ -471,7 +498,6 @@ jobs:
       - viewer
       - docs
       - mcp-stdio-launcher
-      - mcp-stdio-launcher-package
       - mcp-http-interop
       - mcp-filesystem-e2e
       - java-interop-conformance

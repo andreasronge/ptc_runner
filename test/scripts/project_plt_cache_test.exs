@@ -1,5 +1,6 @@
 defmodule PtcRunner.Scripts.ProjectPltCacheTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   @moduletag :nightly
   @script Path.expand("../../scripts/project-plt-cache.py", __DIR__)
@@ -49,12 +50,47 @@ defmodule PtcRunner.Scripts.ProjectPltCacheTest do
     File.rm!(plt)
     assert {_, 0} = cache(root, "restore")
     assert File.read!(plt) == original
+  end
+
+  test "a mix.exs change still restores; Dialyxir reconciles the module set", %{root: root} do
+    plt = Path.join(root, "priv/plts/project.plt")
+    File.mkdir_p!(Path.dirname(plt))
+    original = plt_binary(:original)
+    File.write!(plt, original)
+    assert {_, 0} = cache(root, "publish")
+    File.rm!(plt)
+
+    File.write!(Path.join(root, "mix.exs"), "new docs groups and version")
+    assert {output, 0} = cache(root, "restore")
+    assert output =~ "restored (exact)"
+    assert File.read!(plt) == original
 
     File.rm!(plt)
-    File.write!(Path.join(root, "mix.exs"), "different PLT configuration")
+    File.write!(Path.join(root, "mix.exs"), "new plt_add_apps")
+    File.write!(Path.join(root, "mix.lock"), "new dependencies")
     assert {output, 0} = cache(root, "restore")
-    assert output =~ "miss"
-    refute File.exists?(plt)
+    assert output =~ "compatible"
+    assert File.read!(plt) == original
+  end
+
+  test "publication keeps only the newest snapshots", %{root: root} do
+    plt = Path.join(root, "priv/plts/project.plt")
+    File.mkdir_p!(Path.dirname(plt))
+    File.write!(plt, plt_binary(:complete))
+    now = System.os_time(:second)
+
+    for n <- 1..4 do
+      File.write!(Path.join(root, "mix.lock"), "lock #{n}")
+      assert {_, 0} = cache(root, "publish")
+      # Explicit ages: publication order must not depend on clock resolution.
+      File.touch!(snapshot(root, "lock #{n}"), now - 100 + n)
+    end
+
+    File.write!(Path.join(root, "mix.lock"), "lock 5")
+    assert {_, 0} = cache(root, "publish")
+
+    assert Enum.sort(Path.wildcard(Path.join(root, "cache/*/*.plt"))) ==
+             Enum.sort(for n <- 2..5, do: snapshot(root, "lock #{n}"))
   end
 
   test "busy publication locks are skipped and released by the operating system", %{root: root} do
@@ -157,6 +193,11 @@ defmodule PtcRunner.Scripts.ProjectPltCacheTest do
       {:file_plt, version, files, %{}, %{}, %{}, %{}, %{}, %{}, []},
       [:compressed]
     )
+  end
+
+  defp snapshot(root, lock) do
+    [directory] = Path.wildcard(Path.join(root, "cache/*"))
+    Path.join(directory, Base.encode16(:crypto.hash(:sha256, lock), case: :lower) <> ".plt")
   end
 
   defp cache(root, action, working_directory \\ nil) do

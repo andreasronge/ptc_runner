@@ -178,7 +178,12 @@ defmodule PtcRunner.Kernel.EventSink do
     usage = Map.put(usage, :events_dropped, dropped)
 
     payloads = [
-      %{outcome: :error, reason: EventBudget.maximum_terminal_reason(), usage: usage},
+      EventBudget.maximum_terminal_limit_details()
+      |> Map.merge(%{
+        outcome: :error,
+        reason: EventBudget.maximum_terminal_reason(),
+        usage: usage
+      }),
       %{
         outcome: :ok,
         reason: nil,

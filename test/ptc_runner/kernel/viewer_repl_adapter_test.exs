@@ -1,5 +1,6 @@
 defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits

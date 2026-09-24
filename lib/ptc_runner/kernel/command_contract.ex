@@ -40,6 +40,7 @@ defmodule PtcRunner.Kernel.CommandContract do
     {"validate", :validate, false, false},
     {"doctor", {:doctor, :connect}, :catalog, true},
     {"models", :models, false, false},
+    {"catalog", :catalog, :catalog, false},
     {"materialize", :materialize, false, false},
     {"transcript", :transcript, false, false},
     {"unknown", :unknown, false, false}
@@ -177,6 +178,7 @@ defmodule PtcRunner.Kernel.CommandContract do
             ),
             success_envelope("doctor", doctor_success_result()),
             success_envelope("models", models_result()),
+            success_envelope("catalog", catalog_result()),
             success_envelope("materialize", materialize_result()),
             success_envelope("transcript", transcript_result())
           ],
@@ -293,6 +295,7 @@ defmodule PtcRunner.Kernel.CommandContract do
              :validate,
              :doctor,
              :models,
+             :catalog,
              :materialize,
              :transcript
            ] do
@@ -371,6 +374,17 @@ defmodule PtcRunner.Kernel.CommandContract do
           ordered_subset?(installation["accepts_data"], ~w(normal private_inspection)) and
           ordered_subset?(installation["destinations"], ~w(workflow mission))
       end)
+  end
+
+  def valid_success_semantics?(:catalog, %{
+        "provider" => provider,
+        "tools" => tools,
+        "pagination" => %{"pages" => pages, "truncated" => false},
+        "tool_count" => count
+      }) do
+    is_binary(provider) and provider =~ ~r/\A[a-z][a-z0-9._-]{0,127}\z/ and
+      is_integer(pages) and pages > 0 and count == length(tools) and
+      Enum.map(tools, & &1["name"]) == Enum.sort(Enum.map(tools, & &1["name"]))
   end
 
   def valid_success_semantics?(:materialize, %{"mode" => "source-out", "path" => path})
@@ -1071,6 +1085,7 @@ defmodule PtcRunner.Kernel.CommandContract do
               :init,
               :validate,
               :models,
+              :catalog,
               :doctor,
               {:doctor, :connect},
               :materialize
@@ -1091,6 +1106,7 @@ defmodule PtcRunner.Kernel.CommandContract do
               :init,
               :validate,
               :models,
+              :catalog,
               :doctor,
               {:doctor, :connect},
               :run_unclassified,
@@ -1122,6 +1138,7 @@ defmodule PtcRunner.Kernel.CommandContract do
               :init,
               :validate,
               :models,
+              :catalog,
               :doctor,
               :materialize,
               :unknown
@@ -1170,6 +1187,7 @@ defmodule PtcRunner.Kernel.CommandContract do
        when mode in [
               :validate,
               :models,
+              :catalog,
               :doctor,
               {:doctor, :connect},
               :run_unclassified,
@@ -1182,6 +1200,7 @@ defmodule PtcRunner.Kernel.CommandContract do
        when mode in [
               :validate,
               :models,
+              :catalog,
               :doctor,
               {:doctor, :connect},
               :run_unclassified,
@@ -1218,6 +1237,7 @@ defmodule PtcRunner.Kernel.CommandContract do
               :init,
               :validate,
               :models,
+              :catalog,
               :doctor,
               {:doctor, :connect},
               :materialize,
@@ -1236,6 +1256,10 @@ defmodule PtcRunner.Kernel.CommandContract do
        do: true
 
   defp diagnostic_pair_allowed?(:models, :provider_declaration, :dependency_invalid), do: true
+
+  defp diagnostic_pair_allowed?(:catalog, :provider_acquisition, :provider_unavailable), do: true
+  defp diagnostic_pair_allowed?(:catalog, :active_preflight, :authorization_required), do: true
+  defp diagnostic_pair_allowed?(:catalog, :result_cleanup, :provider_cleanup_failed), do: true
 
   # A run needs no clause here. `local_preflight` is a classified phase, so a
   # post-marker failure renders through the classified branch, which admits
@@ -2518,6 +2542,27 @@ defmodule PtcRunner.Kernel.CommandContract do
     })
   end
 
+  defp catalog_result do
+    tool =
+      closed(~w(name input_schema), %{
+        "name" => %{"type" => "string", "minLength" => 1, "maxLength" => 128},
+        "description" => %{"type" => "string", "maxLength" => 4_096},
+        "input_schema" => %{"type" => "object"},
+        "output_schema" => %{"type" => "object"}
+      })
+
+    closed(~w(provider tools pagination tool_count), %{
+      "provider" => %{"type" => "string", "pattern" => @alias},
+      "tools" => %{"type" => "array", "maxItems" => 128, "items" => tool},
+      "pagination" =>
+        closed(~w(pages truncated), %{
+          "pages" => %{"type" => "integer", "minimum" => 1, "maximum" => 64},
+          "truncated" => %{"const" => false}
+        }),
+      "tool_count" => %{"type" => "integer", "minimum" => 0, "maximum" => 128}
+    })
+  end
+
   defp materialize_result do
     %{
       "oneOf" => [
@@ -2559,6 +2604,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   defp success_result_schema(:validate), do: validate_result()
   defp success_result_schema(:doctor), do: doctor_success_result()
   defp success_result_schema(:models), do: models_result()
+  defp success_result_schema(:catalog), do: catalog_result()
   defp success_result_schema(:materialize), do: materialize_result()
   defp success_result_schema(:transcript), do: transcript_result()
 

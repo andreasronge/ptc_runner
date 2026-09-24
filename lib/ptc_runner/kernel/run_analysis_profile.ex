@@ -164,36 +164,35 @@ defmodule PtcRunner.Kernel.RunAnalysisProfile do
       when map_size(resources) == 2 and is_binary(inspection) and is_binary(traces) and
              is_list(opts) do
     {selected_run_refs, opts} = Keyword.pop(opts, :selected_run_refs)
-    {selected_run_ref, capture_opts} = Keyword.pop(opts, :selected_run_ref)
+    {selected_run_ref, opts} = Keyword.pop(opts, :selected_run_ref)
+    {selected_inspection_path, capture_opts} = Keyword.pop(opts, :selected_inspection_path)
 
-    cond do
-      not is_nil(selected_run_ref) and not is_nil(selected_run_refs) ->
-        {:error, :invalid_run_reference}
+    case private_selection(selected_run_ref, selected_run_refs, selected_inspection_path) do
+      :directory ->
+        capture_directories(recipe, traces, inspection, capture_opts)
 
-      is_nil(selected_run_ref) and is_nil(selected_run_refs) ->
-        with {:ok, trace} <- start_trace({:private_authorized_directory, traces}, capture_opts) do
-          case AnalysisProfile.refuse_empty_capture(
-                 TraceSnapshot.info(trace),
-                 :empty_traces_resource
-               ) do
-            :ok -> capture_inspection(recipe, trace, {:directory, inspection}, capture_opts)
-            {:error, _reason} = error -> stop_trace(trace, error)
-          end
-        end
+      {:file, run_ref, inspection_path} ->
+        capture_selected_file(
+          recipe,
+          traces,
+          inspection_path,
+          run_ref,
+          capture_opts
+        )
 
-      SelectedCanonicalSource.valid_run_ref?(selected_run_ref) ->
-        capture_selected(recipe, traces, inspection, selected_run_ref, capture_opts)
+      {:run, run_ref} ->
+        capture_selected(recipe, traces, inspection, run_ref, capture_opts)
 
-      is_list(selected_run_refs) ->
-        case SelectedCanonicalSource.validate_run_refs(selected_run_refs) do
-          {:ok, run_refs} ->
-            capture_selected_set(recipe, traces, inspection, run_refs, capture_opts)
+      {:runs, run_refs} ->
+        case SelectedCanonicalSource.validate_run_refs(run_refs) do
+          {:ok, validated_run_refs} ->
+            capture_selected_set(recipe, traces, inspection, validated_run_refs, capture_opts)
 
           {:error, _reason} = error ->
             error
         end
 
-      true ->
+      :invalid ->
         {:error, :invalid_run_reference}
     end
   end
@@ -235,6 +234,24 @@ defmodule PtcRunner.Kernel.RunAnalysisProfile do
     )
   end
 
+  defp private_selection(nil, nil, nil), do: :directory
+
+  defp private_selection(run_ref, nil, path) when is_binary(run_ref) and is_binary(path),
+    do: {:file, run_ref, path}
+
+  defp private_selection(run_ref, nil, nil) when is_binary(run_ref), do: {:run, run_ref}
+  defp private_selection(nil, run_refs, nil) when is_list(run_refs), do: {:runs, run_refs}
+  defp private_selection(_run_ref, _run_refs, _path), do: :invalid
+
+  defp capture_directories(recipe, traces, inspection, opts) do
+    with {:ok, trace} <- start_trace({:private_authorized_directory, traces}, opts) do
+      case AnalysisProfile.refuse_empty_capture(TraceSnapshot.info(trace), :empty_traces_resource) do
+        :ok -> capture_inspection(recipe, trace, {:directory, inspection}, opts)
+        {:error, _reason} = error -> stop_trace(trace, error)
+      end
+    end
+  end
+
   defp capture_selected(recipe, traces, inspection, run_ref, opts) do
     with {:ok, _trace_source} <- SelectedCanonicalSource.resolve_trace(traces, run_ref),
          {:ok, _inspection_path} <-
@@ -242,6 +259,15 @@ defmodule PtcRunner.Kernel.RunAnalysisProfile do
          {:ok, trace} <-
            start_trace({:selected_canonical, traces, run_ref}, opts) do
       capture_inspection(recipe, trace, {:selected_canonical, inspection, run_ref}, opts)
+    end
+  end
+
+  defp capture_selected_file(recipe, traces, inspection_path, run_ref, opts) do
+    with {:ok, _trace_source} <- SelectedCanonicalSource.resolve_trace(traces, run_ref),
+         {:ok, inspection_path} <-
+           SelectedCanonicalSource.resolve_inspection_file(inspection_path, run_ref),
+         {:ok, trace} <- start_trace({:selected_canonical, traces, run_ref}, opts) do
+      capture_inspection(recipe, trace, {:file, inspection_path, run_ref}, opts)
     end
   end
 

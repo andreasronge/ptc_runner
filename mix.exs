@@ -194,7 +194,7 @@ defmodule PtcRunner.MixProject do
   defp deps do
     [
       {:jason, "~> 1.4"},
-      {:jsv, "~> 0.22.0"},
+      {:jsv, "~> 0.23.0"},
       {:nimble_parsec, "~> 1.4"},
       {:mint, "~> 1.10"},
       {:req, "~> 0.7.3"},
@@ -215,10 +215,9 @@ defmodule PtcRunner.MixProject do
     ] ++ viewer_dep() ++ gateway_dep()
   end
 
-  # Keep published and ordinary development builds on Hex while allowing an
-  # unreleased ExDNA checkout to be exercised by an isolated compatibility
-  # build. The caller must keep this environment variable set for every Mix
-  # command in that build so dependency resolution stays consistent.
+  # Pin the fork's full-scan memory fix for development and CI. ExDNA is excluded
+  # from production and Hex package requirements. A local checkout override is
+  # available for compatibility testing; keep it set for every Mix command.
   defp ex_dna_dep do
     options = [only: [:dev, :test], runtime: false]
 
@@ -227,7 +226,9 @@ defmodule PtcRunner.MixProject do
         {:ex_dna, Keyword.put(options, :path, Path.expand(path))}
 
       {_env, _path} ->
-        {:ex_dna, "~> 1.5", options}
+        {:ex_dna,
+         options ++
+           [github: "andreasronge/ex_dna", ref: "548b0fcf3f1ea191a5a7a5de562c4dcc74049d9b"]}
     end
   end
 

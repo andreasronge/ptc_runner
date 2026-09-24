@@ -1,5 +1,6 @@
 defmodule PtcRunner.Mix.LauncherDepTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   # Dependabot's Hex updater copies the mix files it fetched into a scratch
   # directory and loads the project there. `ptc_runner_launcher/mix.exs` is

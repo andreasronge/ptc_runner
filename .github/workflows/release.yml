@@ -43,6 +43,8 @@ jobs:
       - uses: ./.github/actions/setup-elixir
       - run: mix precommit
       - run: mix prepush
+      - name: Verify gateway
+        run: scripts/ci/gateway.sh
       - name: Check evaluator reduction baselines
         env:
           MIX_ENV: dev

@@ -801,8 +801,8 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     quality_gate = File.read!("scripts/ci/core-quality.sh")
 
     assert "cmd scripts/ci/core-quality.sh" in precommit
-    assert quality_gate =~ "mix ptc.gen_docs --check"
-    assert quality_gate =~ "mix ptc.conformance_report --check-inventory"
+    assert quality_gate =~ "ptc.gen_docs --check"
+    assert quality_gate =~ "ptc.conformance_report --check-inventory"
 
     current = Path.join(dir, "docs/conformance/current.md")
     orphan = Path.join(dir, "docs/conformance/nested/orphan.md")

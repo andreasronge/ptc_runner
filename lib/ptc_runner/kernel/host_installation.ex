@@ -471,6 +471,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp descriptor_provides(_source), do: []
 
   defp descriptor_destinations(source) when source in [:llm, :llm_replay], do: [:workflow]
+  defp descriptor_destinations(:mcp), do: [:workflow, :mission]
   defp descriptor_destinations(_source), do: [:mission]
 
   defp connectivity_mode(:mcp), do: :acquisition
@@ -510,6 +511,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
           default: {:named_set, "all"},
           minimum_items: 1,
           members: "all"
+        },
+        "catalog" => %{
+          type: :boolean,
+          input: true,
+          default: false
         },
         "max_result_bytes" => %{
           type: :integer,
@@ -669,15 +675,16 @@ defmodule PtcRunner.Kernel.HostInstallation do
   end
 
   defp prepare(_host, %{source: :mcp} = installation, selection, context, _oauth_runtime) do
-    with :ok <- placement(installation, context.destination),
-         {:ok, _selected} <- normalize_selection(installation, selection, context) do
+    with {:ok, selected} <- normalize_selection(installation, selection, context),
+         :ok <- mcp_placement(context.destination, selected) do
       credential_names = credential_names(installation.transport)
 
       {:ok,
        %{
          credential_names: credential_names,
          data_class: installation.data_class,
-         accepts_data: installation.accepts_data
+         accepts_data: installation.accepts_data,
+         capability_effects: mcp_capability_effects(installation, selected, context.provider)
        }}
     end
   end
@@ -780,8 +787,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
   end
 
   defp preflight(host, %{source: :mcp} = installation, selection, context, oauth_runtime) do
-    with :ok <- placement(installation, context.destination),
-         {:ok, selected} <- normalize_selection(installation, selection, context),
+    with {:ok, selected} <- normalize_selection(installation, selection, context),
+         :ok <- mcp_placement(context.destination, selected),
          credential_names = credential_names(installation.transport),
          {:ok, transport} <- preflight_transport(host, installation.transport),
          {:ok, installed_options} <-
@@ -1051,6 +1058,20 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp placement(%{source: :ptc_inspection_snapshot}, _destination),
     do: {:error, :provider_destination_denied}
 
+  defp mcp_placement(:mission, %{"catalog" => false}), do: :ok
+  defp mcp_placement(:workflow, %{"catalog" => true}), do: :ok
+  defp mcp_placement(_destination, _selected), do: {:error, :provider_destination_denied}
+
+  defp mcp_capability_effects(_installation, %{"catalog" => true}, provider),
+    do: %{(provider <> ".catalog") => :read}
+
+  defp mcp_capability_effects(installation, %{"allow" => allow}, _provider) do
+    installation.tools
+    |> Map.values()
+    |> Enum.filter(&(&1.as in allow))
+    |> Map.new(&{&1.as, &1.effect})
+  end
+
   @doc false
   def normalize_selection(%{source: source} = installation, value, %{limits: limits})
       when source in [
@@ -1062,6 +1083,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
              :ptc_inspection_snapshot
            ] do
     with {:ok, rules} <- selection_rules(installation),
+         {:ok, rules} <- catalog_selection_rules(source, value, rules),
          {:ok, normalized} <- SelectionRules.normalize_runtime(rules, value, limits) do
       {:ok, normalized}
     else
@@ -1071,6 +1093,19 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   def normalize_selection(_installation, _value, _context),
     do: {:error, :invalid_mcp_selection}
+
+  defp catalog_selection_rules(:mcp, %{"catalog" => true}, rules) do
+    cross_rules =
+      Enum.reject(rules.cross_rules, &match?({:required_when_set_nonempty, "allow", "write"}, &1))
+
+    SelectionRules.new(
+      fields: rules.fields,
+      cross_rules: cross_rules,
+      named_sets: rules.named_sets
+    )
+  end
+
+  defp catalog_selection_rules(_source, _value, rules), do: {:ok, rules}
 
   defp llm_selection(installation, value, context),
     do: normalize_runtime_selection(installation, value, context)
@@ -1104,8 +1139,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
     do: auth |> Enum.map(& &1.binding) |> Enum.uniq() |> Enum.sort()
 
   defp local_preflight(host, %{source: :mcp} = installation, selection, context) do
-    with :ok <- placement(installation, context.destination),
-         {:ok, _selected} <- normalize_selection(installation, selection, context),
+    with {:ok, selected} <- normalize_selection(installation, selection, context),
+         :ok <- mcp_placement(context.destination, selected),
          {:ok, transport} <- preflight_transport(host, installation.transport),
          {:ok, _options} <-
            installed_options(installation, transport, credential_names(installation.transport)) do

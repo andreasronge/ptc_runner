@@ -382,7 +382,8 @@ defmodule PtcRunner.Kernel.DispatcherStructuredOutputTest do
 
   test "json_object decode unavailability is distinct from invalid provider JSON" do
     parent = self()
-    deadline_ms = System.monotonic_time(:millisecond) + 200
+    # Leave room for schema compilation before deliberately expiring the decode deadline.
+    deadline_ms = System.monotonic_time(:millisecond) + 1_000
 
     {:ok, capability} =
       LLMCapability.new(

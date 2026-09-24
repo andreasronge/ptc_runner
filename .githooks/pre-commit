@@ -13,9 +13,15 @@ PROJECTS=("." "ptc_viewer" "ptc_gateway")
 
 # Newline-delimited names, same as before this change. Paths with embedded
 # newlines need `git diff -z`; that is outside this scoped-format slice.
+# Restore Git's selected index only while reading staged paths. The hook
+# runtime clears it so Mix and any nested Git commands use their own indexes.
+if [ -n "${PTC_HOOK_INDEX_FILE:-}" ]; then
+  export GIT_INDEX_FILE="$PTC_HOOK_INDEX_FILE"
+fi
 ALL_STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
 ALL_DELETED=$(git diff --cached --diff-filter=D --name-only)
 ALL_RENAMED=$(git diff --cached --diff-filter=R --name-only)
+unset GIT_INDEX_FILE PTC_HOOK_INDEX_FILE
 
 # Filter staged paths to those owned by a given project.
 # Root project ".": everything except the Viewer and gateway projects.

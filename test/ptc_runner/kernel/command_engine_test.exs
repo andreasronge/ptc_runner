@@ -49,6 +49,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.RuntimeTools
+  alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.ValueContractClassification
   alias PtcRunner.Lisp.TrustedError
@@ -187,7 +188,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       end)
 
     assert topics ==
-             ~w(docs doctor init materialize models repl root run run transcript validate version viewer)
+             ~w(catalog docs doctor init materialize models repl root run run transcript validate version viewer)
 
     run_options =
       help_branch
@@ -1672,6 +1673,35 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     end
   end
 
+  @tag :tmp_dir
+  test "a workflow timeout reports both effective workflow clocks", %{tmp_dir: directory} do
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "slow", "path" => "slow.clj"}],
+        "entry" => "slow/run"
+      },
+      "input" => %{"value" => %{}},
+      "limits" => %{"run_duration_ms" => 1_000, "workflow_timeout_ms" => 1},
+      "providers" => %{"workflow" => [], "mission" => []}
+    }
+
+    application =
+      write_application(directory, "workflow-timeout", manifest, [
+        {"slow.clj", "(ns slow) (defn run [input] (return (count (vec (range 2000000)))))"}
+      ])
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application])
+
+    assert outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+
+    assert outcome.envelope["error"]["message"] =~
+             ~r/^workflow_timeout_ms limit 1 ms was exceeded during (compilation|execution); effective workflow clocks are limits\.run_duration_ms=1000 ms and limits\.workflow_timeout_ms=1 ms\. Increasing one does not increase the other; raise the binding limit in the manifest, and its installed host ceiling if it is lower$/
+
+    assert_schema_valid(outcome.envelope)
+  end
+
   test "workflow heap diagnostics name the limit and bind the runtime source" do
     assert {:error, %CommandOutcome{} = outcome} =
              project_limit_exceeded(:memory_exceeded, %{
@@ -2057,7 +2087,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         "entry" => "slow/run"
       },
       "input" => %{"value" => %{}},
-      "limits" => %{"run_duration_ms" => 1},
+      "limits" => %{"run_duration_ms" => 1, "normal_event_count" => 3},
       "providers" => %{"workflow" => [], "mission" => []}
     }
 
@@ -2066,17 +2096,45 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         {"slow.clj", "(ns slow) (defn run [input] (return (count (vec (range 2000000)))))"}
       ])
 
+    trace_dir = Path.join(directory, "run-duration-traces")
+    File.mkdir_p!(trace_dir)
+
     assert {:error, %CommandOutcome{} = outcome} =
-             CommandEngine.dispatch(["run", application])
+             CommandEngine.dispatch(["run", application, "--trace-dir", trace_dir])
 
     assert outcome.envelope["error"]["code"] == "run_timeout"
     assert outcome.exit_status == 6
 
     assert outcome.envelope["error"]["message"] =~
-             ~r/^run_duration_ms limit 1 ms was exceeded during (compilation|execution); raise limits\.run_duration_ms in the manifest, and the installed host ceiling if it is lower$/
+             ~r/^run_duration_ms limit 1 ms was exceeded during (compilation|execution); effective workflow clocks are limits\.run_duration_ms=1 ms and limits\.workflow_timeout_ms=120000 ms\. Increasing one does not increase the other; raise the binding limit in the manifest, and its installed host ceiling if it is lower$/
 
     assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
     assert_schema_valid(outcome.envelope)
+
+    assert [trace_path] = Path.wildcard(Path.join(trace_dir, "*.jsonl"))
+    assert {:ok, trace} = TraceLog.new(source: {:file, trace_path})
+
+    assert {:ok,
+            %{
+              "terminal_reason" => "timeout",
+              "terminal_limit" => "run_duration_ms",
+              "terminal_limit_value" => 1,
+              "truncated" => true
+            }} =
+             TraceLog.query(trace, :get_run, %{"run_id" => outcome.envelope["run_ref"]})
+
+    run_duration_message = outcome.envelope["error"]["message"]
+
+    assert {:error, :invalid_command_diagnostic} =
+             CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+               message: run_duration_message,
+               source: CommandSource.fixed(:runtime),
+               provider_activity: true
+             )
+
+    refute CommandContract.valid_envelope?(
+             put_in(outcome.envelope, ["error", "code"], "runtime_limit_exceeded")
+           )
   end
 
   @tag :tmp_dir
@@ -2887,7 +2945,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                  "installation_revision" => "alpha-v1",
                  "data_class" => "normal",
                  "accepts_data" => ["normal"],
-                 "destinations" => ["mission"]
+                 "destinations" => ["workflow", "mission"]
                },
                %{
                  "alias" => "zeta",
@@ -2895,7 +2953,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                  "installation_revision" => "zeta-v1",
                  "data_class" => "normal",
                  "accepts_data" => ["normal"],
-                 "destinations" => ["mission"]
+                 "destinations" => ["workflow", "mission"]
                }
              ]
            }

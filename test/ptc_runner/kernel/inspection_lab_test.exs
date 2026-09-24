@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
   # async: false — Code.require_file loads the lab's modules VM-wide and the lab drives an MCP
   # fixture process (class D).
   use ExUnit.Case, async: false
+  @moduletag :operator
 
   alias PtcRunner.Examples.KernelInspectionLab
   alias PtcRunner.Kernel.ViewerAdapter
