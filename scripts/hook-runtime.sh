@@ -17,6 +17,20 @@ TARGET="${1:-}"
 }
 shift
 
+# Save the selected index for pre-commit's staged-path queries. Git supplies a
+# temporary index for path-specific commits, but nested commands must not
+# inherit it after those queries finish.
+if [ -n "${GIT_INDEX_FILE:-}" ]; then
+  export PTC_HOOK_INDEX_FILE="$GIT_INDEX_FILE"
+else
+  unset PTC_HOOK_INDEX_FILE
+fi
+
+# Git exports these for linked-worktree hooks. Child git commands must discover
+# their repository from their own working directory, especially when Mix
+# initializes a git dependency inside deps/.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
+
 umask 0022
 
 if command -v mix >/dev/null 2>&1; then
