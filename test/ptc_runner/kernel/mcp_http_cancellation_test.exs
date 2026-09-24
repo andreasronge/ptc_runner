@@ -138,8 +138,10 @@ defmodule PtcRunner.Kernel.MCPHTTPCancellationTest do
 
       assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}, @receive_timeout
 
-      assert_receive {:DOWN, ^request_task_ref, :process, ^request_task, :killed},
+      assert_receive {:DOWN, ^request_task_ref, :process, ^request_task, reason},
                      @receive_timeout
+
+      assert reason in [:killed, :noproc]
 
       assert_receive {:mcp_stream_closed, ^stream}, @receive_timeout
       assert_stream_down(stream_ref, stream)

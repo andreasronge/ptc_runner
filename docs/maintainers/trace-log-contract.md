@@ -419,8 +419,11 @@ model/provider when present, timestamp range, limit, and cursor.
 
 The default `view` is `"summary"` and projects each item to `run_id`, `status`,
 `duration_ms`, `llm_calls`, `call_counts_complete`, `evaluations`,
-`terminal_reason`, `complete`, and `truncated`. Set `"view"` to `"full"` for the
-complete sanitized metadata record described above. Pagination and filtering are applied before this
+`terminal_reason`, `terminal_limit`, `terminal_limit_value`, `complete`, and
+`truncated`. Terminal limit fields come from the reserved `run-stopped` record,
+so they remain available when the ordinary `limit-exceeded` event was dropped.
+Set `"view"` to `"full"` for the complete sanitized metadata record described
+above. Pagination and filtering are applied before this
 presentation projection, so the cursor and selected run set are identical in
 both views.
 

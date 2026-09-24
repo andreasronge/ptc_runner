@@ -190,6 +190,7 @@ defmodule PtcRunner.Kernel.Runner do
       }
       |> maybe_put_result_hash(result)
       |> maybe_put_failure_taxonomy(result)
+      |> maybe_put_terminal_limit(result)
 
     case EventSink.finalize_and_events(sink, stopped_data) do
       {:ok, %{events: events, dropped: dropped}} ->
@@ -888,6 +889,16 @@ defmodule PtcRunner.Kernel.Runner do
   end
 
   defp maybe_put_failure_taxonomy(stopped_data, _result), do: stopped_data
+
+  defp maybe_put_terminal_limit(
+         stopped_data,
+         {:error, %Error{kind: kind, reason: reason, details: details}}
+       )
+       when kind == :limit_exceeded or reason == :runtime_limit_exceeded do
+    Map.merge(stopped_data, RuntimeLimitDiagnostic.retain_terminal_details(details))
+  end
+
+  defp maybe_put_terminal_limit(stopped_data, _result), do: stopped_data
 
   defp put_result_usage({:ok, %Result{} = result}, usage), do: {:ok, %{result | usage: usage}}
   defp put_result_usage({:error, %Error{} = error}, usage), do: {:error, %{error | usage: usage}}

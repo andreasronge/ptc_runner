@@ -425,7 +425,9 @@ policy's dropped-event byte relationship.
 `event_payload_bytes` has its own floor, and it has two parts.
 `TerminalUsage.maximum/4` builds the largest `run-stopped` projection a
 configuration can emit. Its fixed part — the bounded terminal reason, the
-saturated reachable drop map, and every key `RunState.usage/1` produces plus the
+saturated reachable drop map, the closed runtime-limit identity and configured
+value (plus only the bounded fields needed to render its diagnostic), and every
+key `RunState.usage/1` produces plus the
 `errors` count a REPL close adds, each at its catalog maximum with an empty
 inventory — is application-independent, so it is the catalog minimum
 `EventBudget.minimum_normal_payload_bytes/0` publishes and the manifest and host
