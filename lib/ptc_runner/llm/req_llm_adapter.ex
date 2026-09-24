@@ -357,7 +357,9 @@ if Code.ensure_loaded?(ReqLLM) do
     Generate text from an LLM.
 
     ## Options
-    - `:receive_timeout` - Request timeout in ms (default: #{@default_timeout})
+    - `:receive_timeout` - HTTP receive timeout in ms (default: the remaining Kernel
+      request deadline, or #{@default_timeout} without a deadline). An explicit
+      value may shorten but never extend the Kernel deadline.
     - `:ollama_base_url` - Override Ollama server URL
     - `:cache` - Enable prompt caching for supported providers (default: false)
     - `:max_tokens` - Output budget. ReqLLM-backed models default to at most
@@ -1811,7 +1813,7 @@ if Code.ensure_loaded?(ReqLLM) do
       if remaining == 0 do
         {:error, request_deadline_error()}
       else
-        receive_timeout = min(Keyword.get(opts, :receive_timeout, @default_timeout), remaining)
+        receive_timeout = min(Keyword.get(opts, :receive_timeout, remaining), remaining)
 
         {:ok,
          opts
@@ -1838,6 +1840,12 @@ if Code.ensure_loaded?(ReqLLM) do
 
       timeout = min(Keyword.get(finch, :pool_timeout, remaining), remaining)
       http = Keyword.put(http, :finch, Keyword.put(finch, :pool_timeout, max(timeout, 1)))
+      # Bedrock and Vertex builders read the HTTP options rather than the
+      # top-level receive timeout. Preserve narrower explicit transport bounds.
+      receive_timeout =
+        min(Keyword.get(http, :receive_timeout, remaining), opts[:receive_timeout])
+
+      http = Keyword.put(http, :receive_timeout, max(receive_timeout, 1))
       Keyword.put(opts, :req_http_options, http)
     end
 

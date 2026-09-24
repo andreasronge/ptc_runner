@@ -58,6 +58,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   alias PtcRunner.Kernel.QueryCursor
   alias PtcRunner.Kernel.QueryValidation
   alias PtcRunner.Kernel.ResultLimit
+  alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.TraceDirectoryAdmission
   alias PtcRunner.Kernel.TraceEventValidation
@@ -2868,8 +2869,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     stopped = events |> Enum.filter(&(&1["type"] == "run-stopped")) |> List.last()
     labels = event_data(started, "labels", %{})
     missions = run_missions(started)
-    workflow_calls = capability_call_count(events, "workflow")
-    mission_calls = capability_call_count(events, "mission")
+    call_counts = run_call_counts(events, stopped)
 
     %{
       "run_id" => run_id,
@@ -2889,9 +2889,10 @@ defmodule PtcRunner.Kernel.TraceLog do
       "evaluations" => evaluation_count(events),
       "subordinate_evaluations" => evaluation_count(events, "mission"),
       "subordinate_source_checks" => subordinate_source_checks(stopped),
-      "workflow_capability_calls" => workflow_calls,
-      "mission_capability_calls" => mission_calls,
-      "llm_calls" => capability_name_count(events, "llm-request"),
+      "workflow_capability_calls" => call_counts.workflow,
+      "mission_capability_calls" => call_counts.mission,
+      "llm_calls" => call_counts.llm,
+      "call_counts_complete" => call_counts.complete?,
       "llm_budget" => terminal_llm_budget(stopped),
       "llm_spend" => terminal_llm_spend(stopped),
       "error_count" => Enum.count(events, &error_event?/1),
@@ -2923,6 +2924,71 @@ defmodule PtcRunner.Kernel.TraceLog do
       {:ok, spend} -> spend
       {:error, :invalid_llm_spend} -> nil
     end
+  end
+
+  defp run_call_counts(events, stopped) do
+    case event_data(stopped, "usage", %{})["capability_calls"] do
+      %{"workflow" => workflow, "mission" => mission} = calls
+      when map_size(calls) == 2 and is_map(workflow) and is_map(mission) ->
+        %{
+          workflow: Enum.sum(Map.values(workflow)),
+          mission: Enum.sum(Map.values(mission)),
+          llm: Map.get(workflow, "llm-request", 0),
+          complete?: true
+        }
+
+      calls when is_map(calls) and map_size(calls) > 0 ->
+        if Enum.all?(calls, fn {name, count} ->
+             is_binary(name) and is_integer(count) and count >= 0
+           end) do
+          %{
+            workflow: scoped_terminal_call_count(calls, "workflow/"),
+            mission: scoped_terminal_call_count(calls, "mission/"),
+            llm: Map.get(calls, "workflow/llm-request", 0),
+            complete?: true
+          }
+        else
+          observed_call_counts(events)
+        end
+
+      calls when is_map(calls) ->
+        %{workflow: 0, mission: 0, llm: 0, complete?: true}
+
+      _legacy_or_incomplete ->
+        observed_call_counts(events)
+    end
+  end
+
+  defp observed_call_counts(events) do
+    %{
+      workflow: quota_backed_capability_call_count(events, "workflow"),
+      mission: quota_backed_capability_call_count(events, "mission"),
+      llm: capability_name_count(events, "workflow", "llm-request"),
+      complete?: false
+    }
+  end
+
+  defp quota_backed_capability_call_count(events, environment) do
+    Enum.count(events, fn event ->
+      name = event_data(event, "name")
+
+      event["type"] == "capability-started" and
+        stringify(event_data(event, "environment")) == environment and
+        is_binary(name) and
+        not runtime_instrumented_name?(environment, name)
+    end)
+  end
+
+  defp runtime_instrumented_name?("workflow", name),
+    do: RuntimeTools.instrumented_name?(:workflow, name)
+
+  defp runtime_instrumented_name?("mission", name),
+    do: RuntimeTools.instrumented_name?(:mission, name)
+
+  defp scoped_terminal_call_count(calls, prefix) do
+    Enum.reduce(calls, 0, fn {name, count}, total ->
+      if String.starts_with?(name, prefix), do: total + count, else: total
+    end)
   end
 
   # Absent prelude data projects to an empty graph.
@@ -3034,8 +3100,12 @@ defmodule PtcRunner.Kernel.TraceLog do
     end)
   end
 
-  defp capability_name_count(events, name) do
-    Enum.count(events, &(&1["type"] == "capability-started" and event_data(&1, "name") == name))
+  defp capability_name_count(events, environment, name) do
+    Enum.count(events, fn event ->
+      event["type"] == "capability-started" and
+        stringify(event_data(event, "environment")) == environment and
+        event_data(event, "name") == name
+    end)
   end
 
   defp evaluation_count(events), do: Enum.count(events, &(&1["type"] == "evaluation-started"))

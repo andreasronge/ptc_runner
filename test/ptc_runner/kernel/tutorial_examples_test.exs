@@ -1,5 +1,6 @@
 defmodule PtcRunner.Kernel.TutorialExamplesTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.HostConfig

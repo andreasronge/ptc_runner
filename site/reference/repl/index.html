@@ -433,8 +433,9 @@ adding smart diagnosis APIs:</p><pre><code class="clojure language-clojure">(def
 (analysis/read run-id {&quot;collection&quot; &quot;prelude_sources&quot;
                        &quot;component_id&quot; &quot;workspace&quot;})
 (analysis/read run-id {&quot;collection&quot; &quot;execution_errors&quot;})
-(analysis/counters {&quot;run_id&quot; run-id})</code></pre><p>An execution error carries the workflow <code class="inline">evaluation_id</code>. Follow its exact
-children without comparing collection-local sequence numbers:</p><pre><code class="clojure language-clojure">(def error (first (get (analysis/read run-id {&quot;collection&quot; &quot;execution_errors&quot;})
+(analysis/counters {&quot;run_id&quot; run-id})</code></pre><p>An execution error carries its workflow or mission <code class="inline">evaluation_id</code>. A workflow
+error can be followed to its exact children without comparing collection-local
+sequence numbers:</p><pre><code class="clojure language-clojure">(def error (first (get (analysis/read run-id {&quot;collection&quot; &quot;execution_errors&quot;})
                        &quot;items&quot;)))
 (def workflow-evaluation-id (get error &quot;evaluation_id&quot;))
 (analysis/read run-id {&quot;collection&quot; &quot;generated_sources&quot;
@@ -442,7 +443,11 @@ children without comparing collection-local sequence numbers:</p><pre><code clas
 (analysis/read run-id {&quot;collection&quot; &quot;turns&quot;
                        &quot;parent_evaluation_id&quot; workflow-evaluation-id})</code></pre><p><code class="inline">parent_evaluation_id</code> proves that the workflow evaluation launched the
 subordinate evaluation. It does not claim that every child caused the eventual
-workflow error.</p><p>When the retained evaluator ledger proves that a successful <code class="inline">kernel-eval</code>
+workflow error.</p><p>A mission evaluation error instead provides <code class="inline">evaluation_failure</code> and
+<code class="inline">failed_generated_source</code> relationships. They associate the retained diagnostic
+with the canonical failed activity and the exact generated program; follow
+their supplied collection and filters as described below. This diagnostic is
+retained on the final agent turn and does not depend on a later model request.</p><p>When the retained evaluator ledger proves that a successful <code class="inline">kernel-eval</code>
 result reached the workflow boundary unchanged, the error also provides typed
 relations. Follow the supplied collection and filters rather than rebuilding
 the join:</p><pre><code class="clojure language-clojure">(def relations (get error &quot;relationships&quot;))

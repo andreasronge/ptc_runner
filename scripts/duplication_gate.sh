@@ -27,8 +27,8 @@ mix compile >&2
 # an actual detector failure cannot be mistaken for a successful partial report.
 EX_DNA_ARGS=(lib/ test/ --format json --max-clones 1000000)
 
-# The opt-in checkout carries ExDNA's unreleased complete-result cache. Keep
-# ordinary Hex builds compatible with 1.5.4 until that option is released.
+# Local-checkout compatibility runs also exercise complete-result caching.
+# Ordinary gate runs remain uncached so every check exercises full detection.
 if [ -n "${PTC_EX_DNA_PATH:-}" ]; then
   EX_DNA_ARGS+=(--cache)
 fi

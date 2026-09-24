@@ -366,9 +366,64 @@ START_TIME=$(date +%s)
 # deciding where the time went.
 PHASE_LABELS=()
 PHASE_TIMES=()
+PHASE_MEMS=()
 record_phase() {
   PHASE_LABELS+=("$1")
   PHASE_TIMES+=("$2")
+  phase_memory
+  PHASE_MEMS+=("$PHASE_MEMORY")
+}
+
+# Cgroup v2 memory at each phase boundary, when the hook can read its own
+# cgroup (a PtcManager operation on Linux); elsewhere the summary is unchanged.
+# Concurrent lanes share the hook's cgroup, so a lane's reading covers the
+# whole overlap window up to its reap, not that lane alone. `high` counts
+# memory.high throttling events since the previous boundary.
+# PTC_PRE_PUSH_CGROUP_ROOT names a directory holding the memory files.
+PHASE_CGROUP="${PTC_PRE_PUSH_CGROUP_ROOT:-}"
+if [ -z "$PHASE_CGROUP" ] && [ -r /proc/self/cgroup ]; then
+  PHASE_CGROUP="/sys/fs/cgroup$(sed -n 's/^0:://p' /proc/self/cgroup 2>/dev/null || true)"
+fi
+
+cgroup_number() {
+  local value
+  value="$(cat "$PHASE_CGROUP/$1" 2>/dev/null || true)"
+  case "$value" in
+    '' | *[!0-9]*) ;;
+    *) echo "$value" ;;
+  esac
+}
+
+cgroup_high_events() {
+  local value
+  value="$(awk '$1 == "high" { print $2 }' "$PHASE_CGROUP/memory.events" 2>/dev/null || true)"
+  case "$value" in
+    '' | *[!0-9]*) ;;
+    *) echo "$value" ;;
+  esac
+}
+
+PHASE_HIGH_MARK="$(cgroup_high_events)"
+
+# Sets PHASE_MEMORY rather than printing it: the `high` mark must advance in
+# this shell, not in a command-substitution subshell.
+phase_memory() {
+  PHASE_MEMORY=""
+  local current peak high
+  current="$(cgroup_number memory.current)"
+  peak="$(cgroup_number memory.peak)"
+  high="$(cgroup_high_events)"
+
+  if [ -n "$current" ]; then
+    PHASE_MEMORY="$PHASE_MEMORY  mem $((current / 1048576))MiB"
+  fi
+  if [ -n "$peak" ]; then
+    PHASE_MEMORY="$PHASE_MEMORY  peak $((peak / 1048576))MiB"
+  fi
+  if [ -n "$high" ] && [ -n "$PHASE_HIGH_MARK" ]; then
+    PHASE_MEMORY="$PHASE_MEMORY  high +$((high - PHASE_HIGH_MARK))"
+  fi
+  PHASE_HIGH_MARK="$high"
 }
 
 print_phase_summary() {
@@ -377,7 +432,7 @@ print_phase_summary() {
   echo "⏱  Phase timings:"
   local i
   for i in "${!PHASE_LABELS[@]}"; do
-    printf '   %-36s %5ss\n' "${PHASE_LABELS[$i]}" "${PHASE_TIMES[$i]}"
+    printf '   %-36s %5ss%s\n' "${PHASE_LABELS[$i]}" "${PHASE_TIMES[$i]}" "${PHASE_MEMS[$i]}"
   done
 }
 
@@ -392,9 +447,16 @@ mcp_filesystem=false
 java=false
 viewer=false
 docs=false
+release=false
+operator=false
 # shellcheck disable=SC1090
 source "$SCOPES_FILE"
 rm -f "$SCOPES_FILE"
+
+# A forced full run is the whole suite, whatever the paths selected.
+if [ -n "${FORCE_FULL_PRE_PUSH:-}" ]; then
+  operator=true
+fi
 
 if [ "$core" != true ] && [ "$launcher" != true ] &&
    [ "$mcp_http" != true ] && [ "$mcp_filesystem" != true ] &&
@@ -403,13 +465,9 @@ if [ "$core" != true ] && [ "$launcher" != true ] &&
   exit 0
 fi
 
-# Documentation failures are deterministic and usually cheap to diagnose. Run
-# this gate before long test and Dialyzer stages so a bad reference does not
-# waste the rest of the push cycle.
+run_docs_gate_selected=false
 if [ "$docs" = true ] || [ "$core" = true ]; then
-  DOCS_START=$SECONDS
-  run_docs_gate
-  record_phase "documentation (ExDoc)" $((SECONDS - DOCS_START))
+  run_docs_gate_selected=true
 fi
 
 run_gate() {
@@ -448,10 +506,12 @@ run_gate() {
 #   lane A   core-static -> core-Dialyzer   _build/test  (shared: serial)
 #   lane B   core-release                   _build/prod  (forced full run only)
 #   lane C   Viewer                         ptc_viewer/_build/test
+#   lane D   documentation (ExDoc)          _build/dev
 #
-# Documentation keeps its head start above: it owns `_build/dev` and is
-# the only stage that writes the root `deps/`, so finishing it first also
-# keeps `mix deps.get` off the lanes.
+# Documentation is the only stage that touches the root `deps/`, through
+# `mix deps.get --check-locked`; with a lockfile that matches `mix.exs` that
+# is a read, so it shares the machine with the other lanes rather than
+# holding the critical path for half a minute on its own.
 #
 # The launcher gate stays serial on purpose. Its port-teardown assertions
 # are load-sensitive (`:DOWN` can outrun `Port.info/1` releasing the port),
@@ -459,9 +519,23 @@ run_gate() {
 # CI runner.
 #
 # Lane output is buffered and replayed in lane order, so a concurrent run
-# reads like a serial one. PTC_PRE_PUSH_SERIAL=1 restores serial execution
-# for diagnosis or for a machine too small to share.
+# reads like a serial one.
+#
+# A managed push runs under an operation wrapper with a bounded memory
+# budget, too small for concurrent lanes to share, so it runs the gates
+# serially by default. An explicit PTC_PRE_PUSH_SERIAL wins either way:
+# 0 forces concurrent lanes, and any other value (conventionally 1) forces
+# serial execution for diagnosis or a machine too small to share.
 # ----------------------------------------------------------------------
+
+case "${PTC_PRE_PUSH_SERIAL:-}" in
+  0) serial_gates=false ;;
+  "")
+    serial_gates=false
+    [ -z "${PTC_MANAGED_OPERATION_CONTEXT:-}" ] || serial_gates=true
+    ;;
+  *) serial_gates=true ;;
+esac
 
 LANE_PIDS=()
 LANE_LABELS=()
@@ -621,11 +695,23 @@ if [ "$viewer" = true ] || [ "$core" = true ]; then
   run_viewer_gate=true
 fi
 
+# A push that touches none of the operator surfaces (Mix tasks, hooks,
+# scripts, Viewer, guides, examples) runs the library lane of the suite; CI
+# still runs every module on the pull request.
 if [ "$run_core_gates" = true ]; then
-  run_gate "core tests" "$HOOK_REPO_ROOT/scripts/ci/core-tests.sh"
+  if [ "$operator" = true ]; then
+    run_gate "core tests" "$HOOK_REPO_ROOT/scripts/ci/core-tests.sh"
+  else
+    run_gate "core tests (library lane)" \
+      env PTC_TEST_LANE=library "$HOOK_REPO_ROOT/scripts/ci/core-tests.sh"
+  fi
 fi
 
-if [ -n "${PTC_PRE_PUSH_SERIAL:-}" ]; then
+if [ "$serial_gates" = true ]; then
+  if [ "$run_docs_gate_selected" = true ]; then
+    run_gate "Documentation (ExDoc)" "$HOOK_REPO_ROOT/scripts/ci/docs.sh"
+  fi
+
   if [ "$run_core_gates" = true ]; then
     run_gate "core static analysis" "$HOOK_REPO_ROOT/scripts/ci/core-static.sh"
     run_gate "core Dialyzer" "$HOOK_REPO_ROOT/scripts/ci/core-dialyzer.sh"
@@ -638,12 +724,17 @@ if [ -n "${PTC_PRE_PUSH_SERIAL:-}" ]; then
   if [ "$run_viewer_gate" = true ]; then
     run_gate "Viewer validation" "$HOOK_REPO_ROOT/scripts/ci/viewer.sh"
   fi
-elif [ "$run_core_gates" = true ] || [ "$run_viewer_gate" = true ]; then
+elif [ "$run_core_gates" = true ] || [ "$run_viewer_gate" = true ] ||
+     [ "$run_docs_gate_selected" = true ]; then
   echo ""
   echo "📦 Deterministic gates (concurrent lanes)"
 
   if [ "$run_core_gates" = true ]; then
     start_lane "core static analysis + Dialyzer" core_static_and_dialyzer
+  fi
+
+  if [ "$run_docs_gate_selected" = true ]; then
+    start_lane "Documentation (ExDoc)" "$HOOK_REPO_ROOT/scripts/ci/docs.sh"
   fi
 
   if [ "$run_release_gate" = true ]; then

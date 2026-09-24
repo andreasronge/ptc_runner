@@ -203,7 +203,9 @@ the installation ceiling. Changing `ceilings.request_timeout_ms` requires a new
 before admission and enforces it through the provider worker and structured
 output validation. When that LLM clock wins over the enclosing run or workflow
 clocks, the public result is retryable `timeout/llm_request_timeout`. Replay
-installations do not carry this deadline.
+installations do not carry this deadline. The HTTP receive and connection-pool
+timeouts follow the remaining deadline; they do not impose a separate 120-second
+cap. An explicitly shorter transport timeout still applies.
 
 ```json
 "deepseek": {

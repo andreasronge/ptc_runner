@@ -333,8 +333,15 @@ sufficient to select a run without loading its activity:
 - workflow/agent name when supplied;
 - model and provider identifiers when recorded by a provider;
 - total and subordinate-evaluation counts;
-- workflow and mission capability-call counts;
-- LLM-call summary derived from named `llm-request` events when applicable;
+- workflow and mission capability-call counts, taken from validated terminal
+  usage when available;
+- an LLM-call count for workflow `llm-request` calls (a mission capability with
+  that name is not an LLM call);
+- `call_counts_complete`, which is `true` when all three call counts are
+  authoritative terminal-usage totals. When `false`, the counts are only
+  observations from retained `capability-started` events and may be lower than
+  the run totals after retention loss. Legacy traces without terminal
+  `capability_calls` never invent the missing totals;
 - the exact closed `llm_spend` projection retained by `run-stopped`, so the
   Viewer distinguishes empty, incomplete, unpriced, available, and overflow
   spend without reconstructing or guessing pricing state;
@@ -411,11 +418,12 @@ status, bounded exact-match tags, workflow/agent name, workflow bundle hash,
 model/provider when present, timestamp range, limit, and cursor.
 
 The default `view` is `"summary"` and projects each item to `run_id`, `status`,
-`duration_ms`, `llm_calls`, `evaluations`, `terminal_reason`, `terminal_limit`,
-`terminal_limit_value`, `complete`, and `truncated`. Terminal limit fields come
-from the reserved `run-stopped` record, so they remain available when the
-ordinary `limit-exceeded` event was dropped. Set `"view"` to `"full"` for the complete sanitized metadata
-record described above. Pagination and filtering are applied before this
+`duration_ms`, `llm_calls`, `call_counts_complete`, `evaluations`,
+`terminal_reason`, `terminal_limit`, `terminal_limit_value`, `complete`, and
+`truncated`. Terminal limit fields come from the reserved `run-stopped` record,
+so they remain available when the ordinary `limit-exceeded` event was dropped.
+Set `"view"` to `"full"` for the complete sanitized metadata record described
+above. Pagination and filtering are applied before this
 presentation projection, so the cursor and selected run set are identical in
 both views.
 
@@ -874,7 +882,7 @@ deterministically encoded JSON object with this exact envelope:
 
 ```json
 {
-  "schema_version": 11,
+  "schema_version": 12,
   "run_id": "run-id",
   "trace_id": "trace-id",
   "sequence": 1,
@@ -908,7 +916,7 @@ The current record types and payloads are:
 | `mcp-response` | `capability_id`, `request_id` | `transport`, `body` or `body_identity` |
 | `mcp-stderr` | `capability_id`, `request_id` | `transport`, `text`, `truncated` |
 | `execution-prints` | `evaluation_id` | `environment`, `prints`, `truncated` |
-| `execution-error` | `evaluation_id` | `environment`, `kind`, `reason`, `details` |
+| `execution-error` | `evaluation_id` | `environment`, optional mission-only `mission_name`, `kind`, `reason`, `details` |
 | `explicit-failure-value` | `evaluation_id` | `environment`, `value` |
 
 A read tool the host declared with `inspection_capture: "digest_results"`
@@ -1041,10 +1049,15 @@ Prelude uniqueness is `(environment, mission_name, component_id)`, so the same
 component ID can be inspected independently in multiple missions. Every
 mission-owned query result preserves `mission_name`.
 
-Schema 11 adds `run-input` to the closed inspection vocabulary. It retains
-the successful terminal result introduced in schema 6 and the explicit-failure
-record introduced in schema 8. Older inspection schemas are rejected as
-unsupported; they are not silently interpreted as schema 11:
+Schema 12 adds mission `execution-error` records to the closed inspection
+vocabulary. Their payload has `environment: "mission"`, `mission_name`,
+`kind: "evaluation_failed"`, a reason, and exact details fields `message`,
+`message_truncated`, and `source_location`; the location is null or contains
+only a non-negative byte `offset`, and the UTF-8 message is bounded to 4,096
+bytes. Schema 12 retains the `run-input` added in schema 11, the successful
+terminal result introduced in schema 6, and the explicit-failure record
+introduced in schema 8. Older inspection schemas are rejected as unsupported;
+they are not silently interpreted as schema 12:
 
 | Record type | Correlation | Exact payload fields |
 | --- | --- | --- |
@@ -1115,11 +1128,16 @@ succeeds or fails: `prints` is the run's bounded `println` output. Public
 evaluation prints are projected in one pass under both a 128-entry ceiling and
 a 65,536-byte encoded JSON-array ceiling, and the truncation flag is
 authoritative even when the omitted entries are empty strings; this record uses
-the same projection. `execution-error` is emitted only when the top-level
-workflow evaluation fails with a non-empty `details` map, where `details` is
-the Kernel `Error.details` map computed for that failure. Their `environment`
-is always `"workflow"`, and their `evaluation_id` must match a canonical
-`evaluation-started` event with `environment: "workflow"` for the same run.
+the same projection. `execution-error` is emitted when the top-level workflow
+evaluation fails with a non-empty `details` map and when a subordinate mission
+evaluation returns an evaluator failure. Its `evaluation_id` must match a
+canonical `evaluation-started` event with the same environment for the same
+run. A workflow record's `details` is the Kernel `Error.details` map computed
+for that failure. Mission records additionally carry `mission_name`; their
+bounded details retain the evaluator message, whether it was truncated, and an
+available source byte offset. They are written when the mission evaluation
+finishes, so an enclosing workflow may recover from the failure without
+erasing its private diagnostic.
 When the workflow's `return` expression is directly a `kernel-eval`, private
 details also contain bounded `boundary_producer` evidence: the child
 `evaluation_id` when that retained successful result is exactly the workflow

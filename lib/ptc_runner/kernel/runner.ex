@@ -1192,6 +1192,8 @@ defmodule PtcRunner.Kernel.Runner do
           message: "#{limit} expired during a parallel operation",
           limit: limit,
           limit_ms: limit_ms,
+          run_duration_ms: limits.run_duration_ms,
+          workflow_timeout_ms: limits.workflow_timeout_ms,
           phase: :execution
         }
 
@@ -1209,6 +1211,8 @@ defmodule PtcRunner.Kernel.Runner do
           message: "#{limit} exceeded during #{phase} after #{timeout_ms}ms",
           limit: limit,
           limit_ms: limit_ms,
+          run_duration_ms: limits.run_duration_ms,
+          workflow_timeout_ms: limits.workflow_timeout_ms,
           phase: phase
         }
     end

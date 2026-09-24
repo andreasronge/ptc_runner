@@ -9,6 +9,10 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSource do
   - `<traces>/<run-ref>.private.jsonl`
   - `<inspection>/<run-ref>.ptcins`
 
+  A caller with an already selected inspection path may resolve that exact
+  regular `.ptcins` file instead. It receives the same embedded run-identity
+  and trace-correlation verification during admission.
+
   Filenames are routing hints. Embedded run and trace identities remain
   authoritative, and snapshot identity commits to the selector, trace source
   class, exact evidence digests, and correlated trace ID. Whole-directory
@@ -104,6 +108,26 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSource do
       resolve_inspection_in(directory, run_ref)
     end
   end
+
+  @spec resolve_inspection_file(term(), term()) :: {:ok, binary()} | {:error, atom()}
+  def resolve_inspection_file(path, run_ref) when is_binary(path) do
+    with :ok <- require_run_ref(run_ref),
+         true <- String.valid?(path) and Path.extname(path) == ".ptcins" do
+      expanded = Path.expand(path)
+
+      case candidate_status(expanded) do
+        :regular -> {:ok, expanded}
+        :absent -> {:error, :selected_inspection_missing}
+        :not_regular -> {:error, :selected_inspection_not_regular}
+        :unavailable -> {:error, :source_unavailable}
+      end
+    else
+      false -> {:error, :source_unavailable}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  def resolve_inspection_file(_path, _run_ref), do: {:error, :source_unavailable}
 
   @spec prove_trace_events(term(), term()) :: {:ok, binary()} | {:error, atom()}
   def prove_trace_events(events, run_ref) when is_list(events) do

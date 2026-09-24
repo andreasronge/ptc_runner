@@ -1,5 +1,6 @@
 defmodule PtcRunner.Lisp.PtcLispBasicsGuideTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   alias PtcRunner.Lisp.SpecValidator
   alias PtcRunner.Lisp.SpecValidator.Parser

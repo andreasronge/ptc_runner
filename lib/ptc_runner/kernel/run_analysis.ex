@@ -11,9 +11,16 @@ defmodule PtcRunner.Kernel.RunAnalysis do
   registry. No operation diagnoses evidence or aggregates primitive pages
   before returning to Lisp.
 
+  Run rows expose `call_counts_complete` beside their call counts. When true,
+  `llm_calls`, `workflow_capability_calls`, and `mission_capability_calls` are
+  authoritative terminal-usage totals. When false, they are observations from
+  the retained event stream and may be lower than the run totals after event
+  retention; `llm_calls` always counts workflow `llm-request` calls only.
+
   Public captures expose only canonical `activity`. Private captures add exact
   exchanges, reconstructed turns, generated source with static prelude-call
-  facts, effective prelude source, and workflow execution diagnostics. The
+  facts, effective prelude source, and workflow or mission execution
+  diagnostics. The
   catalog identifies snapshot and sequence domains, identifier locations, and
   raw collections whose items carry an explicit completeness field. Each
   collection the private inspection record counts also reports the `item_count`
@@ -310,7 +317,7 @@ defmodule PtcRunner.Kernel.RunAnalysis do
 
   defp run_view(_arguments), do: {:error, :invalid_query}
 
-  @summary_run_fields ~w(run_id status duration_ms llm_calls evaluations terminal_reason terminal_limit terminal_limit_value complete truncated)
+  @summary_run_fields ~w(run_id status duration_ms llm_calls call_counts_complete evaluations terminal_reason terminal_limit terminal_limit_value complete truncated)
 
   defp project_runs(items, :full) when is_list(items), do: items
 

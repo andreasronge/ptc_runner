@@ -1,5 +1,6 @@
 defmodule PtcRunner.Kernel.PreludeSearchLabTest do
   use ExUnit.Case, async: false
+  @moduletag :operator
 
   alias PtcRunner.Kernel.LLMReplay
   alias PtcRunner.Labs.PreludeSearch
@@ -14,6 +15,229 @@ defmodule PtcRunner.Kernel.PreludeSearchLabTest do
   Code.require_file("support/lab.exs", lab)
   Code.require_file("support/statistics.exs", lab)
   Code.require_file("support/phase1.exs", lab)
+
+  @tag :tmp_dir
+  test "stopped model commands finalize evidence and replay only the completed prefix", %{
+    tmp_dir: tmp
+  } do
+    output = Path.join(tmp, "live")
+    owner = self()
+
+    runner = fn _command, args, _options ->
+      send(owner, {:command_args, args})
+      {"injected command failure", 1}
+    end
+
+    assert [] ==
+             Phase1.run(
+               output: output,
+               subjects: ["intervals"],
+               instances: 1,
+               command_runner: runner
+             )
+
+    assert_receive {:command_args, args}
+    assert "--trace-dir" in args
+    summary = output |> Path.join("summary.json") |> File.read!() |> Jason.decode!()
+    assert summary["stop_reason"] == "case_failed_reserved_at_ceiling"
+    assert summary["spent_or_reserved_microusd"] == 100_000
+    assert summary["completed_cases"] == 0
+    assert File.read!(Path.join(output, "fixtures/index.json")) |> Jason.decode!() == []
+    assert File.read!(Path.join(output, "results.json")) |> Jason.decode!() == []
+    assert File.exists?(Path.join(output, "stopped-case.json"))
+
+    assert [] ==
+             Phase1.run(
+               output: Path.join(tmp, "replay"),
+               subjects: ["intervals"],
+               instances: 1,
+               replay: true,
+               partial_replay: true,
+               fixtures: Path.join(output, "fixtures"),
+               command_runner: fn _, _, _ -> flunk("no completed model commands to replay") end
+             )
+  end
+
+  @tag :tmp_dir
+  test "a real Kernel timeout remains privately analyzable and preserves a replayable prefix", %{
+    tmp_dir: tmp
+  } do
+    previous = Application.fetch_env(:ptc_runner, :llm_adapter)
+    previous_counter = Application.fetch_env(:ptc_runner, :prelude_search_test_counter)
+    previous_key = System.get_env("OPENROUTER_API_KEY")
+    {:ok, counter} = Agent.start_link(fn -> 0 end)
+    Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.TestSupport.PreludeSearchLLMAdapter)
+    Application.put_env(:ptc_runner, :prelude_search_test_counter, counter)
+    System.put_env("OPENROUTER_API_KEY", "test-only-no-network")
+
+    on_exit(fn ->
+      for {key, value} <- [llm_adapter: previous, prelude_search_test_counter: previous_counter] do
+        case value do
+          {:ok, value} -> Application.put_env(:ptc_runner, key, value)
+          :error -> Application.delete_env(:ptc_runner, key)
+        end
+      end
+
+      if previous_key,
+        do: System.put_env("OPENROUTER_API_KEY", previous_key),
+        else: System.delete_env("OPENROUTER_API_KEY")
+    end)
+
+    runner = fn _, ["ptc" | args], _ ->
+      presentation = PtcRunner.MixCommandAdapter.execute(args)
+      {presentation.stdout <> presentation.stderr, presentation.exit_status}
+    end
+
+    output = Path.join(tmp, "live")
+
+    opts = [
+      subjects: ["intervals"],
+      instances: 1,
+      request_timeout_ms: 1_000,
+      command_runner: runner
+    ]
+
+    rows = Phase1.run([output: output] ++ opts)
+    assert length(rows) == 1, File.read!(Path.join(output, "stopped-case.json"))
+    summary = output |> Path.join("summary.json") |> File.read!() |> Jason.decode!()
+    assert summary["spent_or_reserved_microusd"] == 100_001
+    assert summary["stop_reason"] == "case_failed_reserved_at_ceiling"
+    failed = Path.join(output, "runs/intervals-0-E1-three-turn")
+    [trace] = Path.wildcard(Path.join(failed, "traces/*.jsonl"))
+    run_id = trace |> Path.basename(".jsonl") |> String.replace_suffix(".private", "")
+    analysis_dir = Path.join(tmp, "analysis")
+    File.mkdir_p!(analysis_dir)
+
+    analysis_output =
+      ExUnit.CaptureIO.capture_io(fn ->
+        presentation =
+          PtcRunner.MixCommandAdapter.execute([
+            "repl",
+            "--profile",
+            "private-run-analysis-v2",
+            "--private-unattended",
+            "--run",
+            run_id,
+            "--resource",
+            "traces=" <> Path.join(failed, "traces"),
+            "--resource",
+            "inspection=" <> Path.join(failed, "inspection"),
+            "--session-trace-dir",
+            analysis_dir,
+            "--format",
+            "jsonl",
+            "-e",
+            "(analysis/open " <> Jason.encode!(run_id) <> ")"
+          ])
+
+        assert presentation.exit_status == 0, presentation.stdout <> presentation.stderr
+      end)
+
+    assert analysis_output =~ "model_exchanges"
+    assert File.read!(Path.join(failed, "result.json")) =~ "llm_request_timeout"
+
+    Application.put_env(:ptc_runner, :prelude_search_malformed_program, true)
+    on_exit(fn -> Application.delete_env(:ptc_runner, :prelude_search_malformed_program) end)
+    malformed_output = Path.join(tmp, "malformed")
+
+    assert [_row] =
+             Phase1.run(
+               output: malformed_output,
+               subjects: ["intervals"],
+               instances: 1,
+               budget_microusd: 100_000,
+               command_runner: runner
+             )
+
+    capture = Path.join(malformed_output, "runs/intervals-0-E1-one-turn")
+    [malformed_trace] = Path.wildcard(Path.join(capture, "traces/*.jsonl"))
+    malformed_run_id = malformed_trace |> Path.basename(".jsonl") |> String.split(".") |> hd()
+
+    malformed_analysis =
+      ExUnit.CaptureIO.capture_io(fn ->
+        presentation =
+          PtcRunner.MixCommandAdapter.execute([
+            "repl",
+            "--profile",
+            "private-run-analysis-v2",
+            "--private-unattended",
+            "--resource",
+            "traces=" <> Path.join(capture, "traces"),
+            "--resource",
+            "inspection=" <> Path.join(capture, "inspection"),
+            "--session-trace-dir",
+            analysis_dir,
+            "--format",
+            "jsonl",
+            "-e",
+            "(analysis/open " <> Jason.encode!(malformed_run_id) <> ")",
+            "-e",
+            "(analysis/read " <>
+              Jason.encode!(malformed_run_id) <> " {\"collection\" \"execution_errors\"})"
+          ])
+
+        assert presentation.exit_status == 0, presentation.stdout <> presentation.stderr
+      end)
+
+    [_opened, errors] =
+      malformed_analysis
+      |> String.split("\n", trim: true)
+      |> Enum.map(&Jason.decode!/1)
+      |> Enum.filter(&(&1["type"] == "evaluation"))
+      |> Enum.map(&get_in(&1, ["result", "value"]))
+
+    [error] = errors["items"]
+    assert error["mission_name"] == "repair-0"
+    assert error["reason"] == "parse_error"
+    assert error["details"]["source_location"] == %{"offset" => 4}
+    evaluation_id = error["evaluation_id"]
+
+    assert %{"filters" => %{"evaluation_id" => ^evaluation_id}, "state" => "complete"} =
+             Enum.find(error["relationships"], &(&1["rel"] == "failed_generated_source"))
+
+    assert %{
+             "filters" => %{
+               "evaluation_id" => ^evaluation_id,
+               "status" => "evaluation_error"
+             },
+             "state" => "complete"
+           } = Enum.find(error["relationships"], &(&1["rel"] == "evaluation_failure"))
+
+    replay =
+      Phase1.run(
+        [
+          output: Path.join(tmp, "replay"),
+          replay: true,
+          partial_replay: true,
+          fixtures: Path.join(output, "fixtures")
+        ] ++ opts
+      )
+
+    assert Enum.map(replay, &Map.take(&1, ["candidates", "selection"])) ==
+             Enum.map(rows, &Map.take(&1, ["candidates", "selection"]))
+
+    assert Enum.map(replay, &get_in(&1, ["usage", "llm_spend"])) ==
+             Enum.map(rows, &get_in(&1, ["usage", "llm_spend"]))
+
+    [fixture] = Path.wildcard(Path.join(output, "fixtures/*.jsonl"))
+    File.write!(fixture, File.read!(fixture) <> "\n")
+    rejected = Path.join(tmp, "tampered-replay")
+
+    assert_raise RuntimeError, "replay fixture identity changed", fn ->
+      Phase1.run(
+        [
+          output: rejected,
+          replay: true,
+          partial_replay: true,
+          fixtures: Path.join(output, "fixtures")
+        ] ++ opts
+      )
+    end
+
+    reservation = rejected |> Path.join("reservation.json") |> File.read!() |> Jason.decode!()
+    assert reservation["reserved_microusd"] == 0
+    assert Agent.get(counter, & &1) == 2
+  end
 
   test "diagnosis scoring accepts qualification but rejects empty form and false evidence" do
     instance = %{

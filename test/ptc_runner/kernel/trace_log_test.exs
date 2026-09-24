@@ -1,5 +1,6 @@
 defmodule PtcRunner.Kernel.TraceLogTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.TraceLog
@@ -1349,6 +1350,103 @@ defmodule PtcRunner.Kernel.TraceLogTest do
 
       assert {:error, :malformed_source} = TraceLog.query(trace_log, :list_runs, %{})
     end
+  end
+
+  @tag :tmp_dir
+  test "canonical validation rejects malformed terminal capability-call totals", %{
+    tmp_dir: directory
+  } do
+    invalid_counts = [
+      "invalid",
+      %{"workflow/llm-request" => -1},
+      %{"workflow" => %{"llm-request" => -1}, "mission" => %{}},
+      %{"workflow" => %{}, "mission" => %{"Uppercase" => 1}},
+      %{"other/llm-request" => 1},
+      %{"workflow/Uppercase" => 1}
+    ]
+
+    for {capability_calls, index} <- Enum.with_index(invalid_counts) do
+      path = Path.join(directory, "invalid-capability-calls-#{index}.jsonl")
+
+      events = [
+        decoded_event("invalid-capability-calls-#{index}", 1, "run-started"),
+        decoded_event("invalid-capability-calls-#{index}", 2, "run-stopped", %{
+          "usage" => %{
+            "capability_calls" => capability_calls,
+            "llm_budget" => %{"total_tokens" => nil, "cost" => nil}
+          }
+        })
+      ]
+
+      File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
+      {:ok, trace_log} = TraceLog.new(source: {:file, path})
+
+      assert {:error, :malformed_source} = TraceLog.query(trace_log, :list_runs, %{})
+    end
+  end
+
+  @tag :tmp_dir
+  test "canonical validation rejects terminal call totals below retained starts", %{
+    tmp_dir: directory
+  } do
+    for {shape, capability_calls} <- [
+          flat_zero: %{"workflow/llm-request" => 0},
+          nested_zero: %{"workflow" => %{"llm-request" => 0}, "mission" => %{}},
+          flat_omitted: %{"workflow/workspace.read" => 1},
+          nested_omitted: %{
+            "workflow" => %{"workspace.read" => 1},
+            "mission" => %{}
+          }
+        ] do
+      path = Path.join(directory, "contradictory-capability-calls-#{shape}.jsonl")
+
+      events = [
+        decoded_event("contradictory-capability-calls-#{shape}", 1, "run-started"),
+        decoded_event("contradictory-capability-calls-#{shape}", 2, "capability-started", %{
+          "capability_id" => "retained-call",
+          "environment" => "workflow",
+          "name" => "llm-request"
+        }),
+        decoded_event("contradictory-capability-calls-#{shape}", 3, "run-stopped", %{
+          "usage" => %{
+            "capability_calls" => capability_calls,
+            "llm_budget" => %{"total_tokens" => nil, "cost" => nil}
+          }
+        })
+      ]
+
+      File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
+      {:ok, trace_log} = TraceLog.new(source: {:file, path})
+
+      assert {:error, :malformed_source} = TraceLog.query(trace_log, :list_runs, %{})
+    end
+  end
+
+  @tag :tmp_dir
+  test "canonical validation accepts producer-supported call-count cardinality", %{
+    tmp_dir: directory
+  } do
+    path = Path.join(directory, "high-cardinality-capability-calls.jsonl")
+
+    capability_calls =
+      1..513
+      |> Map.new(fn index -> {"workflow/tool-#{index}", 1} end)
+
+    events = [
+      decoded_event("high-cardinality-capability-calls", 1, "run-started"),
+      decoded_event("high-cardinality-capability-calls", 2, "run-stopped", %{
+        "usage" => %{
+          "capability_calls" => capability_calls,
+          "llm_budget" => %{"total_tokens" => nil, "cost" => nil}
+        }
+      })
+    ]
+
+    File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
+    {:ok, trace_log} = TraceLog.new(source: {:file, path})
+
+    assert {:ok, %{"items" => [%{"workflow_capability_calls" => 513}]}} =
+             TraceLog.query(trace_log, :list_runs, %{})
   end
 
   @tag :tmp_dir

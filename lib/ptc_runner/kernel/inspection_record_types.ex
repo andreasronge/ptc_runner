@@ -70,6 +70,17 @@ defmodule PtcRunner.Kernel.InspectionRecordTypes do
     end
   end
 
+  @doc false
+  @spec valid_mission_evaluation_error_details?(map()) :: boolean()
+  def valid_mission_evaluation_error_details?(details) when is_map(details) do
+    exact_keys?(details, ~w(message message_truncated source_location)) and
+      bounded_string?(details["message"], @max_exception_message_bytes, false) and
+      is_boolean(details["message_truncated"]) and
+      valid_source_location?(details["source_location"])
+  end
+
+  def valid_mission_evaluation_error_details?(_details), do: false
+
   defp valid_boundary_producer?(producer) when is_map(producer) do
     Enum.sort(Map.keys(producer)) == ~w(complete? evaluation_ids) and
       is_boolean(producer["complete?"]) and
@@ -79,6 +90,13 @@ defmodule PtcRunner.Kernel.InspectionRecordTypes do
   end
 
   defp valid_boundary_producer?(_producer), do: false
+
+  defp valid_source_location?(nil), do: true
+
+  defp valid_source_location?(%{"offset" => offset} = location),
+    do: map_size(location) == 1 and is_integer(offset) and offset >= 0
+
+  defp valid_source_location?(_location), do: false
 
   defp valid_capability_identity?(%{"environment" => "workflow", "name" => name} = payload) do
     Map.keys(payload) |> Enum.sort() ==

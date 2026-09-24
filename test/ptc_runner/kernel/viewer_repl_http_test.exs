@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.ViewerReplHttpTest do
   # async: false — starts the :ptc_viewer application and asserts an exact count of node-wide
   # [:bandit, :request, *] telemetry (class D).
   use ExUnit.Case, async: false
+  @moduletag :operator
 
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits

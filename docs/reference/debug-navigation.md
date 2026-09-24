@@ -250,8 +250,10 @@ their name:
 | Relation | Semantics | Reaches |
 | --- | --- | --- |
 | `boundary_failure` | causation | the failing activity record |
+| `evaluation_failure` | association | the canonical failed mission evaluation |
 | `child_evaluations` | nesting | evaluations parented by the failing one |
 | `direct_boundary_producer` | causation | the child evaluation that produced the boundary value |
+| `failed_generated_source` | association | the generated program rejected by mission evaluation |
 | `generated_source` | association | that evaluation's generated program |
 | `producing_turn` | association | the model turn that emitted a program |
 | `referenced_prelude_source` | association | a component a program actually called |
