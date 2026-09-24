@@ -12,6 +12,7 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expected, startFixture } from "./fixture.mjs";
+import { taskWithUrl } from "./measurement.mjs";
 import { aggregate, formatAggregate, usageOf } from "./reporting.mjs";
 
 const execute = promisify(execFile);
@@ -91,7 +92,10 @@ try {
     await mkdir(traceDir, { mode: 0o700 });
     await writeFile(
       inputPath,
-      JSON.stringify({ task: TASK, url: `${fixture.origin}${path}` }),
+      JSON.stringify({
+        task: taskWithUrl(TASK, `${fixture.origin}${path}`),
+        url: `${fixture.origin}${path}`,
+      }),
       { mode: 0o600 },
     );
 
