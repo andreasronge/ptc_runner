@@ -185,6 +185,7 @@ defmodule PtcRunner.Scripts.CIGatesTest do
     workflow = File.read!(Path.join(@root, ".github/workflows/test.yml"))
     setup_action = File.read!(Path.join(@root, ".github/actions/setup-elixir/action.yml"))
     launcher_release = File.read!(Path.join(@root, ".github/workflows/launcher-release.yml"))
+    release = File.read!(Path.join(@root, ".github/workflows/release.yml"))
     hook = File.read!(Path.join(@root, ".githooks/pre-push"))
     mix_project = File.read!(Path.join(@root, "mix.exs"))
     launcher = File.read!(Path.join(@root, "scripts/ci/launcher.sh"))
@@ -192,6 +193,11 @@ defmodule PtcRunner.Scripts.CIGatesTest do
     for entrypoint <- ~w(core-tests core-static core-dialyzer core-release viewer docs launcher) do
       assert workflow =~ "scripts/ci/#{entrypoint}.sh"
       assert hook =~ "scripts/ci/#{entrypoint}.sh"
+    end
+
+    for release_workflow <- [release, launcher_release] do
+      assert release_workflow =~ "mix prepush"
+      assert release_workflow =~ "scripts/ci/gateway.sh"
     end
 
     refute workflow =~ "run: mix test --max-failures 1 --warnings-as-errors"
