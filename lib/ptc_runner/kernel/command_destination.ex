@@ -172,6 +172,9 @@ defmodule PtcRunner.Kernel.CommandDestination do
   defp destination_cause({:destination_exists, _destination, _path}),
     do: :destination_exists
 
+  defp destination_cause({:recovery_reservation_failed, reason}),
+    do: CommandFailureCause.from_reason(reason)
+
   defp destination_cause({{:destination_unavailable, cause}, _destination}),
     do: CommandFailureCause.from_reason(cause)
 
@@ -189,6 +192,9 @@ defmodule PtcRunner.Kernel.CommandDestination do
 
   defp destination_diagnostic({:invalid_destination, destination}),
     do: {:destination, invalid_destination_code(destination)}
+
+  defp destination_diagnostic({:recovery_reservation_failed, _reason}),
+    do: {:destination, :recovery_reservation_failed}
 
   defp destination_diagnostic({{:destination_unavailable, _cause}, destination}),
     do: {:destination, unavailable_destination_code(destination)}

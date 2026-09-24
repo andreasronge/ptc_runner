@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.CommandFrontend do
   alias PtcRunner.Kernel.ProjectArtifactRoot
   alias PtcRunner.Kernel.ProjectConfig
   alias PtcRunner.Kernel.ProjectContext
+  alias PtcRunner.Kernel.PublicationHandle
 
   @frontend_commands CommandDeclaration.frontend_commands()
 
@@ -118,7 +119,14 @@ defmodule PtcRunner.Kernel.CommandFrontend do
        )
        when is_binary(path) do
     result =
-      CommandEnvelope.publish_for_project(outcome, entry.arguments, handle || path, entry.run_ref)
+      PublicationHandle.with_run_ref(entry.run_ref, fn ->
+        CommandEnvelope.publish_for_project(
+          outcome,
+          entry.arguments,
+          handle || path,
+          entry.run_ref
+        )
+      end)
 
     case result do
       :ok ->
@@ -150,7 +158,30 @@ defmodule PtcRunner.Kernel.CommandFrontend do
   defp present(%CommandEntry{} = entry, %CommandOutcome{} = outcome, rejection, named_env_file?) do
     case local_artifact_root_failure(entry, outcome) do
       nil ->
-        rendered_presentation(entry, outcome, nil, rejection, named_env_file?)
+        case CommandEnvelope.destinations(entry.arguments, nil, entry.run_ref) do
+          [] ->
+            rendered_presentation(entry, outcome, nil, rejection, named_env_file?)
+
+          [ledger] ->
+            result =
+              PublicationHandle.with_run_ref(entry.run_ref, fn ->
+                CommandEnvelope.publish_for_project(outcome, entry.arguments, nil, entry.run_ref)
+              end)
+
+            case result do
+              :ok ->
+                rendered_presentation(entry, outcome, ledger, rejection, named_env_file?)
+
+              {:error, reason} ->
+                presentation(
+                  outcome,
+                  nil,
+                  "",
+                  CommandRenderer.envelope_failure(entry.run_ref, reason),
+                  @envelope_failure_exit_status
+                )
+            end
+        end
 
       stderr ->
         presentation(outcome, nil, "", stderr, outcome.exit_status)

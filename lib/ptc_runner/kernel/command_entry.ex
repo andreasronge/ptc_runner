@@ -16,6 +16,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandDestination
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandFailureCause
   alias PtcRunner.Kernel.CommandRejection
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.DestinationIdentity
@@ -288,15 +289,20 @@ defmodule PtcRunner.Kernel.CommandEntry do
   end
 
   defp destination_failed(arguments, destinations, run_ref, frontend, path, reason) do
+    reason = destination_failure_reason(path, reason)
+
     %__MODULE__{
       run_ref: run_ref,
       frontend: frontend,
       arguments: arguments,
-      diagnostic: CommandDiagnostic.new!(:destination, :envelope_destination_unavailable),
+      diagnostic:
+        CommandDiagnostic.new!(:destination, :envelope_destination_unavailable,
+          cause: CommandFailureCause.from_reason(reason)
+        ),
       rejection: nil,
       envelope_path: nil,
       envelope_handle: nil,
-      envelope_destination_failure: {path, destination_failure_reason(path, reason)},
+      envelope_destination_failure: {path, reason},
       destinations: destinations
     }
   end
