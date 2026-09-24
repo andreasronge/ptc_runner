@@ -1,8 +1,8 @@
 defmodule PtcRunner.Kernel.MCPSourceTest do
-  # async: false — real loopback TCP plus 100-900 ms request deadlines that scheduler and pool
-  # contention turn into :mcp_timeout (class A); no VM-global state, so async: true once the
-  # deadlines are held paths.
-  use ExUnit.Case, async: false
+  # Async: no VM-global state. Every fixture listens on its own loopback port or
+  # stdio child, and deadlines follow the rule below so contention cannot turn a
+  # step that must succeed into :mcp_timeout.
+  use ExUnit.Case, async: true
 
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
 
@@ -37,6 +37,15 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   alias PtcRunner.TestSupport.TestHelpers
 
   @owner_lifecycle_timeout_ms 30_000
+
+  # Deadline for a step that must succeed: discovery, a reply, a store call, a
+  # message. It is spent only when that step is already failing.
+  @settle_timeout_ms 10_000
+
+  # A timeout the case asserts fires, when the same knob also bounds discovery
+  # that must succeed first. Long enough for loopback discovery on a saturated
+  # scheduler; a timeout with no such step keeps its own shorter value.
+  @expiring_timeout_ms 1_500
   @max_logical_result_bytes 1_048_576
   @stdio_fixture Path.expand("../../support/mcp_stdio_source_fixture.sh", __DIR__)
   @unicode_stdio_fixture Path.expand("../../support/mcp_stdio_fixture.exs", __DIR__)
@@ -125,7 +134,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       fixture = fixture(self(), tool_http_error: tool_http_error)
       manager = oauth_manager(fixture.endpoint, interceptor)
 
-      builder = streamable_oauth_builder(fixture.endpoint, manager, 2_000)
+      builder = streamable_oauth_builder(fixture.endpoint, manager, @settle_timeout_ms)
 
       assert {:ok, %{capabilities: [capability], close: close}} =
                build_fixture_provider(builder)
@@ -142,7 +151,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       assert {:error, :mcp_authorization_required} =
                TokenManager.authorization_header(
                  manager,
-                 System.monotonic_time(:millisecond) + 1_000
+                 System.monotonic_time(:millisecond) + @settle_timeout_ms
                )
 
       assert match?({:error, %ProviderError{kind: :transport_error}}, result),
@@ -165,7 +174,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       fixture = fixture(self(), tool_http_error: {403, headers})
       manager = oauth_manager(fixture.endpoint, fn _operation, _timeout -> :delegate end)
 
-      builder = streamable_oauth_builder(fixture.endpoint, manager, 2_000)
+      builder = streamable_oauth_builder(fixture.endpoint, manager, @settle_timeout_ms)
 
       assert {:ok, %{capabilities: [capability], close: close}} =
                build_fixture_provider(builder)
@@ -182,7 +191,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                  traceparent: "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01"
                })
 
-      deadline = System.monotonic_time(:millisecond) + 1_000
+      deadline = System.monotonic_time(:millisecond) + @settle_timeout_ms
       assert {:ok, issued} = TokenManager.authorization_header(manager, deadline)
       assert :ok = TokenManager.release(manager, issued.admission, deadline)
       assert :ok = close.()
@@ -233,7 +242,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         end
       end)
 
-    builder = streamable_oauth_builder(fixture.endpoint, manager, 1_000)
+    builder = streamable_oauth_builder(fixture.endpoint, manager, @settle_timeout_ms)
 
     assert {:ok, %{capabilities: [capability], close: close}} =
              build_fixture_provider(builder)
@@ -245,7 +254,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       Store.load_grant(
         authorization_config.context.store,
         authorization_config.key,
-        Deadline.new(1_000)
+        Deadline.new(@settle_timeout_ms)
       )
 
     limits = Limits.defaults()
@@ -268,7 +277,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
           environment,
           capability.name,
           %{"query" => "x"},
-          TestHelpers.dispatch_context(state, :mission, 500,
+          TestHelpers.dispatch_context(state, :mission, @expiring_timeout_ms,
             lease: lease,
             mission_name: "default"
           ),
@@ -277,19 +286,23 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         )
       end)
 
-    assert_receive {:oauth_transition_persistence_blocked, ^status, persistence_worker}, 1_000
+    assert_receive {:oauth_transition_persistence_blocked, ^status, persistence_worker},
+                   @settle_timeout_ms
+
     persistence_ref = Process.monitor(persistence_worker)
 
     assert %{status: :error, kind: :timeout, reason: :provider_timeout} =
-             Task.await(task, 2_000)
+             Task.await(task, @settle_timeout_ms)
 
     send(persistence_worker, :continue_oauth_transition)
-    assert_receive {:DOWN, ^persistence_ref, :process, ^persistence_worker, :normal}, 1_000
+
+    assert_receive {:DOWN, ^persistence_ref, :process, ^persistence_worker, :normal},
+                   @settle_timeout_ms
 
     assert {:error, :mcp_authorization_required} =
              TokenManager.authorization_header(
                manager,
-               System.monotonic_time(:millisecond) + 1_000
+               System.monotonic_time(:millisecond) + @settle_timeout_ms
              )
 
     case status do
@@ -300,7 +313,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                    authorization_config.key,
                    grant.generation,
                    1_000,
-                   Deadline.new(1_000)
+                   Deadline.new(@settle_timeout_ms)
                  )
 
       403 ->
@@ -308,7 +321,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                  Store.load_requirement(
                    authorization_config.context.store,
                    authorization_config.key,
-                   Deadline.new(1_000)
+                   Deadline.new(@settle_timeout_ms)
                  )
 
         assert scopes == MapSet.new(["write"])
@@ -327,7 +340,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:error, :mcp_authorization_required} =
              TokenManager.authorization_header(
                replacement_manager,
-               System.monotonic_time(:millisecond) + 1_000
+               System.monotonic_time(:millisecond) + @settle_timeout_ms
              )
 
     assert :ok = TokenManager.close(replacement_manager)
@@ -495,7 +508,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert Enum.map(requests, & &1["correlation"]) |> MapSet.new() ==
              Enum.map(responses, & &1["correlation"]) |> MapSet.new()
 
-    assert Enum.all?(records, &(&1["schema_version"] == 11))
+    assert Enum.all?(records, &(&1["schema_version"] == 12))
     assert Enum.all?(requests ++ responses, &(&1["payload"]["mission_name"] == "default"))
 
     encoded_inspection = File.read!(inspection_path)
@@ -535,8 +548,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
              |> manifest(["remote.structured"],
                program: single_call_program("remote.structured", "x"),
                max_result_bytes: 1_000_000,
-               timeout_ms: 5_000,
-               evaluation_timeout_ms: 5_000
+               timeout_ms: @settle_timeout_ms,
+               evaluation_timeout_ms: @settle_timeout_ms
              )
              |> directory_request(
                stdio_registry(dir, marker, "structured-padded",
@@ -601,8 +614,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
              |> manifest(["remote.structured"],
                program: single_call_program("remote.structured", "x"),
                max_result_bytes: 1_000_000,
-               timeout_ms: 5_000,
-               evaluation_timeout_ms: 5_000,
+               timeout_ms: @settle_timeout_ms,
+               evaluation_timeout_ms: @settle_timeout_ms,
                limits: %{"evaluation_heap_words" => 4_000_000}
              )
              |> directory_request(
@@ -818,13 +831,13 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     fixture = fixture(self())
     on_exit(fixture.close)
 
-    http_registry = registry(fixture.endpoint, timeout_ms: 5_000)
+    http_registry = registry(fixture.endpoint, timeout_ms: @settle_timeout_ms)
     stdio_registry = stdio_registry(dir, marker)
 
     manifest =
       manifest(dir, ~w(remote.structured remote.text remote.fail),
-        timeout_ms: 5_000,
-        evaluation_timeout_ms: 5_000
+        timeout_ms: @settle_timeout_ms,
+        evaluation_timeout_ms: @settle_timeout_ms
       )
 
     assert {:ok, http_built} =
@@ -939,8 +952,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
              dir
              |> manifest(["remote.structured"],
                program: single_call_program("remote.structured", "x"),
-               timeout_ms: 5_000,
-               evaluation_timeout_ms: 5_000
+               timeout_ms: @settle_timeout_ms,
+               evaluation_timeout_ms: @settle_timeout_ms
              )
              |> directory_request(registry)
              |> RunLifecycle.build()
@@ -974,8 +987,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
              dir
              |> manifest(["remote.fail"],
                program: single_call_program("remote.fail", "x"),
-               timeout_ms: 5_000,
-               evaluation_timeout_ms: 5_000
+               timeout_ms: @settle_timeout_ms,
+               evaluation_timeout_ms: @settle_timeout_ms
              )
              |> directory_request(registry, inspect: inspection_path)
              |> RunLifecycle.build()
@@ -1035,7 +1048,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     registries = [
       registry(fixture.endpoint,
-        timeout_ms: 5_000,
+        timeout_ms: @settle_timeout_ms,
         max_result_bytes: @max_logical_result_bytes
       ),
       stdio_registry(dir, marker, "text-logical-max", max_result_bytes: @max_logical_result_bytes)
@@ -1064,8 +1077,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         registry <- registries do
       manifest =
         manifest(dir, ~w(remote.structured remote.text remote.fail),
-          timeout_ms: 5_000,
-          evaluation_timeout_ms: 5_000,
+          timeout_ms: @settle_timeout_ms,
+          evaluation_timeout_ms: @settle_timeout_ms,
           max_result_bytes: max_result_bytes,
           limits: run_limits
         )
@@ -1120,7 +1133,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
            |> stdio_transport_options()
            |> Keyword.put(:launcher, configured_launcher)},
         tools: mappings(),
-        timeout_ms: 5_000,
+        timeout_ms: @settle_timeout_ms,
         max_result_bytes: 64_000
       )
 
@@ -1131,7 +1144,10 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     assert {:ok, built} =
              dir
-             |> manifest(~w(remote.structured), timeout_ms: 5_000, evaluation_timeout_ms: 5_000)
+             |> manifest(~w(remote.structured),
+               timeout_ms: @settle_timeout_ms,
+               evaluation_timeout_ms: @settle_timeout_ms
+             )
              |> directory_request(registry)
              |> RunLifecycle.build()
 
@@ -1151,8 +1167,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
       manifest =
         manifest(dir, ~w(remote.structured remote.text remote.fail),
-          timeout_ms: 5_000,
-          evaluation_timeout_ms: 5_000
+          timeout_ms: @settle_timeout_ms,
+          evaluation_timeout_ms: @settle_timeout_ms
         )
 
       assert {:ok, built} =
@@ -1206,8 +1222,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:error, :mcp_discovery_method_unsupported} =
              dir
              |> manifest(~w(remote.structured),
-               timeout_ms: 5_000,
-               evaluation_timeout_ms: 5_000
+               timeout_ms: @settle_timeout_ms,
+               evaluation_timeout_ms: @settle_timeout_ms
              )
              |> directory_request(registry)
              |> RunLifecycle.build()
@@ -1225,8 +1241,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:error, :mcp_transport_error} =
              dir
              |> manifest(~w(remote.structured),
-               timeout_ms: 5_000,
-               evaluation_timeout_ms: 5_000
+               timeout_ms: @settle_timeout_ms,
+               evaluation_timeout_ms: @settle_timeout_ms
              )
              |> directory_request(registry)
              |> RunLifecycle.build()
@@ -1559,10 +1575,12 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
   test "agent correction does not repeat any MCP input-required classification" do
     programs = [
-      {~S|(fail (tool/remote.structured {"query" "x"}))|, [evaluation_timeout_ms: 5_000]},
-      {~S|(do (tool/remote.structured {"query" "x"}) (+ {} 1))|, [evaluation_timeout_ms: 5_000]},
+      {~S|(fail (tool/remote.structured {"query" "x"}))|,
+       [evaluation_timeout_ms: @settle_timeout_ms]},
+      {~S|(do (tool/remote.structured {"query" "x"}) (+ {} 1))|,
+       [evaluation_timeout_ms: @settle_timeout_ms]},
       {~S|(do (tool/remote.structured {"query" "x"}) (reduce + (range 0 100000000)))|,
-       [evaluation_timeout_ms: 500, evaluation_heap_words: 100_000_000]}
+       [evaluation_timeout_ms: @expiring_timeout_ms, evaluation_heap_words: 100_000_000]}
     ]
 
     for structured_result <- [
@@ -1668,9 +1686,9 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     tmp_dir: dir
   } do
     for effect <- [:read, :write],
-        {fixture_opts, reason} <- [
-          {[block_tool: "structured"], :timeout},
-          {[disconnect_tool: "structured"], :transport_error}
+        {fixture_opts, reason, timeout_ms} <- [
+          {[block_tool: "structured"], :timeout, @expiring_timeout_ms},
+          {[disconnect_tool: "structured"], :transport_error, @settle_timeout_ms}
         ] do
       fixture = fixture(self(), fixture_opts)
       on_exit(fixture.close)
@@ -1680,10 +1698,12 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                dir
                |> manifest(["remote.structured"],
                  program: single_call_program("remote.structured", "x"),
-                 timeout_ms: 100,
-                 evaluation_timeout_ms: 2_000
+                 timeout_ms: timeout_ms,
+                 evaluation_timeout_ms: 2 * @settle_timeout_ms
                )
-               |> directory_request(registry(fixture.endpoint, tools: tools, timeout_ms: 100))
+               |> directory_request(
+                 registry(fixture.endpoint, tools: tools, timeout_ms: timeout_ms)
+               )
                |> RunLifecycle.build()
 
       assert {:ok, result} = Kernel.run(built.entry_source, built.config)
@@ -1731,7 +1751,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                dir
                |> manifest(["remote.structured"],
                  program: single_call_program("remote.structured", query),
-                 evaluation_timeout_ms: 5_000
+                 evaluation_timeout_ms: @settle_timeout_ms
                )
                |> directory_request(registry(fixture.endpoint, [tools: tools] ++ registry_opts))
                |> RunLifecycle.build()
@@ -1879,23 +1899,23 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     {:ok, first} =
       dir
-      |> manifest(["remote.structured"], timeout_ms: 900, max_result_bytes: 31_000)
+      |> manifest(["remote.structured"], timeout_ms: 9_000, max_result_bytes: 31_000)
       |> directory_request(registry)
       |> RunLifecycle.build()
 
     [first_snapshot] = first.config.connector_snapshots
-    assert first_snapshot["timeout_ms"] == 900
+    assert first_snapshot["timeout_ms"] == 9_000
     assert first_snapshot["max_result_bytes"] == 31_000
     assert :ok = RunBuilder.close(first)
 
     {:ok, second} =
       dir
-      |> manifest(["remote.structured"], timeout_ms: 800, max_result_bytes: 30_000)
+      |> manifest(["remote.structured"], timeout_ms: 8_000, max_result_bytes: 30_000)
       |> directory_request(registry)
       |> RunLifecycle.build()
 
     [second_snapshot] = second.config.connector_snapshots
-    assert second_snapshot["timeout_ms"] == 800
+    assert second_snapshot["timeout_ms"] == 8_000
     assert second_snapshot["max_result_bytes"] == 30_000
     assert second_snapshot["snapshot_hash"] != first_snapshot["snapshot_hash"]
     assert :ok = RunBuilder.close(second)
@@ -1932,7 +1952,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
           transport:
             {:streamable_http, endpoint: fixture.endpoint, allow_insecure_loopback: true},
           tools: %{"structured" => %{as: "remote.structured", effect: effect}},
-          timeout_ms: 1_000
+          timeout_ms: @settle_timeout_ms
         )
 
       assert {:ok, %{capabilities: [capability], close: close}} =
@@ -1966,7 +1986,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
           {:streamable_http,
            endpoint: "http://127.0.0.1:#{port}/mcp", allow_insecure_loopback: true},
         tools: %{"structured" => %{as: "remote.structured", effect: :read}},
-        timeout_ms: 1_000
+        timeout_ms: @settle_timeout_ms
       )
 
     assert {:error, :mcp_endpoint_connection_refused} =
@@ -1985,7 +2005,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       MCPSource.builder(
         transport: {:streamable_http, endpoint: endpoint, authorization: manager},
         tools: %{"structured" => %{as: "remote.structured", effect: :read}},
-        timeout_ms: 1_000
+        timeout_ms: @settle_timeout_ms
       )
 
     assert {:error, :mcp_endpoint_name_unresolved} = build_fixture_provider(builder)
@@ -2002,7 +2022,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         end
       )
 
-    builder = streamable_oauth_builder(fixture.endpoint, manager, 1_000)
+    builder = streamable_oauth_builder(fixture.endpoint, manager, @settle_timeout_ms)
 
     assert {:ok, %{close: close}} = build_fixture_provider(builder)
     assert :ok = close.()
@@ -2217,7 +2237,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
            cwd: @root,
            args: [@stdio_fixture, Path.join(dir, "unused")],
            env: inherited_environment()},
-        tools: mappings()
+        tools: mappings(),
+        timeout_ms: @settle_timeout_ms
       )
 
     {:ok, registry} = ProviderRegistry.new(%{"fixture-mcp" => builder})
@@ -2452,10 +2473,10 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     {:ok, built} =
       dir
       |> manifest(Map.keys(public_mappings()),
-        timeout_ms: 5_000,
-        evaluation_timeout_ms: 5_000
+        timeout_ms: @settle_timeout_ms,
+        evaluation_timeout_ms: @settle_timeout_ms
       )
-      |> directory_request(registry(invalid.endpoint, timeout_ms: 5_000))
+      |> directory_request(registry(invalid.endpoint, timeout_ms: @settle_timeout_ms))
       |> RunLifecycle.build()
 
     assert {:ok, result} = Kernel.run(built.entry_source, built.config)
@@ -2494,10 +2515,10 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         dir
         |> manifest(["remote.structured"],
           program: single_call_program("remote.structured", "x"),
-          timeout_ms: 5_000,
-          evaluation_timeout_ms: 5_000
+          timeout_ms: @settle_timeout_ms,
+          evaluation_timeout_ms: @settle_timeout_ms
         )
-        |> directory_request(registry(fixture.endpoint, timeout_ms: 5_000))
+        |> directory_request(registry(fixture.endpoint, timeout_ms: @settle_timeout_ms))
         |> RunLifecycle.build()
 
       assert {:ok, result} = Kernel.run(built.entry_source, built.config)
@@ -2524,7 +2545,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     {:ok, built} =
       dir
       |> manifest(["remote.structured"])
-      |> directory_request(registry(sse.endpoint, timeout_ms: 5_000))
+      |> directory_request(registry(sse.endpoint, timeout_ms: @settle_timeout_ms))
       |> RunLifecycle.build()
 
     assert [snapshot] = built.config.connector_snapshots
@@ -2538,7 +2559,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:ok, repeated_build} =
              dir
              |> manifest(["remote.structured"])
-             |> directory_request(registry(repeated.endpoint, timeout_ms: 5_000))
+             |> directory_request(registry(repeated.endpoint, timeout_ms: @settle_timeout_ms))
              |> RunLifecycle.build()
 
     assert :ok = RunBuilder.close(repeated_build)
@@ -2550,7 +2571,9 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:ok, repeated_chunked_build} =
              dir
              |> manifest(["remote.structured"])
-             |> directory_request(registry(repeated_chunked.endpoint, timeout_ms: 5_000))
+             |> directory_request(
+               registry(repeated_chunked.endpoint, timeout_ms: @settle_timeout_ms)
+             )
              |> RunLifecycle.build()
 
     assert_receive {:mcp_stream_holding, repeated_chunked_holder}
@@ -2563,7 +2586,9 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:ok, coalesced_tail_build} =
              dir
              |> manifest(["remote.structured"])
-             |> directory_request(registry(coalesced_tail.endpoint, timeout_ms: 5_000))
+             |> directory_request(
+               registry(coalesced_tail.endpoint, timeout_ms: @settle_timeout_ms)
+             )
              |> RunLifecycle.build()
 
     assert :ok = RunBuilder.close(coalesced_tail_build)
@@ -2575,7 +2600,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:ok, split_tail_build} =
              dir
              |> manifest(["remote.structured"])
-             |> directory_request(registry(split_tail.endpoint, timeout_ms: 5_000))
+             |> directory_request(registry(split_tail.endpoint, timeout_ms: @settle_timeout_ms))
              |> RunLifecycle.build()
 
     assert_receive {:mcp_stream_holding, split_tail_holder}
@@ -2588,7 +2613,9 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:error, :mcp_response_exceeded} =
              dir
              |> manifest(["remote.structured"])
-             |> directory_request(registry(oversized_prefix.endpoint, timeout_ms: 5_000))
+             |> directory_request(
+               registry(oversized_prefix.endpoint, timeout_ms: @settle_timeout_ms)
+             )
              |> RunLifecycle.build()
 
     empty_data = fixture(parent, sse?: true, sse_empty_data?: true)
@@ -2597,7 +2624,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:error, :mcp_protocol_error} =
              dir
              |> manifest(["remote.structured"])
-             |> directory_request(registry(empty_data.endpoint, timeout_ms: 5_000))
+             |> directory_request(registry(empty_data.endpoint, timeout_ms: @settle_timeout_ms))
              |> RunLifecycle.build()
 
     held_open = fixture(parent, sse?: true, sse_hold_open?: true)
@@ -2608,7 +2635,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         result =
           dir
           |> manifest(["remote.structured"])
-          |> directory_request(registry(held_open.endpoint, timeout_ms: 5_000))
+          |> directory_request(registry(held_open.endpoint, timeout_ms: @settle_timeout_ms))
           |> RunLifecycle.build()
 
         send(parent, {:held_build_complete, self(), result})
@@ -2619,11 +2646,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       end)
 
     assert_receive {:mcp_stream_holding, holder}
-    assert_receive {:held_build_complete, build_owner, {:ok, held_build}}, 2_000
+    assert_receive {:held_build_complete, build_owner, {:ok, held_build}}, @settle_timeout_ms
     send(holder, :release)
     assert :ok = RunBuilder.close(held_build)
     send(build_owner, :release_build_owner)
-    assert :ok = Task.await(build_task, 2_000)
+    assert :ok = Task.await(build_task, @settle_timeout_ms)
 
     cr_only = fixture(parent, sse?: true, sse_line_ending: "\r")
     on_exit(cr_only.close)
@@ -2631,7 +2658,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:ok, cr_build} =
              dir
              |> manifest(["remote.structured"])
-             |> directory_request(registry(cr_only.endpoint, timeout_ms: 5_000))
+             |> directory_request(registry(cr_only.endpoint, timeout_ms: @settle_timeout_ms))
              |> RunLifecycle.build()
 
     assert :ok = RunBuilder.close(cr_build)
@@ -2650,7 +2677,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         result =
           dir
           |> manifest(["remote.structured"])
-          |> directory_request(registry(fragmented_bom.endpoint, timeout_ms: 5_000))
+          |> directory_request(registry(fragmented_bom.endpoint, timeout_ms: @settle_timeout_ms))
           |> RunLifecycle.build()
 
         send(parent, {:bom_build_complete, self(), result})
@@ -2661,11 +2688,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       end)
 
     assert_receive {:mcp_stream_holding, bom_holder}
-    assert_receive {:bom_build_complete, bom_build_owner, {:ok, bom_build}}, 2_000
+    assert_receive {:bom_build_complete, bom_build_owner, {:ok, bom_build}}, @settle_timeout_ms
     send(bom_holder, :release)
     assert :ok = RunBuilder.close(bom_build)
     send(bom_build_owner, :release_build_owner)
-    assert :ok = Task.await(bom_task, 2_000)
+    assert :ok = Task.await(bom_task, @settle_timeout_ms)
 
     duplicate = fixture(parent, duplicate_catalog?: true)
     on_exit(duplicate.close)
@@ -2701,11 +2728,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     {:ok, built} =
       dir
       |> manifest(~w(remote.structured remote.text),
-        timeout_ms: 5_000,
-        evaluation_timeout_ms: 5_000,
+        timeout_ms: @settle_timeout_ms,
+        evaluation_timeout_ms: @settle_timeout_ms,
         config_extra: %{"model_visible" => ["remote.structured"]}
       )
-      |> directory_request(registry(fixture.endpoint, timeout_ms: 5_000))
+      |> directory_request(registry(fixture.endpoint, timeout_ms: @settle_timeout_ms))
       |> RunLifecycle.build()
 
     visibility =
@@ -2728,10 +2755,10 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     {:ok, fully_visible} =
       dir
       |> manifest(~w(remote.structured remote.text),
-        timeout_ms: 5_000,
-        evaluation_timeout_ms: 5_000
+        timeout_ms: @settle_timeout_ms,
+        evaluation_timeout_ms: @settle_timeout_ms
       )
-      |> directory_request(registry(fixture.endpoint, timeout_ms: 5_000))
+      |> directory_request(registry(fixture.endpoint, timeout_ms: @settle_timeout_ms))
       |> RunLifecycle.build()
 
     [fully_visible_snapshot] = fully_visible.config.connector_snapshots
@@ -2759,11 +2786,13 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     {:ok, revealed} =
       dir
       |> manifest(~w(remote.structured remote.text),
-        timeout_ms: 5_000,
-        evaluation_timeout_ms: 5_000,
+        timeout_ms: @settle_timeout_ms,
+        evaluation_timeout_ms: @settle_timeout_ms,
         config_extra: %{"model_visible" => ["remote.text"]}
       )
-      |> directory_request(registry(fixture.endpoint, timeout_ms: 5_000, tools: tools))
+      |> directory_request(
+        registry(fixture.endpoint, timeout_ms: @settle_timeout_ms, tools: tools)
+      )
       |> RunLifecycle.build()
 
     visibility =
@@ -2786,10 +2815,12 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     {:ok, host_default} =
       dir
       |> manifest(~w(remote.structured remote.text),
-        timeout_ms: 5_000,
-        evaluation_timeout_ms: 5_000
+        timeout_ms: @settle_timeout_ms,
+        evaluation_timeout_ms: @settle_timeout_ms
       )
-      |> directory_request(registry(fixture.endpoint, timeout_ms: 5_000, tools: tools))
+      |> directory_request(
+        registry(fixture.endpoint, timeout_ms: @settle_timeout_ms, tools: tools)
+      )
       |> RunLifecycle.build()
 
     host_default_visibility =
@@ -2931,7 +2962,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
            endpoint: invalid_output.endpoint,
            allow_insecure_loopback: true,
            headers: fn -> raise secret end},
-        tools: mappings()
+        tools: mappings(),
+        timeout_ms: @settle_timeout_ms
       )
 
     {:ok, auth_registry} = ProviderRegistry.new(%{"fixture-mcp" => auth_builder})
@@ -2956,8 +2988,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         |> RunLifecycle.build()
       end)
 
-    assert_receive {:mcp_blocked, worker}, 1_000
-    assert {:error, :mcp_timeout} = Task.await(task, 2_000)
+    assert_receive {:mcp_blocked, worker}, @settle_timeout_ms
+    assert {:error, :mcp_timeout} = Task.await(task, @settle_timeout_ms)
     send(worker, :release)
 
     header_builder =
@@ -2987,9 +3019,9 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         |> RunLifecycle.build()
       end)
 
-    assert_receive {:mcp_header_blocked, header_worker}, 1_000
+    assert_receive {:mcp_header_blocked, header_worker}, @settle_timeout_ms
     header_ref = Process.monitor(header_worker)
-    assert {:error, :mcp_timeout} = Task.await(header_task, 2_000)
+    assert {:error, :mcp_timeout} = Task.await(header_task, @settle_timeout_ms)
     assert_receive {:DOWN, ^header_ref, :process, ^header_worker, :killed}
   end
 
@@ -2998,17 +3030,20 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     parent = self()
     fixture = fixture(parent, block_tool: "structured")
     on_exit(fixture.close)
-    registry = registry(fixture.endpoint, timeout_ms: 500)
+    registry = registry(fixture.endpoint, timeout_ms: @expiring_timeout_ms)
 
     {:ok, built} =
       dir
-      |> manifest(Map.keys(public_mappings()), timeout_ms: 500, evaluation_timeout_ms: 500)
+      |> manifest(Map.keys(public_mappings()),
+        timeout_ms: @expiring_timeout_ms,
+        evaluation_timeout_ms: @expiring_timeout_ms
+      )
       |> directory_request(registry)
       |> RunLifecycle.build()
 
     task = Task.async(fn -> Kernel.run(built.entry_source, built.config) end)
     assert_receive {:mcp_blocked, worker}
-    assert {:ok, _result} = Task.await(task, 3_000)
+    assert {:ok, _result} = Task.await(task, @settle_timeout_ms)
     send(worker, :release)
     EventSink.stop(built.config.event_sink)
   end
@@ -3027,7 +3062,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                fn -> [{"authorization", "Bearer fixture-secret"}] end
              )},
         tools: Keyword.get(opts, :tools, mappings()),
-        timeout_ms: Keyword.get(opts, :timeout_ms, 2_000),
+        timeout_ms: Keyword.get(opts, :timeout_ms, @settle_timeout_ms),
         max_result_bytes: Keyword.get(opts, :max_result_bytes, 64_000),
         max_pages: Keyword.get(opts, :max_pages, 16),
         snapshot_identity: Keyword.get(opts, :snapshot_identity)
@@ -3073,7 +3108,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         tenant_id: "tenant",
         principal_id: "alice",
         store: store,
-        deadline: Deadline.new(1_000)
+        deadline: Deadline.new(@settle_timeout_ms)
       )
 
     {:ok, claims} =
@@ -3081,15 +3116,15 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         store,
         context.tenant_id,
         [{authority.installation_id, authority.fingerprint}],
-        Deadline.new(1_000)
+        Deadline.new(@settle_timeout_ms)
       )
 
     epoch = claims[authority.installation_id]
     key = OAuthContext.grant_key(context, authority, epoch)
-    {:ok, anchor} = Store.time_anchor(store, Deadline.new(1_000))
+    {:ok, anchor} = Store.time_anchor(store, Deadline.new(@settle_timeout_ms))
 
     {:ok, lease} =
-      Store.acquire_mutation(store, key, :authorization, 5_000, Deadline.new(1_000))
+      Store.acquire_mutation(store, key, :authorization, 5_000, Deadline.new(@settle_timeout_ms))
 
     :ok =
       Store.begin_mutation_dispatch(
@@ -3097,7 +3132,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         key,
         lease.fence,
         %{freshness_anchor: anchor, freshness_anchor_ttl_ms: 5_000},
-        Deadline.new(1_000)
+        Deadline.new(@settle_timeout_ms)
       )
 
     {:ok, _grant} =
@@ -3116,7 +3151,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         },
         60_000,
         anchor,
-        Deadline.new(1_000)
+        Deadline.new(@settle_timeout_ms)
       )
 
     {:ok, recording_store} =
@@ -3127,7 +3162,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         tenant_id: context.tenant_id,
         principal_id: context.principal_id,
         store: recording_store,
-        deadline: Deadline.new(1_000)
+        deadline: Deadline.new(@settle_timeout_ms)
       )
 
     {:ok, manager} =
@@ -3147,7 +3182,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       MCPSource.builder(
         transport: {:stdio, stdio_transport_options(marker, mode)},
         tools: Keyword.get(opts, :tools, mappings()),
-        timeout_ms: 5_000,
+        timeout_ms: @settle_timeout_ms,
         snapshot_identity: Keyword.get(opts, :snapshot_identity),
         max_result_bytes: Keyword.get(opts, :max_result_bytes, 64_000)
       )
@@ -3167,7 +3202,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       args: args,
       env: inherited_environment(),
       grace_ms: 50,
-      start_timeout_ms: 5_000
+      start_timeout_ms: @settle_timeout_ms
     ]
   end
 
@@ -3265,13 +3300,13 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                [public_name],
                [
                  program: single_call_program(public_name, "x"),
-                 evaluation_timeout_ms: 5_000
+                 evaluation_timeout_ms: @settle_timeout_ms
                ] ++ manifest_opts
              )
              |> directory_request(
                registry(fixture.endpoint,
                  tools: tools,
-                 timeout_ms: 5_000
+                 timeout_ms: @settle_timeout_ms
                )
              )
              |> RunLifecycle.build()
@@ -3782,7 +3817,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       Map.merge(
         %{
           "allow" => allow,
-          "timeout_ms" => Keyword.get(opts, :timeout_ms, 1_000),
+          "timeout_ms" => Keyword.get(opts, :timeout_ms, @settle_timeout_ms),
           "max_result_bytes" => Keyword.get(opts, :max_result_bytes, 32_000)
         },
         Keyword.get(opts, :config_extra, %{})

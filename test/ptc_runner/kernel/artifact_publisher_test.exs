@@ -137,7 +137,7 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
 
     records = [
       %{
-        "schema_version" => 11,
+        "schema_version" => 12,
         "run_id" => run_id,
         "trace_id" => trace_id,
         "sequence" => 1,

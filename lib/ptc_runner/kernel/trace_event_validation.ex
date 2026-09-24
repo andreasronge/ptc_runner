@@ -1,13 +1,16 @@
 defmodule PtcRunner.Kernel.TraceEventValidation do
   @moduledoc false
 
+  alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.LLMBudget
   alias PtcRunner.Kernel.LLMUsageSummary
   alias PtcRunner.Kernel.ResultIdentity
+  alias PtcRunner.Kernel.RuntimeTools
 
   @event_type ~r/\A[a-z][a-z0-9-]{0,127}\z/
+  @capability_call_key ~r/\A(?:workflow|mission)\/[a-z][a-z0-9._\/-]{0,127}\z/
   @bundle_hash ~r/\A[0-9a-f]{64}\z/
   @event_keys ~w(schema_version run_id trace_id sequence timestamp type data)
   @max_string_bytes 256
@@ -49,7 +52,7 @@ defmodule PtcRunner.Kernel.TraceEventValidation do
       end
     end)
     |> case do
-      {:ok, _state} -> :ok
+      {:ok, _state} -> validate_call_count_consistency(events)
       {:error, _reason} = error -> error
     end
   end
@@ -140,8 +143,10 @@ defmodule PtcRunner.Kernel.TraceEventValidation do
   defp directory_lifecycle_identity?(run_id, type),
     do: valid_event_id(run_id) == :ok and type =~ @event_type
 
-  defp directory_malformed_event?(events),
-    do: Enum.any?(events, &match?({:error, _reason}, directory_event_shape(&1)))
+  defp directory_malformed_event?(events) do
+    Enum.any?(events, &match?({:error, _reason}, directory_event_shape(&1))) or
+      match?({:error, :malformed_source}, validate_call_count_consistency(events))
+  end
 
   defp directory_event_shape(event) when is_map(event) do
     event
@@ -391,6 +396,7 @@ defmodule PtcRunner.Kernel.TraceEventValidation do
 
       {:ok, usage} when is_map(usage) ->
         with :ok <- validate_subordinate_source_checks(usage),
+             :ok <- validate_capability_calls(usage),
              :ok <- validate_terminal_llm_budget(usage),
              do: validate_terminal_llm_spend(usage)
 
@@ -408,6 +414,128 @@ defmodule PtcRunner.Kernel.TraceEventValidation do
       _invalid_count -> {:error, :malformed_source}
     end
   end
+
+  defp validate_capability_calls(usage) do
+    case Map.fetch(usage, "capability_calls") do
+      :error ->
+        :ok
+
+      {:ok, calls} when is_map(calls) ->
+        if valid_capability_calls?(calls),
+          do: :ok,
+          else: {:error, :malformed_source}
+
+      _invalid_calls ->
+        {:error, :malformed_source}
+    end
+  end
+
+  defp valid_capability_calls?(%{"workflow" => workflow, "mission" => mission} = calls)
+       when map_size(calls) == 2 and is_map(workflow) and is_map(mission) do
+    Enum.all?([workflow, mission], fn scoped ->
+      Enum.all?(scoped, fn {name, count} ->
+        is_binary(name) and Regex.match?(@capability_call_key, "workflow/" <> name) and
+          is_integer(count) and count >= 0
+      end)
+    end)
+  end
+
+  defp valid_capability_calls?(calls), do: Enum.all?(calls, &valid_capability_call_entry?/1)
+
+  defp valid_capability_call_entry?({name, count}) when is_binary(name) and is_integer(count),
+    do: Regex.match?(@capability_call_key, name) and count >= 0
+
+  # Analysis sessions retain per-capability quota snapshots here, not run
+  # totals. TraceLog leaves their run counts as retained-event observations.
+  defp valid_capability_call_entry?({name, quota}) when is_binary(name) and is_map(quota) do
+    Capability.valid_name?(name) and
+      Enum.all?(~w(used limit remaining), fn key ->
+        case Map.get(quota, key) do
+          value when is_integer(value) and value >= 0 -> true
+          _ -> false
+        end
+      end)
+  end
+
+  defp valid_capability_call_entry?(_entry), do: false
+
+  defp validate_call_count_consistency(events) do
+    observed =
+      Enum.reduce(events, %{}, fn event, counts ->
+        data = event["data"]
+
+        case {event["type"], stringify(data["environment"]), data["name"]} do
+          {"capability-started", environment, name}
+          when environment in ["workflow", "mission"] and is_binary(name) ->
+            run_id = event["run_id"]
+            call_name = environment <> "/" <> name
+
+            Map.update(counts, run_id, %{call_name => 1}, fn run_counts ->
+              Map.update(run_counts, call_name, 1, &(&1 + 1))
+            end)
+
+          _other ->
+            counts
+        end
+      end)
+
+    Enum.reduce_while(events, :ok, fn event, :ok ->
+      case {event["type"], terminal_call_totals(event["data"])} do
+        {"run-stopped", {:ok, totals}} ->
+          run_id = event["run_id"]
+
+          if terminal_counts_cover?(totals, Map.get(observed, run_id, %{})) do
+            {:cont, :ok}
+          else
+            {:halt, {:error, :malformed_source}}
+          end
+
+        _legacy_or_non_terminal ->
+          {:cont, :ok}
+      end
+    end)
+  end
+
+  defp terminal_counts_cover?(totals, observed) do
+    Enum.all?(observed, fn {name, count} ->
+      case Map.fetch(totals, name) do
+        {:ok, total} -> total >= count
+        :error -> runtime_instrumented_name?(name)
+      end
+    end)
+  end
+
+  defp runtime_instrumented_name?("workflow/" <> name),
+    do: RuntimeTools.instrumented_name?(:workflow, name)
+
+  defp runtime_instrumented_name?("mission/" <> name),
+    do: RuntimeTools.instrumented_name?(:mission, name)
+
+  defp runtime_instrumented_name?(_name), do: false
+
+  defp terminal_call_totals(%{
+         "usage" => %{
+           "capability_calls" => %{"workflow" => workflow, "mission" => mission} = calls
+         }
+       })
+       when map_size(calls) == 2 and is_map(workflow) and is_map(mission) do
+    totals =
+      for {environment, scoped} <- [{"workflow", workflow}, {"mission", mission}],
+          {name, count} <- scoped,
+          into: %{},
+          do: {environment <> "/" <> name, count}
+
+    {:ok, totals}
+  end
+
+  defp terminal_call_totals(%{"usage" => %{"capability_calls" => calls}})
+       when is_map(calls) do
+    if Enum.all?(calls, fn {_name, count} -> is_integer(count) end),
+      do: {:ok, calls},
+      else: :unavailable
+  end
+
+  defp terminal_call_totals(_data), do: :unavailable
 
   defp validate_terminal_llm_budget(usage) do
     case LLMBudget.validate_terminal_projection(Map.get(usage, "llm_budget")) do

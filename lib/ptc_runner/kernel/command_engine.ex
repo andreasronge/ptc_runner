@@ -22,6 +22,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
   alias PtcRunner.Dotenv
   alias PtcRunner.Kernel.CommandAcquisition
   alias PtcRunner.Kernel.CommandArguments
+  alias PtcRunner.Kernel.CommandCatalog
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandDestination
@@ -418,6 +419,9 @@ defmodule PtcRunner.Kernel.CommandEngine do
 
       :models ->
         models_outcome(arguments, run_ref)
+
+      :catalog ->
+        CommandCatalog.dispatch(arguments, run_ref)
 
       :init ->
         CommandInitializer.initialize(arguments.directory, run_ref,

@@ -55,6 +55,9 @@ defmodule PtcRunner.StandaloneCLI do
     # `ptc doctor --connect` would otherwise prefix the JSON report (#1583).
     CLILogger.install_stderr_handler()
     presentation = execute(argv)
+    # Reservation owners can queue a publication warning immediately before
+    # returning. Drain it before the standalone CLI removes the handler.
+    Logger.flush()
     # The dump is Logger reporting the writer's :terminated; removing the
     # default handler after the command has produced its presentation, and
     # before the write, is what keeps stderr empty when the pipe is already

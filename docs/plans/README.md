@@ -21,12 +21,10 @@ belongs in guides or retained specifications.
 
 ## Research direction
 
-- [`reproducible-prelude-search.md`](reproducible-prelude-search.md) defines
-  the toy harness and experiment ladder for checked self-improvement:
-  planted defects in small preludes, recorded executions as evidence,
-  parallel candidate search selected by a held-out check, and the runtime
-  records each experiment pulls in. Results and next steps live in the
-  program document `docs/research/prelude-search.md`, not here.
+- The retained [debug-efficiency program](../research/debug-efficiency.md)
+  records the offline feasibility decision and a proposed bounded live
+  comparison. No live spend is authorized. Prelude-search is paused and its
+  original implementation ladder is retired.
 
 ## Future, trigger-gated
 

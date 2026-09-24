@@ -44,7 +44,6 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunRequest
-  alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.Kernel.SelectionRulesDiagnostic
   alias PtcRunner.Kernel.ServingRequest
   alias PtcRunner.Lisp.Prelude
@@ -681,7 +680,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
              occurrence
            ),
          {:ok, normalized} <-
-           SelectionRules.explain(descriptor.selection_rules, config, request.package.limits) do
+           ProviderDescriptor.explain_selection(descriptor, config, request.package.limits) do
       declaration = %{
         name: name,
         destination: occurrence.destination,

@@ -1,12 +1,13 @@
 defmodule PtcRunner.Scripts.WorktreeSeedTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   alias PtcRunner.TestSupport.GitEnv
 
   @script Path.expand("../../scripts/worktree.sh", __DIR__)
   @git_env GitEnv.clear()
 
-  @key_files ~w(mise.toml mix.lock ptc_viewer/mix.lock ptc_runner_launcher/mix.lock)
+  @key_files ~w(mise.toml mix.lock ptc_viewer/mix.lock ptc_runner_launcher/mix.lock ptc_gateway/mix.lock)
 
   test "seeds a fresh worktree with the main checkout's build artifacts" do
     %{main: main, worktree: worktree} = repo_with_worktree()
@@ -15,16 +16,21 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
     write!(main, "_build/test/lib/ptc_runner/ebin/x.beam", "beam\n")
     write!(main, "priv/plts/project.plt", plt_binary())
     write!(main, "ptc_viewer/_build/test/marker", "viewer\n")
+    write!(main, "ptc_gateway/deps/bandit/mix.exs", "bandit\n")
+    write!(main, "ptc_gateway/_build/test/marker", "gateway\n")
 
     {output, 0} = seed(main, worktree)
 
     assert output =~ "🌱 deps"
     assert output =~ "🌱 _build"
     assert output =~ "🌱 priv/plts"
-    assert output =~ ~r/Seeded 4 artifact\(s\)/
+    assert output =~ "🌱 ptc_gateway/deps"
+    assert output =~ "🌱 ptc_gateway/_build"
+    assert output =~ ~r/Seeded 6 artifact\(s\)/
     assert File.read!(Path.join(worktree, "deps/jason/mix.exs")) == "jason\n"
     assert File.read!(Path.join(worktree, "priv/plts/project.plt")) == plt_binary()
     assert File.read!(Path.join(worktree, "ptc_viewer/_build/test/marker")) == "viewer\n"
+    assert File.read!(Path.join(worktree, "ptc_gateway/_build/test/marker")) == "gateway\n"
 
     assert output =~ "ptc_runner_launcher/deps — not built in the main checkout"
     assert Path.wildcard(Path.join(worktree, ".worktree-seed-tmp*")) == []
@@ -123,18 +129,22 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
     assert File.read!(Path.join(worktree, "ptc_viewer/deps/plug/mix.exs")) == "plug\n"
   end
 
-  test "a diverged nested lockfile leaves the root's artifacts seedable" do
-    %{main: main, worktree: worktree} = repo_with_worktree()
+  for project <- ~w(ptc_viewer ptc_gateway) do
+    test "a diverged #{project} lockfile leaves the root's artifacts seedable" do
+      %{main: main, worktree: worktree} = repo_with_worktree()
 
-    write!(main, "deps/jason/mix.exs", "jason\n")
-    write!(main, "ptc_viewer/deps/plug/mix.exs", "plug\n")
-    write!(worktree, "ptc_viewer/mix.lock", "diverged\n")
+      write!(main, "deps/jason/mix.exs", "jason\n")
+      write!(main, "#{unquote(project)}/deps/plug/mix.exs", "plug\n")
+      write!(worktree, "#{unquote(project)}/mix.lock", "diverged\n")
 
-    {output, 0} = seed(main, worktree)
+      {output, 0} = seed(main, worktree)
 
-    assert output =~ "ptc_viewer/deps — ptc_viewer/mix.lock differs from the main checkout's copy"
-    refute File.exists?(Path.join(worktree, "ptc_viewer/deps"))
-    assert File.read!(Path.join(worktree, "deps/jason/mix.exs")) == "jason\n"
+      assert output =~
+               "#{unquote(project)}/deps — #{unquote(project)}/mix.lock differs from the main checkout's copy"
+
+      refute File.exists?(Path.join(worktree, "#{unquote(project)}/deps"))
+      assert File.read!(Path.join(worktree, "deps/jason/mix.exs")) == "jason\n"
+    end
   end
 
   # The toolchain pin is the one key every artifact shares: a different Erlang

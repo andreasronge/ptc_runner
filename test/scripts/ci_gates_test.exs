@@ -1,5 +1,6 @@
 defmodule PtcRunner.Scripts.CIGatesTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   alias PtcRunner.TestSupport.GitEnv
 
@@ -184,6 +185,7 @@ defmodule PtcRunner.Scripts.CIGatesTest do
     workflow = File.read!(Path.join(@root, ".github/workflows/test.yml"))
     setup_action = File.read!(Path.join(@root, ".github/actions/setup-elixir/action.yml"))
     launcher_release = File.read!(Path.join(@root, ".github/workflows/launcher-release.yml"))
+    release = File.read!(Path.join(@root, ".github/workflows/release.yml"))
     hook = File.read!(Path.join(@root, ".githooks/pre-push"))
     mix_project = File.read!(Path.join(@root, "mix.exs"))
     launcher = File.read!(Path.join(@root, "scripts/ci/launcher.sh"))
@@ -191,6 +193,11 @@ defmodule PtcRunner.Scripts.CIGatesTest do
     for entrypoint <- ~w(core-tests core-static core-dialyzer core-release viewer docs launcher) do
       assert workflow =~ "scripts/ci/#{entrypoint}.sh"
       assert hook =~ "scripts/ci/#{entrypoint}.sh"
+    end
+
+    for release_workflow <- [release, launcher_release] do
+      assert release_workflow =~ "mix prepush"
+      assert release_workflow =~ "scripts/ci/gateway.sh"
     end
 
     refute workflow =~ "run: mix test --max-failures 1 --warnings-as-errors"
@@ -467,14 +474,21 @@ defmodule PtcRunner.Scripts.CIGatesTest do
       assert output =~ "1x  test/a_test.exs:451"
     end
 
-    test "the nightly workflow runs the hunt on main and keeps its records" do
+    # The hunt has its own weekly workflow: its output is a rate over ten
+    # samples, and it was two thirds of Nightly's cost.
+    test "the weekly workflow runs the hunt on main and keeps its records" do
+      hunt = File.read!(Path.join(@root, ".github/workflows/flake-hunt.yml"))
       nightly = File.read!(Path.join(@root, ".github/workflows/nightly.yml"))
 
-      assert nightly =~
-               ~s(scripts/ci/flake-hunt.sh 10 --schedulers 4 --out "$RUNNER_TEMP/flake-hunt")
+      assert hunt =~ ~s(cron: "41 2 * * 0")
 
-      assert nightly =~
+      assert hunt =~
+               ~s(scripts/ci/flake-hunt.sh "${{ inputs.runs || 10 }}" --schedulers 4 --out "$RUNNER_TEMP/flake-hunt")
+
+      assert hunt =~
                ~r/if: always\(\)\n\s+uses: actions\/upload-artifact@v6\n\s+with:\n\s+name: flake-hunt/
+
+      refute nightly =~ "flake-hunt.sh"
     end
 
     # The formatter is the only producer of the record file, so it is proven
@@ -502,6 +516,118 @@ defmodule PtcRunner.Scripts.CIGatesTest do
       assert record["tests"] > 0
       assert record["wall_ms"] >= record["async_ms"]
       assert record["sync_ms"] == record["wall_ms"] - record["async_ms"]
+    end
+  end
+
+  # The quality gate stamps the tree it checked, so it is driven inside a
+  # throwaway repository: a copy of the script, stub shell gates, and a fake
+  # `mix` that can edit a tracked file while the gate runs.
+  describe "core quality stamp" do
+    test "a staged-only tree is stamped, and the commit of that tree skips the gate" do
+      repo = quality_repo()
+      File.write!(Path.join(repo.dir, "a.txt"), "staged\n")
+      git!(repo, ~w(add a.txt))
+
+      assert {_, 0} = run_quality(repo)
+      assert quality_runs(repo) == 1
+
+      git!(repo, ~w(commit -q -m staged))
+
+      assert {output, 0} = run_quality(repo)
+      assert output =~ "already passed"
+      assert quality_runs(repo) == 1
+
+      assert {_, 0} = run_quality(repo, [{"PTC_QUALITY_FORCE", "1"}])
+      assert quality_runs(repo) == 2
+    end
+
+    test "an unstaged tracked change neither stamps nor skips" do
+      repo = quality_repo()
+      assert {_, 0} = run_quality(repo)
+
+      File.write!(Path.join(repo.dir, "a.txt"), "unstaged\n")
+
+      assert {_, 0} = run_quality(repo)
+      assert {_, 0} = run_quality(repo)
+      assert quality_runs(repo) == 3
+    end
+
+    # The edit is staged too, so the tree after the run is clean of unstaged
+    # changes yet is not the tree the gate checked.
+    test "a tracked file edited while the gate runs is not stamped" do
+      repo = quality_repo()
+
+      assert {_, 0} = run_quality(repo, [{"MIX_EDIT", Path.join(repo.dir, "a.txt")}])
+      assert {_, 0} = run_quality(repo)
+      assert quality_runs(repo) == 2
+    end
+  end
+
+  defp quality_repo do
+    dir =
+      Path.join(
+        System.tmp_dir!(),
+        "ptc-core-quality-#{System.unique_integer([:positive, :monotonic])}"
+      )
+
+    on_exit(fn -> File.rm_rf!(dir) end)
+    File.mkdir_p!(Path.join(dir, "scripts/ci"))
+    File.mkdir_p!(Path.join(dir, "bin"))
+
+    for script <- ~w(core-quality.sh _common.sh) do
+      File.cp!(Path.join([@root, "scripts/ci", script]), Path.join([dir, "scripts/ci", script]))
+    end
+
+    for {path, body} <- [
+          {"scripts/duplication_gate.sh", "#!/bin/sh\nexit 0\n"},
+          {"scripts/guide_budget.sh", "#!/bin/sh\nexit 0\n"},
+          {"bin/mix",
+           """
+           #!/bin/sh
+           echo "$*" >> "$MIX_MARKER"
+           if [ -n "${MIX_EDIT:-}" ]; then echo edited >> "$MIX_EDIT" && git add "$MIX_EDIT"; fi
+           """}
+        ] do
+      File.write!(Path.join(dir, path), body)
+      File.chmod!(Path.join(dir, path), 0o755)
+    end
+
+    File.write!(Path.join(dir, ".gitignore"), "_build/\nbin/\nmix-called\n")
+    File.write!(Path.join(dir, "a.txt"), "committed\n")
+    repo = %{dir: dir, marker: Path.join(dir, "mix-called")}
+    git!(repo, ~w(init -q))
+    git!(repo, ~w(add .))
+    git!(repo, ~w(commit -q -m init))
+    repo
+  end
+
+  defp git!(%{dir: dir}, args) do
+    identity = ~w(-c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false)
+
+    {output, 0} =
+      System.cmd("git", identity ++ args, cd: dir, env: @git_env, stderr_to_stdout: true)
+
+    output
+  end
+
+  defp run_quality(%{dir: dir, marker: marker}, env \\ []) do
+    System.cmd(Path.join(dir, "scripts/ci/core-quality.sh"), [],
+      cd: dir,
+      env:
+        @git_env ++
+          [
+            {"PATH", Path.join(dir, "bin") <> ":" <> System.fetch_env!("PATH")},
+            {"MIX_MARKER", marker},
+            {"PTC_QUALITY_FORCE", nil}
+          ] ++ env,
+      stderr_to_stdout: true
+    )
+  end
+
+  defp quality_runs(%{marker: marker}) do
+    case File.read(marker) do
+      {:ok, content} -> content |> String.split("\n", trim: true) |> length()
+      {:error, :enoent} -> 0
     end
   end
 

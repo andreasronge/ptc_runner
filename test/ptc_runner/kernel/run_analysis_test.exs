@@ -13,6 +13,10 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
   alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
 
+  setup_all do
+    PrivateInspectionFixture.seed_context(["private-run"])
+  end
+
   @tag :tmp_dir
   test "run listing delegates the bounded native page", %{tmp_dir: root} do
     {:ok, trace} =
@@ -31,8 +35,182 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
   end
 
   @tag :tmp_dir
-  test "opens a run and reads its advertised primitive collections", %{tmp_dir: root} do
-    fixture = PrivateInspectionFixture.create!(root)
+  test "run listings distinguish terminal call totals from retained observations", %{
+    tmp_dir: root
+  } do
+    authoritative = [
+      counter_event("authoritative", 1, "run-started", %{"missions" => %{}}),
+      counter_event("authoritative", 2, "capability-started", %{
+        "capability_id" => "retained-workflow",
+        "environment" => "workflow",
+        "name" => "llm-request"
+      }),
+      counter_event("authoritative", 3, "capability-started", %{
+        "capability_id" => "retained-mission",
+        "environment" => "mission",
+        "mission_name" => "default",
+        "name" => "llm-request"
+      }),
+      counter_event("authoritative", 4, "run-stopped", %{
+        "outcome" => "ok",
+        "usage" => %{
+          "capability_calls" => %{
+            "workflow/llm-request" => 3,
+            "workflow/workspace.read" => 2,
+            "mission/llm-request" => 4
+          },
+          "llm_budget" => %{"total_tokens" => nil, "cost" => nil}
+        }
+      })
+    ]
+
+    legacy = [
+      counter_event("legacy", 1, "run-started", %{"missions" => %{}}),
+      counter_event("legacy", 2, "capability-started", %{
+        "capability_id" => "observed-workflow",
+        "environment" => "workflow",
+        "name" => "llm-request"
+      }),
+      counter_event("legacy", 3, "capability-started", %{
+        "capability_id" => "observed-mission",
+        "environment" => "mission",
+        "mission_name" => "default",
+        "name" => "llm-request"
+      }),
+      counter_event("legacy", 4, "run-stopped", %{"outcome" => "ok"})
+    ]
+
+    legacy_runtime = [
+      counter_event("legacy-runtime", 1, "run-started", %{"missions" => %{}}),
+      counter_event("legacy-runtime", 2, "capability-started", %{
+        "capability_id" => "runtime-call",
+        "environment" => "workflow",
+        "name" => "kernel-eval"
+      }),
+      counter_event("legacy-runtime", 3, "run-stopped", %{"outcome" => "ok"})
+    ]
+
+    native = [
+      counter_event("native", 1, "run-started", %{"missions" => %{}}),
+      counter_event("native", 2, "run-stopped", %{
+        "outcome" => "ok",
+        "usage" => %{
+          "capability_calls" => %{
+            "workflow" => %{"llm-request" => 3, "workspace.read" => 2},
+            "mission" => %{"llm-request" => 4}
+          },
+          "llm_budget" => %{"total_tokens" => nil, "cost" => nil}
+        }
+      })
+    ]
+
+    contradictory = [
+      counter_event("contradictory", 1, "run-started", %{"missions" => %{}}),
+      counter_event("contradictory", 2, "capability-started", %{
+        "capability_id" => "retained-workflow",
+        "environment" => "workflow",
+        "name" => "llm-request"
+      }),
+      counter_event("contradictory", 3, "run-stopped", %{
+        "outcome" => "ok",
+        "usage" => %{
+          "capability_calls" => %{},
+          "llm_budget" => %{"total_tokens" => nil, "cost" => nil}
+        }
+      })
+    ]
+
+    for {run_id, events} <- [
+          {"authoritative", authoritative},
+          {"legacy", legacy},
+          {"legacy-runtime", legacy_runtime},
+          {"native", native},
+          {"contradictory", contradictory}
+        ] do
+      File.write!(
+        Path.join(root, run_id <> ".jsonl"),
+        Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n"))
+      )
+    end
+
+    {:ok, trace} = TraceSnapshot.start({:directory, root})
+    on_exit(fn -> TraceSnapshot.stop(trace) end)
+    assert {:ok, analysis} = RunAnalysis.new(trace)
+
+    assert {:ok, %{"items" => summary_items}} = RunAnalysis.query(analysis, :runs, %{})
+    summaries = Map.new(summary_items, &{&1["run_id"], &1})
+
+    refute Map.has_key?(summaries, "contradictory")
+    assert summaries["authoritative"]["llm_calls"] == 3
+    assert summaries["authoritative"]["call_counts_complete"]
+    assert summaries["native"]["llm_calls"] == 3
+    assert summaries["native"]["call_counts_complete"]
+    assert summaries["legacy"]["llm_calls"] == 1
+    refute summaries["legacy"]["call_counts_complete"]
+    assert summaries["legacy-runtime"]["llm_calls"] == 0
+    refute summaries["legacy-runtime"]["call_counts_complete"]
+
+    assert {:ok, %{"items" => full_items}} =
+             RunAnalysis.query(analysis, :runs, %{"view" => "full"})
+
+    full = Map.new(full_items, &{&1["run_id"], &1})
+
+    assert Map.take(full["authoritative"], [
+             "workflow_capability_calls",
+             "mission_capability_calls",
+             "llm_calls",
+             "call_counts_complete"
+           ]) == %{
+             "workflow_capability_calls" => 5,
+             "mission_capability_calls" => 4,
+             "llm_calls" => 3,
+             "call_counts_complete" => true
+           }
+
+    assert Map.take(full["legacy"], [
+             "workflow_capability_calls",
+             "mission_capability_calls",
+             "llm_calls",
+             "call_counts_complete"
+           ]) == %{
+             "workflow_capability_calls" => 1,
+             "mission_capability_calls" => 1,
+             "llm_calls" => 1,
+             "call_counts_complete" => false
+           }
+
+    assert Map.take(full["legacy-runtime"], [
+             "workflow_capability_calls",
+             "mission_capability_calls",
+             "llm_calls",
+             "call_counts_complete"
+           ]) == %{
+             "workflow_capability_calls" => 0,
+             "mission_capability_calls" => 0,
+             "llm_calls" => 0,
+             "call_counts_complete" => false
+           }
+
+    assert Map.take(full["native"], [
+             "workflow_capability_calls",
+             "mission_capability_calls",
+             "llm_calls",
+             "call_counts_complete"
+           ]) ==
+             Map.take(full["authoritative"], [
+               "workflow_capability_calls",
+               "mission_capability_calls",
+               "llm_calls",
+               "call_counts_complete"
+             ])
+  end
+
+  @tag :tmp_dir
+  test "opens a run and reads its advertised primitive collections", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
     {:ok, trace} = TraceSnapshot.start({:private_authorized_directory, fixture.traces})
     {:ok, inspection} = InspectionSnapshot.start({:directory, fixture.inspection}, trace)
     on_exit(fn -> InspectionSnapshot.stop(inspection) end)
@@ -1267,8 +1445,8 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
   end
 
   @tag :tmp_dir
-  test "read returns primitive cursors for the caller to follow", %{tmp_dir: root} do
-    fixture = PrivateInspectionFixture.create!(root)
+  test "read returns primitive cursors for the caller to follow", %{tmp_dir: root, seeded: seeded} do
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
     {:ok, trace} = TraceSnapshot.start({:private_authorized_directory, fixture.traces})
     {:ok, inspection} = InspectionSnapshot.start({:directory, fixture.inspection}, trace)
     on_exit(fn -> InspectionSnapshot.stop(inspection) end)
@@ -1300,9 +1478,10 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
 
   @tag :tmp_dir
   test "internal collection rejects a multi-page aggregate above the result-byte limit", %{
-    tmp_dir: root
+    tmp_dir: root,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(root)
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
     max_result_bytes = 5_000
 
     {:ok, trace} =
@@ -1361,8 +1540,11 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
   end
 
   @tag :tmp_dir
-  test "read does not compose independently bounded private collections", %{tmp_dir: root} do
-    fixture = PrivateInspectionFixture.create!(root)
+  test "read does not compose independently bounded private collections", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
     {:ok, sizing_trace} = TraceSnapshot.start({:private_authorized_directory, fixture.traces})
 
     {:ok, sizing_inspection} =
@@ -1401,8 +1583,11 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
   end
 
   @tag :tmp_dir
-  test "one capability builder exposes runs, open, read, then counters", %{tmp_dir: root} do
-    fixture = PrivateInspectionFixture.create!(root)
+  test "one capability builder exposes runs, open, read, then counters", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
     {:ok, trace} = TraceSnapshot.start({:private_authorized_directory, fixture.traces})
     {:ok, inspection} = InspectionSnapshot.start({:directory, fixture.inspection}, trace)
     on_exit(fn -> InspectionSnapshot.stop(inspection) end)

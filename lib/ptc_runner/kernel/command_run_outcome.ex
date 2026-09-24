@@ -408,14 +408,26 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   defp failure_diagnostic(
          %Error{
            kind: :limit_exceeded,
-           details: %{limit: :run_duration_ms, limit_ms: limit_ms, phase: phase}
+           details: %{
+             limit: :run_duration_ms,
+             limit_ms: limit_ms,
+             phase: phase,
+             run_duration_ms: run_duration_ms,
+             workflow_timeout_ms: workflow_timeout_ms
+           }
          },
          provider_activity
        ) do
     # `run_timeout` keeps its own code and status so a script can still tell a
     # wall-clock stop from a turn limit, but it now names the limit and the
     # configured value the way every other breached ceiling does.
-    case RuntimeLimitDiagnostic.live_timeout_message(:run_duration_ms, limit_ms, phase) do
+    case RuntimeLimitDiagnostic.workflow_clock_message(
+           :run_duration_ms,
+           limit_ms,
+           phase,
+           run_duration_ms,
+           workflow_timeout_ms
+         ) do
       {:ok, message} ->
         diagnostic(:execution, :run_timeout, provider_activity,
           message: message,
@@ -451,6 +463,37 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
       )
     else
       _invalid -> diagnostic(:execution, :runtime_limit_exceeded, provider_activity)
+    end
+  end
+
+  defp failure_diagnostic(
+         %Error{
+           kind: :limit_exceeded,
+           details: %{
+             limit: :workflow_timeout_ms,
+             limit_ms: limit_ms,
+             phase: phase,
+             run_duration_ms: run_duration_ms,
+             workflow_timeout_ms: workflow_timeout_ms
+           }
+         },
+         provider_activity
+       ) do
+    case RuntimeLimitDiagnostic.workflow_clock_message(
+           :workflow_timeout_ms,
+           limit_ms,
+           phase,
+           run_duration_ms,
+           workflow_timeout_ms
+         ) do
+      {:ok, message} ->
+        diagnostic(:execution, :runtime_limit_exceeded, provider_activity,
+          message: message,
+          source: CommandSource.fixed(:runtime)
+        )
+
+      :error ->
+        diagnostic(:execution, :runtime_limit_exceeded, provider_activity)
     end
   end
 

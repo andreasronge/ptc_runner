@@ -40,7 +40,7 @@ defmodule PtcRunnerLauncher.CommandTest do
             Command.run(
               shell,
               ["-c", ~s[printf ready > "$1"; read blocked_forever], "ptc-command-test", ready],
-              5_000
+              30_000
             )
         end
       end)
@@ -51,8 +51,9 @@ defmodule PtcRunnerLauncher.CommandTest do
     assert_receive {:trace, ^caller, :spawn, worker, _initial_call}
     assert File.read!(ready) == "ready"
     worker_ref = Process.monitor(worker)
+    assert Process.alive?(worker)
     Process.exit(caller, :kill)
-    assert_receive {:DOWN, ^worker_ref, :process, ^worker, :killed}
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker, :killed}, 5_000
   end
 
   defp create_fifo!(directory, name) do

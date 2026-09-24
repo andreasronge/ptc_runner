@@ -20,6 +20,7 @@ grammar for each frontend.
 | `ptc run MANIFEST --env-file FILE` | Load environment-backed credentials from this exact file |
 | `ptc doctor [MANIFEST or PROJECT]` | Report application and provider readiness |
 | `ptc models PROJECT.json` or `--host-config HOST.json` | List public installed model-alias declarations, each with the safe selector it configured |
+| `ptc catalog PROVIDER --host-config HOST.json` | Acquire one installed non-OAuth MCP provider and return its bounded tool definitions without calling a tool |
 | `ptc transcript RUN_ID ...` | Publish one correlated private model transcript |
 | `ptc repl` | Open a direct, manifest-backed, or analysis session |
 | `ptc viewer PROJECT.json` | Browse a project's captured traces in a local web UI |
@@ -543,7 +544,7 @@ Embedding runtimes can supply authorization targets directly.
 | 3 | `application` | `input_invalid` | no | the selected input is not an admissible JSON object |
 | 3 | `application` | `installed_limit_exceeded` | no | an application limit exceeds the installed ceiling; lower it or raise the host-configured ceiling |
 | 3 | `application` | `invalid_json` | no | an application document is not valid JSON |
-| 3 | `application` | `limit_capacity_invalid` | no | event_payload_bytes effective limit 8662 is below the required 12000 bytes for this application's resolved terminal usage; raise limits.event_payload_bytes, and its installed host ceiling if it is lower, or declare fewer capabilities or missions |
+| 3 | `application` | `limit_capacity_invalid` | no | event_payload_bytes effective limit 9092 is below the required 12000 bytes for this application's resolved terminal usage; raise limits.event_payload_bytes, and its installed host ceiling if it is lower, or declare fewer capabilities or missions |
 | 3 | `application` | `limit_configuration_invalid` | no | normal_event_bytes effective limit 4000000 is below the required 12003450 bytes for event_payload_bytes 4000000; raise limits.normal_event_bytes, and its installed host ceiling if it is lower, or lower limits.event_payload_bytes |
 | 3 | `application` | `limit_unavailable` | no | an optional application limit is unavailable because the host has not enabled it |
 | 3 | `application` | `override_invalid` | no | the component override is invalid |
@@ -784,7 +785,10 @@ execution prints and any provider-backed private activity that occurred. A
 failure can add detailed `execution-error` evidence. A raised capability
 callback additionally records its bounded exception class, message, and
 formatted stacktrace while the trace retains only the closed
-`provider_error / exception` category. Exception text and stacktrace paths can
+`provider_error / exception` category. Failed mission evaluations retain their
+bounded evaluator diagnostic and available source offset under the exact
+generated-source evaluation identity, even when the workflow handles the
+failure and returns normally. Exception text and stacktrace paths can
 contain sensitive data and are not reliably redactable; read the artifact only
 through an authorized private sink.
 
@@ -856,7 +860,12 @@ Public analysis supports `runs`, `open`, `read`, and `counters`; the public
 collections
 but they require a correlated inspection snapshot and private authority.
 `analysis/runs` defaults to a compact projection containing run ID, status,
-duration, LLM calls, evaluations, terminal reason, and completeness flags. Pass
+duration, LLM calls, evaluations, terminal reason, and completeness flags.
+`call_counts_complete` applies to `llm_calls` and the workflow and mission
+capability counts in the full view: `true` means terminal usage supplied run
+totals; `false` means the values count retained events and may be low after
+retention loss. `complete` only reports whether the run has a terminal event.
+Pass
 `{"view" "full"}` when selecting by the complete metadata record:
 
 ```clojure
@@ -929,6 +938,27 @@ ptc transcript RUN_ID \
   --envelope tmp/transcript/command-envelope.json
 ```
 
+When the producer uses an explicitly named inspection file, pass that exact
+file back to the reader instead of renaming it to the run reference. Keep the
+trace, inspection, and transcript output in separate sibling directories:
+
+```console
+mkdir -p tmp/traces tmp/inspection tmp/transcript
+ptc run application.json \
+  --trace-dir tmp/traces \
+  --inspect tmp/inspection/compile.ptcins \
+  --envelope tmp/envelope.json
+ptc transcript RUN_ID \
+  --traces tmp/traces \
+  --inspection-file tmp/inspection/compile.ptcins \
+  --private-unattended \
+  --private-output tmp/transcript/conversation.private.json
+```
+
+Read `RUN_ID` from the command envelope. Use exactly one inspection selector:
+`--inspection DIRECTORY` selects `DIRECTORY/RUN_ID.ptcins`, while
+`--inspection-file FILE.ptcins` opens only that explicit file.
+
 On success the command prints one JSON line containing `command`, the selected
 run under `run_ref`, the absolute output `path`, and the number of published
 `turns`. The optional envelope receives the same result in the V4 command
@@ -962,8 +992,9 @@ INSPECTION_DIRECTORY/RUN_ID.ptcins
 ```
 
 Exactly one of the two trace candidates must exist as a regular file; both
-present is an ambiguous selected source. The inspection candidate must exist as
-a regular file. Filenames are routing hints: embedded run and trace identities
+present is an ambiguous selected source. The inspection candidate, whether
+selected by directory or explicit path, must exist as a regular file. Filenames
+are routing hints: embedded run and trace identities
 remain authoritative, and unrelated directory members are not listed, opened,
 sized, decoded, or counted toward directory or aggregate source limits. The
 selected files still keep their individual source, record, retained-memory,

@@ -51,6 +51,8 @@ jobs:
         run: |
           mix precommit
           mix prepush
+      - name: Verify gateway
+        run: scripts/ci/gateway.sh
 
   build:
     needs: verify

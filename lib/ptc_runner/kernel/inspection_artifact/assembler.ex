@@ -384,6 +384,8 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
     meta = %{
       sequence: record["sequence"],
       evaluation_id: record["correlation"]["evaluation_id"],
+      environment: record["payload"]["environment"],
+      mission_name: record["payload"]["mission_name"],
       details: record["payload"]["details"]
     }
 
@@ -632,8 +634,10 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
         {meta.evaluation_id,
          {meta.environment, meta.mission_name, meta.source_hash, meta.source_bytes}}
       end) ++
-        Enum.flat_map(state.execution_ids, fn {_kind, ids} ->
-          Enum.map(ids, &{&1, {"workflow", nil, :any, :any}})
+        Enum.flat_map(state.execution_meta, fn {_kind, records} ->
+          Enum.map(records, fn record ->
+            {record.evaluation_id, {record.environment, record.mission_name, :any, :any}}
+          end)
         end)
 
     Enum.reduce_while(checks, {:ok, %{}}, fn {id, expected}, {:ok, missing} ->
@@ -938,6 +942,8 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
           "run_id" => state.run_id,
           "evaluation_id" => meta.evaluation_id,
           "sequence" => meta.sequence,
+          "environment" => meta.environment,
+          "mission_name" => meta.mission_name,
           "details" => meta.details || %{}
         }
       end)

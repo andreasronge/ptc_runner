@@ -1,0 +1,30 @@
+{
+  "branch_labels_are": "declared intent, not measured coverage",
+  "corpus_id": "ptc-shipped-helper-corpus",
+  "measurement_boundary": "duration_ms measures execute_built through publication per invocation; kernel_usage is the aggregate Kernel.run snapshot; no helper-only attribution",
+  "subjects": [
+    "segments",
+    "measure",
+    "delta",
+    "fold-pages"
+  ],
+  "unrepresented_arms": {
+    "delta": [],
+    "fold-pages": [
+      "invalid-cursor",
+      "invalid-items",
+      "snapshot-changed",
+      "missing-next-cursor",
+      "invalid-next-cursor"
+    ],
+    "measure": [
+      "phase-return-contract",
+      "non-string"
+    ],
+    "segments": [
+      "phase-return-contract",
+      "api-notes-absent"
+    ]
+  },
+  "version": 1
+}

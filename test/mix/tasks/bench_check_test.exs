@@ -2,6 +2,7 @@ defmodule Mix.Tasks.Bench.CheckTest do
   # async: false — swaps the global Mix.shell and Mix task run-state, and reads a cwd-relative
   # baseline (class D).
   use ExUnit.Case, async: false
+  @moduletag :operator
 
   alias Mix.Tasks.Bench.Check
   alias PtcRunner.Bench.Baseline

@@ -11,9 +11,11 @@ defmodule PtcRunner.CLILoggerTest do
   import ExUnit.CaptureIO
 
   alias PtcRunner.CLILogger
+  alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.MixCommandAdapter
 
   @notice "TLS :client: In state :certify generated CLIENT ALERT: Fatal - Certificate Expired"
+  @publication_handler "ptc-publication-destination-unavailable"
 
   setup do
     previous_level = Logger.level()
@@ -72,6 +74,38 @@ defmodule PtcRunner.CLILoggerTest do
     end)
 
     assert {:ok, %{config: %{type: :standard_error}}} = :logger.get_handler_config(:default)
+  end
+
+  @tag :tmp_dir
+  test "mix ptc logs a bounded publication failure on stderr", %{tmp_dir: dir} do
+    :ok = :telemetry.detach(@publication_handler)
+    on_exit(fn -> CLILogger.install_stderr_handler(:stderr) end)
+
+    capture_io(fn -> MixCommandAdapter.run_task(["help"]) end)
+    destination = Path.join(dir, "result.json")
+
+    fault_hook = fn
+      :staging_file -> {:error, :eio}
+      _stage -> :ok
+    end
+
+    stderr =
+      capture_io(:stderr, fn ->
+        assert {:error, :destination_unavailable} =
+                 PublicationHandle.reserve_direct(
+                   destination,
+                   :result,
+                   0o600,
+                   self(),
+                   fault_hook
+                 )
+
+        Logger.flush()
+      end)
+
+    assert stderr =~ "destination unavailable: operation=reserve kind=result cause=reason:eio"
+    refute stderr =~ dir
+    assert length(String.split(stderr, "destination unavailable:")) == 2
   end
 
   defp capture_notice(message) do

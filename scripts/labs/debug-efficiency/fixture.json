@@ -1,0 +1,68 @@
+{
+  "kind": "synthetic_accounting_demonstration",
+  "cases": [
+    {
+      "id": "explicit-diagnostic",
+      "evidence": {"diag": "Explicit error E1"},
+      "truth": {"answerable": true, "cause": "E1", "required_evidence_ids": ["diag"]},
+      "arms": {
+        "deterministic": {"attempts": [], "response": {"decision": "diagnose", "cause": "E1", "evidence_ids": ["diag"]}},
+        "fixed": {"attempts": [{"status": "accepted", "dispatched": true, "cost_microusd": 12}], "response": {"decision": "diagnose", "cause": "E1", "evidence_ids": ["diag"]}}
+      }
+    },
+    {
+      "id": "wrong-cause",
+      "evidence": {"source": "Source change A", "result": "Observed output B"},
+      "truth": {"answerable": true, "cause": "A", "required_evidence_ids": ["source", "result"]},
+      "arms": {
+        "deterministic": {"attempts": [], "response": {"decision": "abstain", "cause": null, "evidence_ids": []}},
+        "fixed": {"attempts": [{"status": "accepted", "dispatched": true, "cost_microusd": 13}], "response": {"decision": "diagnose", "cause": "B", "evidence_ids": ["source", "result"]}}
+      }
+    },
+    {
+      "id": "insufficient-evidence",
+      "evidence": {"observation": "Two causes fit one observation"},
+      "truth": {"answerable": false, "cause": null, "required_evidence_ids": []},
+      "arms": {
+        "deterministic": {"attempts": [], "response": {"decision": "abstain", "cause": null, "evidence_ids": []}},
+        "fixed": {"attempts": [{"status": "accepted", "dispatched": true, "cost_microusd": 11}], "response": {"decision": "abstain", "cause": null, "evidence_ids": []}}
+      }
+    },
+    {
+      "id": "rejected-known-cost",
+      "evidence": {"diag": "E2"},
+      "truth": {"answerable": true, "cause": "E2", "required_evidence_ids": ["diag"]},
+      "arms": {
+        "deterministic": {"attempts": [], "response": {"decision": "diagnose", "cause": "E2", "evidence_ids": ["diag"]}},
+        "fixed": {"attempts": [{"status": "rejected", "dispatched": true, "cost_microusd": 9}], "response": null}
+      }
+    },
+    {
+      "id": "failed-unknown-cost",
+      "evidence": {"diag": "E3"},
+      "truth": {"answerable": true, "cause": "E3", "required_evidence_ids": ["diag"]},
+      "arms": {
+        "deterministic": {"attempts": [], "response": {"decision": "diagnose", "cause": "E3", "evidence_ids": ["diag"]}},
+        "fixed": {"attempts": [{"status": "failed", "dispatched": true, "cost_microusd": null}], "response": null}
+      }
+    },
+    {
+      "id": "no-bug-oracle",
+      "evidence": {"oracle": "Observed result equals oracle result"},
+      "truth": {"answerable": false, "no_bug": true, "cause": null, "required_evidence_ids": ["oracle"]},
+      "arms": {
+        "deterministic": {"attempts": [], "response": {"decision": "no_bug", "cause": null, "evidence_ids": ["oracle"]}},
+        "fixed": {"attempts": [{"status": "accepted", "dispatched": true, "cost_microusd": 7}], "response": {"decision": "no_bug", "cause": null, "evidence_ids": ["oracle"]}}
+      }
+    },
+    {
+      "id": "predispatch-refusal",
+      "evidence": {"diag": "E4"},
+      "truth": {"answerable": true, "cause": "E4", "required_evidence_ids": ["diag"]},
+      "arms": {
+        "deterministic": {"attempts": [], "response": {"decision": "diagnose", "cause": "E4", "evidence_ids": ["diag"]}},
+        "fixed": {"attempts": [{"status": "predispatch", "dispatched": false, "cost_microusd": 0}], "response": null}
+      }
+    }
+  ]
+}

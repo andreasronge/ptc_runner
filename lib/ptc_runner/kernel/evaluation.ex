@@ -58,6 +58,7 @@ defmodule PtcRunner.Kernel.Evaluation do
   alias PtcRunner.Lisp.EvaluatorErrorCatalog
   alias PtcRunner.Lisp.ShippedExportCatalog
   alias PtcRunner.Lisp.TrustedTool
+  alias PtcRunner.Utf8
 
   @missing_data_params_message "data/params is not available because this evaluation supplied no params. " <>
                                  "Pass a params map through kernel/eval-with or kernel/eval-source-with."
@@ -436,7 +437,7 @@ defmodule PtcRunner.Kernel.Evaluation do
     # false negative.
     :ok = record_capability_denial(state, result)
 
-    case inspection_analysis(
+    case inspect_evaluation_result(
            capture.inspection_sink,
            evaluation_id,
            result,
@@ -458,6 +459,44 @@ defmodule PtcRunner.Kernel.Evaluation do
         failure(:evaluation_error, :inspection_sink_error)
     end
   end
+
+  defp inspect_evaluation_result(sink, evaluation_id, result, environment, mission_name) do
+    with :ok <- inspection_analysis(sink, evaluation_id, result, environment, mission_name) do
+      inspection_evaluation_error(sink, evaluation_id, result, mission_name)
+    end
+  end
+
+  defp inspection_evaluation_error(nil, _evaluation_id, _result, _mission_name), do: :ok
+  defp inspection_evaluation_error(_sink, _evaluation_id, {:ok, _step}, _mission_name), do: :ok
+
+  defp inspection_evaluation_error(sink, evaluation_id, {:error, step}, mission_name) do
+    message = step.fail.message || "mission evaluation failed"
+    bounded_message = Utf8.truncate(message, 4_096)
+
+    details = %{
+      message: bounded_message,
+      message_truncated: bounded_message != message,
+      source_location: source_location(step.fail.details)
+    }
+
+    InspectionSink.emit(
+      sink,
+      "execution-error",
+      %{evaluation_id: evaluation_id},
+      %{
+        environment: :mission,
+        mission_name: mission_name,
+        kind: :evaluation_failed,
+        reason: step.fail.reason,
+        details: details
+      }
+    )
+  end
+
+  defp source_location(%{source_offset: offset}) when is_integer(offset) and offset >= 0,
+    do: %{offset: offset}
+
+  defp source_location(_details), do: nil
 
   defp classify_evaluation_result(
          result,

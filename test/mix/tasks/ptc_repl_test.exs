@@ -1,21 +1,21 @@
 defmodule PtcRunner.ReplFrontendTest do
-  # async: false — run_task reinstalls the VM-global :default logger handler on every case, and
-  # three cases assert the whole VM process list (class D).
-  use ExUnit.Case, async: false
+  # test_helper.exs moves the :default logger handler to standard_error before any case runs, so
+  # run_task leaves it alone. Cases that compare global :stderr, sweep the VM process list, load
+  # an OS environment variable, or run `mix` in this checkout live in ReplFrontendGlobalStateTest.
+  use ExUnit.Case, async: true
+  @moduletag :operator
 
   import ExUnit.CaptureIO
+  import PtcRunner.TestSupport.ReplFrontendFixtures
 
   alias PtcRunner.Kernel.CommandEngine
-  alias PtcRunner.Kernel.EventSink
-  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.TraceLog
-  alias PtcRunner.Lisp.NamespaceDiagnostic
-  alias PtcRunner.MixCommandAdapter
   alias PtcRunner.TestSupport.PrivateInspectionFixture
 
-  @stdio_root Path.expand("../../..", __DIR__)
-  @stdio_fixture Path.expand("../../support/mcp_stdio_source_fixture.sh", __DIR__)
+  setup_all do
+    PrivateInspectionFixture.seed_context(["private-run"])
+  end
 
   test "repeated evals preserve definitions, history, and captured output" do
     output =
@@ -50,34 +50,6 @@ defmodule PtcRunner.ReplFrontendTest do
     assert output |> String.split("\n", trim: true) |> hd() |> String.length() <= 256
   end
 
-  test "direct eval reports the first surplus closer to developers" do
-    output =
-      capture_io(:stderr, fn ->
-        error = assert_raise Mix.Error, fn -> run_repl(["-e", "(+ 1 2))"]) end
-
-        assert error.message =~
-                 "Error (parse_error): unbalanced parentheses: 1 extra ')' " <>
-                   "(first at line 1, column 8)"
-      end)
-
-    assert output ==
-             "Error (parse_error): unbalanced parentheses: 1 extra ')' " <>
-               "(first at line 1, column 8)\n"
-  end
-
-  test "direct eval uses the public arithmetic renderer" do
-    output =
-      capture_io(:stderr, fn ->
-        error = assert_raise Mix.Error, fn -> run_repl(["-e", "(/ 1 0)"]) end
-
-        assert error.message =~ "Error (arithmetic_error): division by zero"
-        refute error.message =~ "PtcRunner.Lisp"
-      end)
-
-    assert output =~ "Error (arithmetic_error): division by zero"
-    refute output =~ "PtcRunner.Lisp"
-  end
-
   test "direct eval names an unattached shipped library" do
     output = capture_io(fn -> run_repl(["-e", ~S|(doc "agent.core/run")|]) end)
 
@@ -86,49 +58,6 @@ defmodule PtcRunner.ReplFrontendTest do
     assert output =~ ~s|{"library": "agent.core"}|
 
     refute output =~ "No documentation found"
-  end
-
-  test "direct eval retains canonical unknown-namespace guidance" do
-    expected =
-      "Error (invalid_form): " <> NamespaceDiagnostic.message("kernel")
-
-    output =
-      capture_io(:stderr, fn ->
-        error =
-          assert_raise Mix.Error, fn ->
-            run_repl(["-e", ~S|(kernel/mission-model-context "reader")|])
-          end
-
-        assert String.starts_with?(
-                 error.message,
-                 "error: repl/command_failed: Error (invalid_form): " <>
-                   "unknown namespace kernel/"
-               )
-      end)
-
-    assert output == expected <> "\n"
-  end
-
-  test "direct eval preserves the detailed type_error message and renders its kind once" do
-    output =
-      capture_io(:stderr, fn ->
-        error =
-          assert_raise Mix.Error, fn ->
-            run_repl(["-e", ~S|(str/split "a-VERDICT-b" "VERDICT")|])
-          end
-
-        assert String.starts_with?(
-                 error.message,
-                 "error: repl/command_failed: Error (type_error): split: " <>
-                   "delimiter must be a regex pattern"
-               )
-
-        refute error.message =~ "type_error: type_error"
-      end)
-
-    assert output ==
-             "Error (type_error): split: delimiter must be a regex pattern, " <>
-               "got plain string \"VERDICT\"\n"
   end
 
   test "interactive mode prints output and exits on EOF" do
@@ -166,26 +95,6 @@ defmodule PtcRunner.ReplFrontendTest do
     assert output =~ "42\n"
     assert output =~ "Goodbye!"
     refute output =~ "subordinate_evaluations limit"
-  end
-
-  test "direct repeated eval retains the ordinary session ceiling" do
-    arguments = Enum.flat_map(1..129, &["--eval", Integer.to_string(&1)])
-
-    stderr =
-      capture_io(:stderr, fn ->
-        _stdout =
-          capture_io(fn ->
-            error = assert_raise Mix.Error, fn -> run_repl(arguments) end
-
-            assert error.message =~
-                     "subordinate_evaluations limit 128 was exceeded"
-
-            refute error.message =~ "manifest"
-          end)
-      end)
-
-    assert stderr =~ "subordinate_evaluations limit 128 was exceeded"
-    refute stderr =~ "manifest"
   end
 
   @tag :tmp_dir
@@ -725,42 +634,6 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
-  test "a missing provider credential retains the run diagnostic and remedy", %{
-    tmp_dir: directory
-  } do
-    {manifest_path, host_path} = write_missing_credential_repl(directory)
-
-    for {mission_args, expected_subject} <- [
-          {[], "alpha"},
-          {["--mission", "review"], "workspace-alpha"}
-        ] do
-      error =
-        assert_raise Mix.Error, fn ->
-          run_repl(
-            [
-              "--manifest",
-              manifest_path,
-              "--host-config",
-              host_path,
-              "-e",
-              "(+ 1 2)"
-            ] ++ mission_args
-          )
-        end
-
-      assert error.message =~
-               "error: repl/command_failed: active_preflight/credential_unavailable: " <>
-                 "provider/#{expected_subject}/credentials: a required provider credential is unavailable; " <>
-                 "export it, pass --env-file PATH, or use a host file credential; " <>
-                 "for credential-free source and helper evaluation, rerun with only " <>
-                 "--project PROJECT (or --manifest MANIFEST), optional --mission MISSION, " <>
-                 "--inspect-only, and -e EXPR"
-
-      refute error.message =~ "PTC_REPL_ABSENT"
-    end
-  end
-
-  @tag :tmp_dir
   test "inspect-only compiles a provider-backed manifest without credentials", %{
     tmp_dir: directory
   } do
@@ -1050,101 +923,6 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
-  test "a host-backed manifest acquires once and reuses one provider session", %{
-    tmp_dir: directory
-  } do
-    environment_name = "PTC_REPL_SCOPED_CREDENTIAL"
-    previous_environment = System.get_env(environment_name)
-    System.delete_env(environment_name)
-
-    on_exit(fn ->
-      if previous_environment,
-        do: System.put_env(environment_name, previous_environment),
-        else: System.delete_env(environment_name)
-    end)
-
-    marker = Path.join(directory, "provider-lifecycle")
-    manifest_path = Path.join(directory, "provider-repl.json")
-    host_path = Path.join(directory, "ptc-host.json")
-    env_file = Path.join(directory, "repl.env")
-    File.write!(env_file, "#{environment_name}=from-file\n")
-
-    File.write!(Path.join(directory, "main.clj"), "(ns app) (defn run [x] (return x))")
-
-    File.write!(
-      manifest_path,
-      Jason.encode!(%{
-        "version" => 1,
-        "workflow" => %{
-          "components" => [%{"id" => "app", "path" => "main.clj"}],
-          "entry" => "app/run"
-        },
-        "providers" => %{
-          "workflow" => [],
-          "mission" => [
-            %{"name" => "workspace", "config" => %{"allow" => ["workspace.structured"]}}
-          ]
-        },
-        "input" => %{"value" => %{}},
-        "limits" => %{"evaluation_timeout_ms" => 5_000, "run_duration_ms" => 20_000}
-      })
-    )
-
-    File.write!(
-      host_path,
-      Jason.encode!(%{
-        "credentials" => %{"token" => %{"env" => environment_name}},
-        "install" => %{
-          "workspace" => %{
-            "source" => "mcp",
-            "installation_revision" => "repl-stdio-v1",
-            "transport" => %{
-              "type" => "stdio",
-              "command" => System.find_executable("sh"),
-              "cwd" => @stdio_root,
-              "args" => [@stdio_fixture, marker, "mark-close"],
-              "env" => %{"TOKEN" => %{"binding" => "token"}},
-              "start_timeout_ms" => 5_000
-            },
-            "tools" => %{
-              "structured" => %{
-                "as" => "workspace.structured",
-                "effect" => "write",
-                "model_visible" => true
-              }
-            },
-            "ceilings" => %{"timeout_ms" => 5_000}
-          }
-        }
-      })
-    )
-
-    output =
-      capture_io(fn ->
-        run_repl([
-          "--manifest",
-          manifest_path,
-          "--host-config",
-          host_path,
-          "--env-file",
-          env_file,
-          "-e",
-          "(def x 41)",
-          "-e",
-          "(+ x 1)"
-        ])
-      end)
-
-    assert output =~ "#'x\n42\n"
-
-    lifecycle = marker |> File.read!() |> String.split("\n", trim: true)
-    assert Enum.count(lifecycle, &String.ends_with?(&1, ":server/discover")) == 1
-    assert Enum.count(lifecycle, &String.ends_with?(&1, ":tools/list")) == 2
-    assert Enum.count(lifecycle, &(&1 == "session-closed")) == 1
-    assert System.get_env(environment_name) == nil
-  end
-
-  @tag :tmp_dir
   test "-l evaluates setup before entering the REPL", %{tmp_dir: directory} do
     path = Path.join(directory, "setup.clj")
     File.write!(path, "(def loaded 41)")
@@ -1234,9 +1012,10 @@ defmodule PtcRunner.ReplFrontendTest do
 
   @tag :tmp_dir
   test "private profile refusal for continue-on-error precedes the repeated-eval check", %{
-    tmp_dir: directory
+    tmp_dir: directory,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(directory)
+    fixture = PrivateInspectionFixture.copy!(seeded, directory)
 
     base_args = [
       "--profile",
@@ -1294,9 +1073,10 @@ defmodule PtcRunner.ReplFrontendTest do
 
   @tag :tmp_dir
   test "the private catalog profile pages safe rows through the JSONL entry point", %{
-    tmp_dir: directory
+    tmp_dir: directory,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(directory)
+    fixture = PrivateInspectionFixture.copy!(seeded, directory)
 
     output =
       capture_io(fn ->
@@ -1429,75 +1209,6 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
-  test "catalog discovery pages forty safe rows into two independent selected sessions", %{
-    tmp_dir: directory
-  } do
-    cohort = build_private_cohort!(directory, 40)
-
-    catalog_output =
-      capture_io(fn ->
-        run_repl([
-          "--profile",
-          "private-run-catalog-v1",
-          "--resource",
-          "traces=#{cohort.traces}",
-          "--resource",
-          "inspection=#{cohort.inspection}",
-          "--session-trace-dir",
-          cohort.catalog_output,
-          "--private-unattended",
-          "--format",
-          "jsonl",
-          "-e",
-          ~S|(def first-page (analysis/catalog {"state" "admissible" "limit" 20}))|,
-          "-e",
-          "first-page",
-          "-e",
-          ~S|(analysis/catalog {"state" "admissible" "limit" 20 "cursor" (get first-page "next_cursor")})|
-        ])
-      end)
-
-    catalog_records = decode_jsonl(catalog_output)
-    evaluations = Enum.filter(catalog_records, &(&1["type"] == "evaluation"))
-    first_page = Enum.at(evaluations, 1)["result"]["value"]
-    second_page = Enum.at(evaluations, 2)["result"]["value"]
-
-    assert length(first_page["items"]) == 20
-    assert length(second_page["items"]) == 20
-    assert first_page["truncated"]
-    refute second_page["truncated"]
-    assert is_binary(first_page["next_cursor"])
-    assert second_page["next_cursor"] == nil
-    assert first_page["catalog_digest"] == second_page["catalog_digest"]
-    assert Enum.all?(first_page["items"] ++ second_page["items"], &(&1["state"] == "admissible"))
-    refute catalog_output =~ "private-prompt-"
-    refute catalog_output =~ "private-answer-"
-    refute catalog_output =~ "private-tool-result-"
-
-    first_batch = first_page["items"] |> Enum.take(16) |> Enum.map(& &1["run_id"])
-    later_batch = second_page["items"] |> Enum.take(16) |> Enum.map(& &1["run_id"])
-
-    first_session = run_selected_cohort!(cohort, first_batch, cohort.first_output)
-    later_session = run_selected_cohort!(cohort, later_batch, cohort.later_output)
-
-    assert Enum.sort(first_session.run_ids) == Enum.sort(first_batch)
-    assert Enum.sort(later_session.run_ids) == Enum.sort(later_batch)
-    assert MapSet.disjoint?(MapSet.new(first_session.run_ids), MapSet.new(later_session.run_ids))
-    assert first_session.session_id != later_session.session_id
-
-    assert first_session.capture == %{
-             "inspection" => %{"file_count" => 16, "run_count" => 16},
-             "traces" => %{"file_count" => 16, "run_count" => 16}
-           }
-
-    assert later_session.capture == first_session.capture
-    refute first_session.output =~ "catalog_digest"
-    refute later_session.output =~ "catalog_digest"
-    refute first_session.output =~ first_page["catalog_digest"]
-    refute later_session.output =~ first_page["catalog_digest"]
-  end
-
-  @tag :tmp_dir
   test "one run flag uses selected-set capture while zero flags retain whole-directory capture",
        %{
          tmp_dir: directory
@@ -1552,9 +1263,10 @@ defmodule PtcRunner.ReplFrontendTest do
 
   @tag :tmp_dir
   test "human private analysis keeps map keys whole and names the unabbreviated value", %{
-    tmp_dir: directory
+    tmp_dir: directory,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(directory)
+    fixture = PrivateInspectionFixture.copy!(seeded, directory)
 
     args = [
       "--profile",
@@ -1586,8 +1298,11 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
-  test "private analysis shows pre-execution invalid tool arguments", %{tmp_dir: root} do
-    fixture = PrivateInspectionFixture.create!(root)
+  test "private analysis shows pre-execution invalid tool arguments", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
 
     output =
       capture_io(fn ->
@@ -1626,9 +1341,10 @@ defmodule PtcRunner.ReplFrontendTest do
 
   @tag :tmp_dir
   test "private analysis redacts invalid tool arguments containing prior evaluation data", %{
-    tmp_dir: root
+    tmp_dir: root,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(root)
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
 
     output =
       capture_io(fn ->
@@ -1669,9 +1385,10 @@ defmodule PtcRunner.ReplFrontendTest do
 
   @tag :tmp_dir
   test "private analysis redacts invalid tool arguments after capability activity", %{
-    tmp_dir: root
+    tmp_dir: root,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(root)
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
 
     source =
       ~s|(do (analysis/open "#{fixture.run_id}") (analysis/counters "#{fixture.run_id}"))|
@@ -1710,9 +1427,10 @@ defmodule PtcRunner.ReplFrontendTest do
 
   @tag :tmp_dir
   test "a load-only session is not told to add a format its input mode refuses", %{
-    tmp_dir: directory
+    tmp_dir: directory,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(directory)
+    fixture = PrivateInspectionFixture.copy!(seeded, directory)
     setup_file = Path.join(directory, "setup.clj")
     File.write!(setup_file, ~s|(analysis/open "#{fixture.run_id}")|)
 
@@ -1741,9 +1459,10 @@ defmodule PtcRunner.ReplFrontendTest do
 
   @tag :tmp_dir
   test "a load form in a session that also evaluates is told where the whole value is", %{
-    tmp_dir: directory
+    tmp_dir: directory,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(directory)
+    fixture = PrivateInspectionFixture.copy!(seeded, directory)
     setup_file = Path.join(directory, "setup.clj")
     File.write!(setup_file, ~s|(analysis/open "#{fixture.run_id}")|)
 
@@ -1773,9 +1492,10 @@ defmodule PtcRunner.ReplFrontendTest do
 
   @tag :tmp_dir
   test "a value no JSON projection can carry is not offered as a structured field", %{
-    tmp_dir: directory
+    tmp_dir: directory,
+    seeded: seeded
   } do
-    fixture = PrivateInspectionFixture.create!(directory)
+    fixture = PrivateInspectionFixture.copy!(seeded, directory)
 
     output =
       capture_io(fn ->
@@ -2067,52 +1787,6 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
-  test "profile evals share mission state and persist outside the source", %{tmp_dir: directory} do
-    source = Path.join(directory, "source")
-    output_directory = Path.join(directory, "output")
-    File.mkdir!(source)
-    File.mkdir!(output_directory)
-    seed_trace(source, "seed")
-    before_sessions = log_analysis_session_pids()
-
-    output =
-      capture_io(fn ->
-        run_repl([
-          "--profile",
-          "run-analysis-v1",
-          "--resource",
-          "traces=#{source}",
-          "--session-trace-dir",
-          output_directory,
-          "-e",
-          "(def runs (analysis/runs {}))",
-          "-e",
-          "(count (get runs \"items\"))"
-        ])
-      end)
-
-    assert output =~ "Captured traces: 1 file, 1 run"
-    assert output =~ "#'runs\n"
-    assert output =~ "1\n"
-    assert output =~ "Analysis trace:"
-    assert File.ls!(source) == ["seed.jsonl"]
-    assert [trace_name] = File.ls!(output_directory)
-    assert String.starts_with?(trace_name, "run-analysis-")
-    assert String.ends_with?(trace_name, ".jsonl")
-    assert log_analysis_session_pids() == before_sessions
-
-    trace_path = Path.join(output_directory, trace_name)
-    assert {:ok, trace} = TraceLog.new(source: {:file, trace_path})
-
-    assert {:ok, %{"items" => [%{"name" => name, "session_profile" => profile}]}} =
-             TraceLog.query(trace, :list_runs, %{})
-
-    assert name == SafeMetadata.fingerprint("ptc.run-analysis.repl")
-    assert profile["id"] == "run-analysis-v1"
-    assert profile["digest"] =~ ~r/\Asha256:[0-9a-f]{64}\z/
-  end
-
-  @tag :tmp_dir
   test "one public profile evaluation publishes its value atomically", %{tmp_dir: directory} do
     source = Path.join(directory, "source")
     traces = Path.join(directory, "analysis-traces")
@@ -2234,69 +1908,6 @@ defmodule PtcRunner.ReplFrontendTest do
 
     assert output =~
              ~S|Explore functions with (apropos "term") and (doc "name"); inspect attached APIs with (dir), (export-meta "ns/name"), and (source ns/name).|
-  end
-
-  @tag :tmp_dir
-  test "JSONL continue-on-error preserves later feedback and exits unsuccessfully", %{
-    tmp_dir: directory
-  } do
-    source = Path.join(directory, "source")
-    output_directory = Path.join(directory, "output")
-    File.mkdir!(source)
-    File.mkdir!(output_directory)
-    seed_trace(source, "seed")
-    before_sessions = log_analysis_session_pids()
-
-    output =
-      capture_io(fn ->
-        assert_raise Mix.Error,
-                     ~r|repl/profile_evaluation_failed: profile evaluation failed|,
-                     fn ->
-                       run_repl([
-                         "--profile",
-                         "run-analysis-v1",
-                         "--resource",
-                         "traces=#{source}",
-                         "--session-trace-dir",
-                         output_directory,
-                         "--format",
-                         "jsonl",
-                         "--continue-on-error",
-                         "-e",
-                         "(def x 40)",
-                         "-e",
-                         "missing-value",
-                         "-e",
-                         "(+ x 2)"
-                       ])
-                     end
-      end)
-
-    records = decode_jsonl(output)
-
-    assert Enum.map(records, & &1["type"]) ==
-             [
-               "session-started",
-               "evaluation",
-               "evaluation",
-               "evaluation",
-               "session-closed",
-               "command-error"
-             ]
-
-    assert List.first(records)["capture"] == %{
-             "traces" => %{"file_count" => 1, "run_count" => 1}
-           }
-
-    evaluations = Enum.filter(records, &(&1["type"] == "evaluation"))
-    assert Enum.map(evaluations, & &1["result"]["status"]) == ["ok", "error", "ok"]
-    assert List.last(evaluations)["result"]["value"] == 42
-    assert List.first(evaluations)["result"]["value_available"] == true
-    assert List.first(evaluations)["result"]["formatted_truncated"] == false
-    assert Enum.at(evaluations, 1)["result"]["continuation_effect"] == "preserved"
-    assert List.last(records)["evaluation_indexes"] == [2]
-    assert File.regular?(Enum.at(records, -2)["trace_path"])
-    assert log_analysis_session_pids() == before_sessions
   end
 
   @tag :tmp_dir
@@ -2695,39 +2306,6 @@ defmodule PtcRunner.ReplFrontendTest do
     assert Bitwise.band(File.stat!(Path.dirname(trace_path)).mode, 0o777) == 0o700
   end
 
-  @tag :tmp_dir
-  test "profile input and persistence failures terminate session owners", %{tmp_dir: directory} do
-    source = Path.join(directory, "source")
-    input_output = Path.join(directory, "input-output")
-    persistence_output = Path.join(directory, "persistence-output")
-    File.mkdir!(source)
-    File.mkdir!(input_output)
-    File.mkdir!(persistence_output)
-    seed_trace(source, "seed")
-    before_sessions = log_analysis_session_pids()
-
-    capture_io(fn ->
-      assert_raise Mix.Error, ~r/could not read the profile script/, fn ->
-        run_repl(profile_args(source, input_output) ++ [Path.join(directory, "missing.clj")])
-      end
-    end)
-
-    assert log_analysis_session_pids() == before_sessions
-    File.chmod!(persistence_output, 0o500)
-
-    try do
-      capture_io(fn ->
-        assert_raise Mix.Error, ~r/profile trace persistence failed/, fn ->
-          run_repl(profile_args(source, persistence_output) ++ ["-e", "42"])
-        end
-      end)
-
-      assert log_analysis_session_pids() == before_sessions
-    after
-      File.chmod!(persistence_output, 0o700)
-    end
-  end
-
   test "profile option combinations fail closed" do
     for args <- [
           ["--resource", "traces=tmp"],
@@ -2786,162 +2364,6 @@ defmodule PtcRunner.ReplFrontendTest do
     end
   end
 
-  # One real `mix ptc repl` OS process (~2.2 s). In-process JSONL cases in
-  # this file cover session records; this pins the Mix task's stdout.
-  @tag :tmp_dir
-  @tag :nightly
-  test "profile JSONL works through an actual Mix subprocess", %{tmp_dir: directory} do
-    source = Path.join(directory, "source")
-    output_directory = Path.join(directory, "output")
-    File.mkdir!(source)
-    File.mkdir!(output_directory)
-    seed_trace(source, "seed")
-
-    {output, 0} =
-      System.cmd(
-        "mix",
-        [
-          "ptc",
-          "repl",
-          "--profile",
-          "run-analysis-v1",
-          "--resource",
-          "traces=#{source}",
-          "--session-trace-dir",
-          output_directory,
-          "--format",
-          "jsonl",
-          "-e",
-          "(count (get (analysis/runs {}) \"items\"))"
-        ],
-        cd: File.cwd!(),
-        env: [{"MIX_ENV", "test"}, {"MIX_QUIET", "1"}]
-      )
-
-    records = decode_mix_jsonl(output)
-    assert Enum.map(records, & &1["type"]) == ["session-started", "evaluation", "session-closed"]
-    assert Enum.at(records, 1)["result"]["value"] == 1
-    assert File.regular?(List.last(records)["trace_path"])
-  end
-
-  defp run_repl(args, frontend_opts \\ []),
-    do: MixCommandAdapter.run_task(["repl" | args], frontend_opts).outcome
-
-  defp profile_args(source, output_directory) do
-    [
-      "--profile",
-      "run-analysis-v1",
-      "--resource",
-      "traces=#{source}",
-      "--session-trace-dir",
-      output_directory
-    ]
-  end
-
-  defp decode_jsonl(output) do
-    output
-    |> String.split("\n", trim: true)
-    |> Enum.map(&Jason.decode!/1)
-  end
-
-  defp decode_mix_jsonl(output) do
-    output
-    |> String.split("\n", trim: true)
-    |> Enum.reject(&String.starts_with?(&1, "==> "))
-    |> Enum.map(&Jason.decode!/1)
-  end
-
-  defp build_private_cohort!(directory, count) do
-    File.chmod!(directory, 0o700)
-    seed_root = prepare_private_fixture_root!(Path.join(directory, "cohort-seed"))
-
-    cohort =
-      PrivateInspectionFixture.create!(seed_root, command_run_ref(1))
-
-    File.mkdir!(Path.join(directory, "catalog-output"))
-    File.mkdir!(Path.join(directory, "first-output"))
-    File.mkdir!(Path.join(directory, "later-output"))
-
-    Enum.each(2..count, fn seed ->
-      fixture_root = prepare_private_fixture_root!(Path.join(directory, "cohort-#{seed}"))
-
-      fixture =
-        PrivateInspectionFixture.create!(
-          fixture_root,
-          command_run_ref(seed)
-        )
-
-      File.cp!(
-        Path.join(fixture.traces, "#{fixture.run_id}.jsonl"),
-        Path.join(cohort.traces, "#{fixture.run_id}.jsonl")
-      )
-
-      File.cp!(
-        Path.join(fixture.inspection, "#{fixture.run_id}.ptcins"),
-        Path.join(cohort.inspection, "#{fixture.run_id}.ptcins")
-      )
-    end)
-
-    Map.merge(cohort, %{
-      catalog_output: Path.join(directory, "catalog-output"),
-      first_output: Path.join(directory, "first-output"),
-      later_output: Path.join(directory, "later-output")
-    })
-  end
-
-  defp prepare_private_fixture_root!(root) do
-    directories = [
-      root,
-      Path.join(root, "traces"),
-      Path.join(root, "inspection"),
-      Path.join(root, "analysis-traces")
-    ]
-
-    Enum.each(directories, fn directory ->
-      File.mkdir_p!(directory)
-      File.chmod!(directory, 0o700)
-    end)
-
-    root
-  end
-
-  defp run_selected_cohort!(cohort, run_ids, output_directory) do
-    selection = Enum.flat_map(run_ids, &["--run", &1])
-
-    output =
-      capture_io(fn ->
-        run_repl(
-          [
-            "--profile",
-            "private-run-analysis-v2",
-            "--resource",
-            "traces=#{cohort.traces}",
-            "--resource",
-            "inspection=#{cohort.inspection}",
-            "--session-trace-dir",
-            output_directory,
-            "--private-unattended",
-            "--format",
-            "jsonl",
-            "-e",
-            ~S|(analysis/runs {"limit" 100})|
-          ] ++ selection
-        )
-      end)
-
-    [started, evaluated, closed] = decode_jsonl(output)
-
-    %{
-      output: output,
-      session_id: started["session_id"],
-      capture: started["capture"],
-      run_ids: evaluated["result"]["value"]["items"] |> Enum.map(& &1["run_id"]),
-      trace_path: closed["trace_path"]
-    }
-  end
-
-  defp command_run_ref(seed), do: PrivateInspectionFixture.command_run_ref(10_000 + seed)
-
   defp write_file(directory, name, contents) do
     file = Path.join(directory, name)
     File.write!(file, contents)
@@ -2966,63 +2388,6 @@ defmodule PtcRunner.ReplFrontendTest do
     )
 
     manifest_path
-  end
-
-  defp write_missing_credential_repl(directory) do
-    File.write!(Path.join(directory, "credential-main.clj"), "(ns app) (defn run [x] (return x))")
-    File.write!(Path.join(directory, "credential-review.clj"), "(ns review)")
-    manifest_path = Path.join(directory, "credential-repl.json")
-    host_path = Path.join(directory, "credential-repl-host.json")
-
-    workflow_declarations = [
-      %{"name" => "alpha"},
-      %{"name" => "omega"}
-    ]
-
-    mission_declarations = [
-      %{"name" => "workspace-alpha"},
-      %{"name" => "workspace-omega"}
-    ]
-
-    File.write!(
-      manifest_path,
-      Jason.encode!(%{
-        "version" => 1,
-        "workflow" => %{
-          "components" => [%{"id" => "app", "path" => "credential-main.clj"}],
-          "entry" => "app/run"
-        },
-        "missions" => %{
-          "review" => %{
-            "components" => [%{"id" => "review", "path" => "credential-review.clj"}],
-            "providers" => ["workspace-alpha", "workspace-omega"]
-          }
-        },
-        "input" => %{"value" => %{}},
-        "providers" => %{
-          "workflow" => workflow_declarations,
-          "mission" => mission_declarations
-        }
-      })
-    )
-
-    File.write!(
-      host_path,
-      Jason.encode!(%{
-        "credentials" => %{
-          "alpha-key" => %{"env" => "PTC_REPL_ABSENT_ALPHA_KEY"},
-          "omega-key" => %{"env" => "PTC_REPL_ABSENT_OMEGA_KEY"}
-        },
-        "install" => %{
-          "alpha" => repl_llm_installation("alpha-key"),
-          "omega" => repl_llm_installation("omega-key"),
-          "workspace-alpha" => repl_mcp_installation("alpha-key"),
-          "workspace-omega" => repl_mcp_installation("omega-key")
-        }
-      })
-    )
-
-    {manifest_path, host_path}
   end
 
   defp write_inspect_only_mission_manifest(directory) do
@@ -3126,61 +2491,5 @@ defmodule PtcRunner.ReplFrontendTest do
     )
 
     {manifest_path, project_path}
-  end
-
-  defp repl_llm_installation(credential) do
-    %{
-      "source" => "llm",
-      "structured_output_mode" => "unsupported",
-      "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
-      "installation_revision" => "repl-missing-credential-v1",
-      "model" => "openrouter:test/model",
-      "credential" => credential
-    }
-  end
-
-  defp repl_mcp_installation(credential) do
-    %{
-      "source" => "mcp",
-      "installation_revision" => "repl-missing-credential-v1",
-      "transport" => %{
-        "type" => "stdio",
-        "command" => System.find_executable("sh"),
-        "env" => %{"TOKEN" => %{"binding" => credential}}
-      },
-      "tools" => %{"read" => %{"as" => "#{credential}.read", "effect" => "read"}}
-    }
-  end
-
-  # ex_dna:disable-for-next-line — boundary test keeps its trace fixture local and explicit
-  defp seed_trace(directory, run_id) do
-    path = Path.join(directory, run_id <> ".jsonl")
-    {:ok, limits} = Limits.new()
-    {:ok, sink} = EventSink.start(:normal, limits, run_id: run_id)
-    :ok = EventSink.emit(sink, "run-started", %{missions: %{}})
-
-    :ok =
-      EventSink.emit(sink, "run-stopped", %{
-        outcome: :ok,
-        reason: nil,
-        usage: %{llm_budget: %{"total_tokens" => nil, "cost" => nil}}
-      })
-
-    :ok = TraceLog.append_jsonl(path, EventSink.events(sink))
-    EventSink.stop(sink)
-  end
-
-  defp log_analysis_session_pids do
-    Process.list()
-    |> Enum.filter(fn pid ->
-      case Process.info(pid, :dictionary) do
-        {:dictionary, dictionary} ->
-          dictionary[:"$initial_call"] == {PtcRunner.Kernel.AnalysisSession, :init, 1}
-
-        nil ->
-          false
-      end
-    end)
-    |> Enum.sort()
   end
 end

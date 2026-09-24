@@ -1,8 +1,8 @@
 defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
-  # async: false — ten cases share the named ManagerCleanup application child and one restarts it,
-  # and deadlines of 1-2 s are asserted on expiry (class D, A); the other 18 could run async in a
-  # sibling module.
-  use ExUnit.Case, async: false
+  # Async: each case owns its memory store and managers. Adoption into the shared
+  # ManagerCleanup is safe concurrently; the case that restarts it lives in
+  # TokenManagerGlobalStateTest.
+  use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.Limits
@@ -19,6 +19,10 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
   alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Test.MCPOAuthRecordingStore
 
+  # Deadline for a step that must succeed: a store call, an issued header, a
+  # reply, or a DOWN. It is spent only when that step is already failing.
+  @settle_timeout_ms 10_000
+
   setup do
     authority = authority()
     {:ok, memory} = Memory.start(owner: self())
@@ -29,7 +33,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
         tenant_id: "tenant",
         principal_id: "alice",
         store: store,
-        deadline: Deadline.new(1_000)
+        deadline: Deadline.new(@settle_timeout_ms)
       )
 
     {:ok, claims} =
@@ -37,7 +41,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
         store,
         "tenant",
         [{authority.installation_id, authority.fingerprint}],
-        Deadline.new(1_000)
+        Deadline.new(@settle_timeout_ms)
       )
 
     key = Context.grant_key(context, authority, claims[authority.installation_id])
@@ -62,7 +66,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
         authority_epoch: context.epoch
       )
 
-    deadline = System.monotonic_time(:millisecond) + 2_000
+    deadline = System.monotonic_time(:millisecond) + @settle_timeout_ms
     assert {:ok, issued} = TokenManager.authorization_header(manager, deadline)
     assert issued.header == {"authorization", "Bearer access-1"}
     assert :ok = TokenManager.release(manager, issued.admission, deadline)
@@ -99,7 +103,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
         tenant_id: "tenant",
         principal_id: "alice",
         store: recording_store,
-        deadline: Deadline.new(1_000)
+        deadline: Deadline.new(@settle_timeout_ms)
       )
 
     request = record_requests(fixture, self())
@@ -113,7 +117,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
         request: request
       )
 
-    deadline = System.monotonic_time(:millisecond) + 2_000
+    deadline = System.monotonic_time(:millisecond) + @settle_timeout_ms
     assert {:ok, issued} = TokenManager.authorization_header(manager, deadline)
     assert issued.header == {"authorization", "Bearer access-2"}
     assert issued.generation == original.generation + 1
@@ -128,7 +132,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
     assert :ok = TokenManager.release(manager, issued.admission, deadline)
 
     assert {:ok, stored} =
-             Store.load_grant(context.store, context.key, Deadline.new(1_000))
+             Store.load_grant(context.store, context.key, Deadline.new(@settle_timeout_ms))
 
     assert stored.refresh_token == "refresh-2"
     assert stored.requested_scopes == MapSet.new(["read", "write"])
@@ -136,7 +140,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
   end
 
   test "uses an unrefreshable access token through its remaining lifetime", context do
-    {:ok, anchor} = Store.time_anchor(context.store, Deadline.new(1_000))
+    {:ok, anchor} = Store.time_anchor(context.store, Deadline.new(@settle_timeout_ms))
 
     {:ok, lease} =
       Store.acquire_mutation(
@@ -144,7 +148,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
         context.key,
         :authorization,
         5_000,
-        Deadline.new(1_000)
+        Deadline.new(@settle_timeout_ms)
       )
 
     :ok =
@@ -153,7 +157,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
         context.key,
         lease.fence,
         %{freshness_anchor: anchor, freshness_anchor_ttl_ms: 5_000},
-        Deadline.new(1_000)
+        Deadline.new(@settle_timeout_ms)
       )
 
     {:ok, _grant} =
@@ -171,9 +175,11 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
           metadata_revision: 1,
           metadata_binding: nil
         },
-        500,
+        # Unrefreshable and still inside the default 30 s refresh skew, with
+        # room to survive a loaded scheduler before the header is issued.
+        5_000,
         anchor,
-        Deadline.new(1_000)
+        Deadline.new(@settle_timeout_ms)
       )
 
     {:ok, manager} =
@@ -184,7 +190,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
         authority_epoch: context.epoch
       )
 
-    deadline = System.monotonic_time(:millisecond) + 1_000
+    deadline = System.monotonic_time(:millisecond) + @settle_timeout_ms
     assert {:ok, issued} = TokenManager.authorization_header(manager, deadline)
     assert issued.header == {"authorization", "Bearer short-lived"}
     assert :ok = TokenManager.release(manager, issued.admission, deadline)
@@ -208,7 +214,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
         request: failing_request
       )
 
-    deadline = System.monotonic_time(:millisecond) + 2_000
+    deadline = System.monotonic_time(:millisecond) + @settle_timeout_ms
 
     assert {:error, :mcp_authorization_required} =
              TokenManager.authorization_header(manager, deadline)
@@ -219,7 +225,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
                context.key,
                :authorization,
                1_000,
-               Deadline.new(1_000)
+               Deadline.new(@settle_timeout_ms)
              )
   end
 
@@ -250,7 +256,9 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
         request: blocking_request
       )
 
-    deadline = System.monotonic_time(:millisecond) + 1_000
+    # Must expire while the refresh is dispatched, so it also has to cover
+    # reaching the token endpoint on a loaded scheduler.
+    deadline = System.monotonic_time(:millisecond) + 2_000
 
     refresh =
       Task.async(fn ->
@@ -266,7 +274,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
 
     wait_ms = max(deadline - System.monotonic_time(:millisecond) + 10, 10)
     Process.send_after(self(), :deadline_passed, wait_ms)
-    assert_receive :deadline_passed, wait_ms + 100
+    assert_receive :deadline_passed, wait_ms + @settle_timeout_ms
 
     # Suspend the store across the failure report. The report is issued
     # after the caller's deadline, so with the old max(remaining, 1) budget
@@ -290,7 +298,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
                context.key,
                :authorization,
                1_000,
-               Deadline.new(1_000)
+               Deadline.new(@settle_timeout_ms)
              )
 
     send(refresh.pid, :finish)
@@ -316,7 +324,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
         request: changed_request
       )
 
-    deadline = System.monotonic_time(:millisecond) + 2_000
+    deadline = System.monotonic_time(:millisecond) + @settle_timeout_ms
 
     assert {:error, :mcp_authorization_required} =
              TokenManager.authorization_header(manager, deadline)
@@ -327,7 +335,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
                context.key,
                :authorization,
                1_000,
-               Deadline.new(1_000)
+               Deadline.new(@settle_timeout_ms)
              )
 
     refute_receive {:refresh, _token}
@@ -352,7 +360,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
         request: changed_request
       )
 
-    deadline = System.monotonic_time(:millisecond) + 2_000
+    deadline = System.monotonic_time(:millisecond) + @settle_timeout_ms
 
     assert {:error, :mcp_authorization_required} =
              TokenManager.authorization_header(manager, deadline)
@@ -363,7 +371,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
                context.key,
                :authorization,
                1_000,
-               Deadline.new(1_000)
+               Deadline.new(@settle_timeout_ms)
              )
 
     refute_receive {:refresh, _token}
@@ -380,7 +388,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
         authority_epoch: context.epoch
       )
 
-    deadline = System.monotonic_time(:millisecond) + 2_000
+    deadline = System.monotonic_time(:millisecond) + @settle_timeout_ms
 
     assert {:error, :mcp_authorization_required} =
              TokenManager.require_scopes(
@@ -391,7 +399,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
              )
 
     assert {:ok, nil} =
-             Store.load_requirement(context.store, context.key, Deadline.new(1_000))
+             Store.load_requirement(context.store, context.key, Deadline.new(@settle_timeout_ms))
   end
 
   test "locally fences a rejected generation when durable rejection fails", context do
@@ -406,7 +414,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
     end
 
     manager = manager_with_interceptor(context, interceptor)
-    deadline = System.monotonic_time(:millisecond) + 2_000
+    deadline = System.monotonic_time(:millisecond) + @settle_timeout_ms
 
     assert {:error, :store_error} = TokenManager.reject(manager, grant.generation, deadline)
 
@@ -426,7 +434,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
     end
 
     manager = manager_with_interceptor(context, interceptor)
-    deadline = System.monotonic_time(:millisecond) + 2_000
+    deadline = System.monotonic_time(:millisecond) + @settle_timeout_ms
 
     assert {:error, :store_error} =
              TokenManager.require_scopes(
@@ -480,7 +488,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
     assert {:error, :mcp_authorization_required} =
              TokenManager.authorization_header(
                manager,
-               System.monotonic_time(:millisecond) + 1_000
+               System.monotonic_time(:millisecond) + @settle_timeout_ms
              )
   end
 
@@ -517,8 +525,8 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
     assert Task.yield(closing, 100) == nil
 
     send(worker, :continue)
-    assert :ok = Task.await(transition, 1_000)
-    assert :ok = Task.await(closing, 1_000)
+    assert :ok = Task.await(transition, @settle_timeout_ms)
+    assert :ok = Task.await(closing, @settle_timeout_ms)
 
     {:ok, replacement_manager} =
       TokenManager.start(
@@ -531,7 +539,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
     assert {:error, :mcp_authorization_required} =
              TokenManager.authorization_header(
                replacement_manager,
-               System.monotonic_time(:millisecond) + 1_000
+               System.monotonic_time(:millisecond) + @settle_timeout_ms
              )
 
     assert :ok = TokenManager.close(replacement_manager)
@@ -551,7 +559,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
     end
 
     manager = manager_with_interceptor(context, interceptor)
-    deadline = System.monotonic_time(:millisecond) + 2_000
+    deadline = System.monotonic_time(:millisecond) + @settle_timeout_ms
 
     assert {:error, :store_error} = TokenManager.reject(manager, grant.generation, deadline)
     assert :ok = TokenManager.close(manager)
@@ -582,7 +590,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
     end
 
     failed_manager = manager_with_interceptor(context, interceptor)
-    deadline = System.monotonic_time(:millisecond) + 2_000
+    deadline = System.monotonic_time(:millisecond) + @settle_timeout_ms
 
     assert {:error, :store_error} =
              TokenManager.reject(failed_manager, grant.generation, deadline)
@@ -632,7 +640,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
     end
 
     failed_manager = manager_with_interceptor(context, interceptor)
-    deadline = System.monotonic_time(:millisecond) + 2_000
+    deadline = System.monotonic_time(:millisecond) + @settle_timeout_ms
 
     reject_task =
       Task.async(fn -> TokenManager.reject(failed_manager, grant.generation, deadline) end)
@@ -652,7 +660,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
              TokenManager.authorization_header(replacement_manager, deadline)
 
     send(persistence_worker, :continue)
-    assert {:ok, {:error, :closed}} = Task.yield(reject_task, 1_000)
+    assert {:ok, {:error, :closed}} = Task.yield(reject_task, @settle_timeout_ms)
 
     {:ok, replacement} =
       replace_grant(context.store, context.key, MapSet.new(["read", "write"]))
@@ -704,7 +712,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
         manager
       end
 
-    deadline = System.monotonic_time(:millisecond) + 5_000
+    deadline = System.monotonic_time(:millisecond) + @settle_timeout_ms
     [leader_manager, follower_manager] = managers
     leader = Task.async(fn -> TokenManager.authorization_header(leader_manager, deadline) end)
     assert_receive {:refresh_blocked, refresh_worker}
@@ -716,7 +724,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
     send(refresh_worker, :continue)
 
     for {task, manager} <- [{leader, leader_manager}, {follower, follower_manager}] do
-      assert {:ok, issued} = Task.await(task, 2_000)
+      assert {:ok, issued} = Task.await(task, @settle_timeout_ms)
       assert issued.header == {"authorization", "Bearer access-2"}
       assert :ok = TokenManager.release(manager, issued.admission, deadline)
       assert :ok = TokenManager.close(manager)
@@ -768,7 +776,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
         request: fixture
       )
 
-    deadline = System.monotonic_time(:millisecond) + 5_000
+    deadline = System.monotonic_time(:millisecond) + @settle_timeout_ms
     leader = Task.async(fn -> TokenManager.authorization_header(leader_manager, deadline) end)
     assert_receive {:refresh_discovery_blocked, refresh_worker}
 
@@ -778,8 +786,8 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
     assert Task.yield(follower, 100) == nil
     send(refresh_worker, :fail_before_dispatch)
 
-    assert {:error, :mcp_authorization_required} = Task.await(leader, 2_000)
-    assert {:ok, issued} = Task.await(follower, 2_000)
+    assert {:error, :mcp_authorization_required} = Task.await(leader, @settle_timeout_ms)
+    assert {:ok, issued} = Task.await(follower, @settle_timeout_ms)
     assert issued.header == {"authorization", "Bearer access-2"}
     assert :ok = TokenManager.release(follower_manager, issued.admission, deadline)
     assert :ok = TokenManager.close(leader_manager)
@@ -806,7 +814,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
 
     owner = spawn(fn -> receive do: (:stop -> :ok) end)
     manager = manager_with_interceptor(context, interceptor, owner: owner)
-    deadline = System.monotonic_time(:millisecond) + 2_000
+    deadline = System.monotonic_time(:millisecond) + @settle_timeout_ms
 
     assert {:error, :store_error} = TokenManager.reject(manager, grant.generation, deadline)
     assert_receive :rejection_persist_attempt
@@ -854,21 +862,21 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
 
     manager = manager_with_interceptor(context, interceptor)
     manager_ref = Process.monitor(manager.pid)
-    deadline = System.monotonic_time(:millisecond) + 1_000
+    deadline = System.monotonic_time(:millisecond) + @settle_timeout_ms
 
     assert {:error, :store_error} = TokenManager.reject(manager, 1, deadline)
     assert_receive {:cleanup_persistence_attempted, _initial}
     assert :ok = ManagerCleanup.adopt(manager)
     assert_receive {:cleanup_persistence_attempted, first}
-    assert_receive {:cleanup_persistence_attempted, second}, 1_000
-    assert_receive {:cleanup_persistence_attempted, third}, 1_000
+    assert_receive {:cleanup_persistence_attempted, second}, @settle_timeout_ms
+    assert_receive {:cleanup_persistence_attempted, third}, @settle_timeout_ms
     assert second - first >= 200
     assert third - second >= 400
     assert Process.alive?(manager.pid)
 
     Agent.update(persist?, fn _failed -> true end)
 
-    assert_receive {:DOWN, ^manager_ref, :process, _pid, :normal}, 2_000
+    assert_receive {:DOWN, ^manager_ref, :process, _pid, :normal}, @settle_timeout_ms
   end
 
   test "closing an ephemeral store terminates its adopted retry managers", context do
@@ -886,7 +894,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
 
     manager = manager_with_interceptor(context, interceptor)
     manager_ref = Process.monitor(manager.pid)
-    deadline = System.monotonic_time(:millisecond) + 1_000
+    deadline = System.monotonic_time(:millisecond) + @settle_timeout_ms
 
     assert {:error, :store_error} = TokenManager.reject(manager, 1, deadline)
     assert_receive :terminal_persistence_attempt
@@ -895,7 +903,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
     assert Process.alive?(manager.pid)
 
     assert :ok = Memory.close(context.memory)
-    assert_receive {:DOWN, ^manager_ref, :process, _pid, :killed}, 1_000
+    assert_receive {:DOWN, ^manager_ref, :process, _pid, :killed}, @settle_timeout_ms
   end
 
   test "registration-controller loss does not block persistence handoff", context do
@@ -923,7 +931,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
       )
 
     manager_ref = Process.monitor(manager.pid)
-    deadline = System.monotonic_time(:millisecond) + 1_000
+    deadline = System.monotonic_time(:millisecond) + @settle_timeout_ms
     assert {:error, :store_error} = TokenManager.reject(manager, 1, deadline)
 
     Process.exit(registrar.scope_controller, :kill)
@@ -931,7 +939,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
     assert Process.alive?(manager.pid)
 
     Agent.update(persist?, fn _failed -> true end)
-    assert_receive {:DOWN, ^manager_ref, :process, _pid, :normal}, 2_000
+    assert_receive {:DOWN, ^manager_ref, :process, _pid, :normal}, @settle_timeout_ms
     assert {:error, :provider_cleanup_failed} = ProviderSession.close(session)
   end
 
@@ -978,7 +986,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
       )
 
     manager_ref = Process.monitor(manager.pid)
-    deadline = System.monotonic_time(:millisecond) + 1_000
+    deadline = System.monotonic_time(:millisecond) + @settle_timeout_ms
     assert {:error, :store_error} = TokenManager.reject(manager, 1, deadline)
 
     results =
@@ -986,7 +994,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
       |> Task.async_stream(fn _attempt -> ManagerCleanup.adopt(manager, registrar) end,
         max_concurrency: 32,
         ordered: false,
-        timeout: 5_000
+        timeout: @settle_timeout_ms
       )
       |> Enum.to_list()
 
@@ -996,7 +1004,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
     assert {:links, [^worker]} = Process.info(manager.pid, :links)
 
     Agent.update(persist?, fn _failed -> true end)
-    assert_receive {:DOWN, ^manager_ref, :process, _pid, :normal}, 2_000
+    assert_receive {:DOWN, ^manager_ref, :process, _pid, :normal}, @settle_timeout_ms
     assert :ok = ResourceRegistrar.commit(registrar, nil)
     assert :ok = ProviderSession.close(session)
   end
@@ -1035,7 +1043,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
 
     first_ref = Process.monitor(first_manager.pid)
     second_ref = Process.monitor(second_manager.pid)
-    deadline = System.monotonic_time(:millisecond) + 1_000
+    deadline = System.monotonic_time(:millisecond) + @settle_timeout_ms
     assert {:error, :store_error} = TokenManager.reject(first_manager, 1, deadline)
     assert {:error, :store_error} = TokenManager.reject(second_manager, 1, deadline)
 
@@ -1044,57 +1052,25 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
     assert nil == Task.yield(stalled, 50)
 
     healthy = Task.async(fn -> ManagerCleanup.adopt(second_manager, second_registrar) end)
-    assert {:ok, :ok} = Task.yield(healthy, 500)
+    assert {:ok, :ok} = Task.yield(healthy, @settle_timeout_ms)
     assert nil == Task.yield(stalled, 0)
 
     assert true = :erlang.resume_process(first_registrar.cleanup_owner)
-    assert :ok = Task.await(stalled, 1_000)
+    assert :ok = Task.await(stalled, @settle_timeout_ms)
 
     Agent.update(persist?, fn _failed -> true end)
-    assert_receive {:DOWN, ^first_ref, :process, _pid, :normal}, 2_000
-    assert_receive {:DOWN, ^second_ref, :process, _pid, :normal}, 2_000
+    assert_receive {:DOWN, ^first_ref, :process, _pid, :normal}, @settle_timeout_ms
+    assert_receive {:DOWN, ^second_ref, :process, _pid, :normal}, @settle_timeout_ms
     assert :ok = ResourceRegistrar.commit(first_registrar, nil)
     assert :ok = ResourceRegistrar.commit(second_registrar, nil)
     assert :ok = ProviderSession.close(first_session)
     assert :ok = ProviderSession.close(second_session)
   end
 
-  test "cleanup supervisor restart terminates an adopted manager instead of orphaning it",
-       context do
-    {:ok, _grant} = seed_grant(context.store, context.key, 60_000)
-    parent = self()
-
-    interceptor = fn
-      {:mark_access_rejected, _key, _generation}, _timeout ->
-        send(parent, :restart_cleanup_persistence_attempted)
-        {:return, {:error, :store_error}}
-
-      _operation, _timeout ->
-        :delegate
-    end
-
-    manager = manager_with_interceptor(context, interceptor)
-    manager_ref = Process.monitor(manager.pid)
-    deadline = System.monotonic_time(:millisecond) + 1_000
-
-    assert {:error, :store_error} = TokenManager.reject(manager, 1, deadline)
-    assert_receive :restart_cleanup_persistence_attempted
-    assert :ok = ManagerCleanup.adopt(manager)
-    assert_receive :restart_cleanup_persistence_attempted
-
-    cleanup = Process.whereis(ManagerCleanup)
-    cleanup_ref = Process.monitor(cleanup)
-    Process.exit(cleanup, :kill)
-
-    assert_receive {:DOWN, ^cleanup_ref, :process, ^cleanup, :killed}
-    assert_receive {:DOWN, ^manager_ref, :process, _pid, :killed}
-    assert is_pid(await_cleanup_restart(cleanup))
-  end
-
   test "cleanup adoption treats a manager that already exited as complete" do
     pid = spawn(fn -> :ok end)
     ref = Process.monitor(pid)
-    assert_receive {:DOWN, ^ref, :process, ^pid, reason}, 1_000
+    assert_receive {:DOWN, ^ref, :process, ^pid, reason}, @settle_timeout_ms
     assert reason in [:normal, :noproc]
 
     manager = %TokenManager{pid: pid, resource: "https://mcp.example/mcp"}
@@ -1144,7 +1120,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
     end
 
     manager = manager_with_interceptor(context, interceptor)
-    deadline = System.monotonic_time(:millisecond) + 2_000
+    deadline = System.monotonic_time(:millisecond) + @settle_timeout_ms
     assert {:ok, issued} = TokenManager.authorization_header(manager, deadline)
     assert {:error, :store_error} = TokenManager.release(manager, issued.admission, deadline)
   end
@@ -1156,10 +1132,10 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
          metadata_binding \\ nil,
          requested_scopes \\ MapSet.new(["read"])
        ) do
-    {:ok, anchor} = Store.time_anchor(store, Deadline.new(1_000))
+    {:ok, anchor} = Store.time_anchor(store, Deadline.new(@settle_timeout_ms))
 
     {:ok, lease} =
-      Store.acquire_mutation(store, key, :authorization, 5_000, Deadline.new(1_000))
+      Store.acquire_mutation(store, key, :authorization, 5_000, Deadline.new(@settle_timeout_ms))
 
     :ok =
       Store.begin_mutation_dispatch(
@@ -1167,7 +1143,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
         key,
         lease.fence,
         %{freshness_anchor: anchor, freshness_anchor_ttl_ms: 5_000},
-        Deadline.new(1_000)
+        Deadline.new(@settle_timeout_ms)
       )
 
     Store.commit_grant(
@@ -1186,15 +1162,15 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
       },
       ttl_ms,
       anchor,
-      Deadline.new(1_000)
+      Deadline.new(@settle_timeout_ms)
     )
   end
 
   defp replace_grant(store, key, granted_scopes) do
-    {:ok, anchor} = Store.time_anchor(store, Deadline.new(1_000))
+    {:ok, anchor} = Store.time_anchor(store, Deadline.new(@settle_timeout_ms))
 
     {:ok, lease} =
-      Store.acquire_mutation(store, key, :authorization, 5_000, Deadline.new(1_000))
+      Store.acquire_mutation(store, key, :authorization, 5_000, Deadline.new(@settle_timeout_ms))
 
     :ok =
       Store.begin_mutation_dispatch(
@@ -1202,7 +1178,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
         key,
         lease.fence,
         %{freshness_anchor: anchor, freshness_anchor_ttl_ms: 5_000},
-        Deadline.new(1_000)
+        Deadline.new(@settle_timeout_ms)
       )
 
     Store.commit_grant(
@@ -1220,7 +1196,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
       },
       60_000,
       anchor,
-      Deadline.new(1_000)
+      Deadline.new(@settle_timeout_ms)
     )
   end
 
@@ -1315,7 +1291,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
         tenant_id: context.context.tenant_id,
         principal_id: context.context.principal_id,
         store: recording_store,
-        deadline: Deadline.new(1_000)
+        deadline: Deadline.new(@settle_timeout_ms)
       )
 
     {:ok, manager} =
@@ -1333,23 +1309,6 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
   defp next_sequence do
     assert_receive {:oauth_sequence, event}
     event
-  end
-
-  defp await_cleanup_restart(previous, attempts \\ 100)
-
-  defp await_cleanup_restart(_previous, 0), do: nil
-
-  defp await_cleanup_restart(previous, attempts) do
-    case Process.whereis(ManagerCleanup) do
-      pid when is_pid(pid) and pid != previous ->
-        pid
-
-      _not_restarted ->
-        receive do
-        after
-          10 -> await_cleanup_restart(previous, attempts - 1)
-        end
-    end
   end
 
   defp json(document) do

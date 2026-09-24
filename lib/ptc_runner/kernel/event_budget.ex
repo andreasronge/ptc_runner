@@ -15,7 +15,7 @@ defmodule PtcRunner.Kernel.EventBudget do
   # run instead. Keep this explicit because sizing a constructed literal can
   # undercount the ref-counted binaries retained by a real sink;
   # `limit_catalog_test` re-derives it by measurement.
-  @minimum_normal_payload_bytes 8_662
+  @minimum_normal_payload_bytes 9_092
   @maximum_dropped_bytes 3_449
 
   @doc false
@@ -37,6 +37,42 @@ defmodule PtcRunner.Kernel.EventBudget do
 
   @doc false
   def maximum_terminal_reason, do: :binary.copy(@maximum_terminal_reason)
+
+  @doc false
+  def maximum_terminal_limit_details do
+    longest_name = "a" <> String.duplicate("a", 127)
+    safe_integer_maximum = 9_007_199_254_740_991
+
+    [
+      %{
+        limit: :workflow_capability_calls_per_name,
+        limit_value: 2_592_000_000,
+        name: longest_name
+      },
+      %{
+        limit: :max_calls,
+        limit_value: 2_592_000_000,
+        alias: longest_name
+      },
+      %{
+        limit: :llm_cost_microusd,
+        limit_value: safe_integer_maximum,
+        requested: safe_integer_maximum,
+        remaining: safe_integer_maximum - 1
+      },
+      %{
+        limit: :run_duration_ms,
+        limit_value: 2_592_000_000,
+        phase: :compilation
+      },
+      %{
+        limit: :agent_turns,
+        limit_value: 128,
+        limit_reason: :turn_limit_exceeded
+      }
+    ]
+    |> Enum.max_by(&RetainedSize.bytes/1)
+  end
 
   @doc false
   def minimum_normal_payload_bytes, do: @minimum_normal_payload_bytes

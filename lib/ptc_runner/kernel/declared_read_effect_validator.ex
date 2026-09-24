@@ -106,6 +106,13 @@ defmodule PtcRunner.Kernel.DeclaredReadEffectValidator do
     |> Map.new()
   end
 
+  defp declaration_effects(%{
+         name: name,
+         descriptor: %{source: :mcp},
+         config: %{"catalog" => true}
+       }),
+       do: [{name <> ".catalog", :read}]
+
   defp declaration_effects(%{descriptor: %{source: :mcp, selection_rules: rules}, config: config}) do
     write = Map.get(rules.named_sets, "write", []) |> MapSet.new()
 
