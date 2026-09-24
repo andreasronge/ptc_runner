@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { aggregate, formatAggregate, usageOf } from "./reporting.mjs";
+import {
+  aggregate,
+  formatAggregate,
+  formatSpend,
+  usageOf,
+} from "./reporting.mjs";
 
 function envelope(llmSpend) {
   return { execution: { usage: { llm_spend: llmSpend } } };
@@ -53,4 +58,19 @@ test("an empty spend envelope reports authoritative zero usage", () => {
   assert.equal(row.output_tokens, 0);
   assert.equal(row.micro_usd, 0);
   assert.equal(formatAggregate(aggregate([row], "micro_usd")), "0");
+  assert.equal(formatSpend(row), "0 in / 0 out / 0 microUSD");
+});
+
+test("compile spend preserves known unpriced tokens and unknown cost", () => {
+  const row = usageOf(
+    envelope({ state: "unpriced", input: 120, output: 30 }),
+  );
+
+  assert.equal(formatSpend(row), "120 in / 30 out / n/a microUSD");
+});
+
+test("compile spend keeps overflow accounting unavailable", () => {
+  const row = usageOf(envelope({ state: "overflow" }));
+
+  assert.equal(formatSpend(row), "n/a in / n/a out / n/a microUSD");
 });

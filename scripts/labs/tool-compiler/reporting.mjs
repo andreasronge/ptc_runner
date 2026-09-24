@@ -77,3 +77,9 @@ export function formatAggregate({ subtotal, unaccounted }) {
   if (subtotal === null) return `n/a (${unaccounted} unaccounted)`;
   return `${subtotal} subtotal (${unaccounted} unaccounted)`;
 }
+
+export function formatSpend(row) {
+  const value = (amount) => (amount === null ? "n/a" : String(amount));
+
+  return `${value(row.input_tokens)} in / ${value(row.output_tokens)} out / ${value(row.micro_usd)} microUSD`;
+}

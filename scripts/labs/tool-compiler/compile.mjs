@@ -13,6 +13,7 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { startFixture } from "./fixture.mjs";
+import { formatSpend, usageOf } from "./reporting.mjs";
 
 const execute = promisify(execFile);
 const directory = dirname(fileURLToPath(import.meta.url));
@@ -90,7 +91,7 @@ try {
     .then(JSON.parse)
     .catch(() => ({}));
   const usage = envelope?.execution?.usage ?? {};
-  const spend = usage.llm_spend ?? {};
+  const reportedUsage = usageOf(envelope);
   const recipe = await readFile(resultPath, "utf8")
     .then(JSON.parse)
     .catch(() => null);
@@ -107,7 +108,7 @@ try {
     `model calls    ${usage.capability_calls?.["workflow/llm-request"] ?? 0}\n`,
   );
   process.stdout.write(
-    `compile cost   ${spend.state === "incomplete" ? "n/a" : `${spend.input ?? 0} in / ${spend.output ?? 0} out / ${spend.total_cost?.microunits ?? 0} microUSD`}\n`,
+    `compile cost   ${formatSpend(reportedUsage)}\n`,
   );
   process.stdout.write(`recipe         ${JSON.stringify(recipe)}\n`);
 

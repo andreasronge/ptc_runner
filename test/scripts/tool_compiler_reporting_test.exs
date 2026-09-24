@@ -3,13 +3,16 @@ defmodule PtcRunner.Scripts.ToolCompilerReportingTest do
 
   @moduletag :operator
 
-  test "tool compiler totals preserve incomplete spend accounting" do
-    node =
-      System.find_executable("node") || flunk("Node.js is required for the tool compiler lab")
+  alias PtcRunner.TestSupport.TestHelpers
 
+  if reason = TestHelpers.executable_skip_reason(["node"]) do
+    @moduletag skip: reason
+  end
+
+  test "tool compiler totals preserve incomplete spend accounting" do
     {output, status} =
       System.cmd(
-        node,
+        System.find_executable("node"),
         ["--test", "scripts/labs/tool-compiler/reporting.test.mjs"],
         stderr_to_stdout: true
       )
