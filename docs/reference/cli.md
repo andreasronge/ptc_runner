@@ -934,6 +934,27 @@ ptc transcript RUN_ID \
   --envelope tmp/transcript/command-envelope.json
 ```
 
+When the producer uses an explicitly named inspection file, pass that exact
+file back to the reader instead of renaming it to the run reference. Keep the
+trace, inspection, and transcript output in separate sibling directories:
+
+```console
+mkdir -p tmp/traces tmp/inspection tmp/transcript
+ptc run application.json \
+  --trace-dir tmp/traces \
+  --inspect tmp/inspection/compile.ptcins \
+  --envelope tmp/envelope.json
+ptc transcript RUN_ID \
+  --traces tmp/traces \
+  --inspection-file tmp/inspection/compile.ptcins \
+  --private-unattended \
+  --private-output tmp/transcript/conversation.private.json
+```
+
+Read `RUN_ID` from the command envelope. Use exactly one inspection selector:
+`--inspection DIRECTORY` selects `DIRECTORY/RUN_ID.ptcins`, while
+`--inspection-file FILE.ptcins` opens only that explicit file.
+
 On success the command prints one JSON line containing `command`, the selected
 run under `run_ref`, the absolute output `path`, and the number of published
 `turns`. The optional envelope receives the same result in the V4 command
@@ -967,8 +988,9 @@ INSPECTION_DIRECTORY/RUN_ID.ptcins
 ```
 
 Exactly one of the two trace candidates must exist as a regular file; both
-present is an ambiguous selected source. The inspection candidate must exist as
-a regular file. Filenames are routing hints: embedded run and trace identities
+present is an ambiguous selected source. The inspection candidate, whether
+selected by directory or explicit path, must exist as a regular file. Filenames
+are routing hints: embedded run and trace identities
 remain authoritative, and unrelated directory members are not listed, opened,
 sized, decoded, or counted toward directory or aggregate source limits. The
 selected files still keep their individual source, record, retained-memory,

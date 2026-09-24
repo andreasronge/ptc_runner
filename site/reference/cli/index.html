@@ -525,7 +525,20 @@ ptc transcript RUN_ID \
   --inspection tmp/inspection \
   --private-unattended \
   --private-output tmp/transcript/conversation.private.json \
-  --envelope tmp/transcript/command-envelope.json</code></pre><p>On success the command prints one JSON line containing <code class="inline">command</code>, the selected
+  --envelope tmp/transcript/command-envelope.json</code></pre><p>When the producer uses an explicitly named inspection file, pass that exact
+file back to the reader instead of renaming it to the run reference. Keep the
+trace, inspection, and transcript output in separate sibling directories:</p><pre><code class="console language-console">mkdir -p tmp/traces tmp/inspection tmp/transcript
+ptc run application.json \
+  --trace-dir tmp/traces \
+  --inspect tmp/inspection/compile.ptcins \
+  --envelope tmp/envelope.json
+ptc transcript RUN_ID \
+  --traces tmp/traces \
+  --inspection-file tmp/inspection/compile.ptcins \
+  --private-unattended \
+  --private-output tmp/transcript/conversation.private.json</code></pre><p>Read <code class="inline">RUN_ID</code> from the command envelope. Use exactly one inspection selector:
+<code class="inline">--inspection DIRECTORY</code> selects <code class="inline">DIRECTORY/RUN_ID.ptcins</code>, while
+<code class="inline">--inspection-file FILE.ptcins</code> opens only that explicit file.</p><p>On success the command prints one JSON line containing <code class="inline">command</code>, the selected
 run under <code class="inline">run_ref</code>, the absolute output <code class="inline">path</code>, and the number of published
 <code class="inline">turns</code>. The optional envelope receives the same result in the V4 command
 contract.
@@ -546,8 +559,9 @@ characters). Capture then opens only these exact candidates, without listing
 either directory:</p><pre><code class="text language-text">TRACE_DIRECTORY/RUN_ID.jsonl
 TRACE_DIRECTORY/RUN_ID.private.jsonl
 INSPECTION_DIRECTORY/RUN_ID.ptcins</code></pre><p>Exactly one of the two trace candidates must exist as a regular file; both
-present is an ambiguous selected source. The inspection candidate must exist as
-a regular file. Filenames are routing hints: embedded run and trace identities
+present is an ambiguous selected source. The inspection candidate, whether
+selected by directory or explicit path, must exist as a regular file. Filenames
+are routing hints: embedded run and trace identities
 remain authoritative, and unrelated directory members are not listed, opened,
 sized, decoded, or counted toward directory or aggregate source limits. The
 selected files still keep their individual source, record, retained-memory,

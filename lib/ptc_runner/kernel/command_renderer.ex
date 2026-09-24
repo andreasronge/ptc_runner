@@ -302,7 +302,8 @@ defmodule PtcRunner.Kernel.CommandRenderer do
          kind: :generic
        }),
        do:
-         "; required: RUN_ID, --traces, --inspection, --private-unattended, and --private-output"
+         "; required: RUN_ID, --traces, exactly one of --inspection or --inspection-file, " <>
+           "--private-unattended, and --private-output"
 
   defp rejection_suffix(_rejection), do: ""
 

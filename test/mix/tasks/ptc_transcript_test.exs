@@ -105,6 +105,71 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
+  test "an explicitly named --inspect output reopens without renaming", %{tmp_dir: root} do
+    fixture = canonical_create!(root)
+    produced = Path.join(fixture.inspection, "compile.ptcins")
+    File.rename!(Path.join(fixture.inspection, "#{fixture.run_id}.ptcins"), produced)
+    output = Path.join(fixture.output, "explicit.private.json")
+
+    presentation =
+      MixCommandAdapter.execute([
+        "transcript",
+        fixture.run_id,
+        "--traces",
+        fixture.traces,
+        "--inspection-file",
+        produced,
+        "--private-unattended",
+        "--private-output",
+        output
+      ])
+
+    assert presentation.exit_status == 0
+    assert presentation.stderr == ""
+
+    assert %{"run_id" => run_id, "conversation" => %{"complete?" => true}} =
+             output |> File.read!() |> Jason.decode!()
+
+    assert run_id == fixture.run_id
+  end
+
+  @tag :tmp_dir
+  test "inspection directory and explicit file selectors are mutually exclusive", %{tmp_dir: root} do
+    fixture = canonical_create!(root)
+    output = Path.join(fixture.output, "conflicting-inspection.json")
+    inspection_file = Path.join(fixture.inspection, "#{fixture.run_id}.ptcins")
+
+    presentation =
+      MixCommandAdapter.execute(
+        transcript_argv(fixture, output) ++ ["--inspection-file", inspection_file]
+      )
+
+    assert presentation.exit_status == 2
+    assert presentation.stderr =~ "arguments/invalid_arguments"
+    refute File.exists?(output)
+  end
+
+  @tag :tmp_dir
+  test "an explicit inspection selector still requires a regular file", %{tmp_dir: root} do
+    fixture = canonical_create!(root)
+    selected = Path.join(fixture.inspection, "compile.ptcins")
+    File.ln_s!(Path.join(fixture.inspection, "#{fixture.run_id}.ptcins"), selected)
+    output = Path.join(fixture.output, "symlinked-inspection.json")
+
+    presentation =
+      MixCommandAdapter.execute(
+        transcript_argv(fixture, output)
+        |> without_option("--inspection")
+        |> Kernel.++(["--inspection-file", selected])
+      )
+
+    assert presentation.exit_status == 1
+    assert presentation.stderr =~ "transcript/selected_inspection_not_regular"
+    assert presentation.stderr =~ "--inspection"
+    refute File.exists?(output)
+  end
+
+  @tag :tmp_dir
   test "an ambiguous reconstruction names ambiguity and its count, not incompleteness", %{
     tmp_dir: root
   } do
@@ -561,6 +626,7 @@ defmodule Mix.Tasks.PtcTranscriptTest do
       assert presentation.stderr =~ "RUN_ID"
       assert presentation.stderr =~ "--traces"
       assert presentation.stderr =~ "--inspection"
+      assert presentation.stderr =~ "--inspection-file"
       assert presentation.stderr =~ "--private-unattended"
       assert presentation.stderr =~ "--private-output"
       refute presentation.stderr =~ "caller-run"

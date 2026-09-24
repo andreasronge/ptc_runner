@@ -3,9 +3,10 @@ defmodule PtcRunner.TranscriptFrontend do
   One-shot private conversation retrieval for an immutable selected run capture.
 
   The command reserves an owner-only destination before touching either
-  evidence directory, then captures exactly one canonical trace candidate and
-  one canonical inspection artifact for `RUN_ID`. Unrelated files in those
-  directories are not listed, opened, sized, decoded, or counted. The shared
+  evidence source, then captures exactly one canonical trace candidate and one
+  explicitly selected inspection artifact for `RUN_ID`. Directory selection
+  uses the canonical filename; file selection accepts the producer's explicit
+  filename. Unrelated files are not listed, opened, sized, decoded, or counted. The shared
   `RunAnalysis` read model answers one question, and the command publishes
   deterministic JSON atomically. `--private-unattended` is an explicit accident
   guard, not access control; same-UID callers able to invoke this command can
@@ -22,6 +23,7 @@ defmodule PtcRunner.TranscriptFrontend do
   alias PtcRunner.Kernel.PrivateRunAnalysisProfile
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.RunAnalysis
+  alias PtcRunner.Kernel.SelectedCanonicalSource
 
   @max_items 1_000
 
@@ -35,21 +37,52 @@ defmodule PtcRunner.TranscriptFrontend do
   def run(
         %CommandArguments{
           command: :transcript,
-          application: run_id,
           options: %{
-            traces: traces,
             inspection: inspection,
             private_unattended: true,
-            private_output: output
+            private_output: _output
           }
-        },
-        %CommandRuntime{},
+        } = arguments,
+        %CommandRuntime{} = runtime,
         capture_opts
       ) do
+    run_selected(arguments, runtime, capture_opts, {:directory, inspection})
+  end
+
+  def run(
+        %CommandArguments{
+          command: :transcript,
+          application: run_id,
+          options: %{
+            inspection_file: inspection_file,
+            private_unattended: true,
+            private_output: _output
+          }
+        } = arguments,
+        %CommandRuntime{} = runtime,
+        capture_opts
+      ) do
+    run_selected(arguments, runtime, capture_opts, {:file, inspection_file, run_id})
+  end
+
+  def run(_arguments, _runtime, _capture_opts),
+    do: {:error, :invalid_arguments, "invalid transcript command"}
+
+  defp run_selected(arguments, runtime, capture_opts, inspection_source)
+
+  defp run_selected(
+         %CommandArguments{
+           application: run_id,
+           options: %{traces: traces, private_output: output}
+         },
+         %CommandRuntime{},
+         capture_opts,
+         inspection_source
+       ) do
     if valid_capture_opts?(capture_opts) do
       case PublicationHandle.reserve(output, :result, 0o600) do
         {:ok, handle} ->
-          result = capture_and_publish(handle, run_id, traces, inspection, capture_opts)
+          result = capture_and_publish(handle, run_id, traces, inspection_source, capture_opts)
           finalize_handle(handle, result)
 
         {:error, reason} ->
@@ -64,19 +97,23 @@ defmodule PtcRunner.TranscriptFrontend do
     _kind, _reason -> {:error, :internal_error, "transcript command failed"}
   end
 
-  def run(_arguments, _runtime, _capture_opts),
-    do: {:error, :invalid_arguments, "invalid transcript command"}
-
-  defp capture_and_publish(handle, run_id, traces, inspection, capture_opts) do
+  defp capture_and_publish(handle, run_id, traces, inspection_source, capture_opts) do
+    {inspection, capture_opts} = inspection_capture(inspection_source, capture_opts)
     resources = %{"traces" => traces, "inspection" => inspection}
 
-    case validate_sources_and_separation(handle, traces, inspection) do
+    case validate_sources_and_separation(handle, traces, inspection_source) do
       :ok ->
         capture_source(handle, run_id, resources, capture_opts)
 
       {:error, _code, _message} = error ->
         error
     end
+  end
+
+  defp inspection_capture({:directory, directory}, capture_opts), do: {directory, capture_opts}
+
+  defp inspection_capture({:file, path, _run_id}, capture_opts) do
+    {Path.dirname(path), Keyword.put(capture_opts, :selected_inspection_path, path)}
   end
 
   defp capture_source(handle, run_id, resources, capture_opts) do
@@ -299,15 +336,36 @@ defmodule PtcRunner.TranscriptFrontend do
 
   defp valid_capture_opts?(_opts), do: false
 
-  defp validate_sources_and_separation(handle, traces, inspection) do
+  defp validate_sources_and_separation(handle, traces, inspection_source) do
     with {:ok, trace} <- resolve_source(traces, :traces),
-         {:ok, private} <- resolve_source(inspection, :inspection),
+         {:ok, private, inspection_label} <- resolve_inspection_source(inspection_source),
          {:ok, output} <-
            handle
            |> PublicationHandle.path()
            |> Path.dirname()
            |> resolve_output_directory() do
-      validate_separation(trace, private, output)
+      validate_separation(trace, private, inspection_label, output)
+    end
+  end
+
+  defp resolve_inspection_source({:directory, directory}) do
+    case resolve_source(directory, :inspection) do
+      {:ok, resolved} -> {:ok, resolved, "--inspection"}
+      {:error, _code, _message} = error -> error
+    end
+  end
+
+  defp resolve_inspection_source({:file, path, run_id}) do
+    with {:ok, _path} <- SelectedCanonicalSource.resolve_inspection_file(path, run_id),
+         {:ok, resolved} <- AnalysisDirectory.resolve(Path.dirname(path)) do
+      {:ok, resolved, "--inspection-file"}
+    else
+      {:error, reason}
+      when reason in [:selected_inspection_missing, :selected_inspection_not_regular] ->
+        selected_capture_error(reason)
+
+      _error ->
+        {:error, :source_unavailable, "--inspection-file must name an existing .ptcins file"}
     end
   end
 
@@ -347,10 +405,10 @@ defmodule PtcRunner.TranscriptFrontend do
     end
   end
 
-  defp validate_separation(trace, private, output) do
+  defp validate_separation(trace, private, inspection_label, output) do
     labelled = [
       {%{id: "traces", label: "--traces"}, trace},
-      {%{id: "inspection", label: "--inspection"}, private},
+      {%{id: "inspection", label: inspection_label}, private},
       {%{id: "private_output", label: "--private-output"}, output}
     ]
 
