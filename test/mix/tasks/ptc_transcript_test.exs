@@ -10,15 +10,22 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TranscriptFrontend
 
-  defp canonical_create!(root, seed \\ 0) do
-    PrivateInspectionFixture.create!(root, PrivateInspectionFixture.command_run_ref(seed))
+  setup_all do
+    PrivateInspectionFixture.seed_context(
+      Enum.map([0, 1], &PrivateInspectionFixture.command_run_ref/1)
+    )
+  end
+
+  defp canonical_create!(root, seeded, seed \\ 0) do
+    PrivateInspectionFixture.copy!(seeded, root, PrivateInspectionFixture.command_run_ref(seed))
   end
 
   @tag :tmp_dir
   test "one command writes an exact private conversation without record-shape knowledge", %{
-    tmp_dir: root
+    tmp_dir: root,
+    seeded: seeded
   } do
-    fixture = canonical_create!(root)
+    fixture = canonical_create!(root, seeded)
     output_directory = Path.join(root, "transcript")
     File.mkdir!(output_directory)
     output = Path.join(output_directory, "transcript.private.json")
@@ -105,8 +112,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "an explicitly named --inspect output reopens without renaming", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "an explicitly named --inspect output reopens without renaming", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = canonical_create!(root, seeded)
     produced = Path.join(fixture.inspection, "compile.ptcins")
     File.rename!(Path.join(fixture.inspection, "#{fixture.run_id}.ptcins"), produced)
     output = Path.join(fixture.output, "explicit.private.json")
@@ -134,8 +144,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "inspection directory and explicit file selectors are mutually exclusive", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "inspection directory and explicit file selectors are mutually exclusive", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = canonical_create!(root, seeded)
     output = Path.join(fixture.output, "conflicting-inspection.json")
     inspection_file = Path.join(fixture.inspection, "#{fixture.run_id}.ptcins")
 
@@ -150,8 +163,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "an explicit inspection selector still requires a regular file", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "an explicit inspection selector still requires a regular file", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = canonical_create!(root, seeded)
     selected = Path.join(fixture.inspection, "compile.ptcins")
     File.ln_s!(Path.join(fixture.inspection, "#{fixture.run_id}.ptcins"), selected)
     output = Path.join(fixture.output, "symlinked-inspection.json")
@@ -240,8 +256,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "a nonterminal trace reports canonical incompleteness and its counts", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "a nonterminal trace reports canonical incompleteness and its counts", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = canonical_create!(root, seeded)
     trace_path = Path.join(fixture.traces, "#{fixture.run_id}.jsonl")
 
     trace_without_terminal_event =
@@ -266,8 +285,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "destination failures identify --private-output without echoing its path", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "destination failures identify --private-output without echoing its path", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = canonical_create!(root, seeded)
     output = Path.join(fixture.output, "occupied.private.json")
     File.write!(output, "original")
 
@@ -282,8 +304,8 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "the envelope cannot replace the transcript destination", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "the envelope cannot replace the transcript destination", %{tmp_dir: root, seeded: seeded} do
+    fixture = canonical_create!(root, seeded)
     output = Path.join(fixture.output, "same-destination.json")
 
     presentation =
@@ -321,9 +343,10 @@ defmodule Mix.Tasks.PtcTranscriptTest do
 
   @tag :tmp_dir
   test "each --private-output rule is refused under its own code and names the rule", %{
-    tmp_dir: root
+    tmp_dir: root,
+    seeded: seeded
   } do
-    fixture = canonical_create!(root)
+    fixture = canonical_create!(root, seeded)
 
     missing_parent = Path.join([fixture.output, "absent", "out.private.json"])
 
@@ -364,8 +387,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "physical source and output collisions identify the conflicting switches", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "physical source and output collisions identify the conflicting switches", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = canonical_create!(root, seeded)
     alias_root = Path.join(root, "root-alias")
     File.ln_s!(root, alias_root)
     aliased_traces = Path.join(alias_root, "traces")
@@ -402,8 +428,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "unavailable and swapped sources identify the declared source switch", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "unavailable and swapped sources identify the declared source switch", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = canonical_create!(root, seeded)
 
     missing_traces = Path.join(root, "missing-traces")
     missing_output = Path.join(fixture.output, "missing-traces.json")
@@ -438,8 +467,8 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "a noncanonical RUN_ID is refused before path derivation", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "a noncanonical RUN_ID is refused before path derivation", %{tmp_dir: root, seeded: seeded} do
+    fixture = canonical_create!(root, seeded)
     output = Path.join(fixture.output, "noncanonical-run.json")
 
     presentation =
@@ -457,8 +486,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "a traversal-shaped RUN_ID is refused before path derivation", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "a traversal-shaped RUN_ID is refused before path derivation", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = canonical_create!(root, seeded)
     output = Path.join(fixture.output, "traversal-run.json")
     selector = "../#{fixture.run_id}"
 
@@ -475,8 +507,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "a missing selected canonical pair names the absent source", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "a missing selected canonical pair names the absent source", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = canonical_create!(root, seeded)
     missing = PrivateInspectionFixture.command_run_ref(1)
     output = Path.join(fixture.output, "missing-selected.json")
 
@@ -494,9 +529,10 @@ defmodule Mix.Tasks.PtcTranscriptTest do
 
   @tag :tmp_dir
   test "reports a non-V1 private artifact as malformed without a legacy reader", %{
-    tmp_dir: root
+    tmp_dir: root,
+    seeded: seeded
   } do
-    fixture = canonical_create!(root)
+    fixture = canonical_create!(root, seeded)
     PrivateInspectionFixture.rewrite_schema!(fixture.inspection, 4)
     output_directory = Path.join(root, "transcript")
     File.mkdir!(output_directory)
@@ -522,8 +558,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "preserves capture-time source changes without publishing output", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "preserves capture-time source changes without publishing output", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = canonical_create!(root, seeded)
     output_directory = Path.join(root, "transcript")
     File.mkdir!(output_directory)
     output = Path.join(output_directory, "transcript.private.json")
@@ -552,8 +591,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "preserves inspection changes during artifact verification", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "preserves inspection changes during artifact verification", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = canonical_create!(root, seeded)
     output_directory = Path.join(root, "transcript")
     File.mkdir!(output_directory)
     output = Path.join(output_directory, "transcript.private.json")
@@ -584,8 +626,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "a pinned selected inspection survives path removal during admission", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "a pinned selected inspection survives path removal during admission", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = canonical_create!(root, seeded)
     output = Path.join(fixture.output, "removed-inspection.json")
     argv = transcript_argv(fixture, output)
     assert {:ok, entry} = CommandEntry.open(argv, :standalone)
@@ -637,8 +682,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "unrelated mixed history is not listed or admitted for a selected run", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "unrelated mixed history is not listed or admitted for a selected run", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = canonical_create!(root, seeded)
     extra = PrivateInspectionFixture.create!(Path.join(root, "extra"), "trace-only-history")
 
     File.cp!(
@@ -673,8 +721,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "a selected healthy run ignores an adjacent legacy-cost artifact", %{tmp_dir: root} do
-    healthy = canonical_create!(root)
+  test "a selected healthy run ignores an adjacent legacy-cost artifact", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    healthy = canonical_create!(root, seeded)
     damaged_run_id = PrivateInspectionFixture.command_run_ref(1)
 
     damaged =
@@ -711,8 +762,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "the private canonical trace suffix works when it is the only candidate", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "the private canonical trace suffix works when it is the only candidate", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = canonical_create!(root, seeded)
 
     File.rename!(
       Path.join(fixture.traces, "#{fixture.run_id}.jsonl"),
@@ -728,8 +782,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "both canonical trace candidates fail closed as ambiguous", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "both canonical trace candidates fail closed as ambiguous", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = canonical_create!(root, seeded)
 
     File.cp!(
       Path.join(fixture.traces, "#{fixture.run_id}.jsonl"),
@@ -748,8 +805,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "a missing selected inspection is distinct from a missing selected trace", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "a missing selected inspection is distinct from a missing selected trace", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = canonical_create!(root, seeded)
     File.rm!(Path.join(fixture.inspection, "#{fixture.run_id}.ptcins"))
     output = Path.join(fixture.output, "missing-inspection.json")
 
@@ -765,8 +825,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "a selected symlink is refused without disclosing the path", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "a selected symlink is refused without disclosing the path", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = canonical_create!(root, seeded)
     real = Path.join(fixture.traces, "#{fixture.run_id}.jsonl")
     linked = Path.join(root, "linked.jsonl")
     File.rename!(real, linked)
@@ -784,8 +847,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "embedded run identity remains authoritative over the selected filename", %{tmp_dir: root} do
-    embedded = canonical_create!(root, 1)
+  test "embedded run identity remains authoritative over the selected filename", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    embedded = canonical_create!(root, seeded, 1)
     selector = PrivateInspectionFixture.command_run_ref(2)
 
     File.rename!(
@@ -812,8 +878,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "a malformed selected trace fails without publishing output", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "a malformed selected trace fails without publishing output", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = canonical_create!(root, seeded)
     File.write!(Path.join(fixture.traces, "#{fixture.run_id}.jsonl"), "{not-json\n")
     output = Path.join(fixture.output, "malformed-selected.json")
 
@@ -827,8 +896,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "a malformed selected inspection fails without publishing output", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "a malformed selected inspection fails without publishing output", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = canonical_create!(root, seeded)
     File.write!(Path.join(fixture.inspection, "#{fixture.run_id}.ptcins"), "not-json\n")
     output = Path.join(fixture.output, "malformed-inspection.json")
 
@@ -842,8 +914,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "a selected inspection symlink is refused without disclosing the path", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "a selected inspection symlink is refused without disclosing the path", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = canonical_create!(root, seeded)
     real = Path.join(fixture.inspection, "#{fixture.run_id}.ptcins")
     linked = Path.join(root, "linked.ptcins")
     File.rename!(real, linked)
@@ -861,8 +936,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "an unsupported selected trace schema fails without publishing output", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "an unsupported selected trace schema fails without publishing output", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = canonical_create!(root, seeded)
     path = Path.join(fixture.traces, "#{fixture.run_id}.jsonl")
 
     rewritten =
@@ -888,8 +966,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "a selected correlation mismatch fails without disclosing identities", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "a selected correlation mismatch fails without disclosing identities", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = canonical_create!(root, seeded)
     path = Path.join(fixture.inspection, "#{fixture.run_id}.ptcins")
 
     {:ok, records} = StreamingInspection.read_path(path)
@@ -908,8 +989,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "truncating the selected trace during capture fails closed", %{tmp_dir: root} do
-    fixture = canonical_create!(root)
+  test "truncating the selected trace during capture fails closed", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = canonical_create!(root, seeded)
     output = Path.join(fixture.output, "truncated-selected.json")
     argv = transcript_argv(fixture, output)
     assert {:ok, entry} = CommandEntry.open(argv, :standalone)
