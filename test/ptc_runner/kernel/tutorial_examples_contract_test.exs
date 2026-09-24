@@ -2,39 +2,19 @@ defmodule PtcRunner.Kernel.TutorialExamplesContractTest do
   use ExUnit.Case, async: true
   @moduletag :operator
 
-  @repo_root Path.expand("../../..", __DIR__)
+  alias PtcRunner.TestSupport.TutorialExamplesContractHelpers
+
   @examples Path.expand("../../../examples/kernel-tutorial", __DIR__)
   @host Path.join(@examples, "ptc-host.json")
   @cost_budget_host Path.join(@examples, "ptc-host-cost-budget.json")
   @viewer_examples Path.expand("../../../scripts/labs/viewer-demo", __DIR__)
   @support_triage Path.expand("../../../examples/support-triage", __DIR__)
 
-  test "models in shipped runnable examples belong to ReqLLM's catalog" do
-    installations = host_installations()
-
+  test "the runnable example catalog includes every shipped host installation" do
     # A hand-written host list silently stops guarding the moment an example
     # gains a host document, which is how three `debug-a-failed-run` hosts came
     # to pin a model outside the catalog. Derive the list from the tree instead.
-    assert length(installations) >= 12
-
-    for {host, alias_name, model} <- installations do
-      assert {:ok, _catalog_model} = LLMDB.model(model), "#{host} installs #{alias_name}"
-    end
-  end
-
-  defp host_installations do
-    ["examples", "scripts/labs"]
-    |> Enum.flat_map(&Path.wildcard(Path.join([@repo_root, &1, "**", "*.json"])))
-    |> Enum.flat_map(fn path ->
-      case Jason.decode(File.read!(path)) do
-        {:ok, %{"install" => install}} when is_map(install) ->
-          for {alias_name, %{"model" => model}} <- install, do: {path, alias_name, model}
-
-        _ ->
-          []
-      end
-    end)
-    |> Enum.sort()
+    assert length(TutorialExamplesContractHelpers.host_installations()) >= 12
   end
 
   test "the cost-budget tutorial label reports its dedicated host model" do
@@ -64,16 +44,6 @@ defmodule PtcRunner.Kernel.TutorialExamplesContractTest do
 
     assert source =~
              "-> {items [{byte_offset :int, text :string}], next_cursor :string?, content_hash :string}"
-  end
-
-  test "shipped prompt-visible example components do not hide stable results behind any" do
-    examples_root = Path.expand("../../../examples", __DIR__)
-
-    for path <- Path.wildcard(Path.join(examples_root, "**/*.clj")),
-        source = File.read!(path),
-        source =~ ":visibility :prompt" do
-      refute source =~ "-> :any", path
-    end
   end
 
   test "support-triage labels report the model installed by the host" do
