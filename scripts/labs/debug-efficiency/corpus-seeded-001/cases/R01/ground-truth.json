@@ -1,0 +1,6 @@
+{
+  "form": "(not= left-amount right-amount)",
+  "function": "classify",
+  "operator": "comparator_flip",
+  "subject": "reconciliation"
+}

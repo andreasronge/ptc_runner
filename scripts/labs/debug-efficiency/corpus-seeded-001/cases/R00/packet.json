@@ -1,0 +1,54 @@
+{
+  "adjudication": "pending",
+  "candidate_cause": null,
+  "capture_command": "mix run scripts/labs/prelude-search/run.exs --phase 0 --subject reconciliation --seed 20260920 --executions 10 --output <capture-directory>",
+  "case_id": "R00",
+  "disposition": "no_bug",
+  "eligibility": "eligible",
+  "evidence_ids": {
+    "oracle": {
+      "bundle_sha256": "3addc36665042d795ad55d65d286345c968e6d9fa08a796bdc3cf9581aa32dd4",
+      "inspection": "artifacts/inspection/cmd-28zjfr8n81bbmqystvjbqwnt2k.ptcins",
+      "inspection_sha256": "24cd27bc00c57f8704d4efdee8b0ff925a703c989311377437c6139990511001",
+      "result_sha256": "sha256:87257611f0137fde5b6585628bd01130cdb015e478ef081ee01905e80ca4037a",
+      "run_input_sequence": 1,
+      "run_ref": "cmd-28zjfr8n81bbmqystvjbqwnt2k",
+      "run_result_sequence": 3,
+      "source_sha256": "afc3a5aad2d6daa5d3693babd64eb501ae39e7a79a9bf0aad373a7a1f195f959",
+      "trace": "artifacts/traces/cmd-28zjfr8n81bbmqystvjbqwnt2k.jsonl",
+      "trace_sha256": "91f49f93dab1ac117f52a1a036673149f5d3e095981f79ccb659c30a2430e3d1"
+    }
+  },
+  "expected_supporting_evidence_ids": [
+    "oracle:trace:cmd-28zjfr8n81bbmqystvjbqwnt2k",
+    "oracle:inspection:cmd-28zjfr8n81bbmqystvjbqwnt2k",
+    "oracle:run-input:cmd-28zjfr8n81bbmqystvjbqwnt2k",
+    "oracle:run-result:cmd-28zjfr8n81bbmqystvjbqwnt2k"
+  ],
+  "incident_input": {
+    "left": [
+      {
+        "amount": 19,
+        "id": "shared"
+      },
+      {
+        "id": "left-0"
+      }
+    ],
+    "right": [
+      {
+        "amount": 19,
+        "id": "shared"
+      },
+      {
+        "amount": 20260920,
+        "id": "right-0"
+      }
+    ]
+  },
+  "independent_oracle_result_sha256": "sha256:87257611f0137fde5b6585628bd01130cdb015e478ef081ee01905e80ca4037a",
+  "input_index": 0,
+  "seed": 20260920,
+  "source_revision": "4e03b2061e6f70750fee78593e568c70ab75d7c7",
+  "subject": "reconciliation"
+}

@@ -1,0 +1,6 @@
+{
+  "form": "(+ 1 (get entry \"amount\" 0))",
+  "function": "ledger-map",
+  "operator": "boundary_off_by_one",
+  "subject": "reconciliation"
+}

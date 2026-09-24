@@ -1,0 +1,6 @@
+{
+  "form": "{\"start\" start \"end\" finish}",
+  "function": "ordered",
+  "operator": "dropped_edge_case_clause",
+  "subject": "intervals"
+}

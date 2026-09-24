@@ -1,0 +1,6 @@
+{
+  "form": "(get input \"minimum_length\" 2)",
+  "function": "normalise",
+  "operator": "wrong_private_default",
+  "subject": "normaliser"
+}

@@ -1,0 +1,84 @@
+[
+  {
+    "bundle_hash": "3addc36665042d795ad55d65d286345c968e6d9fa08a796bdc3cf9581aa32dd4",
+    "duration_ms": 35,
+    "failure_envelope": null,
+    "inspection_hash": "8162fa28dfc7fd06b74feba09568dcad815ede28858ac2e251441ae731543004",
+    "inspection_path": "artifacts/inspection/cmd-2n18zvv5wg878nkyxw4vgnnpav.ptcins",
+    "kernel_usage": {
+      "agent_protocol_errors": 0,
+      "capability_calls": {
+        "mission": {},
+        "workflow": {}
+      },
+      "capability_denials": {},
+      "capability_refusals": {},
+      "closed?": true,
+      "evaluation_busy?": false,
+      "evaluation_continuation_bytes": 0,
+      "evaluation_history_bytes": 0,
+      "evaluation_memory_bytes": 0,
+      "evaluation_missions": [],
+      "evaluations_by_mission": {},
+      "events_dropped": {},
+      "llm_budget": {
+        "cost": null,
+        "total_tokens": null
+      },
+      "llm_spend": {
+        "state": "empty"
+      },
+      "protocol_errors": 0,
+      "remaining_ms": 9999,
+      "subordinate_evaluations": 0,
+      "subordinate_source_checks": 0
+    },
+    "reached_mutation": true,
+    "result_hash": "sha256:249796390864bfe03faa2e8d0efb0f28dcb436bd61182539d13049fc1018697a",
+    "run_ref": "cmd-2n18zvv5wg878nkyxw4vgnnpav",
+    "split": "visible",
+    "trace_path": "artifacts/traces/cmd-2n18zvv5wg878nkyxw4vgnnpav.jsonl",
+    "variant": "oracle"
+  },
+  {
+    "bundle_hash": "84bfe9dbd67ce84a2505fae4769af519e42c6bdd81bb3d2f85b5282b090d3ad3",
+    "duration_ms": 39,
+    "failure_envelope": null,
+    "inspection_hash": "5079919968e3660fd6d4a5a23ff104230ea5ae206d911973954d5ddb4ff89268",
+    "inspection_path": "artifacts/inspection/cmd-7sp161s5xq17vvdfrqtpm08e8g.ptcins",
+    "kernel_usage": {
+      "agent_protocol_errors": 0,
+      "capability_calls": {
+        "mission": {},
+        "workflow": {}
+      },
+      "capability_denials": {},
+      "capability_refusals": {},
+      "closed?": true,
+      "evaluation_busy?": false,
+      "evaluation_continuation_bytes": 0,
+      "evaluation_history_bytes": 0,
+      "evaluation_memory_bytes": 0,
+      "evaluation_missions": [],
+      "evaluations_by_mission": {},
+      "events_dropped": {},
+      "llm_budget": {
+        "cost": null,
+        "total_tokens": null
+      },
+      "llm_spend": {
+        "state": "empty"
+      },
+      "protocol_errors": 0,
+      "remaining_ms": 9998,
+      "subordinate_evaluations": 0,
+      "subordinate_source_checks": 0
+    },
+    "reached_mutation": true,
+    "result_hash": "sha256:9e7ca597142b3a3e3815207ea49948c305a05096a5da208ec3899a420e385710",
+    "run_ref": "cmd-7sp161s5xq17vvdfrqtpm08e8g",
+    "split": "visible",
+    "trace_path": "artifacts/traces/cmd-7sp161s5xq17vvdfrqtpm08e8g.jsonl",
+    "variant": "observed"
+  }
+]

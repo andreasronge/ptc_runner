@@ -1,0 +1,6 @@
+{
+  "form": "(+ minimum 1)) nil normal",
+  "function": "canonical-token",
+  "operator": "boundary_off_by_one",
+  "subject": "normaliser"
+}

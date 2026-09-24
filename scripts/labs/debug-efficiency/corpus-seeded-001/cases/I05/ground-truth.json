@@ -1,0 +1,6 @@
+{
+  "form": "(get input \"tolerance\" 1)",
+  "function": "merge-with-tolerance",
+  "operator": "wrong_private_default",
+  "subject": "intervals"
+}

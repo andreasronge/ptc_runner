@@ -1,0 +1,71 @@
+{
+  "adjudication": "pending",
+  "candidate_cause": {
+    "form": "{\"start\" start \"end\" finish}",
+    "function": "ordered",
+    "operator": "dropped_edge_case_clause",
+    "subject": "intervals"
+  },
+  "capture_command": "mix run scripts/labs/prelude-search/run.exs --phase 0 --subject intervals --seed 20260922 --executions 10 --output <capture-directory>",
+  "case_id": "I03",
+  "disposition": "candidate_mutation",
+  "eligibility": "eligible",
+  "evidence_ids": {
+    "observed": {
+      "bundle_sha256": "e9902615c6904809e353ffee116369f118b0cbdae26c990d58002cbafb1c5354",
+      "inspection": "artifacts/inspection/cmd-0zgr73bekgjaw4tvf1khrecmqc.ptcins",
+      "inspection_sha256": "d72c2d08eac5e38df87c7bb67248613503c25f937775aa1a838bbbf133153b10",
+      "result_sha256": "sha256:53d9277161a5517e8acd9aa4386161769a7b5d8ffb1baeb189962e35190c4f1e",
+      "run_input_sequence": 1,
+      "run_ref": "cmd-0zgr73bekgjaw4tvf1khrecmqc",
+      "run_result_sequence": 3,
+      "source_sha256": "2b30aa1abbe9c52f7709567887913f7223ba566a8ffd444e72c27350b45bb439",
+      "trace": "artifacts/traces/cmd-0zgr73bekgjaw4tvf1khrecmqc.jsonl",
+      "trace_sha256": "35ca9c25a2d4013185c3e17da3971bfd0d2c24845b4e23adce7196c703e92232"
+    },
+    "oracle": {
+      "bundle_sha256": "27603618c93afa5fbfaa8c58417dab75ec51392b7b329d627b5b0da1c92c653a",
+      "inspection": "artifacts/inspection/cmd-43bj67enk8x76k1e0sb2r6yhjz.ptcins",
+      "inspection_sha256": "9816277d55dd6d2519ef25789f09ac7aa97d5adac5aa0928bafe18ee60afa6f5",
+      "result_sha256": "sha256:43a3ed950de7af4436d55dc8efc7ad58c544314c72603637831fccbff10eea40",
+      "run_input_sequence": 1,
+      "run_ref": "cmd-43bj67enk8x76k1e0sb2r6yhjz",
+      "run_result_sequence": 3,
+      "source_sha256": "07dcc3fee5d975be75faf0d4a55987abfe4b5f489c7ca353ce8f78a7d5e297fd",
+      "trace": "artifacts/traces/cmd-43bj67enk8x76k1e0sb2r6yhjz.jsonl",
+      "trace_sha256": "23398a9e7939f365c9414df90a4022cc7bd4f507432037a83410b0dd02310206"
+    }
+  },
+  "expected_supporting_evidence_ids": [
+    "oracle:trace:cmd-43bj67enk8x76k1e0sb2r6yhjz",
+    "oracle:inspection:cmd-43bj67enk8x76k1e0sb2r6yhjz",
+    "oracle:run-input:cmd-43bj67enk8x76k1e0sb2r6yhjz",
+    "oracle:run-result:cmd-43bj67enk8x76k1e0sb2r6yhjz",
+    "observed:trace:cmd-0zgr73bekgjaw4tvf1khrecmqc",
+    "observed:inspection:cmd-0zgr73bekgjaw4tvf1khrecmqc",
+    "observed:run-input:cmd-0zgr73bekgjaw4tvf1khrecmqc",
+    "observed:run-result:cmd-0zgr73bekgjaw4tvf1khrecmqc",
+    "ground-truth.json"
+  ],
+  "incident_input": {
+    "intervals": [
+      {
+        "end": 20260927,
+        "start": 20260930
+      },
+      {
+        "end": 20260925,
+        "start": 20260922
+      },
+      {
+        "end": 20260928,
+        "start": 20260927
+      }
+    ]
+  },
+  "independent_oracle_result_sha256": "sha256:43a3ed950de7af4436d55dc8efc7ad58c544314c72603637831fccbff10eea40",
+  "input_index": 0,
+  "seed": 20260922,
+  "source_revision": "4e03b2061e6f70750fee78593e568c70ab75d7c7",
+  "subject": "intervals"
+}

@@ -1,0 +1,6 @@
+{
+  "form": "(if false",
+  "function": "finish-token",
+  "operator": "dropped_edge_case_clause",
+  "subject": "normaliser"
+}

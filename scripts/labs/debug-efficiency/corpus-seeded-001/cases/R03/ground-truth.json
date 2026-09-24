@@ -1,0 +1,6 @@
+{
+  "form": "(and false (= right-amount missing))",
+  "function": "classify",
+  "operator": "dropped_edge_case_clause",
+  "subject": "reconciliation"
+}

@@ -1,0 +1,6 @@
+{
+  "form": "(get entry \"amount\" 1)",
+  "function": "ledger-map",
+  "operator": "wrong_private_default",
+  "subject": "reconciliation"
+}

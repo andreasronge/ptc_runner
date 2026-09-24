@@ -1,0 +1,6 @@
+{
+  "form": "{\"text\" (vec normal)\n             \"tokens\"",
+  "function": "normalise",
+  "operator": "swapped_map_key",
+  "subject": "normaliser"
+}

@@ -1,0 +1,36 @@
+{
+  "adjudication": "pending",
+  "candidate_cause": null,
+  "capture_command": "mix run scripts/labs/prelude-search/run.exs --phase 0 --subject normaliser --seed 20260920 --executions 10 --output <capture-directory>",
+  "case_id": "N00",
+  "disposition": "no_bug",
+  "eligibility": "eligible",
+  "evidence_ids": {
+    "oracle": {
+      "bundle_sha256": "24b1122b32abcccd65363bf5a2016f6243722ecabc506eaee1c0ec91d8ba6864",
+      "inspection": "artifacts/inspection/cmd-7czmkpyh0vep07msb4d40s86mf.ptcins",
+      "inspection_sha256": "776795734435b439e9391ffb12945138579c8e4ebd3b437c1ff30a46fb36dc5a",
+      "result_sha256": "sha256:033f0bec5000330e31d391779c2499ea232a8b8bc589017295a74b384e6f3966",
+      "run_input_sequence": 1,
+      "run_ref": "cmd-7czmkpyh0vep07msb4d40s86mf",
+      "run_result_sequence": 3,
+      "source_sha256": "7cf8b086e94fc80ecb9f30ff8f5898bd22a24bf209453c9310975b93f92f7103",
+      "trace": "artifacts/traces/cmd-7czmkpyh0vep07msb4d40s86mf.jsonl",
+      "trace_sha256": "2c0a95f27e26e834e19776aa2ae113be3ed87e33f98d3e9d1a659e0d997cad8a"
+    }
+  },
+  "expected_supporting_evidence_ids": [
+    "oracle:trace:cmd-7czmkpyh0vep07msb4d40s86mf",
+    "oracle:inspection:cmd-7czmkpyh0vep07msb4d40s86mf",
+    "oracle:run-input:cmd-7czmkpyh0vep07msb4d40s86mf",
+    "oracle:run-result:cmd-7czmkpyh0vep07msb4d40s86mf"
+  ],
+  "incident_input": {
+    "text": " Alpha A BETA tail20260920-0 "
+  },
+  "independent_oracle_result_sha256": "sha256:033f0bec5000330e31d391779c2499ea232a8b8bc589017295a74b384e6f3966",
+  "input_index": 0,
+  "seed": 20260920,
+  "source_revision": "4e03b2061e6f70750fee78593e568c70ab75d7c7",
+  "subject": "normaliser"
+}

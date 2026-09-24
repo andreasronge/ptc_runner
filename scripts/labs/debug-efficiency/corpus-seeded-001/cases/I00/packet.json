@@ -1,0 +1,49 @@
+{
+  "adjudication": "pending",
+  "candidate_cause": null,
+  "capture_command": "mix run scripts/labs/prelude-search/run.exs --phase 0 --subject intervals --seed 20260920 --executions 10 --output <capture-directory>",
+  "case_id": "I00",
+  "disposition": "no_bug",
+  "eligibility": "eligible",
+  "evidence_ids": {
+    "oracle": {
+      "bundle_sha256": "27603618c93afa5fbfaa8c58417dab75ec51392b7b329d627b5b0da1c92c653a",
+      "inspection": "artifacts/inspection/cmd-6xz4erkk3agm51xqhv56nnvafa.ptcins",
+      "inspection_sha256": "e20cf369753d54143d24e976e6eaf9ce87378a3be32d00ef7b37057a012c2ac1",
+      "result_sha256": "sha256:6aa65508a8ed3170a06d6f59f18f4c69ffa7a22b5a54316e3022e22ac103d079",
+      "run_input_sequence": 1,
+      "run_ref": "cmd-6xz4erkk3agm51xqhv56nnvafa",
+      "run_result_sequence": 3,
+      "source_sha256": "07dcc3fee5d975be75faf0d4a55987abfe4b5f489c7ca353ce8f78a7d5e297fd",
+      "trace": "artifacts/traces/cmd-6xz4erkk3agm51xqhv56nnvafa.jsonl",
+      "trace_sha256": "d54c5012301138bcf7a52b25370a494180616df4abd6c30f31a84fa9c3aad73e"
+    }
+  },
+  "expected_supporting_evidence_ids": [
+    "oracle:trace:cmd-6xz4erkk3agm51xqhv56nnvafa",
+    "oracle:inspection:cmd-6xz4erkk3agm51xqhv56nnvafa",
+    "oracle:run-input:cmd-6xz4erkk3agm51xqhv56nnvafa",
+    "oracle:run-result:cmd-6xz4erkk3agm51xqhv56nnvafa"
+  ],
+  "incident_input": {
+    "intervals": [
+      {
+        "end": 20260925,
+        "start": 20260928
+      },
+      {
+        "end": 20260923,
+        "start": 20260920
+      },
+      {
+        "end": 20260926,
+        "start": 20260923
+      }
+    ]
+  },
+  "independent_oracle_result_sha256": "sha256:6aa65508a8ed3170a06d6f59f18f4c69ffa7a22b5a54316e3022e22ac103d079",
+  "input_index": 0,
+  "seed": 20260920,
+  "source_revision": "4e03b2061e6f70750fee78593e568c70ab75d7c7",
+  "subject": "intervals"
+}

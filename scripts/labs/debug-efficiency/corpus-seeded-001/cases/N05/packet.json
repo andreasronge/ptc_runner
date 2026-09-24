@@ -1,0 +1,58 @@
+{
+  "adjudication": "pending",
+  "candidate_cause": {
+    "form": "(get input \"minimum_length\" 2)",
+    "function": "normalise",
+    "operator": "wrong_private_default",
+    "subject": "normaliser"
+  },
+  "capture_command": "mix run scripts/labs/prelude-search/run.exs --phase 0 --subject normaliser --seed 20260924 --executions 10 --output <capture-directory>",
+  "case_id": "N05",
+  "disposition": "candidate_mutation",
+  "eligibility": "eligible",
+  "evidence_ids": {
+    "observed": {
+      "bundle_sha256": "618a5353a64c825bd130d2838b54665438ef671fde9cf415b266c7060e80a60b",
+      "inspection": "artifacts/inspection/cmd-7wyy1m664rdts27y5wnsv1c5xj.ptcins",
+      "inspection_sha256": "03bafd5a95046017144ecedca07989a6b49c0facff3c12732a6cd5f6d1f5a6a1",
+      "result_sha256": "sha256:e4323ee8c4b808e21acc45ca70ab533c99dd2860a3018b1353e8b86b8954e0c3",
+      "run_input_sequence": 1,
+      "run_ref": "cmd-7wyy1m664rdts27y5wnsv1c5xj",
+      "run_result_sequence": 3,
+      "source_sha256": "0596f04d1e1695e79134385e78f1086222c11df9f90b72e67bfcf33fc9511b0a",
+      "trace": "artifacts/traces/cmd-7wyy1m664rdts27y5wnsv1c5xj.jsonl",
+      "trace_sha256": "6af30f91279f20a9c7c114b82c809caf2766ddf1abf20e285d7f0f7ef792b2d7"
+    },
+    "oracle": {
+      "bundle_sha256": "24b1122b32abcccd65363bf5a2016f6243722ecabc506eaee1c0ec91d8ba6864",
+      "inspection": "artifacts/inspection/cmd-6g5d616thv4vmardsp5e8wezrs.ptcins",
+      "inspection_sha256": "1fb3a69f0111b8112053bb91a0098544408b51fd48da60ea9139c92f99ce8bc0",
+      "result_sha256": "sha256:f7fb7395be6e5b76038377065f2fd7c1bbdbd0a284510c798c7ecd3661286cdb",
+      "run_input_sequence": 1,
+      "run_ref": "cmd-6g5d616thv4vmardsp5e8wezrs",
+      "run_result_sequence": 3,
+      "source_sha256": "7cf8b086e94fc80ecb9f30ff8f5898bd22a24bf209453c9310975b93f92f7103",
+      "trace": "artifacts/traces/cmd-6g5d616thv4vmardsp5e8wezrs.jsonl",
+      "trace_sha256": "d184b91629658ddde4043cccd05604d8ba7fe8d70d32d74d883f8cdc16383b31"
+    }
+  },
+  "expected_supporting_evidence_ids": [
+    "oracle:trace:cmd-6g5d616thv4vmardsp5e8wezrs",
+    "oracle:inspection:cmd-6g5d616thv4vmardsp5e8wezrs",
+    "oracle:run-input:cmd-6g5d616thv4vmardsp5e8wezrs",
+    "oracle:run-result:cmd-6g5d616thv4vmardsp5e8wezrs",
+    "observed:trace:cmd-7wyy1m664rdts27y5wnsv1c5xj",
+    "observed:inspection:cmd-7wyy1m664rdts27y5wnsv1c5xj",
+    "observed:run-input:cmd-7wyy1m664rdts27y5wnsv1c5xj",
+    "observed:run-result:cmd-7wyy1m664rdts27y5wnsv1c5xj",
+    "ground-truth.json"
+  ],
+  "incident_input": {
+    "text": "!Alpha!A!BETA!tail20260924-0!"
+  },
+  "independent_oracle_result_sha256": "sha256:f7fb7395be6e5b76038377065f2fd7c1bbdbd0a284510c798c7ecd3661286cdb",
+  "input_index": 0,
+  "seed": 20260924,
+  "source_revision": "4e03b2061e6f70750fee78593e568c70ab75d7c7",
+  "subject": "normaliser"
+}

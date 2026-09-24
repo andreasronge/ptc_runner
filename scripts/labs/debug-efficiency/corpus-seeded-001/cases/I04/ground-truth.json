@@ -1,0 +1,6 @@
+{
+  "form": "{\"end\" (get current \"start\")\n   \"start\"",
+  "function": "extend",
+  "operator": "swapped_map_key",
+  "subject": "intervals"
+}

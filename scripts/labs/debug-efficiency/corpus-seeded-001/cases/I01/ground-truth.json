@@ -1,0 +1,6 @@
+{
+  "form": "(< (get next \"start\")",
+  "function": "touches?",
+  "operator": "comparator_flip",
+  "subject": "intervals"
+}

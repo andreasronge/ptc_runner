@@ -1,0 +1,6 @@
+{
+  "form": "(<= (count normal) minimum)",
+  "function": "canonical-token",
+  "operator": "comparator_flip",
+  "subject": "normaliser"
+}

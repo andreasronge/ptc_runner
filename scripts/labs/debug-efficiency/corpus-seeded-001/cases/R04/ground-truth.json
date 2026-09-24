@@ -1,0 +1,6 @@
+{
+  "form": "\"right_amount\" left-amount \"left_amount\" right-amount",
+  "function": "classify",
+  "operator": "swapped_map_key",
+  "subject": "reconciliation"
+}

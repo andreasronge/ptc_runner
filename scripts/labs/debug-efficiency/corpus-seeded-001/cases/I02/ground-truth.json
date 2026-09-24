@@ -1,0 +1,6 @@
+{
+  "form": "(+ (get current \"end\") (- tolerance 1))",
+  "function": "touches?",
+  "operator": "boundary_off_by_one",
+  "subject": "intervals"
+}
