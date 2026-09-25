@@ -443,24 +443,12 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     end)
 
     assert_receive {^port, {:data, {:eol, "APPEND_READY"}}}, 10_000
-    parent = self()
-
-    second_append =
-      Task.async(fn ->
-        TraceLog.append_jsonl(second_path, [second],
-          append_hook: fn :after_file_ready ->
-            send(parent, :second_collision_ready)
-            :ok
-          end
-        )
-      end)
-
-    refute_receive :second_collision_ready, 250
+    second_append = Task.async(fn -> TraceLog.append_jsonl(second_path, [second]) end)
+    assert Task.yield(second_append, 250) == nil
     assert true = Port.command(port, "X\n")
     assert_receive {^port, {:data, {:eol, "APPEND_RESULT=:ok"}}}, 10_000
     assert_receive {^port, {:exit_status, 0}}, 10_000
     assert Task.await(second_append, 10_000) == :ok
-    assert_receive :second_collision_ready
     assert {:ok, first_log} = TraceLog.new(source: {:file, first_path})
     assert {:ok, second_log} = TraceLog.new(source: {:file, second_path})
 
@@ -469,6 +457,38 @@ defmodule PtcRunner.Kernel.TraceLogTest do
 
     assert {:ok, %{"items" => [%{"run_id" => "second-collision"}]}} =
              TraceLog.query(second_log, :list_runs, %{})
+  end
+
+  @tag :tmp_dir
+  @tag :slow
+  test "an unrelated authority lock proceeds while an append hook is paused", %{
+    tmp_dir: directory
+  } do
+    first_path = Path.join(directory, "paused.jsonl")
+    second_path = different_bucket_path(first_path, directory)
+    event = decoded_event("paused", 1, "run-started")
+    port = start_paused_append_runtime(first_path, event)
+
+    on_exit(fn ->
+      if Port.info(port), do: Port.close(port)
+    end)
+
+    assert_receive {^port, {:data, {:eol, "APPEND_READY"}}}, 10_000
+    second = Task.async(fn -> TraceLog.with_append_authority_lock(second_path, fn -> :ok end) end)
+    assert Task.yield(second, 2_000) == {:ok, :ok}
+    assert true = Port.command(port, "X\n")
+    assert_receive {^port, {:exit_status, 0}}, 10_000
+  end
+
+  defp different_bucket_path(first_path, directory) do
+    {:ok, first_scope} = TraceLog.append_lock_identity(first_path)
+    first_bucket = path_bucket(first_scope)
+
+    Enum.find_value(1..100, fn index ->
+      path = Path.join(directory, "unrelated-#{index}.jsonl")
+      {:ok, scope} = TraceLog.append_lock_identity(path)
+      if path_bucket(scope) != first_bucket, do: path
+    end)
   end
 
   @tag :tmp_dir
@@ -496,14 +516,18 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     Enum.reduce_while(1..10_000, %{}, fn index, seen ->
       path = Path.join(directory, "collision-#{index}.jsonl")
       {:ok, scope} = TraceLog.append_lock_identity(path)
-      <<prefix::16, _rest::binary>> = :crypto.hash(:sha256, :erlang.term_to_binary(scope))
-      bucket = 1 + rem(prefix, 2_047)
+      bucket = path_bucket(scope)
 
       case Map.fetch(seen, bucket) do
         {:ok, first_path} -> {:halt, {first_path, path}}
         :error -> {:cont, Map.put(seen, bucket, path)}
       end
     end)
+  end
+
+  defp path_bucket(scope) do
+    <<prefix::16, _rest::binary>> = :crypto.hash(:sha256, :erlang.term_to_binary(scope))
+    1 + rem(prefix, 2_047)
   end
 
   @tag :tmp_dir

@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   @type kind :: :trace | :inspection | :result | :recovery
   @filesystem_destination_failures [:eacces, :edquot, :enospc, :erofs]
   @append_reservation_name ~r/\Areservation-[0-9a-f]{64}\.lock\z/
+  @append_reservation_sweep_interval_ms 60_000
 
   @enforce_keys [
     :kind,
@@ -1189,11 +1190,26 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   defp with_append_reservation(path, fun) do
     case TraceLog.append_reservation_path(path) do
       {:ok, reservation_path} ->
-        sweep_abandoned_append_reservations(Path.dirname(reservation_path))
+        _ = maybe_reclaim_abandoned_reservation(reservation_path)
+        maybe_sweep_abandoned_append_reservations(Path.dirname(reservation_path))
         with_reservation_path(reservation_path, path, Path.dirname(reservation_path), fun, nil)
 
       {:error, _reason} = error ->
         error
+    end
+  end
+
+  defp maybe_sweep_abandoned_append_reservations(root) do
+    key = {__MODULE__, :last_append_reservation_sweep}
+    now = System.monotonic_time(:millisecond)
+
+    case :persistent_term.get(key, nil) do
+      {^root, last} when now - last < @append_reservation_sweep_interval_ms ->
+        :ok
+
+      _previous ->
+        :persistent_term.put(key, {root, now})
+        sweep_abandoned_append_reservations(root)
     end
   end
 

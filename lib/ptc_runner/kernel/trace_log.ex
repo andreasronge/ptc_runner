@@ -758,10 +758,8 @@ defmodule PtcRunner.Kernel.TraceLog do
       when is_binary(path) and is_function(callback, 0) do
     case PrivateDirectory.anchor(path) do
       {:ok, path} ->
-        with_bucket_lock(:callback, fn ->
-          :global.trans({{__MODULE__, {:append, path}}, self()}, fn ->
-            with_append_authority_lock_at(path, callback)
-          end)
+        :global.trans({{__MODULE__, {:append, path}}, self()}, fn ->
+          with_append_authority_lock_at(path, callback)
         end)
 
       _other ->
@@ -1003,8 +1001,8 @@ defmodule PtcRunner.Kernel.TraceLog do
   defp append_lock_name(:callback), do: "bucket-000.lock"
 
   defp append_lock_name(scope) do
-    # Bucket zero guards callback-enabled operations before they take a path
-    # lease. Path leases then precede inode leases in disjoint ranges.
+    # Bucket zero guards append hooks before they take a path lease. Path
+    # leases then precede inode leases in disjoint ranges.
     <<prefix::16, _rest::binary>> = :crypto.hash(:sha256, :erlang.term_to_binary(scope))
 
     bucket =
@@ -1020,9 +1018,9 @@ defmodule PtcRunner.Kernel.TraceLog do
   defp with_callback_lock(_hook, callback), do: with_bucket_lock(:callback, callback)
 
   defp with_bucket_lock(scope, callback) do
-    # A callback may append again in this BEAM process. The outer callback
-    # bucket prevents another callback holder from taking the nested bucket
-    # in reverse order; reentrant use of the same bucket needs no second port.
+    # An append hook may append again in this BEAM process. Its outer guard
+    # prevents another hook holder from taking nested buckets in reverse order;
+    # reentrant use of the same bucket needs no second port.
     name = append_lock_name(scope)
     key = {__MODULE__, :held_append_buckets}
     held = Process.get(key, [])

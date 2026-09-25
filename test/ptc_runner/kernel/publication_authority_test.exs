@@ -412,9 +412,15 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
     assert {_output, 0} = System.cmd(executable, code_paths ++ ["-e", code])
     assert File.dir?(reservation_path)
 
-    assert {:ok, next_handle} = PublicationHandle.reserve_append_for(next_path, :trace, 0, self())
+    sweep_code = """
+    {:ok, handle} = PtcRunner.Kernel.PublicationHandle.reserve_append_for(
+      #{inspect(next_path)}, :trace, 0, self()
+    )
+    :ok = PtcRunner.Kernel.PublicationHandle.close(handle)
+    """
+
+    assert {_output, 0} = System.cmd(executable, code_paths ++ ["-e", sweep_code])
     refute File.exists?(reservation_path)
-    assert :ok = PublicationHandle.close(next_handle)
 
     assert {:ok, recovered_handle} =
              PublicationHandle.reserve_append_for(abandoned_path, :trace, 0, self())

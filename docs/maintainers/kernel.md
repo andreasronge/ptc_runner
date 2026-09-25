@@ -487,17 +487,19 @@ device and inode, so hard-link aliases share the lease across BEAM processes and
 separate local runtimes. The cross-process leases hash into 4,096 persistent
 `bucket-<three hex digits>.lock` files under
 `$TMPDIR/ptc-runner-trace-append-locks-<uid>`; unrelated destinations in one
-bucket serialize. Bucket zero guards callback-enabled operations before they
-take any append lock, so nested callbacks cannot deadlock against each other.
+bucket serialize. Bucket zero guards appends with an `append_hook` before they
+take any append lock, so nested hook appends cannot deadlock against each other.
 Path scopes use buckets 1–2,047 and inode scopes use 2,048–4,095, preserving
 the path-then-inode acquisition order without a self-lock. Reentrant callbacks
-reuse any bucket already held by their process. Same-VM append serialization
+reuse any bucket already held by their process. Authority-lock production
+callbacks do not acquire a second path lock. Same-VM append serialization
 remains per path. Bucket files are
 never unlinked while in use. Previous per-scope `.lock` files in this root are
 no longer opened and may be deleted while no `ptc` or `mix test` process is
 running. Append reservation directories are removed on handle close or removal;
-each new append reservation also sweeps abandoned directories after checking
-their owner and identity, including reservations for existing traces. An unlocked
+an admission checks its own stale reservation immediately and a throttled sweep
+reclaims abandoned reservations for other paths after checking their owner and
+identity, including reservations for existing traces. An unlocked
 lease file may remain after exit but cannot wedge later appenders. Two
 appenders therefore cannot both approve the same prefix and then race the byte
 or sequence checks.
