@@ -17,6 +17,7 @@ grammar for each frontend.
 | `ptc help [COMMAND]` | Print the root command list, or the exact switches one command accepts |
 | `ptc validate MANIFEST or PROJECT` | Load and compile without executing the workflow, and read the input files the declarations name |
 | `ptc run MANIFEST or PROJECT` | Execute the application entry |
+| `ptc prune PROJECT.json` | Remove old project run artifacts by age and size |
 | `ptc run MANIFEST --env-file FILE` | Load environment-backed credentials from this exact file |
 | `ptc doctor [MANIFEST or PROJECT]` | Report application and provider readiness |
 | `ptc models PROJECT.json` or `--host-config HOST.json` | List public installed model-alias declarations, each with the safe selector it configured |
@@ -30,6 +31,37 @@ grammar for each frontend.
 Help is generated from the same declarations as the strict parser, so use the
 help command for the frontend you invoke as its canonical command and option
 reference.
+
+## Prune project artifacts
+
+`ptc prune PROJECT.json` scans the project's artifact root. Supply
+`--max-age-days N`, `--max-bytes N`, or both; neither has a default. Age
+removes runs whose newest artifact is older than N days. Size then removes the
+oldest remaining runs until the artifact total is at most N bytes. Each removal
+includes that run's trace, private trace, inspection, result, and envelope
+files. Files with unknown names are ignored.
+
+Create `<artifact-root>/keep/` with mode `0700` if it does not exist, then
+create an empty `<artifact-root>/keep/<run_ref>` file to retain a run past both
+limits. The `keep/` directory must be owned by the current user and have mode
+`0700`, like the other artifact directories. A kept run still counts toward
+the byte total. The output's `kept_exceeds_max_bytes` flag reports when kept
+runs alone exceed the size limit. `dangling_keep_markers` lists markers without
+a matching run; pruning leaves them in place.
+
+Use `--dry-run` to preview the same selection without deleting files. The
+command writes one JSON object containing `deleted`, `bytes_freed`, `kept`,
+`skipped` (each with a `run_ref` and `reason`), `remaining_bytes`,
+`dangling_keep_markers`, and `kept_exceeds_max_bytes`. Runs with temporary
+publication siblings or files modified in the last ten minutes are skipped
+with reason `in_progress`. `bytes_freed` and `remaining_bytes` in a dry run
+describe the projected result. A Viewer or REPL session already open may hold
+a snapshot of a pruned run; reading it then can fail as `unstable` or
+`unreadable`. An interrupted deletion is recovered by the next real prune;
+`--dry-run` returns an error while recovery is pending so it changes no files.
+
+Pruning does not remove append-lock files. The separate lock-root retention
+work is tracked in [issue #2076](https://github.com/andreasronge/ptc_runner/issues/2076).
 
 A provider-bearing manifest needs a host configuration. A project document can
 remember that path and its environment file. Before running it, active provider
@@ -680,6 +712,9 @@ Embedding runtimes can supply authorization targets directly.
 | 7 | `destination` | `invalid_result_destination` | no | the result destination is invalid |
 | 7 | `destination` | `invalid_trace_destination` | no | the trace destination is invalid |
 | 7 | `destination` | `private_destination_required` | no | the run requires an authorized private destination |
+| 7 | `destination` | `prune_delete_failed` | no | a run artifact could not be deleted safely |
+| 7 | `destination` | `prune_unavailable` | no | the project artifact directory is unavailable |
+| 7 | `destination` | `prune_unsafe_directory` | no | the project artifact directory is unsafe |
 | 7 | `destination` | `recovery_reservation_failed` | no | the private result recovery reservation failed |
 | 7 | `destination` | `result_destination_unavailable` | no | the result destination is unavailable |
 | 7 | `destination` | `result_destination_unsafe` | no | the result destination is unsafe |

@@ -190,10 +190,13 @@ defmodule PtcRunner.LiveStatusTest do
     assert Process.alive?(reporter)
 
     reporter_ref = Process.monitor(reporter)
+    run_state_pid = run_state.pid
+    run_state_ref = Process.monitor(run_state_pid)
     send(terminal_delivery, :release_terminal)
     assert_receive {:terminal_delivered, "ok"}
     assert_receive {:DOWN, ^reporter_ref, :process, ^reporter, :normal}
-    refute Process.alive?(run_state.pid)
+    assert_receive {:DOWN, ^run_state_ref, :process, ^run_state_pid, reason}
+    assert reason in [:normal, :noproc]
   end
 
   test "the HTTP reporter percent-encodes the complete run id as one path segment" do

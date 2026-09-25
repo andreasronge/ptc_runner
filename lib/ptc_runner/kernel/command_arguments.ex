@@ -28,6 +28,7 @@ defmodule PtcRunner.Kernel.CommandArguments do
           | :docs
           | :validate
           | :run
+          | :prune
           | :doctor
           | :models
           | :catalog

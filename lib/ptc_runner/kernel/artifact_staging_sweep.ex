@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.ArtifactStagingSweep do
   @moduledoc false
 
+  alias PtcRunner.Kernel.ArtifactIdentity
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.TraceLog
 
@@ -101,8 +102,10 @@ defmodule PtcRunner.Kernel.ArtifactStagingSweep do
     with {:ok, stat} <- directory(path, uid),
          marker = PrivateDirectory.owner_marker(path),
          true <- PrivateDirectory.stale_marker?(marker, stat),
-         true <- unchanged?(root, root_stat) and unchanged?(parent, parent_stat),
-         true <- unchanged?(path, stat) do
+         true <-
+           ArtifactIdentity.unchanged?(root, root_stat) and
+             ArtifactIdentity.unchanged?(parent, parent_stat),
+         true <- ArtifactIdentity.unchanged?(path, stat) do
       owner =
         case marker do
           {:ok, pid} -> pid
@@ -124,19 +127,6 @@ defmodule PtcRunner.Kernel.ArtifactStagingSweep do
 
       _unsafe ->
         {:error, :unsafe_directory}
-    end
-  end
-
-  defp unchanged?(path, expected) do
-    case File.lstat(path) do
-      {:ok, current} ->
-        {current.type, current.uid, Bitwise.band(current.mode, 0o777), current.major_device,
-         current.minor_device, current.inode} ==
-          {expected.type, expected.uid, Bitwise.band(expected.mode, 0o777), expected.major_device,
-           expected.minor_device, expected.inode}
-
-      _changed ->
-        false
     end
   end
 
