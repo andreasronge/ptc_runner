@@ -8,6 +8,8 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   @type identity :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
   @type kind :: :trace | :inspection | :result | :recovery
   @filesystem_destination_failures [:eacces, :edquot, :enospc, :erofs]
+  @append_reservation_name ~r/\Areservation-[0-9a-f]{64}\.lock\z/
+  @append_reservation_sweep_interval_ms 60_000
 
   @enforce_keys [
     :kind,
@@ -1188,11 +1190,61 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   defp with_append_reservation(path, fun) do
     case TraceLog.append_reservation_path(path) do
       {:ok, reservation_path} ->
+        _ = maybe_reclaim_abandoned_reservation(reservation_path)
+        maybe_sweep_abandoned_append_reservations(Path.dirname(reservation_path))
         with_reservation_path(reservation_path, path, Path.dirname(reservation_path), fun, nil)
 
       {:error, _reason} = error ->
         error
     end
+  end
+
+  defp maybe_sweep_abandoned_append_reservations(root) do
+    key = {__MODULE__, :last_append_reservation_sweep}
+    now = System.monotonic_time(:millisecond)
+
+    case :persistent_term.get(key, nil) do
+      {^root, last} when now - last < @append_reservation_sweep_interval_ms ->
+        :ok
+
+      _previous ->
+        :persistent_term.put(key, {root, now})
+        sweep_abandoned_append_reservations(root)
+    end
+  end
+
+  defp sweep_abandoned_append_reservations(root) do
+    case File.ls(root) do
+      {:ok, names} ->
+        Enum.each(names, &sweep_append_reservation(root, &1))
+
+      _unavailable ->
+        :ok
+    end
+  end
+
+  defp sweep_append_reservation(root, name) do
+    if Regex.match?(@append_reservation_name, name) do
+      maybe_reclaim_abandoned_reservation(Path.join(root, name))
+    end
+  end
+
+  defp maybe_reclaim_abandoned_reservation(path) do
+    case File.lstat(path, time: :posix) do
+      {:ok, %{type: :directory} = stat} ->
+        if stale_reservation?(path, stat) do
+          _ = reclaim_abandoned_reservation(path)
+        end
+
+      _other ->
+        :ok
+    end
+  end
+
+  defp reclaim_abandoned_reservation(path) do
+    TraceLog.with_append_authority_lock(path <> ".reclaim", fn ->
+      reclaim_stale_reservation(path, fn -> true end)
+    end)
   end
 
   defp with_reservation_path(reservation_path, destination, sync_parent, fun, fault_hook) do
@@ -1307,7 +1359,11 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   end
 
   defp reclaim_reservation(path, destination) do
-    with {:error, :enoent} <- File.lstat(destination),
+    reclaim_stale_reservation(path, fn -> match?({:error, :enoent}, File.lstat(destination)) end)
+  end
+
+  defp reclaim_stale_reservation(path, destination_available?) do
+    with true <- destination_available?.(),
          {:ok, %{type: :directory} = stat} <- File.lstat(path, time: :posix),
          {:ok, uid} <- PrivateDirectory.preflight_owner(path),
          true <- stat.uid == uid and Bitwise.band(stat.mode, 0o777) == 0o700,
@@ -1315,7 +1371,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
          true <- stale_reservation?(path, stat),
          {:ok, current} <- File.lstat(path, time: :posix),
          :ok <- same_identity(current, identity),
-         {:error, :enoent} <- File.lstat(destination) do
+         true <- destination_available?.() do
       remove_reservation_directory(path)
     else
       _live_or_changed -> {:error, :destination_exists}

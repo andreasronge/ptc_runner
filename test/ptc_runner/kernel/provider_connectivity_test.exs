@@ -1055,7 +1055,11 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
   end
 
   test "caller death leaves no owner, worker, or activity process" do
-    %{prepared: prepared, execution: execution} = fixture(%{"inert" => [destination: :workflow]})
+    %{prepared: prepared, execution: execution} =
+      fixture(%{
+        "inert" => [destination: :workflow, connectivity_mode: :probe, probe: :block]
+      })
+
     parent = self()
 
     caller =
@@ -1075,13 +1079,17 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
       end)
 
     caller_ref = Process.monitor(caller)
+    on_exit(fn -> Process.exit(caller, :kill) end)
     assert_receive {:owner, owner}, 5_000
     owner_ref = Process.monitor(ExecutionSessionOwner.pid(owner))
     activity_ref = Process.monitor(prepared.provider_activity.owner)
+    assert_receive {:probe_blocked, worker}, 5_000
+    worker_ref = Process.monitor(worker)
 
     Process.exit(caller, :kill)
     assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}, 5_000
     assert_receive {:DOWN, ^owner_ref, :process, _owner_pid, _owner_reason}, 5_000
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker, _worker_reason}, 5_000
     assert_receive {:DOWN, ^activity_ref, :process, _activity_pid, _activity_reason}, 5_000
 
     # The result belonged to the caller that died, so nothing may deliver it here.
@@ -1321,12 +1329,30 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
       send(parent, {:probe_credentials, Map.get(context, :credentials)})
 
       case behaviour do
-        :ok -> :ok
-        :metered -> {:ok, %{input: 8, output: 1, total_cost: 3.0e-6}}
-        :unmeasurable -> {:ok, %{invented: 1}}
-        :unavailable -> {:error, :llm_connectivity_unavailable}
-        :slow -> burn_until(System.monotonic_time(:millisecond) + 250)
-        result -> result
+        :ok ->
+          :ok
+
+        :metered ->
+          {:ok, %{input: 8, output: 1, total_cost: 3.0e-6}}
+
+        :unmeasurable ->
+          {:ok, %{invented: 1}}
+
+        :unavailable ->
+          {:error, :llm_connectivity_unavailable}
+
+        :slow ->
+          burn_until(System.monotonic_time(:millisecond) + 250)
+
+        :block ->
+          send(parent, {:probe_blocked, self()})
+
+          receive do
+            :release_probe -> :ok
+          end
+
+        result ->
+          result
       end
     end
   end
