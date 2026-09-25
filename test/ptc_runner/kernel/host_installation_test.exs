@@ -297,33 +297,37 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
     authority_owner = registry.authority_owner.pid
 
-    :sys.replace_state(authority_owner, fn state ->
-      Process.flag(:priority, :low)
-      state
-    end)
-
     assert {:ok, credentials} = ProviderRegistry.resolve_credentials(registry, ["token"])
 
+    assert {:ok, prepared} =
+             ProviderRegistry.prepare(registry, "remote", %{}, context(dir, :mission))
+
+    assert {:ok, preflighted} = ProviderRegistry.preflight(prepared)
+    assert prepared.credential_names == ["token"]
+
+    parent = self()
     limits = %{Limits.installed_defaults() | run_duration_ms: 1_500}
     assert {:ok, session} = ProviderSession.start_active(limits, "installed-deadline-boundary")
     assert {:ok, session} = ProviderSession.begin_operation(session, :run)
     deadline = ProviderSession.run_deadline(session)
 
-    active_context =
-      context(dir, :mission)
-      |> Map.merge(%{
-        deadline: deadline,
-        deadline_ms: Deadline.expires_at(deadline),
-        limits: limits,
-        installed_limits: limits
-      })
+    # Keep the installed ticket and its owner path, but block its acquire
+    # callback so the shared deadline has a worker to terminate.
+    :sys.replace_state(authority_owner, fn state ->
+      preflights =
+        Map.new(state.preflights, fn {ticket, preflight} ->
+          acquire = fn _credentials, _services ->
+            send(parent, {:installed_acquire_started, self()})
+            receive do: (:release -> :ok)
+          end
 
-    assert {:ok, prepared} = ProviderRegistry.prepare(registry, "remote", %{}, active_context)
-    assert {:ok, preflighted} = ProviderRegistry.preflight(prepared)
-    assert prepared.credential_names == ["token"]
+          bounds = %{deadline: deadline, max_heap_words: limits.provider_heap_words}
+          {ticket, %{preflight | acquire: acquire, bounds: bounds}}
+        end)
 
-    assert 1 = :erlang.trace(authority_owner, true, [:procs, :set_on_spawn, {:tracer, self()}])
-    parent = self()
+      %{state | preflights: preflights}
+    end)
+
     occurrence = %{provider: "remote", destination: :mission, index: 0}
 
     caller =
@@ -342,23 +346,19 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     caller_ref = Process.monitor(caller)
 
     try do
-      assert_receive {:trace, ^authority_owner, :spawn, _callback_guard, _spawned}
-      assert_receive {:trace, ^authority_owner, :spawn, callback_worker, _spawned}
-      callback_ref = Process.monitor(callback_worker)
-      assert true = :erlang.suspend_process(callback_worker)
-
-      assert_receive {:DOWN, ^callback_ref, :process, ^callback_worker, :killed}, 5_000
+      assert_receive {:installed_acquire_started, callback_worker}, 5_000
 
       assert_receive {:installed_callback_result,
                       {:error,
                        %CommandDiagnostic{
                          phase: :provider_acquisition,
                          code: :provider_unavailable
-                       }}}
+                       }}},
+                     5_000
 
+      refute Process.alive?(callback_worker)
       assert_receive {:DOWN, ^caller_ref, :process, ^caller, :normal}
     after
-      :erlang.trace(authority_owner, false, [:all])
       if Process.alive?(caller), do: Process.exit(caller, :kill)
       ProviderSession.close(session)
       ProviderRegistry.close(registry)

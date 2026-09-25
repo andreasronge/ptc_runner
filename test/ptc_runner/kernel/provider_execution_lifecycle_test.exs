@@ -4,8 +4,8 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
   import PtcRunner.TestSupport.ProviderExecutionFixture
 
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
-  import PtcRunner.TestSupport.TestHelpers, only: [long_running_body: 0]
 
+  alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.OwnerFailure
@@ -53,16 +53,18 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
 
     fixture =
       provider_fixture(
-        body: long_running_body(),
+        body: "(return (tool/fixture {}))",
         acquire: fn _context ->
           send(parent, {:acquired, self()})
-          fixture_capability()
+          {:ok, capability} = blocked_fixture_capability(parent)
+          {:ok, %{capabilities: [capability]}}
         end
       )
 
     started = start_owned_execution(fixture)
     assert_receive {:acquired, _acquirer}, 5_000
-    state = await_state(started.owner_pid, & &1.registry)
+    assert_receive {:fixture_running, _callback}, 5_000
+    state = :sys.get_state(started.owner_pid)
     assert ProviderSession.valid?(state.provider_session)
 
     watched =
@@ -120,17 +122,20 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     # Acquisition commits a closer that refuses and the Kernel run then blocks,
     # so the session is committed, bound, and still owner-held when the worker
     # dies before it can reach normal Runner teardown.
+    parent = self()
+
     fixture =
       provider_fixture(
-        body: long_running_body(),
+        body: "(return (tool/fixture {}))",
         acquire: fn _context ->
-          {:ok, capability} = fixture_capability()
+          {:ok, capability} = blocked_fixture_capability(parent)
           {:ok, %{capabilities: [capability], close: fn -> :failed end}}
         end
       )
 
     started = start_owned_execution(fixture)
-    state = await_state(started.owner_pid, & &1.registry)
+    assert_receive {:fixture_running, _callback}, 5_000
+    state = :sys.get_state(started.owner_pid)
 
     # Killing on the acquire callback would race `ResourceRegistrar.commit/2`,
     # so wait until the session actually holds the committed closer.
@@ -144,6 +149,20 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     assert diagnostic.phase == :result_cleanup
     assert diagnostic.code == :provider_cleanup_failed
     assert diagnostic.provider_activity
+  end
+
+  defp blocked_fixture_capability(parent) do
+    Capability.new(
+      name: "fixture",
+      input_schema: %{"type" => "object", "additionalProperties" => false},
+      callback: fn _arguments ->
+        send(parent, {:fixture_running, self()})
+
+        receive do
+          :release -> {:ok, %{}}
+        end
+      end
+    )
   end
 
   test "a refusing closer outranks a post-acquisition build failure in the worker" do

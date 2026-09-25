@@ -11,15 +11,193 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
 
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Attestation
+  alias PtcRunner.Kernel.CommandContract
+  alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandEntry
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandPreparation
   alias PtcRunner.Kernel.CommandRenderer
+  alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.CommandWarning
+  alias PtcRunner.Kernel.ModelContractDiagnostic
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.StandaloneCLI
   alias PtcRunner.TestSupport.HTTPRequest
   alias PtcRunner.TestSupport.LLMSupport
+
+  @tag :tmp_dir
+  test "plain doctor locally refuses uncataloged cost reservation pricing", %{
+    tmp_dir: directory
+  } do
+    provider_applications = LLMSupport.snapshot_provider_applications()
+    on_exit(fn -> LLMSupport.restore_provider_applications(provider_applications) end)
+    :ok = LLMSupport.stop_provider_applications()
+
+    application =
+      doctor_application(directory, "uncataloged-pricing", workflow: ["model"], mission: [])
+
+    installation = %{
+      "source" => "llm",
+      "structured_output_mode" => "unsupported",
+      "usage_guarantees" => %{"tokens" => true, "cost_currency" => "USD"},
+      "reservation_tariff" => %{"currency" => "USD", "id" => "test-tariff-v1"},
+      "installation_revision" => "model-v1",
+      "model" => "openrouter:future-vendor/future-priced-model-1781",
+      "credential" => "key"
+    }
+
+    host = %{
+      "limits" => %{"llm_cost_microusd" => 100_000},
+      "credentials" => %{"key" => %{"literal" => "unused-test-secret"}},
+      "install" => %{"model" => installation}
+    }
+
+    host_path = write_host_config(directory, "uncataloged-pricing", host)
+    argv = [application, "--host-config", host_path]
+
+    assert {:ok, %CommandOutcome{} = validated} = CommandEngine.dispatch(["validate" | argv])
+    assert validated.exit_status == 0
+
+    assert {:error, %CommandOutcome{} = doctored} = CommandEngine.dispatch(["doctor" | argv])
+    assert doctored.exit_status == 4
+    assert doctored.envelope["error"]["phase"] == "local_preflight"
+    assert doctored.envelope["error"]["code"] == "model_contract_unsupported"
+    assert doctored.envelope["error"]["provider_activity"] == false
+
+    result = doctored.envelope["result"]
+
+    assert %{"status" => "fail", "code" => "model_contract_unsupported"} =
+             Enum.find(result["checks"], &(&1["name"] == "provider/model/local"))
+
+    assert result["provider_activity"] == false
+    assert result["usage"] == %{"llm_usage_state" => "available", "llm_usage" => []}
+    assert [warning] = doctored.envelope["warnings"]
+    assert warning["code"] == "model_uncataloged"
+    assert warning["provider"] == "model"
+    assert warning["model"] == installation["model"]
+    assert_schema_valid(doctored.envelope)
+
+    assert {:stdio, rendered_result, rendered_warnings} = CommandRenderer.render(doctored)
+    assert Jason.decode!(rendered_result) == result
+    assert rendered_warnings =~ "warning: model_uncataloged:"
+    assert rendered_warnings =~ installation["model"]
+
+    refute CommandContract.valid_envelope?(
+             put_in(doctored.envelope, ["warnings", Access.at(0), "provider"], "other")
+           )
+
+    {:ok, primary_subject} =
+      CommandSubject.provider("model", :local, %{destination: :workflow, index: 0})
+
+    {:ok, primary_warning} = CommandWarning.model_uncataloged("model", installation["model"])
+
+    primary =
+      CommandDiagnostic.new!(:local_preflight, :model_contract_unsupported,
+        subject: primary_subject,
+        provider_activity: false,
+        message: ModelContractDiagnostic.cost_reservation_pricing_message(installation["model"]),
+        warnings: [primary_warning]
+      )
+
+    {:ok, unrelated_subject} =
+      CommandSubject.provider("other", :local, %{destination: :workflow, index: 0})
+
+    {:ok, unrelated_warning} = CommandWarning.model_uncataloged("other", installation["model"])
+
+    unrelated =
+      CommandDiagnostic.new!(:local_preflight, :model_contract_unsupported,
+        subject: unrelated_subject,
+        provider_activity: false,
+        message: ModelContractDiagnostic.cost_reservation_pricing_message(installation["model"]),
+        warnings: [unrelated_warning]
+      )
+
+    assert_raise ArgumentError, fn ->
+      CommandOutcome.doctor_failure(
+        :doctor,
+        doctored.envelope["run_ref"],
+        result,
+        primary,
+        [],
+        [unrelated]
+      )
+    end
+
+    replay_result = put_in(result, ["model_aliases", Access.at(0), "source"], "llm_replay")
+
+    refute CommandContract.valid_envelope?(%{
+             doctored.envelope
+             | "result" => replay_result
+           })
+
+    assert_raise ArgumentError, fn ->
+      CommandOutcome.doctor_failure(
+        :doctor,
+        doctored.envelope["run_ref"],
+        replay_result,
+        primary,
+        [],
+        [primary]
+      )
+    end
+
+    mixed_result =
+      update_in(result["checks"], fn checks ->
+        Enum.map(checks, fn
+          %{"name" => "provider/model/local"} = check ->
+            %{check | "code" => "adapter_unavailable"}
+
+          check ->
+            check
+        end)
+      end)
+
+    mixed_primary =
+      CommandDiagnostic.new!(:local_preflight, :adapter_unavailable,
+        subject: primary_subject,
+        provider_activity: false
+      )
+
+    mixed =
+      CommandOutcome.doctor_failure(
+        :doctor,
+        doctored.envelope["run_ref"],
+        mixed_result,
+        mixed_primary,
+        [],
+        [primary]
+      )
+
+    assert mixed.envelope["warnings"] == [warning]
+    assert CommandContract.valid_envelope?(mixed.envelope)
+
+    assert {:error, %CommandOutcome{} = run} = CommandEngine.dispatch(["run" | argv])
+    assert run.exit_status == 4
+    assert run.envelope["error"]["phase"] == "local_preflight"
+    assert run.envelope["error"]["code"] == "model_contract_unsupported"
+    assert run.envelope["error"]["message"] == doctored.envelope["error"]["message"]
+
+    control_path =
+      write_host_config(directory, "uncataloged-pricing-control", Map.delete(host, "limits"))
+
+    control_argv = [application, "--host-config", control_path]
+
+    assert {:ok, %CommandOutcome{} = control_doctor} =
+             CommandEngine.dispatch(["doctor" | control_argv])
+
+    assert control_doctor.exit_status == 0
+
+    assert %{"status" => "pass", "code" => "available"} =
+             Enum.find(
+               control_doctor.envelope["result"]["checks"],
+               &(&1["name"] == "provider/model/local")
+             )
+
+    assert {:ok, %CommandOutcome{} = control_run} = CommandEngine.dispatch(["run" | control_argv])
+    assert control_run.exit_status == 0
+    assert_schema_valid(control_run.envelope)
+  end
 
   @tag :tmp_dir
   test "doctor attributes a reached LLM authentication refusal to credentials", %{
