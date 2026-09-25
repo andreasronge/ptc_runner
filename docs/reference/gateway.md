@@ -35,12 +35,13 @@ There is no implicit configuration search or implicit environment-file search.
 | Admission | `max_inflight_requests`, `max_concurrent_runs`, and `max_active_provider_calls` each require 1–65535; `max_waiting_provider_calls` requires 0–65535. Each authenticated request reserves one in-flight slot before body reading and holds it through response completion, so a peer that stops sending its body holds a slot until the two-second body-read budget expires. |
 | Tools | 1–128 entries, unique names matching `[a-zA-Z0-9_.-]{1,128}`, validated in UTF-8 name-byte order. Titles require 1–256 bytes; descriptions 1–4096. Each normalized schema is at most 64 KiB and the encoded static catalog at most 4 MiB. |
 | Application | `application.manifest` names one manifest file, at most 1024 bytes. The serving constructor requires object input/output contracts and a validated read/write effect. |
-| Event policy | `events.policy` must be `normal`, which is what an omitted `events` section or field already means. A `private` policy refuses the constructor ahead of the content-digest and write-permission checks and is reported as `template_invalid`. A served run opens no trace destination and publishes no artifact, so the private destination that policy requires does not exist; neither holding the endpoint nor `allow_write` authorizes one. To serve such an application, set its manifest policy to `normal` and record the new content pin. |
+| Event policy | `events.policy` must be `normal`, which is what an omitted `events` section or field already means. A `private` policy refuses the constructor ahead of the content-digest and write-permission checks and is reported as `template_invalid`. Gateway `artifacts` configuration may authorize normal trace and inspection destinations; holding the endpoint or setting `allow_write` never grants a private-result override. To serve such an application, set its manifest policy to `normal` and record the new content pin. |
+| Artifacts | Optional `artifacts` has `root` and optional `trace` and `inspection` booleans (both default false). The root resolves from the gateway document directory and must pass the project artifact root's private-directory checks at startup. Enabled traces go to `traces/<run_ref>.jsonl` and inspection records to `inspection/<run_ref>.ptcins` under that root. Reservation failure refuses the call before execution. Omit the section to record no artifacts. Point a `ptc-project.json` `artifacts.root` at the same directory to browse served runs with `ptc viewer` or `ptc repl`. |
 | Write permission | `allow_write` defaults to false. A compiled write effect requires true; permission never changes the compiled effect. |
 | Content pin | Required `expected_application_content_digest`, exactly `sha256:` plus 64 lowercase hex characters; effective application identity is not interchangeable. |
 | Installation pins | Required exact map `installation_config_pins`, keyed by installation name. Missing, extra, stale or mismatched values refuse startup. |
 | Snapshot pins | Required exact map `provider_snapshot_pins`, keyed `workflow/name` or `mission/name`. Values pin acquisition identity, never volatile content. Tools without providers require both maps to be empty. |
-| Paths | Host, application manifests and audit directory resolve from the gateway document directory. Nested host-owned paths retain host-document-relative semantics. |
+| Paths | Host, application manifests, audit directory and artifact root resolve from the gateway document directory. Nested host-owned paths retain host-document-relative semantics. |
 | Environment file | Anchored once from the invocation directory. Warm startup captures the bearer and selected provider credentials in one scope, restoring environment and lock before listener binding, including on failure. |
 | Private audit | Required iff any tool sets `allow_write: true`; forbidden otherwise. Required fields: `directory`, `max_file_bytes` (1024–67108864), `max_retained_files` (2–128). |
 
@@ -208,7 +209,7 @@ response sizes.
 
 Only the first error is returned. Precedence is document read/JSON, structural
 schema and byte bounds, origins, duplicate tool names, audit presence, host,
-then each tool's constructor/pin and write permission in name order, audit
+artifact-root validation, then each tool's constructor/pin and write permission in name order, audit
 filesystem probe, run admission, warm credential capture/provider pins, and
 listener binding. A stage must succeed before the next stage runs.
 
@@ -219,7 +220,7 @@ credentials, causes or stack traces belong in startup diagnostics.
 The finite catalog is `config_unavailable`, `duplicate_json_key`,
 `config_invalid`, `origin_invalid`, `tool_name_duplicate`, `audit_invalid`,
 `host_invalid`, `template_invalid`, `catalog_too_large`, `application_content_digest_mismatch`,
-`write_forbidden`, `audit_unavailable`, `run_admission_unavailable`,
+`write_forbidden`, `audit_unavailable`, `artifact_root_unavailable`, `run_admission_unavailable`,
 `credential_unavailable`, `installation_pin_mismatch`, `provider_pin_mismatch`,
 `provider_pin_unavailable`, `provider_admission_unavailable`,
 `provider_runtime_unavailable`, `listener_unavailable`, and `internal_error`.

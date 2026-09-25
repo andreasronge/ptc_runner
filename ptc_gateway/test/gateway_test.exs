@@ -3,7 +3,22 @@ defmodule PtcGatewayTest do
   import PtcGateway.TestSupport.GatewayFixture
 
   alias PtcGateway.TestSupport.GatewayLoad
-  alias PtcRunner.Kernel.{GatewayConfig, Limits, ServingTemplate, WarmProviderRuntime}
+
+  alias PtcRunner.Kernel.{
+    GatewayConfig,
+    HostConfig,
+    HostInstallation,
+    InspectionSnapshot,
+    Limits,
+    ProjectConfig,
+    ProviderRuntime,
+    RunCatalog,
+    RunCatalogProbe,
+    ServingTemplate,
+    TraceSnapshot,
+    WarmProviderApplications,
+    WarmProviderRuntime
+  }
 
   @token PtcGateway.TestSupport.GatewayFixture.token()
   @authority_uid 4_294_967_294
@@ -11,6 +26,300 @@ defmodule PtcGatewayTest do
   setup do
     Process.flag(:trap_exit, true)
     :ok
+  end
+
+  @tag :tmp_dir
+  test "configured artifacts record a served tool call", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    config = Map.put(config, "artifacts", %{"root" => "artifacts", "trace" => true})
+    File.write!(path, Jason.encode!(config))
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+
+    assert mcp(config, "tools/call", 1,
+             params: %{"name" => "a", "arguments" => %{}},
+             headers: [{"mcp-name", "a"}]
+           ).status == 200
+
+    assert [trace] = Path.wildcard(Path.join([dir, "artifacts", "traces", "cmd-*.jsonl"]))
+    assert File.stat!(trace).size > 0
+    root = Path.join(dir, "artifacts")
+    project_path = Path.join(dir, "ptc-project.json")
+
+    File.write!(
+      project_path,
+      Jason.encode!(%{
+        "kind" => "ptc-project",
+        "version" => 1,
+        "application" => %{"path" => "app.json"},
+        "artifacts" => %{"root" => "artifacts", "trace" => true}
+      })
+    )
+
+    assert {:ok, %{artifact_root: ^root}} = ProjectConfig.load(project_path)
+
+    assert {:ok, %{probes: probes, excluded_files: 0}} =
+             RunCatalogProbe.probe_all(Path.join(root, "traces"), Path.join(root, "inspection"))
+
+    assert {:ok, %{rows: [%{"run_id" => run_ref, "complete" => true, "state" => "admissible"}]}} =
+             RunCatalog.generation(probes, 0)
+
+    assert Path.basename(trace) == run_ref <> ".jsonl"
+  end
+
+  @tag :tmp_dir
+  test "inspection and concurrent calls use distinct completed artifacts", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+
+    config =
+      Map.put(config, "artifacts", %{"root" => "artifacts", "trace" => true, "inspection" => true})
+
+    File.write!(path, Jason.encode!(config))
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+
+    results =
+      1..2
+      |> Task.async_stream(fn _id ->
+        raw_mcp_response(config, [{"Mcp-Method", "tools/call"}, {"Mcp-Name", "a"}],
+          body: call_body("a", %{})
+        )
+      end)
+      |> Enum.to_list()
+
+    assert Enum.all?(results, &match?({:ok, body} when is_binary(body), &1)), inspect(results)
+    assert Enum.all?(results, fn {:ok, body} -> body =~ "\"isError\":false" end), inspect(results)
+    assert :ok = await_run_release(:sys.get_state(owner).run_admission, 100)
+    root = Path.join(dir, "artifacts")
+    traces = Path.wildcard(Path.join([root, "traces", "cmd-*.jsonl"]))
+    assert length(traces) == 2, inspect(results)
+    assert [_, _] = inspections = Path.wildcard(Path.join([root, "inspection", "cmd-*.ptcins"]))
+
+    assert Enum.sort(Enum.map(traces, &Path.basename(&1, ".jsonl"))) ==
+             Enum.sort(Enum.map(inspections, &Path.basename(&1, ".ptcins")))
+
+    assert {:ok, %{probes: probes, excluded_files: 0}} =
+             RunCatalogProbe.probe_all(Path.join(root, "traces"), Path.join(root, "inspection"))
+
+    assert {:ok, %{rows: [first, second]}} = RunCatalog.generation(probes, 0)
+    assert Enum.all?([first, second], &(&1["complete"] and &1["state"] == "admissible"))
+  end
+
+  @tag :tmp_dir
+  test "served provider exchange is available through private inspection", %{tmp_dir: dir} do
+    server =
+      PtcRunner.TestSupport.MCPHTTPFixture.start(fn _request ->
+        {:keep_alive, 200, [{"content-type", "application/json"}],
+         Jason.encode!(%{
+           "id" => "served-response",
+           "model" => "google/gemma-2-27b-it",
+           "choices" => [
+             %{
+               "index" => 0,
+               "finish_reason" => "stop",
+               "message" => %{"role" => "assistant", "content" => "ok"}
+             }
+           ],
+           "usage" => %{"prompt_tokens" => 1, "completion_tokens" => 1, "total_tokens" => 2}
+         })}
+      end)
+
+    on_exit(server.close)
+    previous = Application.fetch_env(:req_llm, :openrouter)
+    Application.put_env(:req_llm, :openrouter, base_url: server.endpoint)
+
+    on_exit(fn ->
+      case previous do
+        {:ok, value} -> Application.put_env(:req_llm, :openrouter, value)
+        :error -> Application.delete_env(:req_llm, :openrouter)
+      end
+    end)
+
+    {path, config} = fixture(dir, :write)
+
+    File.write!(
+      Path.join(dir, "workflow.clj"),
+      ~s|(ns app) (defn run {:effect :write :requires ["tool:llm-request"]} [input] (let [_ (tool/llm-request {"messages" [{"role" "user" "content" "hi"}]})] (return input)))|
+    )
+
+    manifest_path = Path.join(dir, "app.json")
+    manifest = manifest_path |> File.read!() |> Jason.decode!()
+
+    File.write!(
+      manifest_path,
+      Jason.encode!(
+        Map.put(manifest, "providers", %{"workflow" => [%{"name" => "selected", "config" => %{}}]})
+      )
+    )
+
+    File.write!(Path.join(dir, "provider.key"), "provider-fixture-key")
+
+    File.write!(
+      Path.join(dir, "host.json"),
+      Jason.encode!(%{
+        "credentials" => %{
+          "gateway" => %{"env" => "GATEWAY_TEST_TOKEN"},
+          "key" => %{"file" => "provider.key"}
+        },
+        "install" => %{
+          "selected" => %{
+            "source" => "llm",
+            "model" => "openrouter:google/gemma-2-27b-it",
+            "credential" => "key",
+            "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
+            "installation_revision" => "served-v1"
+          }
+        }
+      })
+    )
+
+    {:ok, host} = HostConfig.load(Path.join(dir, "host.json"))
+    {:ok, catalog} = HostInstallation.catalog(host)
+    on_exit(fn -> PtcRunner.Kernel.InstallationCatalog.close(catalog) end)
+    {:ok, services} = HostInstallation.runtime_services(host)
+
+    {:ok, template} =
+      ServingTemplate.from_directory(manifest_path, host.limits,
+        providers: catalog,
+        inspection_capture: true
+      )
+
+    {:ok, applications, _} = WarmProviderApplications.start([:req_llm], 1)
+
+    pins_json =
+      ExUnit.CaptureIO.capture_io(fn ->
+        {:ok, discovery} =
+          ProviderRuntime.start_link(template: template, services: services, pins: :discover)
+
+        GenServer.stop(discovery)
+      end)
+
+    Enum.each(Enum.reverse(applications), &Application.stop/1)
+    pins = Jason.decode!(pins_json)
+
+    config =
+      config
+      |> Map.put("artifacts", %{"root" => "artifacts", "trace" => true, "inspection" => true})
+      |> Map.put("private_audit", %{
+        "directory" => "audit",
+        "max_file_bytes" => 4096,
+        "max_retained_files" => 2
+      })
+      |> update_in(["tools"], fn tools ->
+        Enum.map(tools, fn tool ->
+          tool
+          |> Map.put("allow_write", true)
+          |> Map.put(
+            "expected_application_content_digest",
+            ServingTemplate.application_content_digest(template)
+          )
+          |> Map.put("installation_config_pins", pins["installation_config_pins"])
+          |> Map.put("provider_snapshot_pins", pins["provider_snapshot_pins"])
+        end)
+      end)
+
+    File.write!(path, Jason.encode!(config))
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+
+    response =
+      raw_mcp_response(config, [{"Mcp-Method", "tools/call"}, {"Mcp-Name", "a"}],
+        body: call_body("a", %{})
+      )
+
+    assert response =~ "\"isError\":false"
+    root = Path.join(dir, "artifacts")
+    assert [trace] = Path.wildcard(Path.join([root, "traces", "cmd-*.jsonl"]))
+    run_ref = Path.basename(trace, ".jsonl")
+    assert File.exists?(Path.join([root, "inspection", run_ref <> ".ptcins"]))
+    {:ok, trace_snapshot} = TraceSnapshot.start({:directory, Path.join(root, "traces")})
+
+    {:ok, snapshot} =
+      InspectionSnapshot.start({:directory, Path.join(root, "inspection")}, trace_snapshot)
+
+    on_exit(fn ->
+      InspectionSnapshot.stop(snapshot)
+      TraceSnapshot.stop(trace_snapshot)
+    end)
+
+    assert {:ok, %{"items" => [_exchange]}} =
+             InspectionSnapshot.query(snapshot, :model_exchanges, %{"run_id" => run_ref})
+  end
+
+  @tag :tmp_dir
+  test "unsafe artifact root refuses startup", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    unsafe = Path.join(dir, "unsafe")
+    File.mkdir!(unsafe)
+    File.chmod!(unsafe, 0o770)
+    config = Map.put(config, "artifacts", %{"root" => "unsafe/artifacts", "trace" => true})
+    File.write!(path, Jason.encode!(config))
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:error, :artifact_root_unavailable} = PtcGateway.start_link(path, env_file: env)
+  end
+
+  @tag :tmp_dir
+  test "existing private artifact root works under a non-writable parent", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    parent = Path.join(dir, "readonly")
+    File.mkdir!(parent)
+    root = Path.join(parent, "artifacts")
+    assert :ok = PtcRunner.Kernel.ProjectArtifactRoot.ensure(root)
+    File.chmod!(parent, 0o500)
+    on_exit(fn -> File.chmod!(parent, 0o700) end)
+    config = Map.put(config, "artifacts", %{"root" => "readonly/artifacts", "trace" => true})
+    File.write!(path, Jason.encode!(config))
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+  end
+
+  @tag :tmp_dir
+  test "destination loss refuses a call before execution", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    config = Map.put(config, "artifacts", %{"root" => "artifacts", "trace" => true})
+    File.write!(path, Jason.encode!(config))
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+    root = Path.join(dir, "artifacts")
+    File.rename!(Path.join(root, "traces"), Path.join(root, "traces-away"))
+
+    response =
+      raw_mcp_response(config, [{"Mcp-Method", "tools/call"}, {"Mcp-Name", "a"}],
+        body: call_body("a", %{})
+      )
+
+    assert response =~ "\"isError\":true"
+    assert File.ls!(Path.join(root, "traces-away")) == []
+  end
+
+  @tag :tmp_dir
+  test "omitting artifacts leaves no served-run files", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+
+    assert mcp(config, "tools/call", 1,
+             params: %{"name" => "a", "arguments" => %{}},
+             headers: [{"mcp-name", "a"}]
+           ).status == 200
+
+    refute File.exists?(Path.join(dir, "artifacts"))
+    refute File.exists?(Path.join(dir, "traces"))
+    refute File.exists?(Path.join(dir, "inspection"))
   end
 
   @tag :tmp_dir
@@ -428,7 +737,7 @@ defmodule PtcGatewayTest do
 
   @tag :nightly
   @tag :tmp_dir
-  test "CLI emits only the closed stderr error and exits 78", %{tmp_dir: dir} do
+  test "CLI emits the closed stderr error and exits 78", %{tmp_dir: dir} do
     stdout = Path.join(dir, "stdout")
     stderr = Path.join(dir, "stderr")
 
@@ -707,6 +1016,7 @@ defmodule PtcGatewayTest do
 
     config =
       config
+      |> Map.put("artifacts", %{"root" => "artifacts", "trace" => true})
       |> Map.put("private_audit", %{
         "directory" => "audit",
         "max_file_bytes" => 4096,
@@ -731,6 +1041,8 @@ defmodule PtcGatewayTest do
     [file] = audit_dir |> File.ls!() |> Enum.filter(&String.ends_with?(&1, ".jsonl"))
     [line] = Path.join(audit_dir, file) |> File.read!() |> String.split("\n", trim: true)
     record = Jason.decode!(line)
+    assert [trace] = Path.wildcard(Path.join([dir, "artifacts", "traces", "cmd-*.jsonl"]))
+    assert Path.basename(trace) == record["run_ref"] <> ".jsonl"
     assert record["tool_name"] == "a"
     assert record["outcome_code"] == "success"
     assert record["dispatch_state"] == "true"
@@ -738,7 +1050,7 @@ defmodule PtcGatewayTest do
 
     assert Map.keys(record) |> Enum.sort() ==
              Enum.sort(
-               ~w(call_id cleanup_status disconnected dispatch_state ended_at outcome_code started_at tool_name write_effects_may_have_occurred)
+               ~w(call_id run_ref cleanup_status disconnected dispatch_state ended_at outcome_code started_at tool_name write_effects_may_have_occurred)
              )
   end
 
@@ -1422,6 +1734,7 @@ defmodule PtcGatewayTest do
   defp audit_record(index) do
     %{
       "call_id" => "call-#{index}",
+      "run_ref" => "cmd-00000000000000000000000000",
       "tool_name" => String.duplicate("tool", 40),
       "started_at" => "2026-09-16T00:00:00.000Z",
       "ended_at" => "2026-09-16T00:00:01.000Z",

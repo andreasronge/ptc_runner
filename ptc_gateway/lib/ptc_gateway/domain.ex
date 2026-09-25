@@ -9,6 +9,8 @@ defmodule PtcGateway.Domain do
     HostInstallation,
     InstallationCatalog,
     MCPProtocol,
+    PrivateDirectory,
+    ProjectArtifactRoot,
     RunAdmission,
     ServingTemplate,
     WarmProviderRuntime
@@ -67,7 +69,9 @@ defmodule PtcGateway.Domain do
           policy: %{listen: config["listen"], admission: config["admission"]}
       }
 
-      with {:ok, tools, metadata} <- templates(config["tools"], host, catalog),
+      with :ok <- artifact_root(config),
+           {:ok, tools, metadata} <-
+             templates(config["tools"], host, catalog, config["artifacts"]),
            :ok <- static_catalog(metadata),
            {:ok, services} <- HostInstallation.runtime_services(host) do
         boot(config, tools, services, env_file, %{state | metadata: metadata})
@@ -76,6 +80,33 @@ defmodule PtcGateway.Domain do
       end
     else
       {:error, code} -> {:error, code, state}
+    end
+  end
+
+  defp artifact_root(%{"artifacts" => %{"root" => root}}) do
+    with :ok <- artifact_root_parent(root),
+         :ok <- ProjectArtifactRoot.ensure(root) do
+      :ok
+    else
+      _ -> {:error, :artifact_root_unavailable}
+    end
+  end
+
+  defp artifact_root(_), do: :ok
+
+  defp artifact_root_parent(root) do
+    case File.lstat(root) do
+      {:ok, %{type: :directory}} ->
+        case PrivateDirectory.preflight_owner(root) do
+          {:ok, _uid} -> :ok
+          error -> error
+        end
+
+      {:error, :enoent} ->
+        PrivateDirectory.preflight(root)
+
+      _ ->
+        {:error, :artifact_root_unavailable}
     end
   end
 
@@ -98,9 +129,9 @@ defmodule PtcGateway.Domain do
     end
   end
 
-  defp templates(entries, host, catalog) do
+  defp templates(entries, host, catalog, artifacts) do
     Enum.reduce_while(entries, {:ok, %{}, []}, fn entry, {:ok, tools, metadata} ->
-      case template(entry, host, catalog) do
+      case template(entry, host, catalog, artifacts) do
         {:ok, template} ->
           pins = %{
             installation_config_pins: entry["installation_config_pins"],
@@ -166,9 +197,10 @@ defmodule PtcGateway.Domain do
     end
   end
 
-  defp template(entry, host, catalog) do
+  defp template(entry, host, catalog, artifacts) do
     case ServingTemplate.from_directory(entry["application"]["manifest"], host.limits,
            providers: catalog,
+           inspection_capture: artifacts != nil and artifacts["inspection"] == true,
            expected_application_content_digest: entry["expected_application_content_digest"]
          ) do
       {:ok, template} ->
@@ -258,6 +290,7 @@ defmodule PtcGateway.Domain do
               tools: state.metadata,
               tool_entries: state.tools,
               run_admission: state.run_admission,
+              artifacts: config["artifacts"],
               audit: state.audit,
               request_admission: state.request_admission},
            ip: ip,

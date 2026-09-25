@@ -628,7 +628,15 @@ defmodule PtcGateway.MCP do
     {owner, monitor} =
       spawn_monitor(fn ->
         request_monitor = Process.monitor(parent)
-        reservation = ServingTemplate.reserve(template, arguments, opts[:run_admission])
+
+        reservation =
+          ServingTemplate.reserve_gateway(
+            template,
+            arguments,
+            opts[:run_admission],
+            opts[:artifacts]
+          )
+
         send(parent, {:reserved, self(), reservation})
 
         receive do
@@ -690,7 +698,8 @@ defmodule PtcGateway.MCP do
     request_monitor = monitor_request(request, self(), reserved)
     close = &wire_outcome(id, template, &1)
     publish = &publish_terminal(request, request_monitor, parent, &1)
-    audit = &audit_terminal(name, template, &1, started_at, opts)
+    run_ref = ServingTemplate.reservation_run_ref(reserved)
+    audit = &audit_terminal(name, template, &1, started_at, opts, run_ref)
 
     try do
       case opts[:serving_hooks] do
@@ -843,10 +852,10 @@ defmodule PtcGateway.MCP do
     :ok
   end
 
-  defp audit_terminal(name, template, outcome, started_at, opts) do
+  defp audit_terminal(name, template, outcome, started_at, opts, run_ref \\ nil) do
     disconnected = Process.get(:ptc_gateway_disconnected, false)
     if hook = get_in(opts, [:serving_hooks, :before_audit]), do: hook.(outcome, disconnected)
-    audit_result(opts[:audit], name, template, outcome, started_at, disconnected)
+    audit_result(opts[:audit], name, template, outcome, started_at, disconnected, run_ref)
   end
 
   defp wire_outcome(id, template, outcome) do
@@ -903,15 +912,17 @@ defmodule PtcGateway.MCP do
   defp error_text(:cancelled), do: "Tool execution was cancelled"
   defp error_text(_), do: "Tool execution failed"
 
-  defp audit_result(nil, _name, _template, _outcome, _started_at, _disconnected), do: :ok
+  defp audit_result(nil, _name, _template, _outcome, _started_at, _disconnected, _run_ref),
+    do: :ok
 
-  defp audit_result(audit, name, template, outcome, started_at, disconnected) do
+  defp audit_result(audit, name, template, outcome, started_at, disconnected, run_ref) do
     if ServingTemplate.effect(template) == :write and
          ServingOutcome.metadata(outcome).dispatched != false do
       metadata = ServingOutcome.metadata(outcome)
 
       PtcGateway.PrivateAudit.append(audit, %{
         "call_id" => Base.encode16(:crypto.strong_rand_bytes(16), case: :lower),
+        "run_ref" => run_ref,
         "tool_name" => name,
         "started_at" => DateTime.to_iso8601(started_at),
         "ended_at" =>

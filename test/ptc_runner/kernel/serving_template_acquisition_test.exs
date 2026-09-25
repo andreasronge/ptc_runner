@@ -29,7 +29,7 @@ defmodule PtcRunner.Kernel.ServingTemplateAcquisitionTest do
       {ValueContract, :compile, 1},
       {ExecutionInput, :new, 3},
       {ExecutionPolicy, :new, 1},
-      {PublicationAuthority, :new, 1}
+      {PublicationAuthority, :authorize_with_context, 4}
     ]
 
     Enum.each(patterns, fn {module, _, _} = pattern ->
@@ -91,12 +91,15 @@ defmodule PtcRunner.Kernel.ServingTemplateAcquisitionTest do
                function == :compile
            end)
 
-    for module <- [ExecutionInput, ExecutionPolicy, PublicationAuthority] do
+    for module <- [ExecutionInput, ExecutionPolicy] do
       assert Enum.count(calls, fn
                {m, :new, _} -> m == module
                _ -> false
              end) == 16
     end
+
+    assert Enum.count(calls, &match?({PublicationAuthority, :authorize_with_context, _}, &1)) ==
+             16
 
     policies = for {ExecutionPolicy, :new, [opts]} <- calls, do: opts
 
@@ -130,7 +133,7 @@ defmodule PtcRunner.Kernel.ServingTemplateAcquisitionTest do
       {PtcRunner.Kernel.EventSink, :start, :_},
       {ExecutionInput, :new, 3},
       {ExecutionPolicy, :new, 1},
-      {PublicationAuthority, :new, 1}
+      {PublicationAuthority, :authorize_with_context, 4}
     ]
 
     Enum.each(patterns, fn {module, _, _} = pattern ->

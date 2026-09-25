@@ -244,9 +244,11 @@ defmodule PtcGateway.PrivateAudit do
   defp audit_record?(record) when is_map(record) do
     Map.keys(record) |> Enum.sort() ==
       Enum.sort(
-        ~w(call_id tool_name started_at ended_at outcome_code dispatch_state write_effects_may_have_occurred disconnected cleanup_status)
+        ~w(call_id run_ref tool_name started_at ended_at outcome_code dispatch_state write_effects_may_have_occurred disconnected cleanup_status)
       ) and
-      is_binary(record["call_id"]) and is_binary(record["tool_name"]) and
+      is_binary(record["call_id"]) and
+      is_binary(record["run_ref"]) and
+      is_binary(record["tool_name"]) and
       is_binary(record["started_at"]) and is_binary(record["ended_at"]) and
       is_binary(record["outcome_code"]) and is_binary(record["dispatch_state"]) and
       is_boolean(record["write_effects_may_have_occurred"]) and

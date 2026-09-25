@@ -14,7 +14,7 @@ defmodule Mix.Tasks.Ptc.Gateway do
   def run(args) do
     reference = PtcGateway.ReleaseCLI.install_signal_handler()
     {opts, paths, invalid} = OptionParser.parse(args, strict: [env_file: :string])
-    Mix.Task.run("app.start")
+    {:ok, _started} = Application.ensure_all_started(:ptc_gateway)
 
     result =
       case {paths, invalid} do

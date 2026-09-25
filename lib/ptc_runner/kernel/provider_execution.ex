@@ -371,7 +371,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          true <- valid?(execution),
          true <- operation != :connect or non_interactive?(execution),
          true <- PreparedRun.consumed_valid?(prepared),
-         true <- operation == :serve or PublicationAuthority.authorized?(authority),
+         true <- publication_authorized?(authority, operation),
          true <- publication_valid?(authority, lease, operation),
          true <- bound_to_prepared?(execution, prepared),
          true <- valid_target?(target, prepared, execution.catalog),
@@ -407,6 +407,13 @@ defmodule PtcRunner.Kernel.ProviderExecution do
 
   defp notifier_matches_operation?(notifier, _operation),
     do: is_nil(notifier) or is_function(notifier, 1)
+
+  # Warm serving acquires its provider plan before a call exists. That opening
+  # has no publication destination; RunAdmission receives each call's authority.
+  defp publication_authorized?(nil, :serve), do: true
+
+  defp publication_authorized?(authority, _operation),
+    do: PublicationAuthority.authorized?(authority)
 
   defp publication_valid?(nil, nil, :serve), do: true
 
