@@ -915,6 +915,10 @@ defmodule PtcRunner.Kernel.CoreContractTest do
           send(parent, {:provider_started, self()})
 
           receive do
+            {:monitor_ready, token} -> send(parent, {:provider_monitored, self(), token})
+          end
+
+          receive do
             :finish -> {:ok, nil}
           end
         end
@@ -940,6 +944,9 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert_receive {:provider_started, provider}, 1_000
     provider_ref = Process.monitor(provider)
+    monitor_token = make_ref()
+    send(provider, {:monitor_ready, monitor_token})
+    assert_receive {:provider_monitored, ^provider, ^monitor_token}, 1_000
 
     Process.exit(caller, :kill)
 
