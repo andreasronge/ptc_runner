@@ -425,8 +425,28 @@ defmodule PtcRunner.Kernel.CommandParser do
     end
   end
 
+  defp validate_command(:prune, [project], options, ordered, frontend_options, frontend) do
+    age = Map.get(options, :max_age_days)
+    bytes = Map.get(options, :max_bytes)
+
+    if ((is_integer(age) and age >= 0) or (is_integer(bytes) and bytes >= 0)) and
+         (is_nil(age) or (is_integer(age) and age >= 0)) and
+         (is_nil(bytes) or (is_integer(bytes) and bytes >= 0)) and
+         Map.keys(options) -- [:max_age_days, :max_bytes, :dry_run] == [] do
+      arguments(:prune,
+        application: project,
+        options: options,
+        ordered_options: ordered,
+        frontend_options: frontend_options,
+        frontend: frontend
+      )
+    else
+      reject(:prune, :invalid_arguments)
+    end
+  end
+
   defp validate_command(command, _positional, _options, _ordered, _frontend_options, _frontend)
-       when command in [:init, :validate, :run, :viewer, :materialize],
+       when command in [:init, :validate, :run, :viewer, :materialize, :prune],
        do: {:error, CommandRejection.positional_arity(command)}
 
   defp validate_command(command, _positional, _options, _ordered, _frontend_options, _frontend),

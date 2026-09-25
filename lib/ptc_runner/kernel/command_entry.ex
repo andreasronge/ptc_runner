@@ -152,6 +152,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
   defp one_shot_destination_keys(:transcript), do: [:private_output]
   defp one_shot_destination_keys(:repl), do: [:output, :private_output]
   defp one_shot_destination_keys(:viewer), do: []
+  defp one_shot_destination_keys(:prune), do: []
 
   defp replace_ordered_destinations(ordered, destinations) do
     Enum.reduce(destinations, ordered, fn {key, path}, options ->

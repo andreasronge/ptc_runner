@@ -9,7 +9,7 @@ defmodule PtcRunner.Kernel.ProjectResolver do
   alias PtcRunner.Kernel.ProjectConfig
   alias PtcRunner.Kernel.ProjectContext
 
-  @project_commands ~w(validate run doctor models materialize)
+  @project_commands ~w(validate run doctor models materialize prune)
 
   @spec parse([binary()], :standalone | :mix, binary()) ::
           {:ok, CommandArguments.t()}
@@ -168,6 +168,10 @@ defmodule PtcRunner.Kernel.ProjectResolver do
 
   defp project_argv("materialize", rest, project, _run_ref) do
     {:ok, ["materialize", project.application | rest], project, []}
+  end
+
+  defp project_argv("prune", rest, project, _run_ref) do
+    {:ok, ["prune", project.path | rest], project, []}
   end
 
   defp project_argv(command, rest, project, run_ref) do
@@ -472,4 +476,5 @@ defmodule PtcRunner.Kernel.ProjectResolver do
   defp command_atom("doctor"), do: :doctor
   defp command_atom("models"), do: :models
   defp command_atom("materialize"), do: :materialize
+  defp command_atom("prune"), do: :prune
 end
