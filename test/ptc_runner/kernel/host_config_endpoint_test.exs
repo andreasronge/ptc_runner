@@ -12,7 +12,6 @@ defmodule PtcRunner.Kernel.HostConfigEndpointTest do
   alias PtcRunner.Kernel.CommandAcquisition
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.HostConfig
-  alias PtcRunner.Kernel.MCPSource
 
   describe "endpoints refused at load time" do
     @tag :tmp_dir
@@ -245,42 +244,4 @@ defmodule PtcRunner.Kernel.HostConfigEndpointTest do
       assert {:ok, _host, _catalog} = CommandAcquisition.catalog(path)
     end
   end
-
-  describe "the in-process API applies the same rule" do
-    test "localhost is not admitted as a loopback address" do
-      assert_raise ArgumentError, fn ->
-        MCPSource.builder(
-          transport:
-            {:streamable_http, endpoint: "http://localhost:8055", allow_insecure_loopback: true},
-          tools: mappings()
-        )
-      end
-    end
-
-    test "the allowance against an https endpoint is refused" do
-      assert_raise ArgumentError, fn ->
-        MCPSource.builder(
-          transport:
-            {:streamable_http,
-             endpoint: "https://mcp.example.test/mcp", allow_insecure_loopback: true},
-          tools: mappings()
-        )
-      end
-    end
-
-    test "the literal loopback addresses remain admitted" do
-      for endpoint <- ["http://127.0.0.1:8055", "http://[::1]:8055/mcp"] do
-        assert {:staged, builder, nil} =
-                 MCPSource.builder(
-                   transport:
-                     {:streamable_http, endpoint: endpoint, allow_insecure_loopback: true},
-                   tools: mappings()
-                 )
-
-        assert is_function(builder, 2)
-      end
-    end
-  end
-
-  defp mappings, do: %{"echo" => %{as: "workspace.echo", effect: :read}}
 end

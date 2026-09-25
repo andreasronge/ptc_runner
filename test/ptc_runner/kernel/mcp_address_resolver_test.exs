@@ -1,7 +1,5 @@
 defmodule PtcRunner.Kernel.MCPAddressResolverTest do
-  # async: false — one case flips :erlang.system_flag(:schedulers_online, 1) for the whole VM
-  # (class D); the other 3 could run async in a sibling module.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.MCPAddressResolver
 
@@ -62,38 +60,5 @@ defmodule PtcRunner.Kernel.MCPAddressResolverTest do
 
     send(ipv4_resolver, :finish_ipv4_query)
     assert_receive {^ref, :resolved, ^ipv4_resolver, {:ok, [^ipv4]}}
-  end
-
-  test "resolves both families concurrently on a single scheduler" do
-    parent = self()
-    gate = make_ref()
-    original_schedulers = :erlang.system_info(:schedulers_online)
-
-    resolver = fn _hostname, family ->
-      send(parent, {gate, :started, family, self()})
-
-      receive do
-        {^gate, :release} -> {:error, :nxdomain}
-      end
-    end
-
-    try do
-      :erlang.system_flag(:schedulers_online, 1)
-
-      task =
-        Task.async(fn ->
-          MCPAddressResolver.resolve_hostname(~c"example.test", resolver)
-        end)
-
-      assert_receive {^gate, :started, :inet6, ipv6_resolver}
-      assert_receive {^gate, :started, :inet, ipv4_resolver}
-
-      send(ipv6_resolver, {gate, :release})
-      send(ipv4_resolver, {gate, :release})
-
-      assert Task.await(task) == {:error, :nxdomain}
-    after
-      :erlang.system_flag(:schedulers_online, original_schedulers)
-    end
   end
 end

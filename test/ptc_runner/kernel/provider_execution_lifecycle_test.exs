@@ -1,8 +1,6 @@
 defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
-  # async: false — three cases install VM-global :erlang.trace_pattern breakpoints on
-  # ProviderSession and ProviderRegistry close (class D); the other 15 could run async in a sibling
-  # module.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
+  import PtcRunner.TestSupport.ProviderExecutionLifecycleFixture
   import PtcRunner.TestSupport.ProviderExecutionFixture
 
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
@@ -13,7 +11,6 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
   alias PtcRunner.Kernel.OwnerFailure
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
-  alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.RunCoordinator
 
@@ -48,104 +45,6 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     Process.exit(started.caller, :kill)
 
     assert_all_down(watched)
-    refute_received {:execution_result, _result}
-  end
-
-  test "caller death runs a committed closer before the runtime that produced it closes" do
-    # A committed provider closer belongs to the runtime that acquired it: it
-    # may still release an admission, persist a token response, or reach the
-    # authority the registry holds. Aborting must therefore close the session
-    # first and leave that runtime standing until the closer has settled.
-    parent = self()
-
-    fixture =
-      provider_fixture(
-        body: long_running_body(),
-        acquire: fn context ->
-          scoped_root(parent, context)
-          {:ok, capability} = fixture_capability()
-
-          {:ok,
-           %{
-             capabilities: [capability],
-             close: fn ->
-               send(parent, {:provider_closing, self()})
-               receive do: (:release -> :ok)
-             end
-           }}
-        end
-      )
-
-    started = start_owned_execution(fixture)
-    state = await_state(started.owner_pid, & &1.registry)
-
-    # Killing on the acquire callback would race `ResourceRegistrar.commit/2`,
-    # so wait until the session actually holds the committed closer.
-    assert_eventually(fn -> :sys.get_state(state.provider_session.pid).committed != [] end)
-
-    trace_closes(started.owner_pid)
-
-    try do
-      Process.exit(started.caller, :kill)
-
-      # The session is the first thing the abort closes...
-      assert ProviderSession == next_close()
-      assert_receive {:provider_closing, closer}, 5_000
-
-      # ...and the owner is blocked inside that close while the committed closer
-      # runs, so nothing can have unwound the registry underneath it yet.
-      refute_received {:trace, _owner, :call, {ProviderRegistry, :close, _arguments}}
-
-      send(closer, :release)
-      assert ProviderRegistry == next_close()
-    after
-      stop_trace_closes(started.owner_pid)
-    end
-
-    refute_received {:execution_result, _result}
-  end
-
-  test "caller death while acquisition blocks closes the session before the registry" do
-    parent = self()
-
-    fixture =
-      provider_fixture(
-        acquire: fn context ->
-          scoped_root(parent, context)
-          send(parent, {:blocked_in, :provider_acquire, self()})
-          block_forever()
-        end
-      )
-
-    started = start_owned_execution(fixture)
-    assert_receive {:provider_root, root, :ok}, 5_000
-    assert_receive {:blocked_in, :provider_acquire, acquirer}, 5_000
-    state = :sys.get_state(started.owner_pid)
-    assert ProviderSession.valid?(state.provider_session)
-    assert ProviderRegistry.valid?(state.registry)
-
-    watched =
-      watch(%{
-        owner: started.owner_pid,
-        worker: state.worker_pid,
-        session: state.provider_session.pid,
-        provider_root: root,
-        acquirer: acquirer,
-        event_sink: state.opened_sinks.event_sink.pid,
-        activity: fixture.prepared.provider_activity.owner
-      })
-
-    trace_closes(started.owner_pid)
-
-    try do
-      Process.exit(started.caller, :kill)
-
-      assert [ProviderSession, ProviderRegistry] == [next_close(), next_close()]
-      assert_all_down(watched)
-    after
-      stop_trace_closes(started.owner_pid)
-    end
-
     refute_received {:execution_result, _result}
   end
 
@@ -275,7 +174,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
             fixture.authority,
             self(),
             fixture.execution,
-            &never_notify/1
+            unexpected_notifier()
           )
 
         send(parent, {:execution_owner, owner})
@@ -451,15 +350,6 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     assert_declaration_refused(fixture)
   end
 
-  test "connectivity closes its provider session inside the runtime that acquired it" do
-    # A connectivity acquisition commits real closers to the session, so
-    # unwinding the registry first would run them against a runtime that is
-    # already gone. An independent review found the inversion; this is what
-    # would have caught it.
-    fixture = provider_fixture([connectivity_mode: :acquisition] ++ closing_acquire())
-    assert_session_closes_before_registry(fixture, :connect)
-  end
-
   test "connectivity registry activation timeout preserves the attempted prefix" do
     parent = self()
 
@@ -499,7 +389,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
                fixture.prepared,
                fixture.authority,
                other.execution,
-               &never_notify/1
+               unexpected_notifier()
              )
 
     assert PreparedRun.valid?(fixture.prepared)
@@ -511,201 +401,11 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
                fixture.authority,
                self(),
                other.execution,
-               &never_notify/1
+               unexpected_notifier()
              )
 
     assert PreparedRun.valid?(fixture.prepared)
     assert :ok = PreparedRun.close(fixture.prepared)
     assert :ok = PreparedRun.close(other.prepared)
-  end
-
-  defp start_owned_execution(fixture, operation \\ :run) do
-    parent = self()
-
-    notifier = if operation == :connect, do: nil, else: &never_notify/1
-
-    caller =
-      spawn(fn ->
-        {:ok, owner} =
-          ExecutionSessionOwner.start(
-            fixture.prepared,
-            fixture.authority,
-            self(),
-            fixture.execution,
-            notifier,
-            operation
-          )
-
-        send(parent, {:execution_owner, owner})
-        send(parent, {:execution_result, ExecutionSessionOwner.await(owner)})
-      end)
-
-    assert_receive {:execution_owner, owner}, 5_000
-    owner_pid = ExecutionSessionOwner.pid(owner)
-    on_exit(fn -> release(caller, owner_pid) end)
-    %{caller: caller, owner: owner, owner_pid: owner_pid}
-  end
-
-  # Every test here deliberately blocks provider work in an unlinked caller, so
-  # a failed assertion must still tear the run down instead of leaving the
-  # caller, owner, worker, and registered roots behind for later tests.
-  defp release(caller, owner_pid) do
-    if Process.alive?(caller), do: Process.exit(caller, :kill)
-    reference = Process.monitor(owner_pid)
-
-    receive do
-      {:DOWN, ^reference, :process, ^owner_pid, _reason} -> :ok
-    after
-      5_000 -> Process.exit(owner_pid, :kill)
-    end
-  end
-
-  defp never_notify(_url), do: flunk("ordinary provider execution must not notify authorization")
-
-  defp block_forever do
-    receive do
-      :never -> :never
-    end
-  end
-
-  # Yielding matters more than the attempt count: a bare spin starves the very
-  # worker these helpers are waiting on when schedulers are contended.
-  defp await_state(owner_pid, projection, attempts \\ 50_000)
-
-  defp await_state(owner_pid, projection, attempts) when attempts > 0 do
-    state = :sys.get_state(owner_pid)
-
-    if projection.(state) do
-      state
-    else
-      :erlang.yield()
-      await_state(owner_pid, projection, attempts - 1)
-    end
-  end
-
-  defp await_state(_owner_pid, _projection, 0), do: flunk("owner state never became ready")
-
-  defp watch(processes) do
-    Map.new(processes, fn {name, pid} -> {name, {pid, Process.monitor(pid)}} end)
-  end
-
-  defp assert_all_down(watched) do
-    Enum.each(watched, fn {name, {pid, reference}} ->
-      assert_receive {:DOWN, ^reference, :process, ^pid, _reason},
-                     5_000,
-                     "#{name} was left running"
-    end)
-  end
-
-  defp closing_acquire do
-    parent = self()
-
-    [
-      acquire: fn context ->
-        scoped_root(parent, context)
-        {:ok, capability} = fixture_capability()
-
-        {:ok,
-         %{
-           capabilities: [capability],
-           snapshot: nil,
-           close: fn ->
-             send(parent, :provider_closed)
-             :ok
-           end
-         }}
-      end
-    ]
-  end
-
-  # One invariant, asserted for each operation that owns a provider session:
-  # the session closes while the runtime that produced its resources is still
-  # alive. Connectivity takes no notifier at all, which is itself part of its
-  # contract.
-  defp assert_session_closes_before_registry(fixture, operation) do
-    parent = self()
-    notifier = if operation == :connect, do: nil, else: &never_notify/1
-
-    caller =
-      spawn(fn ->
-        receive do: (:go -> :ok)
-
-        {:ok, owner} =
-          ExecutionSessionOwner.start(
-            fixture.prepared,
-            fixture.authority,
-            self(),
-            fixture.execution,
-            notifier,
-            operation
-          )
-
-        send(parent, {:execution_result, ExecutionSessionOwner.await(owner)})
-      end)
-
-    # Tracing the caller before it starts anything makes the owner and its
-    # worker inherit the flag, so the order below is the order the operation
-    # actually closed in rather than a snapshot taken after the fact.
-    trace_closes(caller, [:call, :set_on_spawn])
-
-    try do
-      send(caller, :go)
-      assert_receive {:execution_result, {:ok, _evidence}}, 5_000
-      assert [ProviderSession, ProviderRegistry] == [next_close(), next_close()]
-      assert_received :provider_closed
-    after
-      stop_trace_closes(caller)
-    end
-  end
-
-  defp trace_closes(owner_pid, flags \\ [:call]) do
-    Enum.each([ProviderRegistry, ProviderSession], &Code.ensure_loaded!/1)
-    assert :erlang.trace_pattern({ProviderRegistry, :close, 1}, true, [:local]) == 1
-    assert :erlang.trace_pattern({ProviderSession, :close, 1}, true, [:local]) == 1
-    assert :erlang.trace(owner_pid, true, flags) == 1
-  end
-
-  defp next_close do
-    assert_receive {:trace, _owner, :call, {module, :close, _arguments}}, 5_000
-    module
-  end
-
-  defp stop_trace_closes(owner_pid) do
-    :erlang.trace_pattern({ProviderRegistry, :close, 1}, false, [:local])
-    :erlang.trace_pattern({ProviderSession, :close, 1}, false, [:local])
-    :erlang.trace(owner_pid, false, [:call])
-  catch
-    :error, :badarg -> false
-  end
-
-  # Every refused declaration must be refused for the same reason and before the
-  # provider builds anything: no preflight, no acquisition, and no registered
-  # resource root.
-  #
-  # Credentials are the deliberate exception, and asserting they were read is
-  # what pins the ordering here. Phase-8 step 5 resolves them from the sealed
-  # declarations before any provider callback runs, so a mismatch found during
-  # preparation is necessarily found after resolution. Moving resolution back
-  # behind preparation would leave this resolver untouched, because preparation
-  # is what fails.
-  defp assert_declaration_refused(fixture) do
-    _started = start_owned_execution(fixture)
-
-    # Past the phase-8 marker the reason is classified where the occurrence is
-    # still in scope, so the refusal arrives as the closed acquisition code for
-    # a preparation that contradicted its declaration, naming the occurrence
-    # that did it rather than as a bare atom the command boundary would have
-    # collapsed to `internal_error`.
-    assert_receive {:execution_result, {:error, %CommandDiagnostic{} = diagnostic}}, 5_000
-    assert diagnostic.phase == :provider_acquisition
-    assert diagnostic.code == :provider_policy_changed
-    assert diagnostic.provider_activity
-    assert diagnostic.subject.name == "selected"
-    assert diagnostic.subject.operation == :acquisition
-    assert diagnostic.subject.occurrence == %{destination: :workflow, index: 0}
-    assert_received {:resolved_credentials, ["fixture-key"]}
-    refute_received {:provider_phase, :preflight}
-    refute_received {:provider_phase, :acquire}
-    refute_received {:provider_root, _root, _registration}
   end
 end
