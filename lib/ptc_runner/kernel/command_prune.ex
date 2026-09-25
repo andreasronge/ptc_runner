@@ -4,9 +4,11 @@ defmodule PtcRunner.Kernel.CommandPrune do
   alias PtcRunner.Kernel.ArtifactIdentity
   alias PtcRunner.Kernel.ArtifactPruneTransaction
   alias PtcRunner.Kernel.PrivateDirectory
+  alias PtcRunner.Kernel.RunArtifactName
   alias PtcRunner.Kernel.TraceDirectoryAdmission
+  alias PtcRunner.Kernel.TraceLog
 
-  @artifact_dirs ~w(traces inspection results envelopes)
+  @artifact_dirs RunArtifactName.directories()
   @grace_seconds 600
   @seconds_per_day 86_400
 
@@ -14,9 +16,10 @@ defmodule PtcRunner.Kernel.CommandPrune do
   def run(%{project: %{config: %{artifact_root: root}}, options: options}) when is_binary(root) do
     with {:ok, uid} <- PrivateDirectory.preflight_owner(Path.join(root, "unused")),
          {:ok, directories} <- directories(root, uid),
-         {:ok, files, staging} <- artifacts(directories),
-         {:ok, markers} <- markers(root, uid),
-         {:ok, result} <- prune(files, staging, markers, directories, options) do
+         {:ok, result} <-
+           TraceLog.with_append_authority_lock(Path.join(root, ".ptc-prune.authority"), fn ->
+             run_locked(root, uid, directories, options)
+           end) do
       {:ok, result}
     else
       {:error, :unsafe_directory} -> {:error, :prune_unsafe_directory}
@@ -26,6 +29,13 @@ defmodule PtcRunner.Kernel.CommandPrune do
   end
 
   def run(_), do: {:error, :prune_unavailable}
+
+  defp run_locked(root, uid, directories, options) do
+    with :ok <- ArtifactPruneTransaction.recover(root, uid),
+         {:ok, files, staging} <- artifacts(directories),
+         {:ok, markers} <- markers(root, uid),
+         do: prune(files, staging, markers, directories, options)
+  end
 
   defp directories(root, uid) do
     paths = [root | Enum.map(@artifact_dirs, &Path.join(root, &1))]
@@ -66,7 +76,7 @@ defmodule PtcRunner.Kernel.CommandPrune do
   end
 
   defp scan_name(directory, name, files, staging) do
-    case artifact_ref(Path.basename(directory), name) do
+    case RunArtifactName.ref(Path.basename(directory), name) do
       nil -> {:ok, files, staging_from_name(staging, name)}
       ref -> scan_artifact(Path.join(directory, name), ref, files, staging)
     end
@@ -82,18 +92,6 @@ defmodule PtcRunner.Kernel.CommandPrune do
     end
   end
 
-  defp artifact_ref("traces", name), do: TraceDirectoryAdmission.run_claim(name)
-
-  defp artifact_ref(directory, name) do
-    suffix = if directory == "inspection", do: ".ptcins", else: ".json"
-
-    if String.ends_with?(name, suffix) do
-      name
-      |> String.trim_trailing(suffix)
-      |> TraceDirectoryAdmission.canonical_stem()
-    end
-  end
-
   defp staging_from_name(staging, name) do
     case String.split(name, ~r/\.ptc-(?:tmp|marker)-/, parts: 2) do
       [base, _token] ->
@@ -103,7 +101,9 @@ defmodule PtcRunner.Kernel.CommandPrune do
 
           _ ->
             ref =
-              Enum.find_value(@artifact_dirs, fn directory -> artifact_ref(directory, base) end)
+              Enum.find_value(@artifact_dirs, fn directory ->
+                RunArtifactName.ref(directory, base)
+              end)
 
             if ref, do: MapSet.put(staging, ref), else: staging
         end
@@ -273,7 +273,7 @@ defmodule PtcRunner.Kernel.CommandPrune do
         {:ok, names} ->
           current =
             names
-            |> Enum.filter(&(artifact_ref(Path.basename(directory), &1) == run.ref))
+            |> Enum.filter(&(RunArtifactName.ref(Path.basename(directory), &1) == run.ref))
             |> Enum.map(&Path.join(directory, &1))
             |> MapSet.new()
 

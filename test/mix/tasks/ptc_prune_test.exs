@@ -157,6 +157,65 @@ defmodule Mix.Tasks.PtcPruneTest do
     assert result.stderr =~ "project/project_schema_invalid"
   end
 
+  @tag :tmp_dir
+  test "concurrent prunes serialize a whole run", %{tmp_dir: directory} do
+    {project, root} = project!(directory)
+    paths = artifact_set!(root, "old", 20, 1)
+
+    results =
+      1..2
+      |> Task.async_stream(
+        fn _ ->
+          MixCommandAdapter.execute(["prune", project, "--max-age-days", "1"])
+        end,
+        max_concurrency: 2,
+        timeout: 30_000
+      )
+      |> Enum.map(fn {:ok, result} -> result end)
+
+    assert Enum.all?(results, &(&1.exit_status == 0))
+
+    assert results |> Enum.flat_map(&Jason.decode!(&1.stdout)["deleted"]) |> Enum.sort() == [
+             "old"
+           ]
+
+    assert Enum.all?(paths, &(not File.exists?(&1)))
+  end
+
+  @tag :tmp_dir
+  test "an interrupted prune restores uncommitted files and finishes committed cleanup", %{
+    tmp_dir: directory
+  } do
+    {project, root} = project!(directory)
+    restore = Path.join([root, "traces", "restore.jsonl"])
+    committed = Path.join([root, "traces", "committed.jsonl"])
+
+    for path <- [restore, committed] do
+      File.write!(path, "x")
+      File.touch!(path, System.os_time(:second) - 20 * 86_400)
+    end
+
+    staged_restore = Path.join(root, ".ptc-prune-0123456789abcdef")
+    staged_commit = Path.join(root, ".ptc-prune-fedcba9876543210")
+
+    for {stage, path} <- [{staged_restore, restore}, {staged_commit, committed}] do
+      File.mkdir!(stage)
+      File.chmod!(stage, 0o700)
+      File.ln!(path, Path.join(stage, "traces-" <> Path.basename(path)))
+      File.rm!(path)
+    end
+
+    File.write!(Path.join(staged_commit, "committed"), "")
+    result = MixCommandAdapter.execute(["prune", project, "--max-age-days", "100"])
+
+    assert result.exit_status == 0
+    assert Jason.decode!(result.stdout)["remaining_bytes"] == 1
+    assert File.read!(restore) == "x"
+    refute File.exists?(committed)
+    refute File.exists?(staged_restore)
+    refute File.exists?(staged_commit)
+  end
+
   defp project!(directory) do
     target = Path.join(directory, "demo")
     assert MixCommandAdapter.execute(["init", target]).exit_status == 0
