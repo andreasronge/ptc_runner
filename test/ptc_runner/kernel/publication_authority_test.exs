@@ -393,6 +393,36 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
   end
 
   @tag :tmp_dir
+  test "a dead runtime's append reservation is swept with an existing trace", %{tmp_dir: dir} do
+    abandoned_path = Path.join(dir, "abandoned.jsonl")
+    next_path = Path.join(dir, "next.jsonl")
+    File.write!(abandoned_path, "")
+    File.write!(next_path, "")
+    {:ok, reservation_path} = TraceLog.append_reservation_path(abandoned_path)
+    executable = System.find_executable("elixir") || flunk("elixir is required")
+    code_paths = Enum.flat_map(:code.get_path(), fn path -> ["-pa", List.to_string(path)] end)
+
+    code = """
+    {:ok, _handle} = PtcRunner.Kernel.PublicationHandle.reserve_append_for(
+      #{inspect(abandoned_path)}, :trace, 0, self()
+    )
+    :erlang.halt(0)
+    """
+
+    assert {_output, 0} = System.cmd(executable, code_paths ++ ["-e", code])
+    assert File.dir?(reservation_path)
+
+    assert {:ok, next_handle} = PublicationHandle.reserve_append_for(next_path, :trace, 0, self())
+    refute File.exists?(reservation_path)
+    assert :ok = PublicationHandle.close(next_handle)
+
+    assert {:ok, recovered_handle} =
+             PublicationHandle.reserve_append_for(abandoned_path, :trace, 0, self())
+
+    assert :ok = PublicationHandle.close(recovered_handle)
+  end
+
+  @tag :tmp_dir
   test "private result reservations also claim the requested name", %{tmp_dir: dir} do
     target = Path.join(dir, "same-private-result.json")
 

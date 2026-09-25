@@ -419,7 +419,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     1..10_000
     |> Task.async_stream(fn index ->
       path = Path.join(root, "trace-\#{index}.jsonl")
-      PtcRunner.Kernel.TraceLog.with_append_authority_lock(path, fn -> :ok end)
+      PtcRunner.Kernel.TraceLog.append_jsonl(path, [])
     end, max_concurrency: 16, timeout: 30_000)
     |> Enum.each(fn {:ok, :ok} -> :ok end)
     [lock_root] = Path.wildcard(Path.join(root, "ptc-runner-trace-append-locks-*"))
@@ -471,12 +471,33 @@ defmodule PtcRunner.Kernel.TraceLogTest do
              TraceLog.query(second_log, :list_runs, %{})
   end
 
+  @tag :tmp_dir
+  test "nested append callbacks reuse their bucket", %{tmp_dir: directory} do
+    {first_path, second_path} = colliding_append_paths(directory)
+    first = decoded_event("outer-collision", 1, "run-started")
+    second = decoded_event("inner-collision", 1, "run-started")
+
+    task =
+      Task.async(fn ->
+        TraceLog.append_jsonl(first_path, [first],
+          append_hook: fn :after_file_ready ->
+            TraceLog.append_jsonl(second_path, [second])
+          end
+        )
+      end)
+
+    result = Task.yield(task, 5_000) || Task.shutdown(task, :brutal_kill)
+    assert result == {:ok, :ok}
+    assert File.regular?(first_path)
+    assert File.regular?(second_path)
+  end
+
   defp colliding_append_paths(directory) do
     Enum.reduce_while(1..10_000, %{}, fn index, seen ->
       path = Path.join(directory, "collision-#{index}.jsonl")
       {:ok, scope} = TraceLog.append_lock_identity(path)
       <<prefix::16, _rest::binary>> = :crypto.hash(:sha256, :erlang.term_to_binary(scope))
-      bucket = Bitwise.band(prefix, 2_047)
+      bucket = 1 + rem(prefix, 2_047)
 
       case Map.fetch(seen, bucket) do
         {:ok, first_path} -> {:halt, {first_path, path}}

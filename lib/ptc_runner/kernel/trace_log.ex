@@ -80,7 +80,8 @@ defmodule PtcRunner.Kernel.TraceLog do
   @max_cursor_bytes 1_024
   @max_string_bytes 256
   @append_lock_timeout_ms 30_000
-  @append_buckets_per_kind 2_048
+  @append_path_buckets 2_047
+  @append_inode_buckets 2_048
   @append_lock_helper ~S"""
   set -eu
   lock_kind=$1
@@ -671,17 +672,23 @@ defmodule PtcRunner.Kernel.TraceLog do
            Keyword.get(opts, :append_hook),
          :ok <- validate_append_path(path, private?),
          {:ok, path} <- PrivateDirectory.anchor(path) do
-      :global.trans({{__MODULE__, {:append, path}}, self()}, fn ->
-        with_append_lock(path, fn ->
-          append_locked(path, normalize(events), max_bytes, private?, append_hook)
-        end)
-      end)
+      append_jsonl_with_lock(path, events, max_bytes, private?, append_hook)
     else
       _ -> {:error, :invalid_trace_log}
     end
   end
 
   def append_jsonl(_path, _events, _opts), do: {:error, :invalid_trace_log}
+
+  defp append_jsonl_with_lock(path, events, max_bytes, private?, append_hook) do
+    with_callback_lock(append_hook, fn ->
+      :global.trans({{__MODULE__, {:append, path}}, self()}, fn ->
+        with_append_lock(path, fn ->
+          append_locked(path, normalize(events), max_bytes, private?, append_hook)
+        end)
+      end)
+    end)
+  end
 
   @doc false
   @spec validate_append_path(term(), term()) :: :ok | {:error, atom()}
@@ -751,8 +758,10 @@ defmodule PtcRunner.Kernel.TraceLog do
       when is_binary(path) and is_function(callback, 0) do
     case PrivateDirectory.anchor(path) do
       {:ok, path} ->
-        :global.trans({{__MODULE__, {:append, path}}, self()}, fn ->
-          with_append_authority_lock_at(path, callback)
+        with_bucket_lock(:callback, fn ->
+          :global.trans({{__MODULE__, {:append, path}}, self()}, fn ->
+            with_append_authority_lock_at(path, callback)
+          end)
         end)
 
       _other ->
@@ -782,23 +791,22 @@ defmodule PtcRunner.Kernel.TraceLog do
   defp with_append_lock(_path, _callback, 0), do: {:error, :source_unavailable}
 
   defp with_append_lock(path, callback, attempts) do
-    with {:ok, scope} <- append_path_lock_scope(path),
-         {:ok, port} <- start_append_lock(scope) do
-      result =
-        try do
-          case append_path_lock_scope(path) do
-            {:ok, ^scope} -> callback.()
-            _changed -> :retry_append_lock
-          end
-        after
-          release_append_lock(port)
-        end
+    case append_path_lock_scope(path) do
+      {:ok, scope} ->
+        result =
+          with_bucket_lock(scope, fn ->
+            case append_path_lock_scope(path) do
+              {:ok, ^scope} -> callback.()
+              _changed -> :retry_append_lock
+            end
+          end)
 
-      if result == :retry_append_lock,
-        do: with_append_lock(path, callback, attempts - 1),
-        else: result
-    else
-      _ -> {:error, :source_unavailable}
+        if result == :retry_append_lock,
+          do: with_append_lock(path, callback, attempts - 1),
+          else: result
+
+      _other ->
+        {:error, :source_unavailable}
     end
   end
 
@@ -915,23 +923,22 @@ defmodule PtcRunner.Kernel.TraceLog do
     do: {:error, :source_unavailable}
 
   defp with_inode_append_lock(path, callback, attempts) do
-    with {:ok, scope, _stat} <- append_inode_lock_scope(path),
-         {:ok, port} <- start_append_lock(scope) do
-      result =
-        try do
-          case append_inode_lock_scope(path) do
-            {:ok, ^scope, locked_stat} -> callback.(locked_stat)
-            _changed -> :retry_inode_append_lock
-          end
-        after
-          release_append_lock(port)
-        end
+    case append_inode_lock_scope(path) do
+      {:ok, scope, _stat} ->
+        result =
+          with_bucket_lock(scope, fn ->
+            case append_inode_lock_scope(path) do
+              {:ok, ^scope, locked_stat} -> callback.(locked_stat)
+              _changed -> :retry_inode_append_lock
+            end
+          end)
 
-      if result == :retry_inode_append_lock,
-        do: with_inode_append_lock(path, callback, attempts - 1),
-        else: result
-    else
-      _ -> {:error, :source_unavailable}
+        if result == :retry_inode_append_lock,
+          do: with_inode_append_lock(path, callback, attempts - 1),
+          else: result
+
+      _other ->
+        {:error, :source_unavailable}
     end
   end
 
@@ -993,14 +1000,52 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
+  defp append_lock_name(:callback), do: "bucket-000.lock"
+
   defp append_lock_name(scope) do
-    # Path leases can enclose inode leases. Keep their bucket ranges disjoint
-    # so the fixed path-then-inode acquisition order cannot lock one file twice.
-    offset = if elem(scope, 0) == :inode, do: @append_buckets_per_kind, else: 0
+    # Bucket zero guards callback-enabled operations before they take a path
+    # lease. Path leases then precede inode leases in disjoint ranges.
     <<prefix::16, _rest::binary>> = :crypto.hash(:sha256, :erlang.term_to_binary(scope))
-    bucket = offset + Bitwise.band(prefix, @append_buckets_per_kind - 1)
+
+    bucket =
+      case elem(scope, 0) do
+        :path -> 1 + rem(prefix, @append_path_buckets)
+        :inode -> 2_048 + Bitwise.band(prefix, @append_inode_buckets - 1)
+      end
 
     "bucket-#{bucket |> Integer.to_string(16) |> String.downcase() |> String.pad_leading(3, "0")}.lock"
+  end
+
+  defp with_callback_lock(nil, callback), do: callback.()
+  defp with_callback_lock(_hook, callback), do: with_bucket_lock(:callback, callback)
+
+  defp with_bucket_lock(scope, callback) do
+    # A callback may append again in this BEAM process. The outer callback
+    # bucket prevents another callback holder from taking the nested bucket
+    # in reverse order; reentrant use of the same bucket needs no second port.
+    name = append_lock_name(scope)
+    key = {__MODULE__, :held_append_buckets}
+    held = Process.get(key, [])
+
+    if name in held do
+      callback.()
+    else
+      case start_append_lock(scope) do
+        {:ok, port} ->
+          Process.put(key, [name | held])
+
+          try do
+            callback.()
+          after
+            release_append_lock(port)
+
+            if held == [], do: Process.delete(key), else: Process.put(key, held)
+          end
+
+        {:error, _reason} = error ->
+          error
+      end
+    end
   end
 
   defp append_scope_digest(scope) do
