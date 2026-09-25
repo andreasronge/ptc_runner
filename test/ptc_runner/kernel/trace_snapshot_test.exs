@@ -611,10 +611,13 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
         end
       end)
 
+    on_exit(fn -> if Process.alive?(owner), do: Process.exit(owner, :kill) end)
+
     starter =
       Task.async(fn ->
         TraceSnapshot.start({:directory, directory},
           owner: owner,
+          capture_deadline_ms: System.monotonic_time(:millisecond) + 60_000,
           capture_hook: fn ->
             send(test, {:capture_paused, self()})
 

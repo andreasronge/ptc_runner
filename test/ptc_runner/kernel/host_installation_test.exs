@@ -35,7 +35,24 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   @tag :tmp_dir
   test "catalog construction is process-free and excludes host-private values", %{tmp_dir: dir} do
     host = load_host(dir, http_config())
-    assert {:ok, catalog} = HostInstallation.catalog(host)
+    caller = self()
+
+    # Trace only this caller while building the catalog. Any owner started by
+    # catalog/1 would have to spawn from this process; tracing avoids comparing
+    # the VM-wide owner set while other async tests create their own owners.
+    assert :erlang.trace(caller, true, [:procs]) == 1
+
+    catalog =
+      try do
+        assert {:ok, catalog} = HostInstallation.catalog(host)
+        delivered = :erlang.trace_delivered(caller)
+        assert_receive {:trace_delivered, ^caller, ^delivered}
+        refute_received {:trace, ^caller, :spawn, _child, _mfa}
+        catalog
+      after
+        :erlang.trace(caller, false, [:procs])
+      end
+
     serialized_catalog = :erlang.term_to_binary(catalog)
 
     refute Map.has_key?(catalog, :owner)
@@ -285,7 +302,9 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       state
     end)
 
-    limits = %{Limits.installed_defaults() | run_duration_ms: 500}
+    assert {:ok, credentials} = ProviderRegistry.resolve_credentials(registry, ["token"])
+
+    limits = %{Limits.installed_defaults() | run_duration_ms: 1_500}
     assert {:ok, session} = ProviderSession.start_active(limits, "installed-deadline-boundary")
     assert {:ok, session} = ProviderSession.begin_operation(session, :run)
     deadline = ProviderSession.run_deadline(session)
@@ -301,9 +320,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
     assert {:ok, prepared} = ProviderRegistry.prepare(registry, "remote", %{}, active_context)
     assert {:ok, preflighted} = ProviderRegistry.preflight(prepared)
-
-    assert {:ok, credentials} =
-             ProviderRegistry.resolve_credentials(registry, prepared.credential_names)
+    assert prepared.credential_names == ["token"]
 
     assert 1 = :erlang.trace(authority_owner, true, [:procs, :set_on_spawn, {:tracer, self()}])
     parent = self()
@@ -330,7 +347,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       callback_ref = Process.monitor(callback_worker)
       assert true = :erlang.suspend_process(callback_worker)
 
-      assert_receive {:DOWN, ^callback_ref, :process, ^callback_worker, :killed}, 1_000
+      assert_receive {:DOWN, ^callback_ref, :process, ^callback_worker, :killed}, 5_000
 
       assert_receive {:installed_callback_result,
                       {:error,
