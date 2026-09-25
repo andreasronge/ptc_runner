@@ -299,20 +299,33 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
     assert {:ok, credentials} = ProviderRegistry.resolve_credentials(registry, ["token"])
 
-    assert {:ok, prepared} =
-             ProviderRegistry.prepare(registry, "remote", %{}, context(dir, :mission))
-
-    assert {:ok, preflighted} = ProviderRegistry.preflight(prepared)
-    assert prepared.credential_names == ["token"]
-
-    parent = self()
-    limits = %{Limits.installed_defaults() | run_duration_ms: 1_500}
+    limits = %{Limits.installed_defaults() | run_duration_ms: 5_000}
     assert {:ok, session} = ProviderSession.start_active(limits, "installed-deadline-boundary")
     assert {:ok, session} = ProviderSession.begin_operation(session, :run)
     deadline = ProviderSession.run_deadline(session)
 
+    active_context =
+      context(dir, :mission)
+      |> Map.merge(%{
+        deadline: deadline,
+        deadline_ms: Deadline.expires_at(deadline),
+        limits: limits,
+        installed_limits: limits
+      })
+
+    assert {:ok, prepared} =
+             ProviderRegistry.prepare(registry, "remote", %{}, active_context)
+
+    assert {:ok, preflighted} = ProviderRegistry.preflight(prepared)
+    assert prepared.credential_names == ["token"]
+
+    assert [{_ticket, %{bounds: %{deadline: ^deadline}}}] =
+             :sys.get_state(authority_owner).preflights |> Map.to_list()
+
+    parent = self()
+
     # Keep the installed ticket and its owner path, but block its acquire
-    # callback so the shared deadline has a worker to terminate.
+    # callback so the preflight-propagated deadline has a worker to terminate.
     :sys.replace_state(authority_owner, fn state ->
       preflights =
         Map.new(state.preflights, fn {ticket, preflight} ->
@@ -321,8 +334,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
             receive do: (:release -> :ok)
           end
 
-          bounds = %{deadline: deadline, max_heap_words: limits.provider_heap_words}
-          {ticket, %{preflight | acquire: acquire, bounds: bounds}}
+          {ticket, %{preflight | acquire: acquire}}
         end)
 
       %{state | preflights: preflights}
@@ -354,7 +366,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
                          phase: :provider_acquisition,
                          code: :provider_unavailable
                        }}},
-                     5_000
+                     10_000
 
       refute Process.alive?(callback_worker)
       assert_receive {:DOWN, ^caller_ref, :process, ^caller, :normal}
