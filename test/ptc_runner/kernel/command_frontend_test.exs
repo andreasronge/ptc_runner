@@ -22,7 +22,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
 
   @run_ref "cmd-00000000000000000000000001"
 
-  @human_fixtures Path.expand("../../fixtures/command-human-v4.json", __DIR__)
+  @human_fixtures Path.expand("../../fixtures/command-human-v5.json", __DIR__)
                   |> File.read!()
                   |> Jason.decode!()
 
@@ -506,7 +506,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
       )
 
     assert presentation.exit_status == 7
-    assert presentation.stdout == ""
+    assert Jason.decode!(presentation.stdout) == CommandOutcome.to_map(presentation.outcome)
     # The parent directory does not exist, which is the one destination cause
     # with an obvious remedy, so it is named without echoing the path itself.
     assert presentation.stderr =~ "destination/result_directory_missing"

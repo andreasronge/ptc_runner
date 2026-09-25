@@ -15,8 +15,7 @@
     "root": "01-one-question/.ptc",
     "trace": true,
     "inspection": true,
-    "result": false,
-    "envelope": true
+    "result": false
   },
   "viewer": {
     "port": 4131,

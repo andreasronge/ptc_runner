@@ -17,6 +17,28 @@ defmodule PtcRunner.CLILoggerTest do
   @notice "TLS :client: In state :certify generated CLIENT ALERT: Fatal - Certificate Expired"
   @publication_handler "ptc-publication-destination-unavailable"
 
+  test "publication stderr joins a command envelope by run reference" do
+    run_ref = "cmd-00000000000000000000000001"
+
+    stderr =
+      capture_io(:stderr, fn ->
+        CLILogger.publication_failure(
+          [],
+          %{},
+          %{
+            operation: :reserve,
+            kind: :result,
+            cause: {:reason, :eio},
+            run_ref: run_ref
+          },
+          :stderr
+        )
+      end)
+
+    assert stderr ==
+             "destination unavailable: operation=reserve kind=result cause=reason:eio run_ref=#{run_ref}\n"
+  end
+
   setup do
     previous_level = Logger.level()
     {:ok, original} = :logger.get_handler_config(:default)

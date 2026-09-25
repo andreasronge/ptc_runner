@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
   use ExUnit.Case, async: true
   @moduletag :operator
 
+  alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandEntry
   alias PtcRunner.Kernel.CommandFrontend
@@ -10,8 +11,77 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
   alias PtcRunner.Kernel.CommandPreparation
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.PrivateDirectory
+  alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.TestSupport.Eventually
+
+  @tag :tmp_dir
+  test "a staging reservation failure reaches the default V5 ledger with its cause", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
+    output = Path.join(directory, "result.json")
+    event = [:ptc_runner, :publication, :destination_unavailable]
+    ref = :telemetry_test.attach_event_handlers(self(), [event])
+    on_exit(fn -> :telemetry.detach(ref) end)
+
+    presentation =
+      PublicationHandle.with_fault_hook(
+        fn path, stage ->
+          if path == output and stage == :staging_file, do: {:error, :eio}, else: :ok
+        end,
+        fn ->
+          CommandFrontend.execute(["run", project, "--output", output], :standalone, fn _ ->
+            {:ok, CommandRuntime.standalone()}
+          end)
+        end
+      )
+
+    assert presentation.exit_status != 0
+    envelope = CommandOutcome.to_map(presentation.outcome)
+    assert envelope["schema_version"] == 5
+    assert envelope["error"]["code"] == "result_destination_unavailable"
+    assert envelope["error"]["cause"] == "filesystem_error"
+    assert Jason.decode!(presentation.stdout) == envelope
+    assert {:ok, schema} = JSV.build(CommandContract.published_schema(), atoms: false)
+    assert {:ok, _validated} = JSV.validate(envelope, schema, cast: false)
+    refute Jason.encode!(envelope) =~ directory
+    run_ref = envelope["run_ref"]
+    ledger = Path.join([target, ".ptc", "envelopes", run_ref <> ".json"])
+    assert Jason.decode!(File.read!(ledger)) == envelope
+    assert_receive {^event, ^ref, %{}, %{run_ref: ^run_ref, cause: {:reason, :eio}}}
+  end
+
+  @tag :tmp_dir
+  test "a missing host before sink creation reaches the default V5 ledger", %{tmp_dir: directory} do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
+
+    document = project |> File.read!() |> Jason.decode!()
+
+    File.write!(
+      project,
+      Jason.encode!(Map.put(document, "host", %{"path" => "missing-host.json"}))
+    )
+
+    presentation =
+      CommandFrontend.execute(["run", project], :standalone, fn _ ->
+        {:ok, CommandRuntime.standalone()}
+      end)
+
+    assert presentation.exit_status != 0
+    envelope = CommandOutcome.to_map(presentation.outcome)
+    assert envelope["schema_version"] == 5
+    assert envelope["error"]["code"] == "host_unavailable"
+    assert envelope["error"]["cause"] == "resource_unavailable"
+    assert Jason.decode!(presentation.stdout) == envelope
+    refute Jason.encode!(envelope) =~ directory
+    ledger = Path.join([target, ".ptc", "envelopes", envelope["run_ref"] <> ".json"])
+    assert Jason.decode!(File.read!(ledger)) == envelope
+  end
 
   @tag :tmp_dir
   test "run admission reclaims interrupted staging with a dead owner", %{tmp_dir: directory} do
@@ -576,6 +646,8 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     assert presentation.stderr =~ root
     assert presentation.stderr =~ "owner-only (0700)"
     assert presentation.stderr =~ "chmod 700"
+    assert presentation.outcome.envelope["error"]["cause"] == "permission"
+    assert Jason.decode!(presentation.stdout) == presentation.outcome.envelope
   end
 
   @tag :tmp_dir
@@ -650,6 +722,8 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     assert presentation.stderr =~ Path.join(root, "envelopes")
     assert presentation.stderr =~ "owner-only (0700)"
     assert presentation.stderr =~ "chmod 700"
+    assert presentation.outcome.envelope["error"]["cause"] == "permission"
+    assert Jason.decode!(presentation.stdout) == presentation.outcome.envelope
   end
 
   @tag :tmp_dir
@@ -666,6 +740,8 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     assert presentation.stderr =~ "envelope/destination_parent_unavailable"
     assert presentation.stderr =~ missing
     assert presentation.stderr =~ "mkdir -p '#{missing}'"
+    assert presentation.outcome.envelope["error"]["cause"] == "filesystem_error"
+    assert Jason.decode!(presentation.stdout) == presentation.outcome.envelope
     refute presentation.stderr =~ "owner-only (0700)"
     refute File.exists?(missing)
   end
@@ -686,9 +762,47 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     assert presentation.exit_status == 7
     assert presentation.envelope_path == explicit
     assert Jason.decode!(File.read!(explicit)) == presentation.outcome.envelope
+    assert presentation.outcome.envelope["error"]["cause"] == "filesystem_error"
     assert presentation.stderr =~ "destination/invalid_destination"
     assert presentation.stderr =~ "envelope/destination_parent_unavailable"
     assert presentation.stderr =~ "missing-artifact-parent"
+  end
+
+  @tag :tmp_dir
+  test "final ledger reservation reports the command run reference", %{tmp_dir: directory} do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
+    copy = Path.join(directory, "copy.json")
+    event = [:ptc_runner, :publication, :destination_unavailable]
+    ref = :telemetry_test.attach_event_handlers(self(), [event])
+    on_exit(fn -> :telemetry.detach(ref) end)
+
+    stderr =
+      ExUnit.CaptureIO.capture_io(:stderr, fn ->
+        presentation =
+          PublicationHandle.with_fault_hook(
+            fn path, stage ->
+              if Path.dirname(path) == Path.join([target, ".ptc", "envelopes"]) and
+                   stage == :staging_file,
+                 do: {:error, :eio},
+                 else: :ok
+            end,
+            fn ->
+              CommandFrontend.execute(["run", project, "--envelope", copy], :standalone, fn _ ->
+                {:ok, CommandRuntime.standalone()}
+              end)
+            end
+          )
+
+        send(self(), {:presentation, presentation})
+      end)
+
+    assert_receive {:presentation, presentation}
+    run_ref = presentation.outcome.envelope["run_ref"]
+    assert Jason.decode!(File.read!(copy))["run_ref"] == run_ref
+    assert stderr =~ "run_ref=#{run_ref}"
+    assert_receive {^event, ^ref, %{}, %{run_ref: ^run_ref, cause: {:reason, :eio}}}
   end
 
   @tag :tmp_dir
@@ -1045,8 +1159,19 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     assert presentation.stderr =~ "parent directory is missing (enoent)"
     assert presentation.outcome.envelope["error"]["phase"] == "destination"
     assert presentation.outcome.envelope["error"]["code"] == "envelope_destination_unavailable"
+    assert presentation.outcome.envelope["error"]["cause"] == "filesystem_error"
+    assert Jason.decode!(presentation.stdout) == presentation.outcome.envelope
+
+    ledger =
+      Path.join([
+        target,
+        ".ptc",
+        "envelopes",
+        presentation.outcome.envelope["run_ref"] <> ".json"
+      ])
+
+    assert Jason.decode!(File.read!(ledger)) == presentation.outcome.envelope
     refute File.exists?(copy)
-    refute File.exists?(Path.join(target, ".ptc"))
   end
 
   @tag :tmp_dir
@@ -1076,8 +1201,19 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     assert presentation.stderr =~ "permission denied (eacces)"
     assert presentation.outcome.envelope["error"]["phase"] == "destination"
     assert presentation.outcome.envelope["error"]["code"] == "envelope_destination_unavailable"
+    assert presentation.outcome.envelope["error"]["cause"] == "permission"
+    assert Jason.decode!(presentation.stdout) == presentation.outcome.envelope
+
+    ledger =
+      Path.join([
+        target,
+        ".ptc",
+        "envelopes",
+        presentation.outcome.envelope["run_ref"] <> ".json"
+      ])
+
+    assert Jason.decode!(File.read!(ledger)) == presentation.outcome.envelope
     refute File.exists?(copy)
-    refute File.exists?(Path.join(target, ".ptc"))
   end
 
   @tag :tmp_dir

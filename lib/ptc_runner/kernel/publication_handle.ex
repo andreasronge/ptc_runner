@@ -7,9 +7,37 @@ defmodule PtcRunner.Kernel.PublicationHandle do
 
   @type identity :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
   @type kind :: :trace | :inspection | :result | :recovery
+  @type reservation_error ::
+          atom() | {:destination_unavailable, {:reason, atom()} | {:exception, module()}}
   @filesystem_destination_failures [:eacces, :edquot, :enospc, :erofs]
   @append_reservation_name ~r/\Areservation-[0-9a-f]{64}\.lock\z/
   @append_reservation_sweep_interval_ms 60_000
+
+  @doc false
+  def with_run_ref(run_ref, fun) when is_binary(run_ref) and is_function(fun, 0) do
+    previous = Process.put(:ptc_command_run_ref, run_ref)
+
+    try do
+      fun.()
+    after
+      if previous,
+        do: Process.put(:ptc_command_run_ref, previous),
+        else: Process.delete(:ptc_command_run_ref)
+    end
+  end
+
+  @doc false
+  def with_fault_hook(hook, fun) when is_function(hook, 2) and is_function(fun, 0) do
+    previous = Process.put(:ptc_publication_fault_hook, hook)
+
+    try do
+      fun.()
+    after
+      if previous,
+        do: Process.put(:ptc_publication_fault_hook, previous),
+        else: Process.delete(:ptc_publication_fault_hook)
+    end
+  end
 
   @enforce_keys [
     :kind,
@@ -53,7 +81,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
         }
 
   @spec reserve(binary(), kind(), non_neg_integer()) ::
-          {:ok, t()} | {:error, atom()}
+          {:ok, t()} | {:error, reservation_error()}
   def reserve(path, kind, mode)
       when is_binary(path) and kind in [:trace, :inspection, :result, :recovery] and
              is_integer(mode) and mode >= 0 do
@@ -64,7 +92,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
 
   @doc false
   @spec reserve_for(binary(), kind(), non_neg_integer(), pid()) ::
-          {:ok, t()} | {:error, atom()}
+          {:ok, t()} | {:error, reservation_error()}
   def reserve_for(path, kind, mode, controller)
       when is_binary(path) and kind in [:trace, :inspection, :result, :recovery] and
              is_integer(mode) and mode >= 0 and is_pid(controller) do
@@ -77,7 +105,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
 
   @doc false
   @spec reserve_stream_for(binary(), :inspection, non_neg_integer(), pid()) ::
-          {:ok, t()} | {:error, atom()}
+          {:ok, t()} | {:error, reservation_error()}
   def reserve_stream_for(path, :inspection, mode, controller)
       when is_binary(path) and is_integer(mode) and mode >= 0 and is_pid(controller) do
     with {:ok, owner} <- PublicationHandleOwner.start(controller) do
@@ -127,7 +155,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
 
   @doc false
   @spec reserve_visible(binary(), kind(), non_neg_integer()) ::
-          {:ok, t()} | {:error, atom()}
+          {:ok, t()} | {:error, reservation_error()}
   def reserve_visible(path, kind, mode)
       when is_binary(path) and kind in [:trace, :inspection, :result, :recovery] and
              is_integer(mode) and mode >= 0 do
@@ -138,7 +166,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
 
   @doc false
   @spec reserve_visible_for(binary(), kind(), non_neg_integer(), pid()) ::
-          {:ok, t()} | {:error, atom()}
+          {:ok, t()} | {:error, reservation_error()}
   def reserve_visible_for(path, kind, mode, controller)
       when is_binary(path) and kind in [:trace, :inspection, :result, :recovery] and
              is_integer(mode) and mode >= 0 and is_pid(controller) do
@@ -224,7 +252,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
 
   @doc false
   @spec reserve_append_for(binary(), kind(), non_neg_integer(), pid()) ::
-          {:ok, t()} | {:error, atom()}
+          {:ok, t()} | {:error, reservation_error()}
   def reserve_append_for(path, kind, mode, controller)
       when is_binary(path) and kind == :trace and is_integer(mode) and mode >= 0 and
              is_pid(controller) do
@@ -1785,10 +1813,16 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     do: {:error, reason}
 
   defp emit_destination_unavailable(operation, kind, cause) do
+    run_ref = Process.get(:ptc_command_run_ref)
+    if run_ref, do: Process.put(:ptc_publication_failure_cause, cause)
+
+    metadata = %{operation: operation, kind: kind, cause: cause}
+    metadata = if run_ref, do: Map.put(metadata, :run_ref, run_ref), else: metadata
+
     :telemetry.execute(
       [:ptc_runner, :publication, :destination_unavailable],
       %{},
-      %{operation: operation, kind: kind, cause: cause}
+      metadata
     )
   end
 end

@@ -44,6 +44,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
   alias PtcRunner.Kernel.ProjectResolver
   alias PtcRunner.Kernel.ProviderCredentials
   alias PtcRunner.Kernel.PublicationAuthority
+  alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.LiveStatus
 
   @fallback_run_ref "cmd-00000000000000000000000000"
@@ -357,7 +358,14 @@ defmodule PtcRunner.Kernel.CommandEngine do
     {_status, outcome} = result
 
     publication =
-      CommandEnvelope.publish_for_project(outcome, entry.arguments, handle || path, entry.run_ref)
+      PublicationHandle.with_run_ref(entry.run_ref, fn ->
+        CommandEnvelope.publish_for_project(
+          outcome,
+          entry.arguments,
+          handle || path,
+          entry.run_ref
+        )
+      end)
 
     case publication do
       :ok ->

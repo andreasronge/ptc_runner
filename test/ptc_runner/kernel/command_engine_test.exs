@@ -153,7 +153,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         "--envelope ENVELOPE.json" in option["switches"]
       end)
 
-    assert envelope["description"] =~ "V4 command envelope"
+    assert envelope["description"] =~ "V5 command envelope"
 
     assert {:stdout, text} = CommandRenderer.render(transcript_help)
     assert text =~ "--private-output TRANSCRIPT.json"
@@ -596,7 +596,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
-  test "a type evaluator failure publishes only fixed V4 evidence", %{tmp_dir: directory} do
+  test "a type evaluator failure publishes only fixed V5 evidence", %{tmp_dir: directory} do
     application = write_application(directory, "type-error-dispatch", valid_manifest())
 
     File.write!(
@@ -1150,7 +1150,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
-  test "V4 success and error envelopes retain evaluations by mission", %{tmp_dir: directory} do
+  test "V5 success and error envelopes retain evaluations by mission", %{tmp_dir: directory} do
     manifest =
       valid_manifest(%{
         "workflow" => %{
@@ -4289,7 +4289,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                },
                %{
                  "switches" => ["--envelope ENVELOPE.json"],
-                 "description" => "atomically publish the V4 command envelope"
+                 "description" => "atomically publish the V5 command envelope"
                },
                %{
                  "switches" => ["--help"],
@@ -6057,7 +6057,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     }
 
     classified = %{
-      "schema_version" => 4,
+      "schema_version" => 5,
       "command" => "run",
       "status" => "error",
       "run_ref" => run_ref,
@@ -6281,7 +6281,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     result_publication = CommandDiagnostic.new!(:publication, :result_publication_failed)
 
     envelope = %{
-      "schema_version" => 4,
+      "schema_version" => 5,
       "command" => "run",
       "status" => "error",
       "run_ref" => run_ref,
@@ -6400,7 +6400,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.exit_status == 2
 
     assert outcome.envelope == %{
-             "schema_version" => 4,
+             "schema_version" => 5,
              "command" => "unknown",
              "status" => "error",
              "run_ref" => outcome.envelope["run_ref"],
@@ -6907,7 +6907,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   # or without provider activity, and the dispatcher calls an active failure
   # incomplete. Every one of those outcomes has to seal, or the run that raised
   # this reason exits 70 through the very path the diagnostic exists to replace.
-  test "every reachable capacity refusal outcome seals as a V4 envelope" do
+  test "every reachable capacity refusal outcome seals as a V5 envelope" do
     payload_bytes = EventBudget.minimum_normal_payload_bytes()
     {:ok, message} = LimitCapacityDiagnostic.message(payload_bytes, payload_bytes * 2)
     {:ok, run_ref} = CommandRunRef.generate()

@@ -216,7 +216,7 @@ defmodule Mix.Tasks.PtcTest do
     assert rendering == "1\n"
 
     assert %{
-             "schema_version" => 4,
+             "schema_version" => 5,
              "command" => "run",
              "status" => "ok",
              "warnings" => [],
@@ -231,12 +231,15 @@ defmodule Mix.Tasks.PtcTest do
     manifest_path = write_manifest(dir, %{"value" => 1})
     missing_host = Path.join(dir, "missing-host.json")
 
-    message = failed_message(["run", manifest_path, "--host-config", missing_host])
+    presentation =
+      MixCommandAdapter.execute(["run", manifest_path, "--host-config", missing_host])
 
-    assert message =~ "error: host/host_unavailable:"
-    assert message =~ "(run_ref: cmd-"
-    refute message =~ dir
-    refute message =~ "schema_version"
+    assert presentation.exit_status == 3
+    assert Jason.decode!(presentation.stdout)["error"]["cause"] == "resource_unavailable"
+    assert presentation.stderr =~ "error: host/host_unavailable:"
+    assert presentation.stderr =~ "(run_ref: cmd-"
+    refute presentation.stderr =~ dir
+    refute presentation.stderr =~ "schema_version"
   end
 
   @tag :tmp_dir
@@ -465,11 +468,14 @@ defmodule Mix.Tasks.PtcTest do
     manifest_path = write_manifest(dir, %{"value" => 1})
     invalid_inspection = Path.join(dir, "run.jsonl")
 
-    message = failed_message(["run", manifest_path, "--inspect", invalid_inspection])
+    presentation =
+      MixCommandAdapter.execute(["run", manifest_path, "--inspect", invalid_inspection])
 
-    assert message =~ "destination/invalid_inspection_destination:"
-    assert message =~ ".ptcins"
-    refute message =~ invalid_inspection
+    assert presentation.exit_status == 7
+    assert Jason.decode!(presentation.stdout)["error"]["cause"] == "invalid_configuration"
+    assert presentation.stderr =~ "destination/invalid_inspection_destination:"
+    assert presentation.stderr =~ ".ptcins"
+    refute presentation.stderr =~ invalid_inspection
   end
 
   @tag :tmp_dir

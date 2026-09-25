@@ -60,8 +60,7 @@ defmodule PtcRunner.Kernel.CommandInitializer do
       "root": ".ptc",
       "trace": true,
       "inspection": false,
-      "result": false,
-      "envelope": true
+      "result": false
     },
     "viewer": {
       "port": 0,

@@ -247,7 +247,9 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenClientTest do
       {:ok, %{value: "secret", release: blocking_release}}
     end
 
-    release_deadline_ms = System.monotonic_time(:millisecond) + 10
+    # Give dispatch room under full-suite scheduler load; the request still
+    # consumes the remaining budget before the release callback starts.
+    release_deadline_ms = System.monotonic_time(:millisecond) + 500
 
     request = fn _, _, _, _, _ ->
       wait_until(release_deadline_ms)

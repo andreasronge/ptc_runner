@@ -8,8 +8,7 @@
     "root": ".ptc-reviewer-replay",
     "trace": true,
     "inspection": true,
-    "result": true,
-    "envelope": true
+    "result": true
   },
   "viewer": {
     "port": 0,

@@ -24,13 +24,14 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   has no source because the provider subject already locates the slot. Every
   other message is the catalog literal.
 
-  `notes` is reserved and always empty: the strict internal V4 envelope contract
+  `notes` is reserved and always empty: the strict internal V5 envelope contract
   pins it to `{"const": []}`. Reporting a rejected value against the bound it
   broke is a later-version change, not a producer-side one.
   """
 
   alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.CandidateRefusedDiagnostic
+  alias PtcRunner.Kernel.CommandFailureCause
   alias PtcRunner.Kernel.CommandPath
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
@@ -63,6 +64,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
     :notes,
     :retryable,
     :provider_activity,
+    :cause,
     :warnings,
     :exit_status
   ]
@@ -81,6 +83,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
           notes: [],
           retryable: boolean(),
           provider_activity: boolean(),
+          cause: atom() | nil,
           warnings: [CommandWarning.t()],
           exit_status: 2 | 3 | 4 | 5 | 6 | 7 | 70
         }
@@ -90,7 +93,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   def new(phase, code, opts \\ [])
 
   def new(phase, code, opts) when is_list(opts) do
-    allowed = [:message, :source, :path, :span, :subject, :provider_activity, :warnings]
+    allowed = [:message, :source, :path, :span, :subject, :provider_activity, :warnings, :cause]
 
     with true <- Keyword.keyword?(opts),
          keys = Keyword.keys(opts),
@@ -102,7 +105,9 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          span <- Keyword.get(opts, :span),
          subject <- Keyword.get(opts, :subject),
          activity <- Keyword.get(opts, :provider_activity, false),
+         cause <- Keyword.get(opts, :cause),
          warnings <- Keyword.get(opts, :warnings, []),
+         true <- is_nil(cause) or CommandFailureCause.valid?(cause),
          true <- DiagnosticCatalog.valid_message?(phase, code, message),
          true <- valid_source?(source),
          true <- valid_source_for_row?(source, row),
@@ -128,6 +133,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          notes: [],
          retryable: row.retryable,
          provider_activity: activity,
+         cause: cause,
          warnings: warnings,
          exit_status: row.exit_status
        }}
@@ -153,6 +159,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
       span: diagnostic.span,
       subject: diagnostic.subject,
       provider_activity: diagnostic.provider_activity,
+      cause: diagnostic.cause,
       warnings: diagnostic.warnings
     ]
 
@@ -165,7 +172,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   def to_map(%__MODULE__{} = diagnostic) do
     if not valid?(diagnostic), do: raise(ArgumentError, "invalid command diagnostic")
 
-    %{
+    rendered = %{
       "phase" => Atom.to_string(diagnostic.phase),
       "code" => Atom.to_string(diagnostic.code),
       "message" => diagnostic.message,
@@ -177,6 +184,10 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
       "retryable" => diagnostic.retryable,
       "provider_activity" => diagnostic.provider_activity
     }
+
+    if diagnostic.cause,
+      do: Map.put(rendered, "cause", Atom.to_string(diagnostic.cause)),
+      else: rendered
   end
 
   defp path_map(nil), do: nil

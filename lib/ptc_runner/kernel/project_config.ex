@@ -194,7 +194,7 @@ defmodule PtcRunner.Kernel.ProjectConfig do
             "trace" => bool,
             "inspection" => bool,
             "result" => bool,
-            "envelope" => bool
+            "envelope" => %{bool | "default" => true}
           })
           |> Map.put("allOf", [
             %{
@@ -400,7 +400,7 @@ defmodule PtcRunner.Kernel.ProjectConfig do
          {:ok, trace} <- boolean(artifacts, "trace", false),
          {:ok, inspection} <- boolean(artifacts, "inspection", false),
          {:ok, result} <- boolean(artifacts, "result", false),
-         {:ok, envelope} <- boolean(artifacts, "envelope", false),
+         {:ok, envelope} <- boolean(artifacts, "envelope", true),
          true <- not inspection or trace do
       {:ok, root, %{trace: trace, inspection: inspection, result: result, envelope: envelope}}
     else
@@ -498,7 +498,7 @@ defmodule PtcRunner.Kernel.ProjectConfig do
   defp resolve(directory, relative), do: Path.expand(relative, directory)
 
   defp default_artifacts,
-    do: %{trace: false, inspection: false, result: false, envelope: false}
+    do: %{trace: false, inspection: false, result: false, envelope: true}
 
   defp default_viewer,
     do: %{port: 0, open: false, repl: false, private: false}

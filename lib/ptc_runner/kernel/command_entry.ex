@@ -16,6 +16,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandDestination
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandFailureCause
   alias PtcRunner.Kernel.CommandRejection
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.DestinationIdentity
@@ -48,14 +49,14 @@ defmodule PtcRunner.Kernel.CommandEntry do
           rejection: CommandRejection.t() | nil,
           envelope_path: binary() | nil,
           envelope_handle: %PublicationHandle{} | nil,
-          envelope_destination_failure: {binary(), atom()} | nil,
+          envelope_destination_failure: {binary(), term()} | nil,
           destinations: {map(), [atom()]} | nil
         }
 
   @spec open([binary()], :standalone | :mix) :: {:ok, t()} | {:error, t()}
   def open(argv, frontend) when frontend in [:standalone, :mix] do
     run_ref = generated_or_safe_ref()
-    open_safely(argv, frontend, run_ref)
+    PublicationHandle.with_run_ref(run_ref, fn -> open_safely(argv, frontend, run_ref) end)
   end
 
   def open(_argv, frontend) do
@@ -69,7 +70,10 @@ defmodule PtcRunner.Kernel.CommandEntry do
   def open_with_ref(argv, frontend, run_ref)
       when frontend in [:standalone, :mix] and is_binary(run_ref) do
     if CommandRunRef.valid?(run_ref),
-      do: open_safely(argv, frontend, run_ref),
+      do:
+        PublicationHandle.with_run_ref(run_ref, fn ->
+          open_safely(argv, frontend, run_ref)
+        end),
       else:
         {:error,
          rejected(
@@ -285,15 +289,20 @@ defmodule PtcRunner.Kernel.CommandEntry do
   end
 
   defp destination_failed(arguments, destinations, run_ref, frontend, path, reason) do
+    reason = destination_failure_reason(path, reason)
+
     %__MODULE__{
       run_ref: run_ref,
       frontend: frontend,
       arguments: arguments,
-      diagnostic: CommandDiagnostic.new!(:destination, :envelope_destination_unavailable),
+      diagnostic:
+        CommandDiagnostic.new!(:destination, :envelope_destination_unavailable,
+          cause: CommandFailureCause.from_reason(reason)
+        ),
       rejection: nil,
       envelope_path: nil,
       envelope_handle: nil,
-      envelope_destination_failure: {path, destination_failure_reason(path, reason)},
+      envelope_destination_failure: {path, reason},
       destinations: destinations
     }
   end

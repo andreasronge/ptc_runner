@@ -11,7 +11,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   4. `docs/java-interop.md` — bounded Java interop reference
   5. `priv/schemas/ptc-host-config.schema.json` — host-installation JSON Schema
   6. `priv/schemas/ptc-application-manifest.schema.json` — manifest JSON Schema
-  7. `priv/schemas/ptc-command-envelope-v4.schema.json` — command envelope JSON Schema
+  7. `priv/schemas/ptc-command-envelope-v5.schema.json` — command envelope JSON Schema
   8. `priv/schemas/ptc-project-config.schema.json` — project launch JSON Schema
   9. `docs/kernel-limits-reference.md` — Kernel run-limit meanings and metadata
   10. `docs/prelude-reference.md` — shipped PTC-Lisp component and export catalog
@@ -33,6 +33,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
 
   alias PtcRunner.Kernel.BundleCompiler
   alias PtcRunner.Kernel.CommandContract
+  alias PtcRunner.Kernel.CommandFailureCause
   alias PtcRunner.Kernel.CommandFrontend
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.DiagnosticCatalog
@@ -57,6 +58,8 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   @exit_status_end "<!-- END GENERATED: exit-status catalog -->"
   @profile_diagnostic_begin "<!-- BEGIN GENERATED: profile diagnostic catalog (mix ptc.gen_docs) -->"
   @profile_diagnostic_end "<!-- END GENERATED: profile diagnostic catalog -->"
+  @failure_cause_begin "<!-- BEGIN GENERATED: command failure causes (mix ptc.gen_docs) -->"
+  @failure_cause_end "<!-- END GENERATED: command failure causes -->"
   @limit_reference_path "docs/kernel-limits-reference.md"
   @agent_failure_path "priv/preludes/kernel/agent.failure.clj"
   @prelude_reference_path "docs/prelude-reference.md"
@@ -64,7 +67,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   @audit_index_path "docs/conformance/index.md"
   @host_schema_path "priv/schemas/ptc-host-config.schema.json"
   @manifest_schema_path "priv/schemas/ptc-application-manifest.schema.json"
-  @command_schema_path "priv/schemas/ptc-command-envelope-v4.schema.json"
+  @command_schema_path "priv/schemas/ptc-command-envelope-v5.schema.json"
   @project_schema_path "priv/schemas/ptc-project-config.schema.json"
   @gateway_schema_path "priv/schemas/ptc-gateway-config.schema.json"
   @generated_schema_paths [
@@ -171,6 +174,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     generate_limit_reference(check?)
     generate_agent_failure(check?)
     generate_exit_status_catalog(check?)
+    generate_failure_cause_catalog(check?)
     generate_profile_diagnostic_catalog(check?)
     generate_prelude_reference(check?)
     generate_shipped_export_catalog(check?)
@@ -443,6 +447,33 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     end
 
     content
+  end
+
+  defp generate_failure_cause_catalog(check?) do
+    content = read_cli_reference!()
+
+    rows =
+      CommandFailureCause.rows()
+      |> Enum.map_join("\n", fn {cause, meaning} ->
+        "| `#{cause}` | #{meaning} |"
+      end)
+
+    section = """
+    #{@failure_cause_begin}
+
+    The optional `error.cause` in a V5 envelope gives a closed, public reason
+    for failures known before a trace or inspection sink begins writing. It
+    contains no path, exception name, or provider response.
+
+    | Cause | Meaning |
+    | --- | --- |
+    #{rows}
+    #{@failure_cause_end}\
+    """
+
+    [head, rest] = String.split(content, @failure_cause_begin, parts: 2)
+    [_stale, tail] = String.split(rest, @failure_cause_end, parts: 2)
+    write_or_check!(@cli_reference_path, head <> section <> tail, check?)
   end
 
   defp generate_profile_diagnostic_catalog(check?) do

@@ -16,6 +16,27 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
   alias PtcRunner.Kernel.TraceLog
 
   @tag :tmp_dir
+  test "occupied private recovery reports its specific cause before a sink exists", %{
+    tmp_dir: dir
+  } do
+    application = application!(dir, "recovery-collision", %{"events" => %{"policy" => "private"}})
+    output = Path.join(dir, "private-result.json")
+
+    assert {:ok, preparation} =
+             CommandEngine.prepare(["run", application, "--private-output", output])
+
+    recovery = PublicationAuthority.recovery_path(preparation.run_ref, output)
+    File.write!(recovery, "occupied")
+
+    assert {:error, outcome} = CommandEngine.preflight(preparation)
+    envelope = CommandOutcome.to_map(outcome)
+    assert envelope["error"]["code"] == "recovery_reservation_failed"
+    assert envelope["error"]["cause"] == "destination_exists"
+    refute Jason.encode!(envelope) =~ dir
+    assert :ok = CommandPreparation.close(preparation)
+  end
+
+  @tag :tmp_dir
   test "phase six reserves exact normal trace names before provider activity", %{tmp_dir: dir} do
     File.mkdir!(Path.join(dir, "traces"))
     application = application!(dir, "normal")

@@ -96,18 +96,32 @@ defmodule PtcRunner.Kernel.CommandRenderer do
           warning -> {:stdio, json_line(result), warning}
         end
 
-      %{"status" => "error", "run_ref" => run_ref} = envelope ->
-        {:stderr,
-         warning_lines(envelope) <>
-           (failure_line(outcome, run_ref, rejection, opts)
-            |> append_named_env_file_hint(envelope, opts)) <>
-           evaluation_line(envelope)}
+      %{"status" => "error"} = envelope ->
+        render_error(outcome, envelope, rejection, opts)
     end
   rescue
     _exception ->
       {:stderr,
        "error: internal/internal_error: internal command failure " <>
          "(run_ref: #{outcome_run_ref(outcome)})\n"}
+  end
+
+  defp render_error(
+         outcome,
+         %{"command" => "run", "error" => %{"cause" => _cause}} = envelope,
+         rejection,
+         opts
+       ),
+       do: {:stdio, json_line(envelope), failure_text(outcome, envelope, rejection, opts)}
+
+  defp render_error(outcome, envelope, rejection, opts),
+    do: {:stderr, failure_text(outcome, envelope, rejection, opts)}
+
+  defp failure_text(outcome, %{"run_ref" => run_ref} = envelope, rejection, opts) do
+    warning_lines(envelope) <>
+      (failure_line(outcome, run_ref, rejection, opts)
+       |> append_named_env_file_hint(envelope, opts)) <>
+      evaluation_line(envelope)
   end
 
   defp warning_lines(%{"warnings" => [_warning | _rest] = warnings}) do

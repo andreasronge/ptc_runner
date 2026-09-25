@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.CommandRuntime do
 
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandFailureCause
   alias PtcRunner.LiveStatus.Target
 
   @environment_file_errors [
@@ -131,7 +132,10 @@ defmodule PtcRunner.Kernel.CommandRuntime do
         :ok
 
       {:error, reason} when reason in @environment_file_errors ->
-        {:error, CommandDiagnostic.new!(:local_preflight, reason)}
+        {:error,
+         CommandDiagnostic.new!(:local_preflight, reason,
+           cause: CommandFailureCause.from_reason(reason)
+         )}
 
       {:error, reason} ->
         {:error, reason}

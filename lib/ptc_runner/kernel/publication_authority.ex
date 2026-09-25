@@ -723,6 +723,9 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
   defp reservation_error(:recovery_reservation_failed, _destination, _path),
     do: {:error, :recovery_reservation_failed}
 
+  defp reservation_error({:recovery_reservation_failed, _cause} = reason, _destination, _path),
+    do: {:error, reason}
+
   defp reservation_error(reason, destination, _path), do: {:error, {reason, destination}}
 
   defp reserve_optional(nil, _kind, _mode, _claim_owner), do: {:ok, nil}
@@ -772,9 +775,9 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
               claim_owner
             )
 
-          {:error, _reason} ->
+          {:error, reason} ->
             cleanup_reserved([requested_handle])
-            {:error, :recovery_reservation_failed}
+            {:error, {:recovery_reservation_failed, reason}}
         end
 
       {:error, :destination_exists} ->

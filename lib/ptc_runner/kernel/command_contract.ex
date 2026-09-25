@@ -1,6 +1,6 @@
 defmodule PtcRunner.Kernel.CommandContract do
   @moduledoc """
-  Generated-in-source JSON Schema for the V4 command envelope.
+  Generated-in-source JSON Schema for the V5 command envelope.
 
   The checked-in structural JSON artifact is produced from this module.
   Diagnostic phase/code/retryability/message rows come only from
@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.CandidateRefusedDiagnostic
   alias PtcRunner.Kernel.CommandDeclaration
+  alias PtcRunner.Kernel.CommandFailureCause
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.ComponentOverrideDiagnostic
@@ -30,7 +31,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   alias PtcRunner.Kernel.SelectionRulesDiagnostic
   alias PtcRunner.Lisp.EvaluatorErrorCatalog
 
-  @id "https://ptc-runner.dev/schemas/ptc-command-envelope-v4.schema.json"
+  @id "https://ptc-runner.dev/schemas/ptc-command-envelope-v5.schema.json"
   @envelope_root_key {__MODULE__, :envelope_root}
   @non_run_schema_modes [
     {"help", :help, false, false},
@@ -133,7 +134,7 @@ defmodule PtcRunner.Kernel.CommandContract do
     %{
       "$schema" => "https://json-schema.org/draft/2020-12/schema",
       "$id" => @id,
-      "title" => "PtcRunner command envelope V4",
+      "title" => "PtcRunner command envelope V5",
       "oneOf" =>
         Enum.map(@non_run_schema_modes, fn {command, mode, provider_activity, compound?} ->
           error_envelope(command, diagnostic_rows(mode), provider_activity, compound?)
@@ -1411,7 +1412,7 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp base_properties(commands, status) do
     %{
-      "schema_version" => %{"const" => 4},
+      "schema_version" => %{"const" => 5},
       "command" => %{"enum" => commands},
       "status" => %{"const" => status},
       "run_ref" => %{"type" => "string", "pattern" => @run_ref},
@@ -1515,7 +1516,8 @@ defmodule PtcRunner.Kernel.CommandContract do
             "subject" => ref("diagnostic_subject"),
             "notes" => %{"type" => "array"},
             "retryable" => %{"type" => "boolean"},
-            "provider_activity" => %{"type" => "boolean"}
+            "provider_activity" => %{"type" => "boolean"},
+            "cause" => cause_schema()
           }
         ),
       "diagnostic_source" => structural_diagnostic_field_schema(diagnostic_members, "source"),
@@ -1577,7 +1579,7 @@ defmodule PtcRunner.Kernel.CommandContract do
        do:
          Map.keys(properties) |> Enum.sort() ==
            Enum.sort(
-             ~w(phase code message source path span subject notes retryable provider_activity)
+             ~w(phase code message source path span subject notes retryable provider_activity cause)
            )
 
   defp diagnostic_object_schema?(_schema), do: false
@@ -1595,9 +1597,14 @@ defmodule PtcRunner.Kernel.CommandContract do
         "subject" => subject_schema(row),
         "notes" => %{"const" => []},
         "retryable" => %{"const" => row.retryable},
-        "provider_activity" => provider_activity_schema(row, provider_activity)
+        "provider_activity" => provider_activity_schema(row, provider_activity),
+        "cause" => cause_schema()
       }
     )
+  end
+
+  defp cause_schema do
+    %{"enum" => Enum.map(CommandFailureCause.values(), &Atom.to_string/1)}
   end
 
   defp source_schema(kind)

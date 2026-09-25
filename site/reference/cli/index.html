@@ -177,7 +177,7 @@ as absolute or relative to the process working directory (same rule as
 existing file.</li><li><code class="inline">--private-output VALUE.json</code> publishes a private result at owner-only mode
 and keeps it off stdout.</li><li><code class="inline">--trace-dir DIR</code> writes <code class="inline">&lt;run_ref&gt;.jsonl</code> or
 <code class="inline">&lt;run_ref&gt;.private.jsonl</code> according to the run's artifact class.</li><li><code class="inline">--inspect FILE</code> writes sensitive execution evidence to an owner-only
-<code class="inline">.ptcins</code> file.</li><li><code class="inline">--envelope FILE</code> atomically publishes a convenience copy of the stable V4
+<code class="inline">.ptcins</code> file.</li><li><code class="inline">--envelope FILE</code> atomically publishes a convenience copy of the stable V5
 command envelope. When a project enables <code class="inline">artifacts.envelope</code>, the project's
 <code class="inline">.ptc/envelopes/&lt;run_ref&gt;.json</code> ledger entry is written independently for that
 run. The explicit path is reserved before artifact admission, so concurrent
@@ -284,7 +284,7 @@ the same verified candidate in the immutable workflow or mission bundle.</p><p>K
 it, and under any directory name. A name outside the portable logical-name
 grammar — a leading dot, an uppercase segment — restricts neither
 <code class="inline">ptc materialize --out</code> nor <code class="inline">--component-override-descriptor</code>.</p><h2 id="read-results-and-failures">Read results and failures</h2><p>A successful normal run prints the compact JSON result value. A private run
-does not print its value. The V4 envelope records the result class, artifact
+does not print its value. The V5 envelope records the result class, artifact
 states, bounded usage, retained-memory counts, and the closed diagnostic when
 one exists.</p><p>Capability failures normally enter PTC-Lisp as recoverable envelopes so the
 workflow can correct, retry, degrade, or fail. Parser, compiler, timeout, heap,
@@ -335,8 +335,12 @@ the component dependency as described in
 <a href="/reference/component-contracts/#select-a-shipped-prelude">Select a shipped prelude</a>.</p><h3 id="use-the-standalone-process-contract">Use the standalone process contract</h3><p>For machine integration, name an envelope file instead of parsing stdout:</p><pre><code class="console language-console">ptc run ptc.json --envelope command-envelope.json</code></pre><p>The standalone streams are human presentation channels and may also contain
 output from applications or children. The envelope is an atomic, no-replace
 file whose JSON Schema this executable serves as <code class="inline">ptc docs schema-envelope</code>
-(<code class="inline">priv/schemas/ptc-command-envelope-v4.schema.json</code> in the repository). Its
-status and exit-code relationship is sealed by the same command contract.</p><p>After arguments parse, an ordinary or caught shared-engine command outcome
+(<code class="inline">priv/schemas/ptc-command-envelope-v5.schema.json</code> in the repository). Its
+status and exit-code relationship is sealed by the same command contract.</p><p>When a <code class="inline">run</code> fails with a known pre-sink cause, stdout also receives the V5
+envelope as one JSON line, and stderr retains the human diagnostic. Project
+runs attempt to store that same envelope in the default ledger.</p><p>The optional <code class="inline">error.cause</code> in a V5 envelope gives a closed, public reason
+for failures known before a trace or inspection sink begins writing. It
+contains no path, exception name, or provider response.</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Cause</th><th style="text-align: left;">Meaning</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">lock_timeout</code></td><td style="text-align: left;">A reservation or admission lock expired.</td></tr><tr><td style="text-align: left;"><code class="inline">filesystem_error</code></td><td style="text-align: left;">A filesystem operation failed.</td></tr><tr><td style="text-align: left;"><code class="inline">permission</code></td><td style="text-align: left;">The operating system denied access.</td></tr><tr><td style="text-align: left;"><code class="inline">unexpected_exception</code></td><td style="text-align: left;">A bounded operation raised or returned an unknown failure.</td></tr><tr><td style="text-align: left;"><code class="inline">subprocess_failed</code></td><td style="text-align: left;">A subprocess failed before execution evidence began.</td></tr><tr><td style="text-align: left;"><code class="inline">invalid_configuration</code></td><td style="text-align: left;">A configuration value could not be used.</td></tr><tr><td style="text-align: left;"><code class="inline">resource_unavailable</code></td><td style="text-align: left;">A required local resource was unavailable.</td></tr><tr><td style="text-align: left;"><code class="inline">destination_exists</code></td><td style="text-align: left;">An output destination was already occupied.</td></tr></tbody></table></div><p>After arguments parse, an ordinary or caught shared-engine command outcome
 publishes one requested envelope. This includes a recognized <code class="inline">run</code>, <code class="inline">validate</code>, <code class="inline">doctor</code>, or
 <code class="inline">models</code> invocation whose named project fails schema validation: project
 diagnostics terminate before command bootstrap or project references are
@@ -543,7 +547,7 @@ ptc transcript RUN_ID \
 <code class="inline">--inspection DIRECTORY</code> selects <code class="inline">DIRECTORY/RUN_ID.ptcins</code>, while
 <code class="inline">--inspection-file FILE.ptcins</code> opens only that explicit file.</p><p>On success the command prints one JSON line containing <code class="inline">command</code>, the selected
 run under <code class="inline">run_ref</code>, the absolute output <code class="inline">path</code>, and the number of published
-<code class="inline">turns</code>. The optional envelope receives the same result in the V4 command
+<code class="inline">turns</code>. The optional envelope receives the same result in the V5 command
 contract.
 The frontend-owned transcript command publishes this success envelope only
 after its private document is complete; a transcript refusal retains its

@@ -95,7 +95,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
         end
 
       {:error, :host_unavailable} ->
-        {:error, diagnostic(:host, :host_unavailable)}
+        {:error, CommandDiagnostic.new!(:host, :host_unavailable, cause: :resource_unavailable)}
 
       {:error, :host_invalid} ->
         {:error, diagnostic(:host, :host_invalid)}

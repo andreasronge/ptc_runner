@@ -15,8 +15,7 @@
     "root": "02-domain-api/.ptc",
     "trace": true,
     "inspection": true,
-    "result": false,
-    "envelope": true
+    "result": false
   },
   "viewer": {
     "port": 4132,
