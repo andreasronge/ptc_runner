@@ -16,6 +16,10 @@ page holds whether a program is driven by that console or by a person.
 | [debug-efficiency](debug-efficiency.md) | Can Jev-assisted evidence selection reduce time and cost to a correct diagnosis without increasing wrong conclusions? | offline preparation; no live run authorized |
 | [self-improvement](self-improvement.md) | Can workflows and tools improve from execution evidence, judged outside the loop, with gains that compound across layers? | draft; discussion #2034, no experiment authorized |
 
+The tool-compiler lab ran outside any program; its
+[report](reports/tool-compiler/000-compiled-extraction-recipe.md) points to the
+tag that keeps its harness.
+
 ## Layout
 
 ```text

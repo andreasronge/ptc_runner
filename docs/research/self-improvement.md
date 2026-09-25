@@ -187,8 +187,10 @@ H1 cannot yet be judged by replay. Of the deterministic helpers, only
 `cap/unwrap!` (1) and `validate-phase-return` (13) have recorded executions,
 and both are too small to justify a model search.
 
-Prelude-search 000–004 and any future debug-efficiency results are prior
-evidence, not measurements of this program.
+Prelude-search 000–004, the tool-compiler lab
+([report](reports/tool-compiler/000-compiled-extraction-recipe.md)) and any
+future debug-efficiency results are prior evidence, not measurements of this
+program.
 
 ## Backlog
 
