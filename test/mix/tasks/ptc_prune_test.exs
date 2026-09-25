@@ -119,6 +119,44 @@ defmodule Mix.Tasks.PtcPruneTest do
     assert File.read!(target) == "evidence"
   end
 
+  @tag :tmp_dir
+  test "a root named like an artifact directory does not make root files prunable", %{
+    tmp_dir: directory
+  } do
+    {project, _default_root} = project!(directory)
+    document = Jason.decode!(File.read!(project))
+    File.write!(project, Jason.encode!(put_in(document, ["artifacts", "root"], "results")))
+    root = Path.join(Path.dirname(project), "results")
+
+    for child <- ~w(traces inspection results envelopes) do
+      File.mkdir_p!(Path.join(root, child))
+      File.chmod!(Path.join(root, child), 0o700)
+    end
+
+    File.chmod!(root, 0o700)
+    unrelated = Path.join(root, "notes.json")
+    File.write!(unrelated, "keep")
+    File.touch!(unrelated, System.os_time(:second) - 20 * 86_400)
+    paths = artifact_set!(root, "old", 20, 1)
+
+    result = MixCommandAdapter.execute(["prune", project, "--max-age-days", "1"])
+    assert result.exit_status == 0
+    assert Jason.decode!(result.stdout)["deleted"] == ["old"]
+    assert File.read!(unrelated) == "keep"
+    assert Enum.all?(paths, &(not File.exists?(&1)))
+  end
+
+  @tag :tmp_dir
+  test "invalid project configuration retains its project diagnostic", %{tmp_dir: directory} do
+    {project, _root} = project!(directory)
+    document = Jason.decode!(File.read!(project))
+    File.write!(project, Jason.encode!(Map.put(document, "version", 999)))
+
+    result = MixCommandAdapter.execute(["prune", project, "--max-age-days", "1"])
+    assert result.exit_status == 3
+    assert result.stderr =~ "project/project_schema_invalid"
+  end
+
   defp project!(directory) do
     target = Path.join(directory, "demo")
     assert MixCommandAdapter.execute(["init", target]).exit_status == 0

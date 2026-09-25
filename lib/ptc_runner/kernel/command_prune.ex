@@ -2,9 +2,9 @@ defmodule PtcRunner.Kernel.CommandPrune do
   @moduledoc false
 
   alias PtcRunner.Kernel.ArtifactIdentity
+  alias PtcRunner.Kernel.ArtifactPruneTransaction
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.TraceDirectoryAdmission
-  alias PtcRunner.Kernel.TraceLog
 
   @artifact_dirs ~w(traces inspection results envelopes)
   @grace_seconds 600
@@ -40,8 +40,7 @@ defmodule PtcRunner.Kernel.CommandPrune do
 
   defp artifacts(directories) do
     directories
-    |> Map.keys()
-    |> Enum.filter(&(Path.basename(&1) in @artifact_dirs))
+    |> artifact_directories()
     |> Enum.sort()
     |> Enum.reduce_while({:ok, %{}, MapSet.new()}, fn directory, {:ok, files, staging} ->
       case scan_directory(directory, files, staging) do
@@ -260,40 +259,15 @@ defmodule PtcRunner.Kernel.CommandPrune do
          end) do
       :in_progress
     else
-      run.artifacts
-      |> Enum.sort_by(fn {path, _} -> Path.basename(Path.dirname(path)) != "traces" end)
-      |> remove_files()
+      ArtifactPruneTransaction.delete(run.artifacts, root_path(directories))
     end
-  end
-
-  defp remove_files(artifacts) do
-    Enum.reduce_while(artifacts, :ok, fn {path, stat}, :ok ->
-      result =
-        if Path.basename(Path.dirname(path)) == "traces" do
-          TraceLog.with_append_authority_lock(path, fn -> unlink_if_stable(path, stat) end)
-        else
-          unlink_if_stable(path, stat)
-        end
-
-      case result do
-        :ok -> {:cont, :ok}
-        _ -> {:halt, {:error, :delete_failed}}
-      end
-    end)
-  end
-
-  defp unlink_if_stable(path, stat) do
-    if ArtifactIdentity.stable_file?(path, stat),
-      do: File.rm(path),
-      else: {:error, :delete_failed}
   end
 
   defp run_files_unchanged?(run, directories) do
     expected = run.artifacts |> Enum.map(&elem(&1, 0)) |> MapSet.new()
 
     directories
-    |> Map.keys()
-    |> Enum.filter(&(Path.basename(&1) in @artifact_dirs))
+    |> artifact_directories()
     |> Enum.all?(fn directory ->
       case File.ls(directory) do
         {:ok, names} ->
@@ -315,5 +289,10 @@ defmodule PtcRunner.Kernel.CommandPrune do
           false
       end
     end)
+  end
+
+  defp artifact_directories(directories) do
+    root = root_path(directories)
+    Enum.map(@artifact_dirs, &Path.join(root, &1))
   end
 end

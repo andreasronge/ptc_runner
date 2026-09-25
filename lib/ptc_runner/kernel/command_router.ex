@@ -36,6 +36,10 @@ defmodule PtcRunner.Kernel.CommandRouter do
         CommandFrontend.present_entry(entry, bootstrap)
 
       {:ok, %CommandEntry{arguments: %{command: command}} = entry}
+      when command == :prune and not is_nil(entry.diagnostic) ->
+        prune_diagnostic(entry.diagnostic)
+
+      {:ok, %CommandEntry{arguments: %{command: command}} = entry}
       when command == :prune ->
         run_prune(entry)
 
@@ -51,6 +55,11 @@ defmodule PtcRunner.Kernel.CommandRouter do
       {:ok, %CommandEntry{} = entry} ->
         CommandFrontend.present_entry(entry, bootstrap)
     end
+  end
+
+  defp prune_diagnostic(%{phase: phase, code: code, message: message}) do
+    row = DiagnosticCatalog.fetch!(phase, code)
+    presentation(nil, "", "error: #{phase}/#{code}: #{message}\n", row.exit_status)
   end
 
   defp run_prune(entry) do
