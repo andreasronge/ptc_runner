@@ -3,7 +3,7 @@ defmodule Mix.Tasks.Ptc.Gateway do
   @moduledoc """
   Run in the sibling gateway project:
 
-      mix ptc.gateway /absolute/path/gateway.json --env-file credentials.env
+      MIX_QUIET=1 mix ptc.gateway /absolute/path/gateway.json --env-file credentials.env
 
   The explicit environment file is anchored to the invocation directory.
   Startup failure prints one closed JSON error on stderr and exits 78.

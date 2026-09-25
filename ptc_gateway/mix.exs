@@ -15,6 +15,7 @@ defmodule PtcGateway.MixProject do
       aliases: aliases(),
       deps: [
         {:ptc_runner, path: "..", only: [:dev, :test]},
+        launcher_dep(),
         {:req_llm, "~> 1.20", runtime: false},
         {:plug, "~> 1.18"},
         {:bandit, "~> 1.6"}
@@ -31,4 +32,14 @@ defmodule PtcGateway.MixProject do
   # not a per-commit gate, and because it measures VM-wide counters that a
   # parallel suite would perturb.
   defp aliases, do: [soak: ["test --only soak"]]
+
+  defp launcher_dep do
+    launcher_path = Path.expand("../ptc_runner_launcher/release_config.exs", __DIR__)
+
+    if File.regular?(launcher_path) do
+      {:ptc_runner_launcher, "~> 0.2.0", path: "../ptc_runner_launcher", override: true}
+    else
+      {:ptc_runner_launcher, "~> 0.2.0", override: true}
+    end
+  end
 end

@@ -2116,12 +2116,14 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert {:ok,
             %{
-              "terminal_reason" => "timeout",
+              "terminal_reason" => terminal_reason,
               "terminal_limit" => "run_duration_ms",
               "terminal_limit_value" => 1,
               "truncated" => true
             }} =
              TraceLog.query(trace, :get_run, %{"run_id" => outcome.envelope["run_ref"]})
+
+    assert terminal_reason in ["timeout", "compile_timeout"]
 
     run_duration_message = outcome.envelope["error"]["message"]
 

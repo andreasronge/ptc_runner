@@ -122,8 +122,14 @@ defmodule PtcRunner.Kernel.GatewayConfig do
         )
       end)
     end)
+    |> anchor_artifacts(directory)
     |> anchor_audit(directory)
   end
+
+  defp anchor_artifacts(%{"artifacts" => artifacts} = value, directory),
+    do: put_in(value, ["artifacts", "root"], Path.expand(artifacts["root"], directory))
+
+  defp anchor_artifacts(value, _), do: value
 
   defp anchor_audit(%{"private_audit" => audit} = value, directory),
     do: put_in(value, ["private_audit", "directory"], Path.expand(audit["directory"], directory))
@@ -182,6 +188,15 @@ defmodule PtcRunner.Kernel.GatewayConfig do
               "max_retained_files" => count(2, 128)
             },
             ~w(directory max_file_bytes max_retained_files)
+          ),
+        "artifacts" =>
+          object(
+            %{
+              "root" => path(),
+              "trace" => %{"type" => "boolean", "default" => false},
+              "inspection" => %{"type" => "boolean", "default" => false}
+            },
+            ["root"]
           )
       },
       ~w(version listen authentication host admission tools)

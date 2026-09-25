@@ -6,7 +6,8 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   `{:ok, template}` or `{:error, build_code}`. `installed_limits` is a complete
   valid `PtcRunner.Kernel.Limits` value. Options are
   `providers: %InstallationCatalog{}` for provider-bearing packages and
-  `:expected_application_content_digest`, a `sha256:<64 lowercase hex>` pin.
+  `:expected_application_content_digest`, a `sha256:<64 lowercase hex>` pin,
+  and `:inspection_capture` for an operator-configured gateway artifact root.
   Unknown or duplicate options, and malformed pins, fail before acquisition.
   The pin compares content only, never effective identity.
 
@@ -33,13 +34,14 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   `{:ok, reservation}` or a `ServingOutcome`. Input is a complete
   JSON object, validated before admission. `deadline` is an absolute monotonic
   millisecond integer. Invalid deadlines return `:internal_error`; expired
-  deadlines return `:cancelled`. No input/policy seal, identity, activity,
-  authority, sink or execution owner is created by a reservation.
+  deadlines return `:cancelled`. A reservation fixes a fresh command run
+  reference but creates no input/policy seal, activity, authority, sink or
+  execution owner.
 
   After the transport commits its response, the same reserving worker calls
   `activate(reservation)` and receives one closed ServingOutcome. Activation
   is single-use, creates fresh one-shot resources, and performs sealed outcome
-  opening and artifact-free publication in that worker. Capacity remains held
+  opening and publication in that worker. Capacity remains held
   through publication and authority cleanup. Caller death cancels execution;
   death during publication fences admission because cleanup is uncertain.
   Deadlines remain active through publication, which cannot publish a successful
@@ -86,14 +88,12 @@ defmodule PtcRunner.Kernel.ServingTemplate do
 
   Private event policy is rejected with `:private_result_unservable`; event
   policy for accepted templates and input authority are
-  normal, result projection is JSON, inspection capture is disabled, and
-  publication is artifact-free. None of these choices is a per-call override.
-  The private refusal is the decided contract rather than an unimplemented
-  destination: serving authorizes no artifact destination at all, so a private
-  policy has no private result to place, and possessing a serving template must
-  not become an implicit override of it. Serve such an application by setting its
-  manifest policy to normal and pinning the application content digest that
-  change produces.
+  normal and result projection is JSON. Ordinary template calls capture no
+  inspection data and publish no artifacts. A gateway operator may configure
+  normal trace and inspection destinations for all tools; the gateway reserves
+  them before execution. Possessing a serving template or an endpoint grants
+  no private-result override. Serve such an application by setting its manifest
+  policy to normal and pinning the application content digest that change produces.
 
   ## Ownership and close
 
@@ -269,7 +269,14 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   @spec reserve(t(), term(), pid(), integer() | :infinity) ::
           {:ok, reservation()} | ServingOutcome.t()
   def reserve(template, input, admission, deadline \\ :infinity),
-    do: ServingCall.reserve(template, input, admission, deadline)
+    do: ServingCall.reserve(template, input, admission, deadline, nil)
+
+  @doc false
+  def reserve_gateway(template, input, admission, artifacts),
+    do: ServingCall.reserve(template, input, admission, :infinity, artifacts)
+
+  @doc false
+  def reservation_run_ref(reservation), do: ServingCall.run_ref(reservation)
 
   @doc "Activates after transport commitment and finishes publication in this calling worker."
   @spec activate(reservation()) ::
@@ -330,8 +337,10 @@ defmodule PtcRunner.Kernel.ServingTemplate do
 
   defp options(opts) when is_list(opts) do
     if Keyword.keyword?(opts) and
-         Keyword.keys(opts) -- [:providers, :expected_application_content_digest] == [] and
+         Keyword.keys(opts) --
+           [:providers, :expected_application_content_digest, :inspection_capture] == [] and
          length(opts) == MapSet.size(MapSet.new(Keyword.keys(opts))) and
+         is_boolean(Keyword.get(opts, :inspection_capture, false)) and
          (not Keyword.has_key?(opts, :expected_application_content_digest) or
             InstallationConfigDigest.valid_digest?(opts[:expected_application_content_digest])),
        do: :ok,
@@ -373,15 +382,17 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   end
 
   defp construct(package, opts) do
+    inspection_capture = Keyword.get(opts, :inspection_capture, false)
+
     if provider_bearing?(package),
-      do: construct_retained(package, opts[:providers]),
-      else: construct_free(package)
+      do: construct_retained(package, opts[:providers], inspection_capture),
+      else: construct_free(package, inspection_capture)
   end
 
   defp provider_bearing?(package),
     do: package.providers.workflow != [] or package.providers.mission != []
 
-  defp construct_free(package) do
+  defp construct_free(package, inspection_capture) do
     deadline = System.monotonic_time(:millisecond) + 5_000
 
     with {:ok, bundle} <- compile(package.workflow_components, deadline),
@@ -391,7 +402,7 @@ defmodule PtcRunner.Kernel.ServingTemplate do
          {:ok, effect} <- validate_effect(workflow, missions, package.entry),
          policy = %{
            input_authority_class: :normal,
-           inspection_capture: false,
+           inspection_capture: inspection_capture,
            result_projection: :json,
            effective_event_policy: package.events.policy,
            publication: :artifact_free,
@@ -425,7 +436,8 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   def prepare_call(%__MODULE__{} = template, %RunRequest{} = request) do
     if RunRequest.valid?(request) and request.package == template.package and
          request.input.authority == :normal and request.policy.result_projection == :json and
-         not request.policy.inspection_capture and request.policy.event_policy == :normal do
+         request.policy.inspection_capture == template.policy.inspection_capture and
+         request.policy.event_policy == :normal do
       with {:ok, retained} <- retained_metadata(template, request) do
         seal_call(template, request, retained)
       end
@@ -524,11 +536,15 @@ defmodule PtcRunner.Kernel.ServingTemplate do
     end
   end
 
-  defp construct_retained(package, catalog) do
+  defp construct_retained(package, catalog, inspection_capture) do
     if InstallationCatalog.valid?(catalog) and
          catalog.installed_limits == package.installed_limits do
       with {:ok, policy} <-
-             ExecutionPolicy.new(event_policy: package.events.policy, result_projection: :json),
+             ExecutionPolicy.new(
+               event_policy: package.events.policy,
+               result_projection: :json,
+               inspection_capture: inspection_capture
+             ),
            {:ok, request} <- ServingRequest.new(package, policy),
            {:ok, prepared} <- RunCoordinator.prepare(request, catalog) do
         try do
@@ -559,7 +575,7 @@ defmodule PtcRunner.Kernel.ServingTemplate do
                effective_digest: prepared.effective_application_digest,
                policy: %{
                  input_authority_class: :normal,
-                 inspection_capture: false,
+                 inspection_capture: inspection_capture,
                  result_projection: :json,
                  effective_event_policy: :normal,
                  publication: :artifact_free,

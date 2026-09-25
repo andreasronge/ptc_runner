@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.ServingCall do
   """
   alias PtcRunner.Kernel.ArtifactPublisher
   alias PtcRunner.Kernel.Attestation
+  alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.ExecutionInput
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.ExecutionPolicy
@@ -25,15 +26,16 @@ defmodule PtcRunner.Kernel.ServingCall do
   alias PtcRunner.Kernel.WarmProviderRuntime
 
   @opaque reservation ::
-            {__MODULE__, ServingTemplate.t(), map(), RunAdmission.reservation(), integer(), pid()}
+            {__MODULE__, ServingTemplate.t(), map(), RunAdmission.reservation(), integer(), pid(),
+             binary(), map() | nil}
 
-  @spec reserve(ServingTemplate.t(), term(), pid(), integer() | :infinity) ::
+  @spec reserve(ServingTemplate.t(), term(), pid(), integer() | :infinity, map() | nil) ::
           {:ok, reservation()} | ServingOutcome.t()
-  def reserve(template, input, admission, caller_deadline) do
+  def reserve(template, input, admission, caller_deadline, artifacts) do
     with {:ok, input} <- StrictJSON.admit(input),
          true <- is_map(input) and not is_struct(input),
          true <- ValueContract.valid?(template.package.contracts.input, input) do
-      reserve_valid(template, input, admission, caller_deadline)
+      reserve_valid(template, input, admission, caller_deadline, artifacts)
     else
       _ -> outcome(template, :invalid_input, false)
     end
@@ -41,7 +43,7 @@ defmodule PtcRunner.Kernel.ServingCall do
     _ -> outcome(template, :internal_error, false)
   end
 
-  defp reserve_valid(template, input, admission, caller_deadline) do
+  defp reserve_valid(template, input, admission, caller_deadline, artifacts) do
     now = System.monotonic_time(:millisecond)
     limit = now + ServingTemplate.limits(template).run_duration_ms
     deadline = if caller_deadline == :infinity, do: limit, else: caller_deadline
@@ -58,23 +60,37 @@ defmodule PtcRunner.Kernel.ServingCall do
         outcome(template, expired_code(deadline, :admission_unavailable), false)
 
       true ->
-        case RunAdmission.reserve(admission, deadline) do
-          {:ok, lease} -> {:ok, {__MODULE__, template, input, lease, deadline, self()}}
-          {:error, :run_capacity_exhausted} -> outcome(template, :busy, false)
-          _ -> outcome(template, expired_code(deadline, :admission_unavailable), false)
+        case {CommandRunRef.generate(), RunAdmission.reserve(admission, deadline)} do
+          {{:ok, run_ref}, {:ok, lease}} ->
+            {:ok, {__MODULE__, template, input, lease, deadline, self(), run_ref, artifacts}}
+
+          {{:error, _}, {:ok, lease}} ->
+            RunAdmission.close(lease)
+            outcome(template, :internal_error, false)
+
+          {_, {:error, :run_capacity_exhausted}} ->
+            outcome(template, :busy, false)
+
+          _ ->
+            outcome(template, expired_code(deadline, :admission_unavailable), false)
         end
     end
   end
 
   @spec close(reservation()) :: :ok | {:error, :run_admission_unavailable}
-  def close({__MODULE__, _, _, lease, _, caller}) when caller == self(),
+  def close({__MODULE__, _, _, lease, _, caller, _, _}) when caller == self(),
     do: RunAdmission.close(lease)
 
   def close(_), do: {:error, :run_admission_unavailable}
 
   @doc false
-  def cancel_external({__MODULE__, _, _, lease, _, _}), do: RunAdmission.cancel_external(lease)
+  def cancel_external({__MODULE__, _, _, lease, _, _, _, _}),
+    do: RunAdmission.cancel_external(lease)
+
   def cancel_external(_), do: {:error, :run_admission_unavailable}
+
+  @doc false
+  def run_ref({__MODULE__, _, _, _, _, _, run_ref, _}), do: run_ref
 
   @spec activate(reservation()) :: ServingOutcome.t()
   def activate(reservation), do: activate(reservation, %{})
@@ -85,12 +101,15 @@ defmodule PtcRunner.Kernel.ServingCall do
 
   def activate(_, _), do: ServingOutcome.new(:internal_error, false, :write)
 
-  defp do_activate({__MODULE__, template, input, lease, deadline, caller}, hooks)
+  defp do_activate(
+         {__MODULE__, template, input, lease, deadline, caller, run_ref, artifacts},
+         hooks
+       )
        when caller == self() do
     case RunAdmission.retain_publication(lease) do
       :ok ->
         if hook = Map.get(hooks, :after_retention), do: hook.()
-        activate_owned(template, input, lease, deadline, hooks)
+        activate_owned(template, input, lease, deadline, hooks, run_ref, artifacts)
 
       _ ->
         outcome(template, expired_code(deadline, :admission_unavailable), false)
@@ -99,26 +118,29 @@ defmodule PtcRunner.Kernel.ServingCall do
 
   defp do_activate(_, _), do: ServingOutcome.new(:internal_error, false, :write)
 
-  defp activate_owned(template, input, lease, deadline, hooks) do
-    case prepare(template, input) do
+  defp activate_owned(template, input, lease, deadline, hooks, run_ref, artifacts) do
+    case prepare(template, input, run_ref, artifacts) do
       {:ok, prepared} ->
         try do
-          case PublicationAuthority.new([]) do
+          case PublicationAuthority.authorize_with_context(
+                 run_ref,
+                 destinations(artifacts, run_ref),
+                 prepared.effective_event_policy,
+                 prepared.effective_data_class
+               ) do
             {:ok, authority} ->
               execute(template, prepared, authority, lease, deadline, hooks)
 
             _ ->
               clean? = PreparedRun.close(prepared) == :ok
-              RunAdmission.finish_publication(lease, clean?)
-              outcome(template, if(clean?, do: :publication_failed, else: :cleanup_failed), false)
+              fail_before_execution(template, lease, deadline, hooks, clean?)
           end
         after
           PreparedRun.close(prepared)
         end
 
       _ ->
-        RunAdmission.finish_publication(lease, false)
-        outcome(template, :cleanup_failed, false)
+        fail_before_execution(template, lease, deadline, hooks, false)
     end
   rescue
     _ ->
@@ -130,20 +152,53 @@ defmodule PtcRunner.Kernel.ServingCall do
       outcome(template, :cleanup_failed, false)
   end
 
-  defp prepare(template, input) do
+  defp fail_before_execution(template, lease, deadline, hooks, clean?) do
+    code = if clean?, do: :publication_failed, else: :cleanup_failed
+    terminal = outcome(template, code, false)
+    terminal = close_outcome(hooks, terminal)
+    settlement = RunAdmission.freeze_publication(lease, clean?)
+    terminal = settled_outcome(template, terminal, settlement, deadline)
+    published? = run_terminal_hook(hooks, :before_release, terminal)
+    terminal = publication_outcome(template, terminal, published?)
+    audited? = run_terminal_hook(hooks, :before_release_audit, terminal)
+    release = RunAdmission.finish_publication(lease, clean? and published? and audited?)
+
+    if audited? and release == :ok,
+      do: terminal,
+      else: outcome(template, :cleanup_failed, false)
+  end
+
+  defp prepare(template, input, run_ref, artifacts) do
     with {:ok, input} <- ExecutionInput.new(input, :normal, template.package.contracts.input),
          {:ok, policy} <-
            ExecutionPolicy.new(
-             run_id: identity(),
+             run_id: run_ref,
              trace_id: identity(),
              result_projection: :json,
-             inspection_capture: false,
+             inspection_capture: artifacts != nil and artifacts["inspection"] == true,
              event_policy: :normal
            ),
          {:ok, request} <- RunRequest.new(template.package, input, policy) do
       ServingTemplate.prepare_call(template, request)
     end
   end
+
+  defp destinations(nil, _run_ref), do: []
+
+  defp destinations(artifacts, run_ref) do
+    root = artifacts["root"]
+
+    []
+    |> maybe_destination(artifacts["trace"] == true, :trace_dir, Path.join(root, "traces"))
+    |> maybe_destination(
+      artifacts["inspection"] == true,
+      :inspect,
+      Path.join([root, "inspection", run_ref <> ".ptcins"])
+    )
+  end
+
+  defp maybe_destination(destinations, true, key, path), do: [{key, path} | destinations]
+  defp maybe_destination(destinations, false, _key, _path), do: destinations
 
   defp execute(template, prepared, authority, lease, deadline, hooks) do
     result =
