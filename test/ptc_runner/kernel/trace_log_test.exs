@@ -409,6 +409,84 @@ defmodule PtcRunner.Kernel.TraceLogTest do
 
   @tag :tmp_dir
   @tag :slow
+  @tag timeout: 300_000
+  test "ten thousand append destinations use a bounded lock namespace", %{tmp_dir: directory} do
+    executable = System.find_executable("elixir") || flunk("elixir is required")
+    code_paths = Enum.flat_map(:code.get_path(), fn path -> ["-pa", List.to_string(path)] end)
+
+    code = """
+    root = #{inspect(directory)}
+    1..10_000
+    |> Task.async_stream(fn index ->
+      path = Path.join(root, "trace-\#{index}.jsonl")
+      PtcRunner.Kernel.TraceLog.with_append_authority_lock(path, fn -> :ok end)
+    end, max_concurrency: 16, timeout: 30_000)
+    |> Enum.each(fn {:ok, :ok} -> :ok end)
+    [lock_root] = Path.wildcard(Path.join(root, "ptc-runner-trace-append-locks-*"))
+    IO.puts(length(File.ls!(lock_root)))
+    """
+
+    {output, 0} = System.cmd(executable, code_paths ++ ["-e", code], env: [{"TMPDIR", directory}])
+    assert String.to_integer(String.trim(output)) <= 4_096
+  end
+
+  @tag :tmp_dir
+  @tag :slow
+  test "different paths in one bucket serialize across runtimes", %{tmp_dir: directory} do
+    {first_path, second_path} = colliding_append_paths(directory)
+    first = decoded_event("first-collision", 1, "run-started")
+    second = decoded_event("second-collision", 1, "run-started")
+    port = start_paused_append_runtime(first_path, first)
+
+    on_exit(fn ->
+      if Port.info(port), do: Port.close(port)
+    end)
+
+    assert_receive {^port, {:data, {:eol, "APPEND_READY"}}}, 10_000
+    parent = self()
+
+    second_append =
+      Task.async(fn ->
+        TraceLog.append_jsonl(second_path, [second],
+          append_hook: fn :after_file_ready ->
+            send(parent, :second_collision_ready)
+            :ok
+          end
+        )
+      end)
+
+    refute_receive :second_collision_ready, 250
+    assert true = Port.command(port, "X\n")
+    assert_receive {^port, {:data, {:eol, "APPEND_RESULT=:ok"}}}, 10_000
+    assert_receive {^port, {:exit_status, 0}}, 10_000
+    assert Task.await(second_append, 10_000) == :ok
+    assert_receive :second_collision_ready
+    assert {:ok, first_log} = TraceLog.new(source: {:file, first_path})
+    assert {:ok, second_log} = TraceLog.new(source: {:file, second_path})
+
+    assert {:ok, %{"items" => [%{"run_id" => "first-collision"}]}} =
+             TraceLog.query(first_log, :list_runs, %{})
+
+    assert {:ok, %{"items" => [%{"run_id" => "second-collision"}]}} =
+             TraceLog.query(second_log, :list_runs, %{})
+  end
+
+  defp colliding_append_paths(directory) do
+    Enum.reduce_while(1..10_000, %{}, fn index, seen ->
+      path = Path.join(directory, "collision-#{index}.jsonl")
+      {:ok, scope} = TraceLog.append_lock_identity(path)
+      <<prefix::16, _rest::binary>> = :crypto.hash(:sha256, :erlang.term_to_binary(scope))
+      bucket = Bitwise.band(prefix, 2_047)
+
+      case Map.fetch(seen, bucket) do
+        {:ok, first_path} -> {:halt, {first_path, path}}
+        :error -> {:cont, Map.put(seen, bucket, path)}
+      end
+    end)
+  end
+
+  @tag :tmp_dir
+  @tag :slow
   test "a first-file append retains one cross-runtime lease after creation", %{
     tmp_dir: directory
   } do

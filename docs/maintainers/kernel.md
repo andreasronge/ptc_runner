@@ -484,9 +484,19 @@ This section owns the parts that are implementation rather than contract.
 Ordinary host-selected append takes an OS-released advisory lease before it
 validates the existing prefix and writes a batch. Existing files are keyed by
 device and inode, so hard-link aliases share the lease across BEAM processes and
-separate local runtimes. An unlocked lease file may remain after exit but cannot
-wedge later appenders. Two appenders therefore cannot both approve the same
-prefix and then race the byte or sequence checks.
+separate local runtimes. The cross-process leases hash into 4,096 persistent
+`bucket-<three hex digits>.lock` files under
+`$TMPDIR/ptc-runner-trace-append-locks-<uid>`; unrelated destinations in one
+bucket serialize. Path scopes use the first 2,048 buckets and inode scopes the
+other 2,048, preserving the path-then-inode acquisition order without a
+self-lock. Same-VM append serialization remains per path. Bucket files are
+never unlinked while in use. Previous per-scope `.lock` files in this root are
+no longer opened and may be deleted while no `ptc` or `mix test` process is
+running. Append reservation directories are removed on handle close or removal;
+stale reservations are reclaimed when their destination is retried. An unlocked
+lease file may remain after exit but cannot wedge later appenders. Two
+appenders therefore cannot both approve the same prefix and then race the byte
+or sequence checks.
 
 Complete analysis-session batches use atomic no-clobber publication rather than
 append. `TraceLog` validates and deterministically encodes the whole batch,

@@ -80,6 +80,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   @max_cursor_bytes 1_024
   @max_string_bytes 256
   @append_lock_timeout_ms 30_000
+  @append_buckets_per_kind 2_048
   @append_lock_helper ~S"""
   set -eu
   lock_kind=$1
@@ -736,7 +737,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     with {:ok, path} <- PrivateDirectory.anchor(path),
          {:ok, scope} <- append_path_lock_scope(path),
          {:ok, lock_root} <- append_lock_root() do
-      {:ok, Path.join(lock_root, "reservation-" <> append_lock_name(scope))}
+      {:ok, Path.join(lock_root, "reservation-" <> append_scope_digest(scope) <> ".lock")}
     else
       _ -> {:error, :source_unavailable}
     end
@@ -993,13 +994,20 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   defp append_lock_name(scope) do
-    digest =
-      scope
-      |> :erlang.term_to_binary()
-      |> then(&:crypto.hash(:sha256, &1))
-      |> Base.encode16(case: :lower)
+    # Path leases can enclose inode leases. Keep their bucket ranges disjoint
+    # so the fixed path-then-inode acquisition order cannot lock one file twice.
+    offset = if elem(scope, 0) == :inode, do: @append_buckets_per_kind, else: 0
+    <<prefix::16, _rest::binary>> = :crypto.hash(:sha256, :erlang.term_to_binary(scope))
+    bucket = offset + Bitwise.band(prefix, @append_buckets_per_kind - 1)
 
-    "#{digest}.lock"
+    "bucket-#{bucket |> Integer.to_string(16) |> String.downcase() |> String.pad_leading(3, "0")}.lock"
+  end
+
+  defp append_scope_digest(scope) do
+    scope
+    |> :erlang.term_to_binary()
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
   end
 
   @doc false
