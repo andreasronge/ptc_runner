@@ -9,19 +9,35 @@ defmodule PtcRunner.Kernel.ArtifactPruneTransaction do
   @attempts 4
   @stage_pattern ~r/\A\.ptc-prune-[0-9a-f]{16}\z/
 
+  @spec ensure_no_pending(binary()) :: :ok | {:error, :delete_failed}
+  def ensure_no_pending(root) do
+    case stages(root) do
+      {:ok, []} -> :ok
+      _ -> {:error, :delete_failed}
+    end
+  end
+
   @spec recover(binary(), non_neg_integer()) :: :ok | {:error, :delete_failed}
   def recover(root, uid) do
-    case File.ls(root) do
+    case stages(root) do
       {:ok, names} ->
         names
-        |> Enum.filter(&Regex.match?(@stage_pattern, &1))
-        |> Enum.sort()
         |> Enum.reduce_while(:ok, fn name, :ok ->
           case recover_stage(root, Path.join(root, name), uid) do
             :ok -> {:cont, :ok}
             _ -> {:halt, {:error, :delete_failed}}
           end
         end)
+
+      _ ->
+        {:error, :delete_failed}
+    end
+  end
+
+  defp stages(root) do
+    case File.ls(root) do
+      {:ok, names} ->
+        {:ok, names |> Enum.filter(&Regex.match?(@stage_pattern, &1)) |> Enum.sort()}
 
       _ ->
         {:error, :delete_failed}

@@ -57,7 +57,8 @@ publication siblings or files modified in the last ten minutes are skipped
 with reason `in_progress`. `bytes_freed` and `remaining_bytes` in a dry run
 describe the projected result. A Viewer or REPL session already open may hold
 a snapshot of a pruned run; reading it then can fail as `unstable` or
-`unreadable`.
+`unreadable`. An interrupted deletion is recovered by the next real prune;
+`--dry-run` returns an error while recovery is pending so it changes no files.
 
 Pruning does not remove append-lock files. The separate lock-root retention
 work is tracked in [issue #2076](https://github.com/andreasronge/ptc_runner/issues/2076).

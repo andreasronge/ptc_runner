@@ -216,6 +216,28 @@ defmodule Mix.Tasks.PtcPruneTest do
     refute File.exists?(staged_commit)
   end
 
+  @tag :tmp_dir
+  test "dry-run leaves an interrupted prune untouched", %{tmp_dir: directory} do
+    {project, root} = project!(directory)
+    path = Path.join([root, "traces", "interrupted.jsonl"])
+    stage = Path.join(root, ".ptc-prune-0123456789abcdef")
+    backup = Path.join(stage, "traces-interrupted.jsonl")
+
+    File.write!(path, "evidence")
+    File.mkdir!(stage)
+    File.chmod!(stage, 0o700)
+    File.ln!(path, backup)
+    File.rm!(path)
+
+    result = MixCommandAdapter.execute(["prune", project, "--max-age-days", "1", "--dry-run"])
+
+    assert result.exit_status != 0
+    assert result.stderr =~ "prune_delete_failed"
+    refute File.exists?(path)
+    assert File.read!(backup) == "evidence"
+    assert File.dir?(stage)
+  end
+
   defp project!(directory) do
     target = Path.join(directory, "demo")
     assert MixCommandAdapter.execute(["init", target]).exit_status == 0

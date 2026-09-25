@@ -31,11 +31,16 @@ defmodule PtcRunner.Kernel.CommandPrune do
   def run(_), do: {:error, :prune_unavailable}
 
   defp run_locked(root, uid, directories, options) do
-    with :ok <- ArtifactPruneTransaction.recover(root, uid),
+    with :ok <- recover_or_refuse(root, uid, options),
          {:ok, files, staging} <- artifacts(directories),
          {:ok, markers} <- markers(root, uid),
          do: prune(files, staging, markers, directories, options)
   end
+
+  defp recover_or_refuse(root, _uid, %{dry_run: true}),
+    do: ArtifactPruneTransaction.ensure_no_pending(root)
+
+  defp recover_or_refuse(root, uid, _options), do: ArtifactPruneTransaction.recover(root, uid)
 
   defp directories(root, uid) do
     paths = [root | Enum.map(@artifact_dirs, &Path.join(root, &1))]

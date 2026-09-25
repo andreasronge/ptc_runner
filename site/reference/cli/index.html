@@ -125,7 +125,8 @@ publication siblings or files modified in the last ten minutes are skipped
 with reason <code class="inline">in_progress</code>. <code class="inline">bytes_freed</code> and <code class="inline">remaining_bytes</code> in a dry run
 describe the projected result. A Viewer or REPL session already open may hold
 a snapshot of a pruned run; reading it then can fail as <code class="inline">unstable</code> or
-<code class="inline">unreadable</code>.</p><p>Pruning does not remove append-lock files. The separate lock-root retention
+<code class="inline">unreadable</code>. An interrupted deletion is recovered by the next real prune;
+<code class="inline">--dry-run</code> returns an error while recovery is pending so it changes no files.</p><p>Pruning does not remove append-lock files. The separate lock-root retention
 work is tracked in <a href="https://github.com/andreasronge/ptc_runner/issues/2076">issue #2076</a>.</p><p>A provider-bearing manifest needs a host configuration. A project document can
 remember that path and its environment file. Before running it, active provider
 checks can make real requests and may incur cost:</p><pre><code class="console language-console">ptc doctor ptc-project.json --connect</code></pre><p>Readiness is derived from provider check rows: no rows report
