@@ -19,7 +19,7 @@
   "input": {
     "value": {
       "learn_url": "http://127.0.0.1/unset",
-      "holdout_url": "http://127.0.0.1/unset"
+      "validation_url": "http://127.0.0.1/unset"
     }
   },
   "contracts": {

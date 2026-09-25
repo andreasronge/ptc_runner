@@ -3,7 +3,7 @@
   "type": "object",
   "properties": {
     "learn_url": {"type": "string"},
-    "holdout_url": {"type": "string"}
+    "validation_url": {"type": "string"}
   },
-  "required": ["learn_url", "holdout_url"]
+  "required": ["learn_url", "validation_url"]
 }

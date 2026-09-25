@@ -269,3 +269,21 @@ The existing **0 of 9** result and the later passthrough-versus-compiled cost
 tables are measurements of that restricted interface. They remain useful
 evidence about blind probing, but do not measure the corrected raw-tool
 baseline. No corrected-baseline success or cost result has been measured yet.
+
+## 2026-09-20 — Correction: validation is not acceptance
+
+The page formerly called held out was visible to the compiler throughout its
+selector search. It was validation data, not an accept gate. The fixture and
+compiler now call it `/validation`, and promotion is gated on an additional
+`/acceptance` page with an unseen DOM shape. Candidate output stays separate
+until a model-free compiled run returns the exact expected records on every
+fixture; failed compilation or verification leaves the accepted manifest
+unchanged. Standalone verification now exits nonzero on failed or incorrect
+runs.
+
+The reported 3/3 is an observation on the fixtures used in that run, not proof
+that future compilation attempts or unseen pages always succeed. Likewise,
+compilation costing less than one failed Arm A pass does not establish
+successful-outcome amortization: Arm A produced no successful outcome in the
+measurement. Arm C also did not ingest Arm A's usage evidence; it searched the
+learning and validation pages through its own probe surface.

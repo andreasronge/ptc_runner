@@ -12,6 +12,7 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expected, startFixture } from "./fixture.mjs";
+import { recordsAreCorrect } from "./driver.mjs";
 import { taskWithUrl } from "./measurement.mjs";
 import { aggregate, formatAggregate, usageOf } from "./reporting.mjs";
 
@@ -34,18 +35,6 @@ async function commandPath(name) {
     } catch {}
   }
   throw new Error(`${name} is not available on PATH`);
-}
-
-function correct(path, records) {
-  const want = expected[path];
-  if (!Array.isArray(records) || records.length !== want.length) return false;
-  return want.every((row) =>
-    records.some(
-      (got) =>
-        String(got?.text ?? "").trim() === row.text &&
-        String(got?.author ?? "").trim() === row.author,
-    ),
-  );
 }
 
 const output = await mkdtemp(join(directory, ".arm-a-"));
@@ -144,14 +133,14 @@ try {
     results.push({
       arm,
       page: path,
-      status: envelope.status ?? status,
+      status: status === "failed" ? status : (envelope.status ?? status),
       failure: envelope?.result?.error?.code ?? envelope?.error?.code ?? null,
       seconds: Math.round((Date.now() - started) / 100) / 10,
       trace_dir: traceDir,
       inspection: inspectPath,
       ...measured,
       records: Array.isArray(value?.records) ? value.records.length : null,
-      correct: correct(path, value?.records),
+      correct: recordsAreCorrect(expected[path], value?.records),
     });
   }
 
@@ -209,6 +198,9 @@ try {
     );
   }
   process.stdout.write(`written: ${join(directory, "results.json")}\n`);
+  if (results.some((row) => row.status !== "ok" || !row.correct)) {
+    process.exitCode = 1;
+  }
 } catch (error) {
   failure = error;
 } finally {

@@ -1,18 +1,24 @@
 // Arm C: compile the recipe instead of writing it. The compiler workflow reads
 // each page's text, probes candidate selectors against the page itself, and
-// returns a recipe. This driver then writes that recipe into the compiled arm's
-// mission data, so the compiled artifact is data rather than generated source.
+// returns a candidate recipe. This driver independently executes that candidate
+// on every fixture and promotes it only after all checks pass.
 //
 //   node compile.mjs [--env-file /absolute/path/to/.env]
 //
-// Verify afterwards with `ARMS=compiled node run.mjs`, which re-extracts every
-// page with the recipe this produced.
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { startFixture } from "./fixture.mjs";
+import { promoteCandidate, recordsAreCorrect, validRecipe } from "./driver.mjs";
+import { expected, startFixture } from "./fixture.mjs";
 import { formatSpend, usageOf } from "./reporting.mjs";
 
 const execute = promisify(execFile);
@@ -30,7 +36,8 @@ async function commandPath(name) {
 }
 
 const output = await mkdtemp(join(directory, ".arm-c-"));
-const fixture = await startFixture();
+const fixture = await startFixture({ acceptanceEnabled: false });
+const candidateManifestPath = join(directory, "compiled/.candidate.ptc.json");
 let failure;
 
 try {
@@ -61,7 +68,7 @@ try {
     inputPath,
     JSON.stringify({
       learn_url: `${fixture.origin}/quotes`,
-      holdout_url: `${fixture.origin}/held-out`,
+      validation_url: `${fixture.origin}/validation`,
     }),
     { mode: 0o600 },
   );
@@ -112,22 +119,87 @@ try {
   );
   process.stdout.write(`recipe         ${JSON.stringify(recipe)}\n`);
 
-  if (recipe?.container && recipe?.text_selector && recipe?.author_selector) {
-    const manifestPath = join(directory, "compiled/ptc.json");
-    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-    manifest.missions.default.data = { recipe };
-    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-    process.stdout.write(
-      `\nwrote the recipe into compiled/ptc.json mission data.\n` +
-        `verify with: ARMS=compiled node run.mjs\n`,
+  const compilationSucceeded = status === "ok" && envelope.status === "ok";
+  const verificationRows = [];
+
+  if (compilationSucceeded && validRecipe(recipe)) {
+    fixture.enableAcceptance();
+    const acceptedManifestPath = join(directory, "compiled/ptc.json");
+    const candidateManifest = JSON.parse(
+      await readFile(acceptedManifestPath, "utf8"),
     );
+    candidateManifest.missions.default.data = { recipe };
+    await writeFile(
+      candidateManifestPath,
+      `${JSON.stringify(candidateManifest, null, 2)}\n`,
+    );
+
+    for (const path of Object.keys(expected)) {
+      const name = `verify-${path.slice(1)}`;
+      const verifyInput = join(output, `${name}-input.json`);
+      const verifyResult = join(output, `${name}-result.json`);
+      const verifyEnvelope = join(output, `${name}-envelope.json`);
+      const verifyTraces = join(output, `${name}-traces`);
+      await mkdir(verifyTraces, { mode: 0o700 });
+      await writeFile(
+        verifyInput,
+        JSON.stringify({ task: "verify", url: `${fixture.origin}${path}` }),
+        { mode: 0o600 },
+      );
+
+      let verifyStatus = "ok";
+      try {
+        await execute(
+          process.env.PTC ?? "ptc",
+          ["run", candidateManifestPath, "--host-config", hostPath,
+           "--input", verifyInput, "--output", verifyResult,
+           "--envelope", verifyEnvelope, "--trace-dir", verifyTraces],
+          {
+            cwd: directory,
+            env: { ...process.env, PTC_WEB_FIXTURE_ORIGIN: fixture.origin },
+            timeout: 600000,
+            maxBuffer: 8 << 20,
+          },
+        );
+      } catch (error) {
+        verifyStatus = "failed";
+        process.stderr.write(`${name}: ${error.stderr || error.message}\n`);
+      }
+      const checkedEnvelope = await readFile(verifyEnvelope, "utf8")
+        .then(JSON.parse)
+        .catch(() => ({}));
+      const checkedValue = await readFile(verifyResult, "utf8")
+        .then(JSON.parse)
+        .catch(() => null);
+      verificationRows.push({
+        page: path,
+        status:
+          verifyStatus === "failed"
+            ? verifyStatus
+            : (checkedEnvelope.status ?? verifyStatus),
+        correct: recordsAreCorrect(expected[path], checkedValue?.records),
+      });
+    }
+  }
+
+  process.stdout.write(`verification   ${JSON.stringify(verificationRows)}\n`);
+  const promotion = await promoteCandidate({
+    acceptedManifestPath: join(directory, "compiled/ptc.json"),
+    candidate: recipe,
+    compilationSucceeded,
+    expected,
+    verificationRows,
+  });
+  if (promotion.promoted) {
+    process.stdout.write(`\npromoted the independently verified recipe to compiled/ptc.json\n`);
   } else {
-    process.stdout.write(`\nno usable recipe; compiled/ptc.json untouched\n`);
+    process.stdout.write(`\n${promotion.reason}; compiled/ptc.json untouched\n`);
     process.exitCode = 1;
   }
 } catch (error) {
   failure = error;
 } finally {
+  await rm(candidateManifestPath, { force: true });
   await fixture.close();
 }
 

@@ -4,3 +4,5 @@
 results.json
 .arm-c-*/
 .boundary-*/
+compiled/.candidate.ptc.json
+compiled/.candidate.ptc.json.pending
