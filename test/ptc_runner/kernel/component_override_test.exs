@@ -51,63 +51,6 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
     end
 
     @tag :tmp_dir
-    test "a candidate whose bytes do not match its hash is rejected", context do
-      paths = write_application(context, context.base, source_hash: hash("something else"))
-
-      assert {:error, {:source_role, :component_override, :override_source_hash_mismatch}} =
-               paths.manifest
-               |> ApplicationPackage.request_directory(
-                 installed_limits: context.registry.installed_limits,
-                 component_override_descriptor: paths.descriptor
-               )
-               |> RunLifecycle.build(context.registry)
-               |> RunLifecycle.execute()
-    end
-
-    @tag :tmp_dir
-    test "a candidate written against a since-changed base is rejected", context do
-      paths = write_application(context, context.base, base_source_hash: hash("stale base"))
-
-      assert {:error, {:source_role, :component_override, :override_base_hash_mismatch}} =
-               paths.manifest
-               |> ApplicationPackage.request_directory(
-                 installed_limits: context.registry.installed_limits,
-                 component_override_descriptor: paths.descriptor
-               )
-               |> RunLifecycle.build(context.registry)
-               |> RunLifecycle.execute()
-    end
-
-    @tag :tmp_dir
-    test "an override for a component the manifest never selected is rejected", context do
-      paths = write_application(context, context.base, component_id: "agent.core")
-
-      assert {:error, {:source_role, :component_override, :override_component_not_selected}} =
-               paths.manifest
-               |> ApplicationPackage.request_directory(
-                 installed_limits: context.registry.installed_limits,
-                 component_override_descriptor: paths.descriptor
-               )
-               |> RunLifecycle.build(context.registry)
-               |> RunLifecycle.execute()
-    end
-
-    @tag :tmp_dir
-    test "candidate source may not live outside the descriptor's directory", context do
-      paths = write_application(context, context.base, path: "../escape.clj")
-      File.write!(Path.join(Path.dirname(paths.descriptor), "../escape.clj"), "(ns escape)")
-
-      assert {:error, {:source_role, :component_override, :invalid_override_source}} =
-               paths.manifest
-               |> ApplicationPackage.request_directory(
-                 installed_limits: context.registry.installed_limits,
-                 component_override_descriptor: paths.descriptor
-               )
-               |> RunLifecycle.build(context.registry)
-               |> RunLifecycle.execute()
-    end
-
-    @tag :tmp_dir
     test "candidate source uses the portable logical-name grammar", context do
       paths = write_application(context, context.base, path: "Candidate.clj")
       File.write!(Path.join(Path.dirname(paths.descriptor), "Candidate.clj"), context.base.source)

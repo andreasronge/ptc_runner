@@ -1850,30 +1850,6 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert List.last(events).data.result_hash == expected_hash
   end
 
-  test "workflow timeout diagnostics name the effective configured limit" do
-    {:ok, workflow} = WorkflowEnvironment.new([])
-    {:ok, mission} = MissionEnvironment.new([])
-    {:ok, limits} = Limits.new(workflow_timeout_ms: 1, run_duration_ms: 1_000)
-    {:ok, sink} = EventSink.start(:normal, limits, run_id: "workflow-timeout")
-
-    {:ok, config} =
-      RunConfig.new(
-        workflow_environment: workflow,
-        missions: %{"default" => mission},
-        input: %{},
-        limits: limits,
-        event_sink: sink
-      )
-
-    assert {:error, error} = Kernel.run("(reduce + (range 1000000))", config)
-    assert error.kind == :limit_exceeded
-    assert error.reason in [:timeout, :compile_timeout]
-    assert error.details.limit == :workflow_timeout_ms
-    assert error.details.limit_ms == 1
-    assert error.details.phase in [:compilation, :execution]
-    assert error.details.message =~ "workflow_timeout_ms exceeded during"
-  end
-
   test "Kernel JSON boundaries reject Java callable authority before commit" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])

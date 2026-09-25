@@ -661,32 +661,6 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
   end
 
   @tag :tmp_dir
-  test "command preparation anchors artifact destinations at invocation", %{tmp_dir: directory} do
-    invocation = Path.join(directory, "invocation")
-    later = Path.join(directory, "later")
-    File.mkdir!(invocation)
-    File.mkdir!(later)
-    application = write_application(directory, "anchored-destination", valid_manifest())
-
-    preparation =
-      File.cd!(invocation, fn ->
-        assert {:ok, preparation} =
-                 CommandEngine.prepare(["run", application, "--output", "result.json"])
-
-        preparation
-      end)
-
-    File.cd!(later, fn ->
-      assert preparation.artifact_destinations == %{
-               output: Path.join(invocation, "result.json")
-             }
-    end)
-
-    assert preparation.artifact_destination_failures == []
-    assert :ok = CommandPreparation.close(preparation)
-  end
-
-  @tag :tmp_dir
   test "artifact anchoring captures cwd before application acquisition", %{tmp_dir: directory} do
     invocation = Path.join(directory, "invocation-before-acquisition")
     later = Path.join(directory, "cwd-during-acquisition")

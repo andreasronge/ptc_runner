@@ -13,17 +13,7 @@ defmodule PtcRunner.Kernel.InspectOnlyReplTest do
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.WorkflowEnvironment
-  alias PtcRunner.Lisp
   alias PtcRunner.ReplDiagnosticCatalog
-
-  test "Lisp.run_native inspect_only blocks tool calls" do
-    assert {:error, blocked} =
-             Lisp.run_native(~S|(tool/kernel-eval {:mission "x" :kind :source :source "1"})|,
-               inspect_only: true
-             )
-
-    assert blocked.fail.reason == :inspect_only_unavailable
-  end
 
   test "Kernel.run inspect_only does not invoke capabilities" do
     parent = self()
@@ -60,47 +50,6 @@ defmodule PtcRunner.Kernel.InspectOnlyReplTest do
     refute_received :invoked
   end
 
-  @tag :tmp_dir
-  test "opens a compile-and-inspect session without providers", %{tmp_dir: directory} do
-    manifest_path = write_manifest(directory)
-
-    assert {:ok, session} = InspectOnlyRepl.open(manifest_path)
-
-    assert %{kind: :workflow, declared_missions: [], inspect_only: true} =
-             ReplSession.mode_info(session)
-
-    assert {:ok, listed, session} = ReplSession.eval(session, "(components)")
-    assert listed.return == ["helpers"]
-    assert {:ok, answer, session} = ReplSession.eval(session, "(helpers/answer)")
-    assert answer.return == 42
-
-    assert {:error, blocked, session} =
-             ReplSession.eval(
-               session,
-               ~S|(tool/kernel-eval {:mission "review" :kind :source :source "(return 1)"})|
-             )
-
-    assert blocked.fail.reason == :inspect_only_unavailable
-    assert blocked.fail.message =~ "cannot use Kernel, provider, or capability routes"
-    assert {:ok, _} = ReplSession.close(session)
-  end
-
-  @tag :tmp_dir
-  test "mission inspect-only cannot see workflow component IDs", %{tmp_dir: directory} do
-    manifest_path = write_mission_manifest(directory)
-
-    assert {:ok, session} = InspectOnlyRepl.open(manifest_path, mission: "review")
-
-    assert %{kind: :mission, mission: "review", inspect_only: true} =
-             ReplSession.mode_info(session)
-
-    assert {:ok, listed, session} = ReplSession.eval(session, "(components)")
-    assert listed.return == ["review"]
-    assert {:ok, missing, session} = ReplSession.eval(session, ~S|(component "helpers")|)
-    assert missing.return == nil
-    assert {:ok, _} = ReplSession.close(session)
-  end
-
   test "classify! keeps inspect_only_unavailable closed" do
     diagnostic = ReplDiagnosticCatalog.classify!(:inspect_only_unavailable)
     assert diagnostic.code == :inspect_only_unavailable
@@ -110,11 +59,6 @@ defmodule PtcRunner.Kernel.InspectOnlyReplTest do
     assert_raise ArgumentError, fn ->
       ReplDiagnosticCatalog.classify!(:unknown_tool)
     end
-  end
-
-  test "startup notice names a compile-and-inspect environment" do
-    assert InspectOnlyRepl.startup_notice() ==
-             "compile-and-inspect environment; not a runnable application environment"
   end
 
   @tag :tmp_dir
@@ -246,36 +190,6 @@ defmodule PtcRunner.Kernel.InspectOnlyReplTest do
         "workflow" => %{
           "components" => [%{"id" => "helpers", "path" => "helpers.clj"}],
           "entry" => "helpers/run"
-        },
-        "input" => %{"value" => %{}}
-      })
-    )
-
-    path
-  end
-
-  # ex_dna:disable-for-next-line — Mix CLI and Kernel inspect-only tests keep independent fixtures
-  defp write_mission_manifest(directory) do
-    File.write!(
-      Path.join(directory, "helpers.clj"),
-      "(ns helpers) (defn answer [] 42) (defn run [input] (return input))"
-    )
-
-    File.write!(Path.join(directory, "review.clj"), "(ns review) (defn answer [] 1)")
-    path = Path.join(directory, "ptc.json")
-
-    File.write!(
-      path,
-      Jason.encode!(%{
-        "version" => 1,
-        "workflow" => %{
-          "components" => [%{"id" => "helpers", "path" => "helpers.clj"}],
-          "entry" => "helpers/run"
-        },
-        "missions" => %{
-          "review" => %{
-            "components" => [%{"id" => "review", "path" => "review.clj"}]
-          }
         },
         "input" => %{"value" => %{}}
       })

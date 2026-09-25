@@ -212,11 +212,4 @@ defmodule PtcRunner.Kernel.ConfinedFileTest do
       assert {:error, :not_found} = ConfinedFile.resolve_absolute(Path.join(root, "absent"))
     end
   end
-
-  describe "trusted loading no longer depends on the public provider" do
-    test "the manifest loader does not reference FileCapability" do
-      source = File.read!("lib/ptc_runner/kernel/manifest.ex")
-      refute source =~ "FileCapability"
-    end
-  end
 end

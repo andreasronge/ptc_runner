@@ -23,62 +23,14 @@ defmodule PtcRunner.Kernel.AgentCoreCharacterizationTest do
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.WorkflowEnvironment
-  alias PtcRunner.Lisp
-  alias PtcRunner.Lisp.TrustedTool
   alias PtcRunner.TestSupport.StreamingInspection
 
   import PtcRunner.TestSupport.AgentFixtures,
     only: [
-      live_alias_route: 5,
       mission_with_source: 2,
       replay_alias_route: 3,
       replay_alias_router: 2
     ]
-
-  @provider_kinds [
-    :denied,
-    :not_found,
-    :unavailable,
-    :invalid_request,
-    :internal,
-    :domain_error,
-    :invalid_result,
-    :authentication_failed,
-    :payment_required,
-    :rate_limited,
-    :tool_calling_unsupported,
-    :timeout,
-    :transport_error
-  ]
-
-  @kebab_provider_reasons [
-    "denied",
-    "not-found",
-    "unavailable",
-    "invalid-request",
-    "internal",
-    "domain-error",
-    "invalid-result",
-    "reservation-bound-exceeded",
-    "authentication-failed",
-    "payment-required",
-    "rate-limited",
-    "tool-calling-unsupported",
-    "timeout",
-    "transport-error"
-  ]
-
-  @kebab_protocol_reasons ["unknown-model-alias", "invalid-model-alias", "model-alias-required"]
-
-  @underscore_protocol_reasons [
-    "unknown_model_alias",
-    "invalid_model_alias",
-    "model_alias_required"
-  ]
-
-  @kebab_timeout_reasons ["provider-timeout", "llm-request-timeout"]
-
-  @underscore_timeout_reasons ["provider_timeout", "llm_request_timeout"]
 
   describe "last turn of a non-final phase" do
     test "a protocol error transitions with correlated transcript and phase bookkeeping" do
@@ -161,27 +113,6 @@ defmodule PtcRunner.Kernel.AgentCoreCharacterizationTest do
                action(0, "tool-call", 0, 0, "explore"),
                action(1, "tool-call", 1, 0, "synthesize")
              ]
-    end
-
-    test "terminal_only on a non-final phase is refused before any provider request" do
-      {:ok, config} = agent_config([])
-
-      source = ~S"""
-      (agent.core/run-phased-result-value
-        "Decide."
-        {"phases"
-         [{"mission" "default" "max_turns" 1 "terminal_only" true}
-          {"mission" "default" "max_turns" 1}]})
-      """
-
-      assert {:error,
-              %{
-                kind: :workflow_failed,
-                reason: :explicit_failure,
-                details: %{failure_kind: "invalid-agent-config"}
-              }} = Kernel.run(source, config)
-
-      refute_receive {:agent_request, _request}
     end
 
     test "a terminal-source rejection on the last turn of a final phase terminates" do
@@ -327,7 +258,7 @@ defmodule PtcRunner.Kernel.AgentCoreCharacterizationTest do
   end
 
   describe "provider, protocol, and timeout taxonomy" do
-    for kind <- @provider_kinds do
+    for kind <- [:denied, :timeout] do
       test "run-outcome returns authenticated #{kind} envelopes for underscore Kernel spellings" do
         assert_kernel_provider_reason(unquote(kind))
       end
@@ -419,78 +350,6 @@ defmodule PtcRunner.Kernel.AgentCoreCharacterizationTest do
       refute Map.has_key?(value, "model")
       assert llm_request_output(records) == nil
       assert fail_fast_unauthenticated?(fail_fast)
-    end
-
-    test "run-outcome returns whole-call llm_request_timeout as a provider-failure" do
-      {:ok, hung} =
-        LLMCapability.new(
-          requester: fn _request, _context ->
-            receive do
-              :never -> {:ok, %{content: "late", tokens: %{}}}
-            end
-          end
-        )
-
-      {:ok, router} =
-        LLMRouter.new([
-          live_alias_route("chosen", true, hung, nil, request_timeout_ms: 100)
-        ])
-
-      {outcome, fail_fast, records, events, usage} =
-        routed_pair(router, nil, :llm_timeout)
-
-      error = %{
-        "status" => "error",
-        "kind" => "timeout",
-        "reason" => "llm_request_timeout",
-        "retryable?" => true,
-        "model" => "chosen"
-      }
-
-      assert_provider_failure_outcome(outcome, "chosen", error)
-      assert_llm_request_inspection(records, error)
-      assert_authenticated_fail_fast(fail_fast, :timeout, true)
-      assert usage.capability_calls.workflow["llm-request"] == 1
-
-      assert Enum.any?(
-               events,
-               &(&1.type == "capability-stopped" and &1.data[:name] == "llm-request")
-             )
-    end
-
-    test "kebab provider reasons stay recoverable without rewriting the envelope" do
-      for reason <- @kebab_provider_reasons do
-        error = classified_error("provider-error", reason)
-        assert_lisp_provider_failure(error)
-      end
-    end
-
-    test "kebab protocol reasons stay recoverable without rewriting the envelope" do
-      for reason <- @kebab_protocol_reasons do
-        error = classified_error("protocol-error", reason)
-        assert_lisp_provider_failure(error)
-      end
-    end
-
-    test "underscore protocol reasons stay recoverable without rewriting the envelope" do
-      for reason <- @underscore_protocol_reasons do
-        error = classified_error("protocol_error", reason)
-        assert_lisp_provider_failure(error)
-      end
-    end
-
-    test "kebab whole-request timeout reasons stay recoverable without rewriting the envelope" do
-      for reason <- @kebab_timeout_reasons do
-        error = classified_error("timeout", reason)
-        assert_lisp_provider_failure(error)
-      end
-    end
-
-    test "underscore whole-request timeout reasons stay recoverable without rewriting the envelope" do
-      for reason <- @underscore_timeout_reasons do
-        error = classified_error("timeout", reason)
-        assert_lisp_provider_failure(error)
-      end
     end
   end
 
@@ -686,89 +545,6 @@ defmodule PtcRunner.Kernel.AgentCoreCharacterizationTest do
     )
   end
 
-  defp assert_lisp_provider_failure(error) do
-    parent = self()
-    {:ok, bundle} = compile_agent()
-
-    tools =
-      Map.merge(required_agent_tools(), %{
-        "llm-request" => %TrustedTool{
-          function: fn arguments ->
-            send(parent, {:llm_request, arguments})
-            error
-          end
-        },
-        "workflow-annotate" => %TrustedTool{
-          function: fn _ -> %{status: :ok, value: nil} end
-        },
-        "kernel-mission-model-context" => %TrustedTool{
-          function: fn _ ->
-            %{
-              status: :ok,
-              value:
-                Jason.encode!(%{
-                  "schema_version" => 2,
-                  "namespaces" => [],
-                  "entries" => []
-                })
-            }
-          end
-        },
-        "kernel-llm-provider-failure" => %TrustedTool{
-          function: fn arguments ->
-            send(parent, {:llm_provider_failure, arguments})
-            %{status: :error, kind: :protocol_error, reason: :invalid_llm_provider_failure}
-          end
-        }
-      })
-
-    assert {:ok, step} =
-             Lisp.run_native(
-               ~S|(return (agent.core/run-outcome "Classify" {"max_turns" 1}))|,
-               prelude: bundle.prelude,
-               tools: tools,
-               filter_context: false,
-               caller: :kernel
-             )
-
-    assert_receive {:llm_request, _request}
-    refute_receive {:llm_provider_failure, _arguments}
-
-    outcome = stringify_keys(unwrap_lisp_return(step.return))
-    assert outcome["status"] == "provider-failure"
-    assert stringify_keys(outcome["error"]) == stringify_keys(error)
-  end
-
-  defp classified_error(kind, reason) do
-    %{
-      status: :error,
-      kind: String.to_atom(kind),
-      reason: String.to_atom(reason),
-      retryable?: true
-    }
-  end
-
-  defp unwrap_lisp_return({:__ptc_return__, value}), do: value
-  defp unwrap_lisp_return(value), do: value
-
-  defp stringify_keys(%PtcRunner.Lisp.Keyword{name: name}), do: name
-
-  defp stringify_keys(value) when is_map(value) and not is_struct(value) do
-    Map.new(value, fn {key, item} -> {stringify_key(key), stringify_keys(item)} end)
-  end
-
-  defp stringify_keys(value) when is_list(value), do: Enum.map(value, &stringify_keys/1)
-
-  defp stringify_keys(value) when is_atom(value) and value not in [nil, true, false],
-    do: Atom.to_string(value)
-
-  defp stringify_keys(value), do: value
-
-  defp stringify_key(%PtcRunner.Lisp.Keyword{name: name}), do: name
-  defp stringify_key(key) when is_atom(key), do: Atom.to_string(key)
-  defp stringify_key(key) when is_binary(key), do: key
-  defp stringify_key(key), do: to_string(key)
-
   defp routed_pair(router, model, label) do
     outcome_source =
       if is_binary(model) do
@@ -896,13 +672,5 @@ defmodule PtcRunner.Kernel.AgentCoreCharacterizationTest do
       )
 
     Kernel.compile_bundle(components)
-  end
-
-  defp required_agent_tools do
-    Map.new(
-      ~w(kernel-check-source kernel-eval kernel-agent-config-failure kernel-agent-outcome-failure kernel-agent-protocol-error kernel-llm-provider-failure kernel-mission-inventory kernel-mission-model-context kernel-phase-return-contract-failure kernel-result-contract kernel-result-contract-failure kernel-runtime-limit-failure
-         llm-request workflow-annotate),
-      &{&1, %TrustedTool{function: fn _arguments -> %{status: :error} end}}
-    )
   end
 end

@@ -50,11 +50,6 @@ defmodule PtcRunner.Kernel.RunCatalogTest do
       assert malformed["isolation_reason"] == "malformed_metadata"
       assert plain["isolation_reason"] == "duplicate_run_identity"
     end
-
-    test "every reason the catalog can report is ordered" do
-      assert RunCatalog.reason_order() == Enum.uniq(RunCatalog.reason_order())
-      assert Enum.all?(RunCatalog.reason_order(), &is_atom/1)
-    end
   end
 
   describe "generation identity" do

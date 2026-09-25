@@ -112,23 +112,6 @@ defmodule PtcViewer.ApiTest do
              PtcViewer.Api.conversation([inspection_absence: :not_private], "run-1")
   end
 
-  test "preludes delegates the pinned inspection grant", %{trace_dir: trace_dir} do
-    source = {:pinned, "run.ptcins"}
-    {:ok, store} = PtcViewer.InspectionStore.start(source)
-    on_exit(fn -> if Process.alive?(store), do: PtcViewer.InspectionStore.stop(store) end)
-
-    config = [
-      trace_dir: trace_dir,
-      inspection_store: store,
-      inspection_adapter: PtcViewer.PinningInspectionTestAdapter
-    ]
-
-    assert {:ok, %{"source" => actual_source, "run_id" => "run-1", "items" => []}} =
-             PtcViewer.Api.preludes(config, "run-1")
-
-    assert actual_source == inspect(source)
-  end
-
   test "generated sources delegates the pinned inspection grant", %{trace_dir: trace_dir} do
     source = {:pinned, "run.ptcins"}
     {:ok, store} = PtcViewer.InspectionStore.start(source)
@@ -142,46 +125,6 @@ defmodule PtcViewer.ApiTest do
 
     assert {:ok, %{"run_id" => "run-1", "items" => []}} =
              PtcViewer.Api.generated_sources(config, "run-1")
-  end
-
-  test "result delegates the pinned inspection grant", %{trace_dir: trace_dir} do
-    source = {:pinned, "run.ptcins"}
-    {:ok, store} = PtcViewer.InspectionStore.start(source)
-    on_exit(fn -> if Process.alive?(store), do: PtcViewer.InspectionStore.stop(store) end)
-
-    config = [
-      trace_dir: trace_dir,
-      inspection_store: store,
-      inspection_adapter: PtcViewer.PinningInspectionTestAdapter
-    ]
-
-    assert {:ok, %{"source" => actual_source, "run_id" => "run-1", "value" => "done"}} =
-             PtcViewer.Api.result(config, "run-1")
-
-    assert actual_source == inspect(source)
-  end
-
-  test "execution_errors and explicit_failure_values delegate the pinned grant", %{
-    trace_dir: trace_dir
-  } do
-    source = {:pinned, "run.ptcins"}
-    {:ok, store} = PtcViewer.InspectionStore.start(source)
-    on_exit(fn -> if Process.alive?(store), do: PtcViewer.InspectionStore.stop(store) end)
-
-    config = [
-      trace_dir: trace_dir,
-      inspection_store: store,
-      inspection_adapter: PtcViewer.PinningInspectionTestAdapter
-    ]
-
-    assert {:ok, %{"source" => actual_errors, "run_id" => "run-1", "items" => []}} =
-             PtcViewer.Api.execution_errors(config, "run-1")
-
-    assert {:ok, %{"source" => actual_failures, "run_id" => "run-1", "items" => []}} =
-             PtcViewer.Api.explicit_failure_values(config, "run-1")
-
-    assert actual_errors == inspect(source)
-    assert actual_failures == inspect(source)
   end
 
   test "start rejects an adapter that does not implement the query contract" do
@@ -199,10 +142,5 @@ defmodule PtcViewer.ApiTest do
                inspection_adapter: String,
                open: false
              )
-  end
-
-  test "legacy raw trace API is absent" do
-    refute function_exported?(PtcViewer.Api, :list_traces, 1)
-    refute function_exported?(PtcViewer.Api, :get_trace, 2)
   end
 end

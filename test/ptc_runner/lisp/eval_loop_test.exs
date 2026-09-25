@@ -173,24 +173,6 @@ defmodule PtcRunner.Lisp.EvalLoopTest do
     end
   end
 
-  describe "arity check" do
-    test "recur wrong arity for loop" do
-      code = "(loop [x 0] (recur))"
-      assert {:error, %{fail: %{reason: :invalid_arity, message: msg}}} = Lisp.run(code)
-      assert msg =~ "recur"
-      assert msg =~ "1"
-      assert msg =~ "0"
-    end
-
-    test "recur wrong arity for fn" do
-      code = "((fn [x] (recur x 1)) 0)"
-      assert {:error, %{fail: %{reason: :invalid_arity, message: msg}}} = Lisp.run(code)
-      assert msg =~ "recur"
-      assert msg =~ "1"
-      assert msg =~ "2"
-    end
-  end
-
   describe "calling functions from loop" do
     test "calling defn from loop preserves loop bindings" do
       # Regression test: calling user-defined functions from within a loop

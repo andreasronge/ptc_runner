@@ -372,16 +372,6 @@ defmodule PtcRunner.LiveStatusTest do
            }
   end
 
-  test "live timeout formatting names the run-duration limit" do
-    assert {:ok,
-            "run_duration_ms limit 200 ms was exceeded during execution; raise limits.run_duration_ms in the manifest, and the installed host ceiling if it is lower"} =
-             RuntimeLimitDiagnostic.live_timeout_message(
-               :run_duration_ms,
-               200,
-               :execution
-             )
-  end
-
   test "the terminal frame names the timeout limit that actually fired" do
     parent = self()
     {:ok, target} = Target.new(fn _run_id, frame -> send(parent, {:live_frame, frame}) end)

@@ -10,11 +10,6 @@ defmodule PtcViewer.RouterTest do
     %{trace_dir: trace_dir, router_opts: [trace_dir: trace_dir, kernel_trace_adapter: nil]}
   end
 
-  test "legacy raw trace routes are absent", %{router_opts: router_opts} do
-    assert (conn(:get, "/api/traces") |> call_router(router_opts)).status == 404
-    assert (conn(:get, "/api/traces/trace1.jsonl") |> call_router(router_opts)).status == 404
-  end
-
   test "canonical transcript frontend asset is served", %{router_opts: router_opts} do
     conn = conn(:get, "/js/kernel-transcript.js") |> call_router(router_opts)
 

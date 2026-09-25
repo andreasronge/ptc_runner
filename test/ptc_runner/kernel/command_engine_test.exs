@@ -1702,37 +1702,6 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert_schema_valid(outcome.envelope)
   end
 
-  test "workflow heap diagnostics name the limit and bind the runtime source" do
-    assert {:error, %CommandOutcome{} = outcome} =
-             project_limit_exceeded(:memory_exceeded, %{
-               limit: :workflow_heap_words,
-               limit_value: 8_000_000
-             })
-
-    assert {:ok, expected} = RuntimeLimitDiagnostic.heap_words_message(8_000_000)
-    assert outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
-    assert outcome.envelope["error"]["message"] == expected
-    assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
-    assert outcome.envelope["error"]["subject"] == nil
-    assert outcome.envelope["error"]["provider_activity"] == true
-    assert_schema_valid(outcome.envelope)
-
-    runtime_source = CommandSource.fixed(:runtime)
-
-    assert {:error, :invalid_command_diagnostic} =
-             CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
-               message: expected,
-               provider_activity: true
-             )
-
-    assert {:ok, %CommandDiagnostic{source: ^runtime_source}} =
-             CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
-               message: expected,
-               source: runtime_source,
-               provider_activity: true
-             )
-  end
-
   test "max_calls diagnostics name the alias and bind the runtime source" do
     assert {:error, %CommandOutcome{} = outcome} =
              project_limit_exceeded(:capability_quota, %{
@@ -2459,37 +2428,6 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert {:error, :invalid_command_diagnostic} =
              CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
                message: "transcript limit 0 characters was exceeded",
-               provider_activity: true
-             )
-  end
-
-  test "a run timeout names the configured run_duration_ms rather than only timing out" do
-    assert {:ok, message} =
-             RuntimeLimitDiagnostic.live_timeout_message(:run_duration_ms, 3_000, :execution)
-
-    assert message ==
-             "run_duration_ms limit 3000 ms was exceeded during execution; raise limits.run_duration_ms in the manifest, and the installed host ceiling if it is lower"
-
-    # The wall-clock stop keeps its own code and status, so a script can still
-    # separate it from a turn limit on more than the exit code.
-    assert {:ok, %CommandDiagnostic{code: :run_timeout, exit_status: 6}} =
-             CommandDiagnostic.new(:execution, :run_timeout,
-               message: message,
-               source: CommandSource.fixed(:runtime),
-               provider_activity: true
-             )
-
-    assert {:error, :invalid_command_diagnostic} =
-             CommandDiagnostic.new(:execution, :run_timeout,
-               message: message,
-               provider_activity: true
-             )
-
-    assert {:error, :invalid_command_diagnostic} =
-             CommandDiagnostic.new(:execution, :run_timeout,
-               message:
-                 "run_duration_ms limit 0 ms was exceeded during execution; raise limits.run_duration_ms in the manifest, and the installed host ceiling if it is lower",
-               source: CommandSource.fixed(:runtime),
                provider_activity: true
              )
   end

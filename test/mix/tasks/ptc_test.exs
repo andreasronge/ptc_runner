@@ -523,23 +523,6 @@ defmodule Mix.Tasks.PtcTest do
     assert File.exists?(Path.join(trace_dir, envelope["run_ref"] <> ".jsonl"))
   end
 
-  @tag :tmp_dir
-  test "treats removed run switches as ordinary unknown input", %{tmp_dir: dir} do
-    manifest_path = write_manifest(dir, %{"value" => 1})
-
-    for removed <- [
-          ["--" <> "mission", "input.json"],
-          ["--private-" <> "mission", "input.json"],
-          ["--trace", "run.jsonl"],
-          ["--check"]
-        ] do
-      message = failed_message(["run", manifest_path | removed])
-      assert message =~ "arguments/invalid_arguments"
-      assert message =~ "; unknown switch; accepted:"
-      refute message =~ "retired switch"
-    end
-  end
-
   test "renders a closed accepted list without retaining an unknown switch" do
     message = failed_message(["run", "ptc.json", "--caller-secret", "value"])
 

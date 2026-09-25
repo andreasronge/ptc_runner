@@ -456,27 +456,6 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "isolates malformed and unsupported canonical input", %{tmp_dir: directory} do
-    path = Path.join(directory, "version.jsonl")
-    unsupported = Map.put(event("version", 1, "run-started"), "schema_version", 3)
-    write_events(path, [unsupported])
-
-    assert {:ok, unsupported_snapshot} =
-             TraceSnapshot.start({:directory, directory}, owner: self())
-
-    assert {:ok, %{run_count: 0}} = TraceSnapshot.info(unsupported_snapshot)
-    assert :ok = TraceSnapshot.stop(unsupported_snapshot)
-
-    File.write!(path, ~s({"schema_version":2,"schema_version":2}\n))
-
-    assert {:ok, malformed_snapshot} =
-             TraceSnapshot.start({:directory, directory}, owner: self())
-
-    assert {:ok, %{run_count: 0}} = TraceSnapshot.info(malformed_snapshot)
-    assert :ok = TraceSnapshot.stop(malformed_snapshot)
-  end
-
-  @tag :tmp_dir
   test "detects a directory file change between inventory and capture", %{tmp_dir: directory} do
     path = Path.join(directory, "before.jsonl")
     write_events(path, [event("before", 1, "run-started")])

@@ -11,6 +11,39 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   alias PtcRunner.Lisp.Result, as: Step
   alias PtcRunner.Lisp.Runtime.Collection
 
+  describe "keyword access over string graphemes" do
+    test "map yields one nil per grapheme" do
+      assert {:ok, %Step{return: [nil, nil, nil]}} = Lisp.run(~S|(map :x "abc")|)
+    end
+
+    test "filter and keep omit graphemes without the requested key" do
+      assert {:ok, %Step{return: []}} = Lisp.run(~S|(filter :x "abc")|)
+      assert {:ok, %Step{return: []}} = Lisp.run(~S|(keep :x "abc")|)
+    end
+
+    test "remove retains every grapheme" do
+      assert {:ok, %Step{return: ["a", "b", "c"]}} = Lisp.run(~S|(remove :x "abc")|)
+    end
+  end
+
+  describe "take-while and drop-while on map entries" do
+    test "take-while passes entry pairs and stops on a failed predicate" do
+      assert {:ok, %Step{return: [["a", 1]]}} =
+               Lisp.run(~S|(take-while (fn [entry] true) {:a 1})|)
+
+      assert {:ok, %Step{return: []}} =
+               Lisp.run(~S|(take-while (fn [entry] false) {:a 1})|)
+    end
+
+    test "drop-while drops matching entries and keeps nonmatching entries" do
+      assert {:ok, %Step{return: []}} =
+               Lisp.run(~S|(drop-while (fn [entry] true) {:a 1})|)
+
+      assert {:ok, %Step{return: [["a", 1]]}} =
+               Lisp.run(~S|(drop-while (fn [entry] false) {:a 1})|)
+    end
+  end
+
   describe "group-by with destructuring" do
     test "average by category using destructuring" do
       expenses = [
