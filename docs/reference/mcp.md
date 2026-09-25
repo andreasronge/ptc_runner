@@ -593,6 +593,10 @@ OAuth replaces static `auth` with host-owned policy that pins the resource,
 issuer, client, scope ceiling, refresh policy, loopback authority, and permitted
 network origins. The application and server cannot widen them.
 
+For an issuer with no path, a trailing `/` is equivalent to no slash in the
+host configuration, discovery metadata, and authorization response `iss`.
+Issuers with a path remain exact, including a trailing slash.
+
 This is a complete pre-registered installation. Replace the endpoint, issuer,
 resource, client ID, scopes, and tool mapping with values issued for your
 server:
@@ -637,6 +641,9 @@ server:
   }
 }
 ```
+
+For a Google MCP installation, use a Google OAuth Desktop app client to receive
+refresh tokens.
 
 OAuth MCP endpoints must use `https`. The plaintext-loopback allowance is
 credential-free and cannot be combined with an `oauth` block. PtcRunner also

@@ -18,6 +18,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
   use PtcRunner.Kernel.OwnerStatusRedaction
 
   alias PtcRunner.Kernel.Deadline
+  alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.Binding
   alias PtcRunner.Kernel.MCPOAuth.GrantKey
   alias PtcRunner.Kernel.MCPOAuth.Primitives
@@ -1019,10 +1020,10 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
   defp finish_authorization_commit(state, _key, _lease, _grant), do: state
 
   defp valid_callback_issuer?(%{issuer_required?: true, issuer: issuer}, callback_issuer),
-    do: callback_issuer == issuer
+    do: Authority.issuer_matches?(issuer, callback_issuer)
 
   defp valid_callback_issuer?(%{issuer_required?: false, issuer: issuer}, callback_issuer),
-    do: is_nil(callback_issuer) or callback_issuer == issuer
+    do: is_nil(callback_issuer) or Authority.issuer_matches?(issuer, callback_issuer)
 
   defp valid_renewed_binding?(
          %{binding: old_binding, binding_freshness_deadline_ms: deadline_ms},

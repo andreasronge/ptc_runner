@@ -91,6 +91,31 @@ defmodule PtcRunner.Kernel.MCPOAuth.DiscoveryTest do
     assert binding.required_scopes == MapSet.new(["read"])
   end
 
+  test "discovers a root issuer when protected resource metadata includes a slash" do
+    authority = authority()
+    assert authority.issuer == "https://auth.example"
+    [resource | _] = Metadata.protected_resource_candidates(authority.resource)
+    [server | _] = Metadata.authorization_server_candidates(authority.issuer)
+
+    responses = %{
+      {:post, authority.resource} => response(401, "", [{"www-authenticate", "Bearer"}]),
+      {:get, resource} =>
+        json_response(%{
+          "resource" => authority.resource,
+          "authorization_servers" => ["https://auth.example/"],
+          "scopes_supported" => ["read"]
+        }),
+      {:get, server} => json_response(server_document(authority))
+    }
+
+    request = fn method, url, _headers, _body, _timeout ->
+      {:ok, Map.get(responses, {method, url}, response(404, ""))}
+    end
+
+    assert {:ok, binding} = Discovery.discover(authority, request: request)
+    assert binding.authorization_server.issuer == authority.issuer
+  end
+
   test "a challenge-directed resource metadata URL fails closed without fallback" do
     authority = authority()
     directed = "https://mcp.example/directed-metadata"
