@@ -101,7 +101,7 @@
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="gateway-configuration">Gateway configuration</h1><p>The loopback gateway exposes health checks and an authenticated MCP tool server.</p><p>Start it with the installed executable:</p><pre><code class="sh language-sh">ptc gateway /absolute/path/ptc-gateway.json --env-file /absolute/path/credentials.env</code></pre><p>A source checkout runs the equivalent <code class="inline">MIX_QUIET=1 mix ptc.gateway</code> command from
+<h1 id="gateway-configuration">Gateway configuration</h1><p>The loopback gateway exposes health checks and an authenticated MCP tool server.</p><p>Start it with the installed executable:</p><pre><code class="sh language-sh">ptc gateway /absolute/path/ptc-gateway.json --env-file /absolute/path/credentials.env</code></pre><p>A source checkout runs the equivalent <code class="inline">mix ptc.gateway</code> command from
 <code class="inline">ptc_gateway/</code>.</p><p>Remote clients need an authenticated tunnel to loopback. Native TLS, proxy
 trust, direct private-network binding, and container port publishing are not
 supported. Changing configuration, credentials, templates, or pins requires a
@@ -209,14 +209,14 @@ Integration boundaries also exercise exact and excessive body,
 metadata, JSON depth/node, ID, normalized-schema, static-catalog, and encoded
 response sizes.</p><h2 id="startup-failures">Startup failures</h2><p>Only the first error is returned. Precedence is document read/JSON, structural
 schema and byte bounds, origins, duplicate tool names, audit presence, host,
-then each tool's constructor/pin and write permission in name order, audit
+artifact-root validation, then each tool's constructor/pin and write permission in name order, audit
 filesystem probe, run admission, warm credential capture/provider pins, and
 listener binding. A stage must succeed before the next stage runs.</p><p>The CLI writes one JSON object <code class="inline">{&quot;error&quot;:&quot;&lt;code&gt;&quot;}</code> and newline to stderr,
 nothing to stdout, and exits 78. Successful startup is silent. No names, paths,
 credentials, causes or stack traces belong in startup diagnostics.</p><p>The finite catalog is <code class="inline">config_unavailable</code>, <code class="inline">duplicate_json_key</code>,
 <code class="inline">config_invalid</code>, <code class="inline">origin_invalid</code>, <code class="inline">tool_name_duplicate</code>, <code class="inline">audit_invalid</code>,
 <code class="inline">host_invalid</code>, <code class="inline">template_invalid</code>, <code class="inline">catalog_too_large</code>, <code class="inline">application_content_digest_mismatch</code>,
-<code class="inline">write_forbidden</code>, <code class="inline">audit_unavailable</code>, <code class="inline">run_admission_unavailable</code>,
+<code class="inline">write_forbidden</code>, <code class="inline">audit_unavailable</code>, <code class="inline">artifact_root_unavailable</code>, <code class="inline">run_admission_unavailable</code>,
 <code class="inline">credential_unavailable</code>, <code class="inline">installation_pin_mismatch</code>, <code class="inline">provider_pin_mismatch</code>,
 <code class="inline">provider_pin_unavailable</code>, <code class="inline">provider_admission_unavailable</code>,
 <code class="inline">provider_runtime_unavailable</code>, <code class="inline">listener_unavailable</code>, and <code class="inline">internal_error</code>.

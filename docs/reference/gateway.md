@@ -8,7 +8,7 @@ Start it with the installed executable:
 ptc gateway /absolute/path/ptc-gateway.json --env-file /absolute/path/credentials.env
 ```
 
-A source checkout runs the equivalent `MIX_QUIET=1 mix ptc.gateway` command from
+A source checkout runs the equivalent `mix ptc.gateway` command from
 `ptc_gateway/`.
 
 Remote clients need an authenticated tunnel to loopback. Native TLS, proxy
@@ -209,7 +209,7 @@ response sizes.
 
 Only the first error is returned. Precedence is document read/JSON, structural
 schema and byte bounds, origins, duplicate tool names, audit presence, host,
-then each tool's constructor/pin and write permission in name order, audit
+artifact-root validation, then each tool's constructor/pin and write permission in name order, audit
 filesystem probe, run admission, warm credential capture/provider pins, and
 listener binding. A stage must succeed before the next stage runs.
 
@@ -220,7 +220,7 @@ credentials, causes or stack traces belong in startup diagnostics.
 The finite catalog is `config_unavailable`, `duplicate_json_key`,
 `config_invalid`, `origin_invalid`, `tool_name_duplicate`, `audit_invalid`,
 `host_invalid`, `template_invalid`, `catalog_too_large`, `application_content_digest_mismatch`,
-`write_forbidden`, `audit_unavailable`, `run_admission_unavailable`,
+`write_forbidden`, `audit_unavailable`, `artifact_root_unavailable`, `run_admission_unavailable`,
 `credential_unavailable`, `installation_pin_mismatch`, `provider_pin_mismatch`,
 `provider_pin_unavailable`, `provider_admission_unavailable`,
 `provider_runtime_unavailable`, `listener_unavailable`, and `internal_error`.

@@ -84,7 +84,7 @@ defmodule PtcGateway.Domain do
   end
 
   defp artifact_root(%{"artifacts" => %{"root" => root}}) do
-    with :ok <- PrivateDirectory.preflight(root),
+    with :ok <- artifact_root_parent(root),
          :ok <- ProjectArtifactRoot.ensure(root) do
       :ok
     else
@@ -93,6 +93,22 @@ defmodule PtcGateway.Domain do
   end
 
   defp artifact_root(_), do: :ok
+
+  defp artifact_root_parent(root) do
+    case File.lstat(root) do
+      {:ok, %{type: :directory}} ->
+        case PrivateDirectory.preflight_owner(root) do
+          {:ok, _uid} -> :ok
+          error -> error
+        end
+
+      {:error, :enoent} ->
+        PrivateDirectory.preflight(root)
+
+      _ ->
+        {:error, :artifact_root_unavailable}
+    end
+  end
 
   defp load_host(path) do
     case HostConfig.load(path) do

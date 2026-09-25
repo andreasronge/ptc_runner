@@ -31,7 +31,16 @@ defmodule PtcGateway.MixProject do
   # because its signal is a slope and a peak measured over thousands of calls,
   # not a per-commit gate, and because it measures VM-wide counters that a
   # parallel suite would perturb.
-  defp aliases, do: [soak: ["test --only soak"]]
+  defp aliases, do: [{:soak, ["test --only soak"]}, {:"ptc.gateway", &run_gateway/1}]
+
+  defp run_gateway(args) do
+    Mix.shell(Mix.Shell.Quiet)
+    System.put_env("MIX_QUIET", "1")
+    app_file = Path.join([Mix.Project.app_path(), "ebin", "ptc_gateway.app"])
+    prepare_args = if File.regular?(app_file), do: ["--no-deps-check"], else: []
+    Mix.Task.run("app.config", prepare_args)
+    Mix.Task.run("ptc.gateway", args)
+  end
 
   defp launcher_dep do
     launcher_path = Path.expand("../ptc_runner_launcher/release_config.exs", __DIR__)

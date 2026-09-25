@@ -3,7 +3,7 @@ defmodule Mix.Tasks.Ptc.Gateway do
   @moduledoc """
   Run in the sibling gateway project:
 
-      MIX_QUIET=1 mix ptc.gateway /absolute/path/gateway.json --env-file credentials.env
+      mix ptc.gateway /absolute/path/gateway.json --env-file credentials.env
 
   The explicit environment file is anchored to the invocation directory.
   Startup failure prints one closed JSON error on stderr and exits 78.
@@ -14,7 +14,7 @@ defmodule Mix.Tasks.Ptc.Gateway do
   def run(args) do
     reference = PtcGateway.ReleaseCLI.install_signal_handler()
     {opts, paths, invalid} = OptionParser.parse(args, strict: [env_file: :string])
-    Mix.Task.run("app.start")
+    {:ok, _started} = Application.ensure_all_started(:ptc_gateway)
 
     result =
       case {paths, invalid} do

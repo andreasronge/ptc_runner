@@ -267,6 +267,23 @@ defmodule PtcGatewayTest do
   end
 
   @tag :tmp_dir
+  test "existing private artifact root works under a non-writable parent", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    parent = Path.join(dir, "readonly")
+    File.mkdir!(parent)
+    root = Path.join(parent, "artifacts")
+    assert :ok = PtcRunner.Kernel.ProjectArtifactRoot.ensure(root)
+    File.chmod!(parent, 0o500)
+    on_exit(fn -> File.chmod!(parent, 0o700) end)
+    config = Map.put(config, "artifacts", %{"root" => "readonly/artifacts", "trace" => true})
+    File.write!(path, Jason.encode!(config))
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+  end
+
+  @tag :tmp_dir
   test "destination loss refuses a call before execution", %{tmp_dir: dir} do
     {path, config} = fixture(dir)
     config = Map.put(config, "artifacts", %{"root" => "artifacts", "trace" => true})
@@ -729,7 +746,7 @@ defmodule PtcGatewayTest do
         "sh",
         [
           "-c",
-          ~S(MIX_QUIET=1 exec "$1" ptc.gateway "$2" >"$3" 2>"$4"),
+          ~S(exec "$1" ptc.gateway "$2" >"$3" 2>"$4"),
           "--",
           System.find_executable("mix"),
           Path.join(dir, "missing.json"),
@@ -739,7 +756,7 @@ defmodule PtcGatewayTest do
         env: [{"MIX_ENV", "test"}]
       )
 
-    assert File.read!(stdout) in ["", "==> ptc_runner_launcher\n"]
+    assert File.read!(stdout) == ""
     assert File.read!(stderr) == "{\"error\":\"config_unavailable\"}\n"
   end
 
