@@ -244,6 +244,57 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
              )
   end
 
+  test "accepts opposite root issuer spellings on success and denial callbacks", context do
+    for {metadata_issuer, callback_issuer, outcome} <- [
+          {"https://auth.example/", "https://auth.example", :success},
+          {"https://auth.example", "https://auth.example/", :denial}
+        ] do
+      request = request_fixture(context.authority, self(), "max-age=120", "read", metadata_issuer)
+
+      assert {:ok, pending} =
+               Authorization.begin_authorization(context.context, context.authority,
+                 authority_epoch: context.epoch,
+                 redirect_uri: "http://127.0.0.1:49152/callback",
+                 request: request
+               )
+
+      state =
+        pending.url
+        |> URI.parse()
+        |> Map.fetch!(:query)
+        |> URI.decode_query()
+        |> Map.fetch!("state")
+
+      assert {:error, :invalid_callback} =
+               Authorization.complete_authorization(
+                 context.context,
+                 pending,
+                 [{"code", "code-1"}, {"state", state}, {"iss", "https://auth.example/tenant/"}],
+                 request: request
+               )
+
+      callback =
+        case outcome do
+          :success -> [{"code", "code-1"}, {"state", state}, {"iss", callback_issuer}]
+          :denial -> [{"error", "access_denied"}, {"state", state}, {"iss", callback_issuer}]
+        end
+
+      case outcome do
+        :success ->
+          assert {:ok, _grant} =
+                   Authorization.complete_authorization(context.context, pending, callback,
+                     request: request
+                   )
+
+        :denial ->
+          assert {:error, :authorization_denied} =
+                   Authorization.complete_authorization(context.context, pending, callback,
+                     request: request
+                   )
+      end
+    end
+  end
+
   test "a pending flow cannot be completed or cancelled by another principal", context do
     request = request_fixture(context.authority, self())
 
@@ -721,7 +772,8 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
          authority,
          parent,
          cache_control \\ "max-age=120",
-         token_scope \\ "read"
+         token_scope \\ "read",
+         metadata_issuer \\ nil
        ) do
     [resource | _] = Metadata.protected_resource_candidates(authority.resource)
     [server | _] = Metadata.authorization_server_candidates(authority.issuer)
@@ -750,7 +802,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
       :get, ^server, _headers, _body, _timeout ->
         json(
           %{
-            "issuer" => authority.issuer,
+            "issuer" => metadata_issuer || authority.issuer,
             "authorization_endpoint" => "https://auth.example/authorize",
             "token_endpoint" => "https://auth.example/token",
             "response_types_supported" => ["code"],

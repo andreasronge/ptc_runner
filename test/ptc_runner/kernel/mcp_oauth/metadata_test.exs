@@ -49,6 +49,113 @@ defmodule PtcRunner.Kernel.MCPOAuth.MetadataTest do
            ]
   end
 
+  test "keeps root-issuer metadata candidates unchanged" do
+    for issuer <- ["https://auth.example", "https://auth.example/"] do
+      assert Metadata.authorization_server_candidates(issuer) == [
+               "https://auth.example/.well-known/oauth-authorization-server",
+               "https://auth.example/.well-known/openid-configuration"
+             ]
+    end
+  end
+
+  test "accepts Google's root issuer spelling across resource and server metadata" do
+    resource = "https://gmailmcp.googleapis.com/mcp/v1"
+    scope = "https://www.googleapis.com/auth/gmail.readonly"
+
+    protected_resource = %{
+      "resource" => resource,
+      "authorization_servers" => ["https://accounts.google.com/"],
+      "bearer_methods_supported" => ["header"],
+      "scopes_supported" => [scope]
+    }
+
+    authorization_server = %{
+      "issuer" => "https://accounts.google.com",
+      "authorization_endpoint" => "https://accounts.google.com/o/oauth2/v2/auth",
+      "token_endpoint" => "https://oauth2.googleapis.com/token",
+      "response_types_supported" => ["code"],
+      "grant_types_supported" => ["authorization_code", "refresh_token"],
+      "code_challenge_methods_supported" => ["plain", "S256"],
+      "token_endpoint_auth_methods_supported" => ["client_secret_post", "client_secret_basic"],
+      "scopes_supported" => ["openid", "email", "profile"],
+      "authorization_response_iss_parameter_supported" => true
+    }
+
+    for issuer <- ["https://accounts.google.com", "https://accounts.google.com/"] do
+      {:ok, authority} =
+        Authority.from_host(
+          %{
+            "installation_id" => "gmail",
+            "issuer" => issuer,
+            "scope_ceiling" => [scope],
+            "default_scopes" => [scope],
+            "refresh_access" => "when_supported",
+            "network" => %{"additional_origins" => ["https://oauth2.googleapis.com"]},
+            "client" => %{
+              "registration" => "pre_registered",
+              "client_id" => "client",
+              "token_endpoint_auth_method" => "none",
+              "grant_types" => ["authorization_code", "refresh_token"],
+              "loopback_redirect" => %{"host" => "127.0.0.1", "path" => "/callback"}
+            }
+          },
+          resource,
+          MapSet.new()
+        )
+
+      assert authority.issuer == "https://accounts.google.com"
+      assert {:ok, _} = Metadata.validate_protected_resource(protected_resource, authority, "prm")
+
+      assert {:ok, metadata} =
+               Metadata.validate_authorization_server(authorization_server, authority, "as")
+
+      assert metadata.issuer == authority.issuer
+    end
+  end
+
+  test "keeps path issuers exact and rejects different hosts and schemes", %{authority: authority} do
+    protected_resource = %{
+      "resource" => authority.resource,
+      "authorization_servers" => ["https://auth.example/tenant/"]
+    }
+
+    for issuer <- [
+          "https://auth.example/tenant/",
+          "https://other.example/tenant",
+          "http://auth.example/tenant"
+        ] do
+      assert {:error, :invalid_protected_resource_metadata} =
+               Metadata.validate_protected_resource(
+                 %{protected_resource | "authorization_servers" => [issuer]},
+                 authority,
+                 "prm"
+               )
+    end
+
+    base = %{
+      "issuer" => authority.issuer,
+      "authorization_endpoint" => "https://auth.example/authorize",
+      "token_endpoint" => "https://auth.example/token",
+      "response_types_supported" => ["code"],
+      "grant_types_supported" => ["authorization_code"],
+      "code_challenge_methods_supported" => ["S256"],
+      "token_endpoint_auth_methods_supported" => ["none"]
+    }
+
+    for issuer <- [
+          "https://auth.example/tenant/",
+          "https://other.example/tenant",
+          "http://auth.example/tenant"
+        ] do
+      assert {:error, :invalid_authorization_server_metadata} =
+               Metadata.validate_authorization_server(
+                 %{base | "issuer" => issuer},
+                 authority,
+                 "as"
+               )
+    end
+  end
+
   test "validates resource identity, issuer membership, scopes, and fail-closed fields", %{
     authority: authority
   } do

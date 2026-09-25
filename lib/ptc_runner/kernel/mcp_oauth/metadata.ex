@@ -60,7 +60,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Metadata do
          servers when is_list(servers) and length(servers) in 1..@max_endpoints <-
            Map.get(document, "authorization_servers"),
          true <- servers == Enum.uniq(servers) and Enum.all?(servers, &is_binary/1),
-         true <- authority.issuer in servers,
+         true <- Enum.any?(servers, &Authority.issuer_matches?(authority.issuer, &1)),
          {:ok, scopes} <- optional_scopes(Map.get(document, "scopes_supported")) do
       {:ok,
        %{
@@ -82,7 +82,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Metadata do
   def validate_authorization_server(document, %Authority{} = authority, source)
       when is_map(document) and is_binary(source) do
     with issuer when is_binary(issuer) <- Map.get(document, "issuer"),
-         true <- issuer == authority.issuer,
+         true <- Authority.issuer_matches?(authority.issuer, issuer),
          authorization_endpoint when is_binary(authorization_endpoint) <-
            Map.get(document, "authorization_endpoint"),
          {:ok, authorization_endpoint} <-
@@ -125,7 +125,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Metadata do
       {:ok,
        %{
          source: source,
-         issuer: issuer,
+         issuer: authority.issuer,
          authorization_endpoint: authorization_endpoint,
          token_endpoint: token_endpoint,
          response_types_supported: response_types,

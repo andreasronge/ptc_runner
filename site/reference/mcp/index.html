@@ -446,7 +446,9 @@ for instance — so run the thing as well:</p><pre><code class="console language
  &quot;value&quot;:{&quot;text&quot;:[&quot;The current time in New York City is 2026-08-16T07:07:52-04:00&quot;]}}</code></pre><p>That is the baseline to diff a real host document against when a remote
 installation will not connect.</p><h2 id="authorize-oauth-protected-http-explicitly">Authorize OAuth-protected HTTP explicitly</h2><p>OAuth replaces static <code class="inline">auth</code> with host-owned policy that pins the resource,
 issuer, client, scope ceiling, refresh policy, loopback authority, and permitted
-network origins. The application and server cannot widen them.</p><p>This is a complete pre-registered installation. Replace the endpoint, issuer,
+network origins. The application and server cannot widen them.</p><p>For an issuer with no path, a trailing <code class="inline">/</code> is equivalent to no slash in the
+host configuration, discovery metadata, and authorization response <code class="inline">iss</code>.
+Issuers with a path remain exact, including a trailing slash.</p><p>This is a complete pre-registered installation. Replace the endpoint, issuer,
 resource, client ID, scopes, and tool mapping with values issued for your
 server:</p><pre><code class="json language-json">{
   &quot;install&quot;: {
@@ -485,7 +487,8 @@ server:</p><pre><code class="json language-json">{
       }
     }
   }
-}</code></pre><p>OAuth MCP endpoints must use <code class="inline">https</code>. The plaintext-loopback allowance is
+}</code></pre><p>For a Google MCP installation, use a Google OAuth Desktop app client to receive
+refresh tokens.</p><p>OAuth MCP endpoints must use <code class="inline">https</code>. The plaintext-loopback allowance is
 credential-free and cannot be combined with an <code class="inline">oauth</code> block. PtcRunner also
 does not accept a custom CA path in the host document: use a certificate trusted
 by the runtime's operating-system trust store. The repository E2E harness is a

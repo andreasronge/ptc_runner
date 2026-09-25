@@ -169,7 +169,8 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authority do
   def valid?(_authority), do: false
 
   @doc """
-  Validates and retains one exact HTTPS issuer identifier.
+  Validates one HTTPS issuer identifier. An empty path and `/` are stored
+  without a trailing slash; all other path bytes remain exact.
 
   Tests and trusted local embeddings may explicitly admit an HTTP
   literal-loopback issuer with `allow_insecure_loopback: true`; host
@@ -182,11 +183,11 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authority do
     allow_insecure_loopback = Keyword.get(opts, :allow_insecure_loopback, false)
 
     case URI.parse(value) do
-      %URI{scheme: scheme, host: host, userinfo: nil, query: nil, fragment: nil} ->
+      %URI{scheme: scheme, host: host, path: path, userinfo: nil, query: nil, fragment: nil} ->
         if MCPEndpoint.origin_allowed?(scheme, host, allow_insecure_loopback) and
              byte_size(value) <= 4_096 and String.valid?(value) and
              Keyword.keys(opts) -- [:allow_insecure_loopback] == [],
-           do: {:ok, value},
+           do: {:ok, canonical_issuer(value, path)},
            else: {:error, :invalid_issuer}
 
       _invalid ->
@@ -195,6 +196,15 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authority do
   end
 
   def issuer(_value, _opts), do: {:error, :invalid_issuer}
+
+  @doc false
+  @spec issuer_matches?(binary(), term()) :: boolean()
+  def issuer_matches?(configured, candidate) when is_binary(configured) do
+    issuer(candidate, allow_insecure_loopback: true) == {:ok, configured}
+  end
+
+  defp canonical_issuer(value, "/"), do: binary_part(value, 0, byte_size(value) - 1)
+  defp canonical_issuer(value, _path), do: value
 
   @doc """
   Canonicalizes only scheme and host case for one HTTPS MCP resource.
