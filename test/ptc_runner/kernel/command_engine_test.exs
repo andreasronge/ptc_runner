@@ -2116,7 +2116,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert {:ok,
             %{
-              "terminal_reason" => "timeout",
+              "terminal_reason" => terminal_reason,
               "terminal_limit" => "run_duration_ms",
               "terminal_limit_value" => 1,
               "truncated" => true
@@ -2124,6 +2124,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              TraceLog.query(trace, :get_run, %{"run_id" => outcome.envelope["run_ref"]})
 
     run_duration_message = outcome.envelope["error"]["message"]
+    assert terminal_reason in ["compile_timeout", "timeout"]
+
+    phase = if terminal_reason == "compile_timeout", do: "compilation", else: "execution"
+    assert run_duration_message =~ "was exceeded during #{phase}"
 
     assert {:error, :invalid_command_diagnostic} =
              CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
