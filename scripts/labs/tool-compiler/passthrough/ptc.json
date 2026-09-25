@@ -1,0 +1,27 @@
+{
+  "$schema": "https://ptc-runner.dev/schemas/ptc-application-manifest.schema.json",
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "lab.agent", "path": "agent.clj", "dependencies": ["agent.core"]},
+      {"library": "agent.core"}
+    ],
+    "entry": "lab.agent/run"
+  },
+  "input": {"value": {"task": "Return an empty record list.", "url": "http://127.0.0.1/unset"}},
+  "contracts": {
+    "input_schema": {"path": "input.schema.json"},
+    "result_schema": {"path": "result.schema.json"}
+  },
+  "providers": {
+    "workflow": [{"name": "model"}],
+    "mission": [{"name": "web"}]
+  },
+  "missions": {
+    "default": {
+      "components": [{"id": "lab.web", "path": "web.clj"}],
+      "data": {},
+      "providers": ["web"]
+    }
+  }
+}

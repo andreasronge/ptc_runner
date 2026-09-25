@@ -1,0 +1,63 @@
+{
+  "$schema": "https://ptc-runner.dev/schemas/ptc-application-manifest.schema.json",
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "id": "lab.compiler",
+        "path": "agent.clj",
+        "dependencies": [
+          "agent.core"
+        ]
+      },
+      {
+        "library": "agent.core"
+      }
+    ],
+    "entry": "lab.compiler/run"
+  },
+  "input": {
+    "value": {
+      "learn_url": "http://127.0.0.1/unset",
+      "holdout_url": "http://127.0.0.1/unset"
+    }
+  },
+  "contracts": {
+    "input_schema": {
+      "path": "input.schema.json"
+    },
+    "result_schema": {
+      "path": "result.schema.json"
+    }
+  },
+  "providers": {
+    "workflow": [
+      {
+        "name": "model"
+      }
+    ],
+    "mission": [
+      {
+        "name": "web"
+      }
+    ]
+  },
+  "missions": {
+    "default": {
+      "components": [
+        {
+          "id": "lab.probe",
+          "path": "probe.clj"
+        }
+      ],
+      "data": {},
+      "providers": [
+        "web"
+      ]
+    }
+  },
+  "limits": {
+    "run_duration_ms": 900000,
+    "workflow_timeout_ms": 600000
+  }
+}

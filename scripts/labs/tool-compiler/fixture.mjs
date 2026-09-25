@@ -1,0 +1,64 @@
+import { createServer } from 'node:http'
+
+// Two DOM shapes for the same records, plus a decoy `.speaker` in the nav that
+// punishes a selector guessed from the first element that matches. `/ledger`
+// carries enough records that one `page_read` cannot return the whole page.
+const filler = Array.from({ length: 40 }, (_, index) =>
+  `Row ${index + 1}: archival note, no quotation, retained for bulk only.`,
+)
+
+export const expected = {
+  '/quotes': [
+    { text: 'Measure the change before changing the measure.', author: 'Ada North' },
+    { text: 'A useful question leaves room for evidence.', author: 'Ben West' },
+  ],
+  '/held-out': [
+    { text: 'Keep the observation separate from the guess.', author: 'Eli River' },
+    { text: 'A repair earns trust through another test.', author: 'Gus Lake' },
+  ],
+  '/ledger': [
+    { text: 'Bulk hides the signal until someone counts it.', author: 'Ida Frost' },
+    { text: 'A long page is not a complicated one.', author: 'Job Marsh' },
+    { text: 'Read less by choosing better.', author: 'Kit Vale' },
+  ],
+}
+
+const nested = (path) => path === '/held-out'
+
+function card(path, { text, author }) {
+  return nested(path)
+    ? `<article class="entry"><header><span class="speaker">${author}</span></header><section><p class="words">${text}</p></section></article>`
+    : `<article class="entry"><p class="words">${text}</p><span class="speaker">${author}</span></article>`
+}
+
+function page(path) {
+  const records = expected[path]
+  if (!records) return null
+  const cards = records.map((record) => card(path, record)).join('')
+  const bulk =
+    path === '/ledger'
+      ? filler.map((line) => `<p class="note">${line}</p>`).join('')
+      : ''
+  return `<!doctype html><html><head><title>Quotation board</title></head><body><nav><span class="speaker">Navigation editor</span></nav><main><h1>Quotations</h1>${bulk}${cards}</main></body></html>`
+}
+
+export async function startFixture() {
+  const server = createServer((request, response) => {
+    const path = new URL(request.url, 'http://fixture.invalid').pathname
+    const html = page(path)
+    response.writeHead(html ? 200 : 404, {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'no-store',
+    })
+    response.end(html ?? 'Not found')
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  return {
+    origin: `http://127.0.0.1:${server.address().port}`,
+    close: () =>
+      new Promise((resolve, reject) => {
+        server.closeAllConnections()
+        server.close((error) => (error ? reject(error) : resolve()))
+      }),
+  }
+}
