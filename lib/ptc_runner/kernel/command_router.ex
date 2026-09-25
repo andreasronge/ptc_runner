@@ -8,8 +8,10 @@ defmodule PtcRunner.Kernel.CommandRouter do
   alias PtcRunner.Kernel.CommandFrontend
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandPresentation
+  alias PtcRunner.Kernel.CommandPrune
   alias PtcRunner.Kernel.CommandRenderer
   alias PtcRunner.Kernel.CommandRuntime
+  alias PtcRunner.Kernel.DiagnosticCatalog
 
   @frontend_commands CommandDeclaration.frontend_commands()
 
@@ -34,6 +36,14 @@ defmodule PtcRunner.Kernel.CommandRouter do
         CommandFrontend.present_entry(entry, bootstrap)
 
       {:ok, %CommandEntry{arguments: %{command: command}} = entry}
+      when command == :prune and not is_nil(entry.diagnostic) ->
+        prune_diagnostic(entry.diagnostic)
+
+      {:ok, %CommandEntry{arguments: %{command: command}} = entry}
+      when command == :prune ->
+        run_prune(entry)
+
+      {:ok, %CommandEntry{arguments: %{command: command}} = entry}
       when command in @frontend_commands ->
         run_one_shot(entry, bootstrap, repl_runner)
 
@@ -44,6 +54,22 @@ defmodule PtcRunner.Kernel.CommandRouter do
 
       {:ok, %CommandEntry{} = entry} ->
         CommandFrontend.present_entry(entry, bootstrap)
+    end
+  end
+
+  defp prune_diagnostic(%{phase: phase, code: code, message: message}) do
+    row = DiagnosticCatalog.fetch!(phase, code)
+    presentation(nil, "", "error: #{phase}/#{code}: #{message}\n", row.exit_status)
+  end
+
+  defp run_prune(entry) do
+    case CommandPrune.run(entry.arguments) do
+      {:ok, result} ->
+        presentation(nil, Jason.encode!(result) <> "\n", "", 0)
+
+      {:error, code} ->
+        row = DiagnosticCatalog.fetch!(:destination, code)
+        presentation(nil, "", "error: prune/#{code}: #{row.message}\n", row.exit_status)
     end
   end
 

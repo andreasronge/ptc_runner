@@ -48,6 +48,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
       usage: [
         "ptc validate MANIFEST.json|PROJECT.json [--host-config HOST.json] [--component-override-descriptor DESCRIPTOR.json]",
         "ptc run MANIFEST.json|PROJECT.json [OPTIONS]",
+        "ptc prune PROJECT.json (--max-age-days N | --max-bytes N) [--dry-run]",
         "ptc doctor [MANIFEST.json|PROJECT.json] [--host-config HOST.json] [--connect]",
         "ptc models PROJECT.json | --host-config HOST.json",
         "ptc catalog PROVIDER --host-config HOST.json",
@@ -184,6 +185,30 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           frontends: [:mix],
           owner: :frontend,
           repeatable: true
+        },
+        @help_option
+      ]
+    },
+    prune: %{
+      usage: ["ptc prune PROJECT.json (--max-age-days N | --max-bytes N) [--dry-run]"],
+      options: [
+        %{
+          key: :max_age_days,
+          type: :integer,
+          syntax: ["--max-age-days N"],
+          description: "delete runs older than N days"
+        },
+        %{
+          key: :max_bytes,
+          type: :integer,
+          syntax: ["--max-bytes N"],
+          description: "retain at most N artifact bytes"
+        },
+        %{
+          key: :dry_run,
+          type: :boolean,
+          syntax: ["--dry-run"],
+          description: "report without deleting"
         },
         @help_option
       ]
@@ -536,6 +561,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
     :docs,
     :validate,
     :run,
+    :prune,
     :doctor,
     :models,
     :catalog,
@@ -548,7 +574,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
   # Commands the shared engine never dispatches: their frontend owns the
   # process for as long as it runs. Transcript success rejoins the shared
   # outcome boundary after its frontend publishes the private document.
-  @frontend_commands [:transcript, :repl, :viewer]
+  @frontend_commands [:transcript, :repl, :viewer, :prune]
 
   @type command ::
           :version
@@ -556,6 +582,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           | :docs
           | :validate
           | :run
+          | :prune
           | :doctor
           | :models
           | :catalog

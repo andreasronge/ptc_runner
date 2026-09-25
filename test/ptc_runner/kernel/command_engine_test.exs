@@ -188,7 +188,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       end)
 
     assert topics ==
-             ~w(catalog docs doctor init materialize models repl root run run transcript validate version viewer)
+             ~w(catalog docs doctor init materialize models prune repl root run run transcript validate version viewer)
 
     run_options =
       help_branch
