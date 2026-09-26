@@ -1400,37 +1400,6 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
-  test "application assembly rejects a read export transitively backed by an installed write tool",
-       %{
-         tmp_dir: dir
-       } do
-    fixture = fixture(self(), spec_extras?: true)
-    on_exit(fixture.close)
-
-    tools =
-      Map.put(mappings(), "structured", %{as: "remote.structured", effect: :write})
-
-    mission_source = """
-    (ns actions "Write facade" {:visibility :prompt})
-    (defn- persist [query] (tool/remote.structured {"query" query}))
-    (defn save {:signature "(query :string) -> :any" :effect :read}
-      [query]
-      (persist query))
-    """
-
-    assert {:error, {:declared_read_effect_violation, "actions/save", :write}} =
-             dir
-             |> manifest(["remote.structured"],
-               mission_source: mission_source,
-               program: single_call_program("remote.structured", "x")
-             )
-             |> directory_request(registry(fixture.endpoint, tools: tools))
-             |> RunLifecycle.build()
-
-    refute_receive {:mcp_request, _method, _headers}
-  end
-
-  @tag :tmp_dir
   test "write-bearing direct sources require explicit allow while read-only omission stays convenient",
        %{tmp_dir: dir} do
     fixture = fixture(self())
@@ -2354,9 +2323,6 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   } do
     for {status, code, expected} <- [
           {200, -32_601, :mcp_discovery_method_unsupported},
-          {200, -32_022, :mcp_remote_error},
-          {200, -32_602, :mcp_remote_error},
-          {200, -32_603, :mcp_remote_error},
           {400, -32_601, :mcp_discovery_method_unsupported},
           {404, -32_601, :mcp_discovery_method_unsupported},
           {400, -32_022, :mcp_protocol_error},

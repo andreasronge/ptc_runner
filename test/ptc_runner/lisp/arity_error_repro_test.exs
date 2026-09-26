@@ -2,54 +2,26 @@ defmodule PtcRunner.Lisp.ArityErrorReproTest do
   use ExUnit.Case, async: true
   alias PtcRunner.Lisp
 
-  describe "arity error messages include function name" do
-    test "range without args" do
-      {:error, step} = Lisp.run("(range)")
+  test "multi-arity errors name each function and its accepted arities" do
+    for {name, expected} <- [
+          {"range", "1, 2, 3"},
+          {"get", "2 or 3"},
+          {"reduce", "2 or 3"},
+          {"join", "1 or 2"},
+          {"subs", "2 or 3"},
+          {"sort-by", "2 or 3"},
+          {"get-in", "2 or 3"}
+        ] do
+      {:error, step} = Lisp.run("(#{name})")
       assert step.fail.reason == :arity_error
-      assert step.fail.message == "arity error: range expects 1, 2, 3 argument(s), got 0"
+      assert step.fail.message == "arity error: #{name} expects #{expected} argument(s), got 0"
     end
+  end
 
-    test "get without args" do
-      {:error, step} = Lisp.run("(get)")
-      assert step.fail.reason == :arity_error
-      assert step.fail.message == "arity error: get expects 2 or 3 argument(s), got 0"
-    end
-
-    test "reduce without args" do
-      {:error, step} = Lisp.run("(reduce)")
-      assert step.fail.reason == :arity_error
-      assert step.fail.message == "arity error: reduce expects 2 or 3 argument(s), got 0"
-    end
-
-    test "join without args" do
-      {:error, step} = Lisp.run("(join)")
-      assert step.fail.reason == :arity_error
-      assert step.fail.message == "arity error: join expects 1 or 2 argument(s), got 0"
-    end
-
-    test "subs without args" do
-      {:error, step} = Lisp.run("(subs)")
-      assert step.fail.reason == :arity_error
-      assert step.fail.message == "arity error: subs expects 2 or 3 argument(s), got 0"
-    end
-
-    test "sort-by without args" do
-      {:error, step} = Lisp.run("(sort-by)")
-      assert step.fail.reason == :arity_error
-      assert step.fail.message == "arity error: sort-by expects 2 or 3 argument(s), got 0"
-    end
-
-    test "get-in without args" do
-      {:error, step} = Lisp.run("(get-in)")
-      assert step.fail.reason == :arity_error
-      assert step.fail.message == "arity error: get-in expects 2 or 3 argument(s), got 0"
-    end
-
-    test "/ without args (variadic_nonempty)" do
-      {:error, step} = Lisp.run("(/)")
-      assert step.fail.reason == :arity_error
-      assert step.fail.message == "arity error: / requires at least 1 argument, got 0"
-    end
+  test "variadic nonempty errors name the function and minimum arity" do
+    {:error, step} = Lisp.run("(/)")
+    assert step.fail.reason == :arity_error
+    assert step.fail.message == "arity error: / requires at least 1 argument, got 0"
   end
 
   describe "LLM-generated code error scenario" do

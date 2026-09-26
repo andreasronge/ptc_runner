@@ -18,75 +18,32 @@ defmodule PtcRunner.ReplFrontendGlobalStateTest do
   @stdio_root Path.expand("../../..", __DIR__)
   @stdio_fixture Path.expand("../../support/mcp_stdio_source_fixture.sh", __DIR__)
 
-  test "direct eval reports the first surplus closer to developers" do
-    output =
-      capture_io(:stderr, fn ->
-        error = assert_raise Mix.Error, fn -> run_repl(["-e", "(+ 1 2))"]) end
+  test "direct eval renders each error once without leaking module names" do
+    cases = [
+      {"(+ 1 2))", "parse_error",
+       "unbalanced parentheses: 1 extra ')' (first at line 1, column 8)"},
+      {"(/ 1 0)", "arithmetic_error", "division by zero"},
+      {~S|(kernel/mission-model-context "reader")|, "invalid_form",
+       NamespaceDiagnostic.message("kernel")},
+      {~S|(str/split "a-VERDICT-b" "VERDICT")|, "type_error",
+       ~S|split: delimiter must be a regex pattern, got plain string "VERDICT"|}
+    ]
 
-        assert error.message =~
-                 "Error (parse_error): unbalanced parentheses: 1 extra ')' " <>
-                   "(first at line 1, column 8)"
-      end)
+    for {source, kind, detail} <- cases do
+      rendered = "Error (#{kind}): #{detail}"
 
-    assert output ==
-             "Error (parse_error): unbalanced parentheses: 1 extra ')' " <>
-               "(first at line 1, column 8)\n"
-  end
+      output =
+        capture_io(:stderr, fn ->
+          error = assert_raise Mix.Error, fn -> run_repl(["-e", source]) end
+          assert error.message =~ "Error (#{kind}):"
+          if kind != "invalid_form", do: assert(error.message =~ detail)
+          refute error.message =~ "PtcRunner.Lisp"
+          refute error.message =~ "#{kind}: #{kind}"
+        end)
 
-  test "direct eval uses the public arithmetic renderer" do
-    output =
-      capture_io(:stderr, fn ->
-        error = assert_raise Mix.Error, fn -> run_repl(["-e", "(/ 1 0)"]) end
-
-        assert error.message =~ "Error (arithmetic_error): division by zero"
-        refute error.message =~ "PtcRunner.Lisp"
-      end)
-
-    assert output =~ "Error (arithmetic_error): division by zero"
-    refute output =~ "PtcRunner.Lisp"
-  end
-
-  test "direct eval retains canonical unknown-namespace guidance" do
-    expected =
-      "Error (invalid_form): " <> NamespaceDiagnostic.message("kernel")
-
-    output =
-      capture_io(:stderr, fn ->
-        error =
-          assert_raise Mix.Error, fn ->
-            run_repl(["-e", ~S|(kernel/mission-model-context "reader")|])
-          end
-
-        assert String.starts_with?(
-                 error.message,
-                 "error: repl/command_failed: Error (invalid_form): " <>
-                   "unknown namespace kernel/"
-               )
-      end)
-
-    assert output == expected <> "\n"
-  end
-
-  test "direct eval preserves the detailed type_error message and renders its kind once" do
-    output =
-      capture_io(:stderr, fn ->
-        error =
-          assert_raise Mix.Error, fn ->
-            run_repl(["-e", ~S|(str/split "a-VERDICT-b" "VERDICT")|])
-          end
-
-        assert String.starts_with?(
-                 error.message,
-                 "error: repl/command_failed: Error (type_error): split: " <>
-                   "delimiter must be a regex pattern"
-               )
-
-        refute error.message =~ "type_error: type_error"
-      end)
-
-    assert output ==
-             "Error (type_error): split: delimiter must be a regex pattern, " <>
-               "got plain string \"VERDICT\"\n"
+      assert output == rendered <> "\n"
+      refute output =~ "PtcRunner.Lisp"
+    end
   end
 
   test "direct repeated eval retains the ordinary session ceiling" do

@@ -311,62 +311,31 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     refute_received {:provider_root, _root, _registration}
   end
 
-  test "a staged preparation stricter than its sealed declaration is refused" do
-    # Preparation, phase-5 identity, and the sinks the owner opened before any
-    # provider ran all come from the sealed descriptor. A builder preparing as
-    # :private_inspection while its descriptor declares :normal contradicts
-    # that declaration, so the run stops while every provider is still inert.
-    fixture =
-      provider_fixture(
-        credential_names: ["fixture-key"],
-        descriptor_accepts_data: [:normal, :private_inspection],
-        staged_data_class: :private_inspection,
-        staged_accepts_data: [:normal, :private_inspection]
-      )
-
-    assert fixture.prepared.effective_data_class == :normal
-    assert_declaration_refused(fixture)
-  end
-
-  test "a staged preparation weaker than its sealed declaration is refused just as firmly" do
-    # The safe direction still contradicts the declaration the effective data
-    # class, event policy, and opened sinks were derived from, so it is refused
-    # rather than accepted because it happens to be stricter than needed.
-    fixture =
-      provider_fixture(
-        credential_names: ["fixture-key"],
-        descriptor_data_class: :private_inspection,
-        descriptor_accepts_data: [:normal, :private_inspection],
-        staged_accepts_data: [:normal, :private_inspection]
-      )
-
-    assert fixture.prepared.effective_data_class == :private_inspection
-    assert_declaration_refused(fixture)
-  end
-
-  test "a staged preparation accepting more classes than it declared is refused" do
-    # Phase 5 admitted this occurrence against the declared accepted classes.
-    # A builder that widens them at run time answers a different information
-    # flow question than the one the sealed plan approved.
-    fixture =
-      provider_fixture(
-        credential_names: ["fixture-key"],
-        descriptor_accepts_data: [:normal],
-        staged_accepts_data: [:normal, :private_inspection]
-      )
-
-    assert_declaration_refused(fixture)
-  end
-
-  test "a staged preparation accepting fewer classes than it declared is refused" do
-    fixture =
-      provider_fixture(
-        credential_names: ["fixture-key"],
-        descriptor_accepts_data: [:normal, :private_inspection],
-        staged_accepts_data: [:normal]
-      )
-
-    assert_declaration_refused(fixture)
+  test "staged preparations that disagree with sealed declarations are refused" do
+    for {options, effective_class} <- [
+          {[
+             descriptor_accepts_data: [:normal, :private_inspection],
+             staged_data_class: :private_inspection,
+             staged_accepts_data: [:normal, :private_inspection]
+           ], :normal},
+          {[
+             descriptor_data_class: :private_inspection,
+             descriptor_accepts_data: [:normal, :private_inspection],
+             staged_accepts_data: [:normal, :private_inspection]
+           ], :private_inspection},
+          {[
+             descriptor_accepts_data: [:normal],
+             staged_accepts_data: [:normal, :private_inspection]
+           ], :normal},
+          {[
+             descriptor_accepts_data: [:normal, :private_inspection],
+             staged_accepts_data: [:normal]
+           ], :normal}
+        ] do
+      fixture = provider_fixture([credential_names: ["fixture-key"]] ++ options)
+      assert fixture.prepared.effective_data_class == effective_class
+      assert_declaration_refused(fixture)
+    end
   end
 
   test "connectivity registry activation timeout preserves the attempted prefix" do
