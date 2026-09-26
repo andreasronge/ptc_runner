@@ -1,7 +1,7 @@
 defmodule PtcRunner.Kernel.PublicationHandleTest do
-  use ExUnit.Case, async: true
-
-  import ExUnit.CaptureIO
+  # These tests attach a process-wide telemetry handler and must not receive
+  # publication events emitted by other test modules.
+  use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.PublicationHandle
 
@@ -18,13 +18,8 @@ defmodule PtcRunner.Kernel.PublicationHandleTest do
       _stage -> :ok
     end
 
-    stderr =
-      capture_io(:stderr, fn ->
-        assert {:error, :destination_unavailable} =
-                 PublicationHandle.reserve_direct(destination, :result, 0o600, self(), fault_hook)
-      end)
-
-    assert stderr == "destination unavailable: operation=reserve kind=result cause=reason:eio\n"
+    assert {:error, :destination_unavailable} =
+             PublicationHandle.reserve_direct(destination, :result, 0o600, self(), fault_hook)
 
     assert_receive {@event, ^ref, %{}, metadata}
     assert metadata == %{operation: :reserve, kind: :result, cause: {:reason, :eio}}

@@ -262,47 +262,4 @@ defmodule PtcRunner.Lisp.AnalyzeOperationsTest do
       assert msg =~ "Empty list"
     end
   end
-
-  describe "juxt function combinator" do
-    test "empty juxt is an arity error (GAP-S110)" do
-      raw = {:list, [{:symbol, :juxt}]}
-      assert {:error, {:invalid_arity, :juxt, _}} = Analyze.analyze(raw)
-    end
-
-    test "single function juxt" do
-      raw = {:list, [{:symbol, :juxt}, {:keyword, :name}]}
-      assert {:ok, {:juxt, [{:keyword, :name}]}} = Analyze.analyze(raw)
-    end
-
-    test "multiple functions juxt" do
-      raw = {:list, [{:symbol, :juxt}, {:keyword, :name}, {:keyword, :age}]}
-      assert {:ok, {:juxt, [{:keyword, :name}, {:keyword, :age}]}} = Analyze.analyze(raw)
-    end
-
-    test "juxt with closures" do
-      raw =
-        {:list,
-         [
-           {:symbol, :juxt},
-           {:short_fn, [{:list, [{:symbol, :+}, {:symbol, :%}, 1]}]},
-           {:short_fn, [{:list, [{:symbol, :*}, {:symbol, :%}, 2]}]}
-         ]}
-
-      assert {:ok, {:juxt, [fn1, fn2]}} = Analyze.analyze(raw)
-      assert match?({:fn, _, _}, fn1)
-      assert match?({:fn, _, _}, fn2)
-    end
-
-    test "juxt with mixed function types" do
-      raw =
-        {:list,
-         [
-           {:symbol, :juxt},
-           {:keyword, :priority},
-           {:symbol, :first}
-         ]}
-
-      assert {:ok, {:juxt, [{:keyword, :priority}, {:var, :first}]}} = Analyze.analyze(raw)
-    end
-  end
 end

@@ -22,15 +22,8 @@ defmodule PtcRunner.Lisp.Runtime do
   alias PtcRunner.Lisp.Runtime.Regex
   alias PtcRunner.Lisp.Runtime.String, as: RuntimeString
 
-  # ============================================================
-  # Flexible Key Access Helper
-  # ============================================================
-
   defdelegate flex_get(map, key), to: FlexAccess
   defdelegate flex_fetch(map, key), to: FlexAccess
-  defdelegate flex_get_in(data, path), to: FlexAccess
-  defdelegate flex_put_in(data, path, value), to: FlexAccess
-  defdelegate flex_update_in(data, path, func), to: FlexAccess
 
   # ============================================================
   # Collection Operations

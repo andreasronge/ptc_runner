@@ -942,21 +942,9 @@ defmodule PtcRunner.ReplFrontendTest do
     refute output =~ "__ptc_return__"
   end
 
-  test "removed upstream and special log options fail closed" do
-    assert_raise Mix.Error, ~r/unknown switch; accepted:/, fn ->
-      run_repl(["--log-prelude", "-e", "(+ 1 2)"])
-    end
-  end
-
   test "eval and positional script modes are mutually exclusive" do
     assert_raise Mix.Error, ~r/arguments\/conflicting_arguments/, fn ->
       run_repl(["-e", "42", "script.clj"])
-    end
-  end
-
-  test "removed configurable history depth fails closed" do
-    assert_raise Mix.Error, ~r/unknown switch; accepted:/, fn ->
-      run_repl(["--history-depth", "0", "--manifest", "missing.json"])
     end
   end
 

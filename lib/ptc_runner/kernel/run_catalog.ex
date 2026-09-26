@@ -74,9 +74,6 @@ defmodule PtcRunner.Kernel.RunCatalog do
   @spec max_row_bytes() :: pos_integer()
   def max_row_bytes, do: @max_row_bytes
 
-  @spec reason_order() :: [atom()]
-  def reason_order, do: @reason_order
-
   @doc """
   Freezes one generation from the probes of a single capture.
 

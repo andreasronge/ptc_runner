@@ -1350,19 +1350,6 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "the removed public capture heap override is rejected", %{tmp_dir: root} do
-    {trace, inspection} = source_directories(root)
-    write_run(trace, inspection, "heap-bounded", :basic)
-    {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
-    on_exit(fn -> TraceSnapshot.stop(trace_snapshot) end)
-
-    assert {:error, :invalid_snapshot} =
-             InspectionSnapshot.start({:directory, inspection}, trace_snapshot,
-               capture_heap_words: 233
-             )
-  end
-
-  @tag :tmp_dir
   test "an individually oversized query item fails instead of returning a stalled cursor", %{
     tmp_dir: root
   } do

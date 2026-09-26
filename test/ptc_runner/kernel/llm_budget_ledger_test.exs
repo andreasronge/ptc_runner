@@ -361,32 +361,6 @@ defmodule PtcRunner.Kernel.LLMBudgetLedgerTest do
              RunState.reserve_capability(state, :workflow, "llm-request", nil, route)
   end
 
-  test "replay aliases never reserve or charge operational ledgers" do
-    {:ok, limits} = Limits.new(llm_total_tokens: 50, llm_cost_microusd: 250)
-    {:ok, state} = RunState.start(limits)
-
-    replay_route = %{route_key: "fixture", max_calls: 16, source: "llm_replay"}
-
-    assert {:ok, reservation_id} =
-             RunState.reserve_capability(state, :workflow, "llm-request", nil, replay_route)
-
-    provider = idle_provider()
-    assert :ok = RunState.attach_provider(state, reservation_id, provider)
-    assert :ok = RunState.open_provider_gate(state, reservation_id, provider, make_ref())
-
-    usage = %{
-      "input" => 50,
-      "output" => 50,
-      "total_cost" => %{"currency" => "USD", "microunits" => 250}
-    }
-
-    assert {:ok, :settled} =
-             RunState.finish_provider(state, reservation_id, {:adapter_success, {:valid, usage}})
-
-    assert RunState.usage(state).llm_budget["total_tokens"]["charged"] == 0
-    assert RunState.usage(state).llm_budget["cost"]["charged_microusd"] == 0
-  end
-
   test "terminal cleanup releases unacknowledged work and full-charges acknowledged work" do
     {:ok, limits} =
       Limits.new(

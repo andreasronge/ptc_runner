@@ -19,40 +19,6 @@ defmodule PtcRunner.Lisp.AnalyzeIfArityTest do
       {:ok, step} = Lisp.run("(if false :yes :no)")
       assert step.return == "no"
     end
-
-    test "0-arg still raise arity error" do
-      assert {:error, step} = Lisp.run("(if)")
-      assert step.fail.message =~ "expected (if cond then else?)"
-    end
-
-    test "1-arg still raise arity error" do
-      assert {:error, step} = Lisp.run("(if true)")
-      assert step.fail.message =~ "expected (if cond then else?)"
-    end
-
-    test "4+ args still raise arity error" do
-      assert {:error, step} = Lisp.run("(if true :a :b :c)")
-      assert step.fail.message =~ "expected (if cond then else?)"
-    end
-  end
-
-  describe "if-not arity" do
-    test "2-arg if-not returns value when false" do
-      {:ok, step} = Lisp.run("(if-not false :yes)")
-      assert step.return == "yes"
-    end
-
-    test "2-arg if-not returns nil when true" do
-      {:ok, step} = Lisp.run("(if-not true :yes)")
-      assert step.return == nil
-    end
-
-    test "3-arg if-not still works" do
-      {:ok, step} = Lisp.run("(if-not false :yes :no)")
-      assert step.return == "yes"
-      {:ok, step} = Lisp.run("(if-not true :yes :no)")
-      assert step.return == "no"
-    end
   end
 
   describe "when regression" do

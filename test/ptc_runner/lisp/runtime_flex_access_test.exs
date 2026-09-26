@@ -2,6 +2,7 @@ defmodule PtcRunner.Lisp.RuntimeFlexAccessTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp.Runtime
+  alias PtcRunner.Lisp.Runtime.FlexAccess
 
   describe "sort_by - flexible key access" do
     test "string key fallback: sort_by with string keys in data" do
@@ -480,62 +481,62 @@ defmodule PtcRunner.Lisp.RuntimeFlexAccessTest do
   describe "flex_fetch - flexible key fetching" do
     test "flex_fetch with atom key finds value in atom-keyed map" do
       map = %{name: "Alice"}
-      assert Runtime.flex_fetch(map, :name) == {:ok, "Alice"}
+      assert FlexAccess.flex_fetch(map, :name) == {:ok, "Alice"}
     end
 
     test "flex_fetch with atom key finds value in string-keyed map" do
       map = %{"name" => "Alice"}
-      assert Runtime.flex_fetch(map, :name) == {:ok, "Alice"}
+      assert FlexAccess.flex_fetch(map, :name) == {:ok, "Alice"}
     end
 
     test "flex_fetch with string key finds value in string-keyed map" do
       map = %{"name" => "Alice"}
-      assert Runtime.flex_fetch(map, "name") == {:ok, "Alice"}
+      assert FlexAccess.flex_fetch(map, "name") == {:ok, "Alice"}
     end
 
     test "flex_fetch with string key finds value in atom-keyed map" do
       map = %{name: "Alice"}
-      assert Runtime.flex_fetch(map, "name") == {:ok, "Alice"}
+      assert FlexAccess.flex_fetch(map, "name") == {:ok, "Alice"}
     end
 
     test "flex_fetch with atom key returns :error for missing key" do
       map = %{name: "Alice"}
-      assert Runtime.flex_fetch(map, :age) == :error
+      assert FlexAccess.flex_fetch(map, :age) == :error
     end
 
     test "flex_fetch with string key returns :error for missing key" do
       map = %{"name" => "Alice"}
-      assert Runtime.flex_fetch(map, "age") == :error
+      assert FlexAccess.flex_fetch(map, "age") == :error
     end
 
     test "flex_fetch preserves nil values" do
       map = %{status: nil}
-      assert Runtime.flex_fetch(map, :status) == {:ok, nil}
+      assert FlexAccess.flex_fetch(map, :status) == {:ok, nil}
     end
 
     test "flex_fetch preserves nil values in string-keyed map" do
       map = %{"status" => nil}
-      assert Runtime.flex_fetch(map, "status") == {:ok, nil}
+      assert FlexAccess.flex_fetch(map, "status") == {:ok, nil}
     end
 
     test "flex_fetch with MapSet returns :error" do
       set = MapSet.new([1, 2, 3])
-      assert Runtime.flex_fetch(set, :key) == :error
+      assert FlexAccess.flex_fetch(set, :key) == :error
     end
 
     test "flex_fetch with nil returns :error" do
-      assert Runtime.flex_fetch(nil, :key) == :error
-      assert Runtime.flex_fetch(nil, "key") == :error
+      assert FlexAccess.flex_fetch(nil, :key) == :error
+      assert FlexAccess.flex_fetch(nil, "key") == :error
     end
 
     test "flex_fetch prefers atom key when both exist" do
       map = %{"name" => "Bob", name: "Alice"}
-      assert Runtime.flex_fetch(map, :name) == {:ok, "Alice"}
+      assert FlexAccess.flex_fetch(map, :name) == {:ok, "Alice"}
     end
 
     test "flex_fetch with non-atom/string key uses Map.fetch directly" do
       map = %{1 => "value"}
-      assert Runtime.flex_fetch(map, 1) == {:ok, "value"}
+      assert FlexAccess.flex_fetch(map, 1) == {:ok, "value"}
     end
   end
 end

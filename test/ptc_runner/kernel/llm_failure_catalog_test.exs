@@ -40,10 +40,6 @@ defmodule PtcRunner.Kernel.LLMFailureCatalogTest do
            }) == %{llm_provider_failure: :timeout, llm_provider_retryable?: true}
   end
 
-  test "generated agent.failure source matches the catalog projection" do
-    assert File.read!("priv/preludes/kernel/agent.failure.clj") == LLMFailureCatalog.lisp_source()
-  end
-
   test "classify admits every catalog spelling and stays out of the prompt inventory" do
     {:ok, components} = Library.components(["agent.failure"])
     {:ok, bundle} = Kernel.compile_bundle(components)

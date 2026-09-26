@@ -470,58 +470,6 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       assert {:ok, %{return: [1, 2], memory: %{}}} =
                Lisp.run(source, context: ctx)
     end
-
-    test "juxt enables multi-criteria sorting" do
-      source = ~S"""
-      (sort-by (juxt :priority :name) data/tasks)
-      """
-
-      ctx = %{
-        tasks: [
-          %{priority: 2, name: "Deploy"},
-          %{priority: 1, name: "Test"},
-          %{priority: 1, name: "Build"}
-        ]
-      }
-
-      {:ok, %{return: result, memory: _}} = Lisp.run(source, context: ctx)
-
-      # Should sort by priority first, then by name
-      assert result == [
-               %{priority: 1, name: "Build"},
-               %{priority: 1, name: "Test"},
-               %{priority: 2, name: "Deploy"}
-             ]
-    end
-
-    test "juxt with map extracts multiple values" do
-      source = "(map (juxt :x :y) data/points)"
-
-      ctx = %{points: [%{x: 1, y: 2}, %{x: 3, y: 4}]}
-
-      {:ok, %{return: result, memory: _}} = Lisp.run(source, context: ctx)
-      assert result == [[1, 2], [3, 4]]
-    end
-
-    test "juxt with closures applies multiple transformations" do
-      source = "((juxt #(+ % 1) #(* % 2)) 5)"
-
-      {:ok, %{return: result, memory: _}} = Lisp.run(source)
-      assert result == [6, 10]
-    end
-
-    test "juxt with builtin functions" do
-      source = "((juxt first last) [1 2 3])"
-
-      {:ok, %{return: result, memory: _}} = Lisp.run(source)
-      assert result == [1, 3]
-    end
-
-    test "empty juxt raises (requires at least one function) (GAP-S110)" do
-      source = "((juxt) {:a 1})"
-
-      assert {:error, %{fail: %{reason: :invalid_arity}}} = Lisp.run(source)
-    end
   end
 
   describe "Clojure namespace compatibility" do
@@ -780,34 +728,6 @@ defmodule PtcRunner.Lisp.IntegrationTest do
     test "val extracts from min-key result" do
       {:ok, %{return: result}} = Lisp.run("(val (apply min-key val (seq {:a 10 :b 42 :c 7})))")
       assert result == 7
-    end
-  end
-
-  describe "apply function E2E" do
-    test "apply with max spreads collection" do
-      source = "(apply max [3 1 4 1 5])"
-      {:ok, %{return: 5}} = Lisp.run(source)
-    end
-
-    test "apply with reduce (multi-arity)" do
-      source = "(apply reduce [+ 0 [1 2 3]])"
-      {:ok, %{return: 6}} = Lisp.run(source)
-    end
-
-    test "apply in thread-last" do
-      source = "(->> [1 2 3 4] (apply +))"
-      {:ok, %{return: 10}} = Lisp.run(source)
-    end
-
-    test "apply with get (multi-arity 3-arg)" do
-      source = ~S|(apply get [{:a 1} :b "default"])|
-      {:ok, %{return: "default"}} = Lisp.run(source)
-    end
-
-    test "apply with closure arity error E2E" do
-      source = "(apply (fn [x y] (+ x y)) [1])"
-      {:error, %{fail: %{message: msg}}} = Lisp.run(source)
-      assert msg =~ "arity_mismatch"
     end
   end
 

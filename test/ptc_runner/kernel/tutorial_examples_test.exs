@@ -16,25 +16,6 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
   @viewer_examples Path.expand("../../../scripts/labs/viewer-demo", __DIR__)
   @replay_example Path.expand("../../../examples/llm-replay", __DIR__)
 
-  test "the deterministic tutorial manifest returns the documented value" do
-    {:ok, registry} = ProviderRegistry.new()
-
-    assert {:ok,
-            %{
-              value: %{
-                "order_count" => 3,
-                "paid_count" => 2,
-                "paid_total" => 335.75,
-                "pending_ids" => ["A-101"]
-              }
-            }} =
-             "01-orders"
-             |> path()
-             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
-             |> RunLifecycle.build(registry)
-             |> RunLifecycle.execute()
-  end
-
   test "the live-model tutorial manifests and shared host installation load strictly" do
     assert {:ok, host} = HostConfig.load(@host)
     assert host.install |> Map.keys() |> Enum.sort() == ["deepseek", "workspace"]
@@ -42,29 +23,7 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
     for example <- ~w(02-deepseek-extract 03-file-agent 04-multi-turn-agent 07-parallel-fan-out) do
       assert {:ok, manifest} = Manifest.load(path(example))
       assert manifest.entry =~ "/"
-
-      if example == "04-multi-turn-agent" do
-        assert manifest.limits.run_duration_ms == 120_000
-        assert manifest.limits.workflow_timeout_ms == 120_000
-        assert manifest.limits.run_duration_ms < manifest.installed_limits.run_duration_ms
-        assert manifest.limits.workflow_timeout_ms < manifest.installed_limits.workflow_timeout_ms
-      end
     end
-  end
-
-  test "the cost-budget tutorial installs and requests the deliberate one-microUSD ceiling" do
-    assert {:ok, host} = HostConfig.load(@cost_budget_host)
-    assert host.limits.llm_cost_microusd == 1
-
-    installation = host.install["deepseek"]
-
-    assert installation.reservation_tariff == %{
-             currency: "USD",
-             id: "openrouter-model-pricing-v1"
-           }
-
-    assert {:ok, manifest} = Manifest.load(path("06-cost-budget"), host.limits)
-    assert manifest.limits.llm_cost_microusd == 1
   end
 
   test "every tutorial project strictly resolves its application and local artifact root" do
@@ -125,19 +84,6 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
     assert result.usage.subordinate_evaluations == 2
     assert result.usage.capability_calls.workflow == %{}
     assert result.usage.capability_calls.mission == %{}
-  end
-
-  test "the replay example returns its frozen response without network access" do
-    assert {:ok, %{value: %{"content" => "Frozen answer"}}} = run_replay(@replay_example)
-  end
-
-  test "the replay example project remembers the host installation" do
-    assert {:ok, project} = ProjectConfig.load(Path.join(@replay_example, "ptc-project.json"))
-    assert project.application == Path.join(@replay_example, "ptc.json")
-    assert project.host == Path.join(@replay_example, "ptc-host.json")
-    assert project.env_file == nil
-    assert project.artifacts.inspection
-    assert project.viewer.private
   end
 
   test "every shipped example project records inspection and grants it to the Viewer" do

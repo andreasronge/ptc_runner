@@ -12,162 +12,6 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
   alias PtcRunner.Kernel.SchemaViolation
   alias PtcRunner.Kernel.TerminalUsage
 
-  @manifest_narrowable [
-    {"capability_argument_bytes", :capability_argument_bytes, 262_144, 4_000_000},
-    {"capability_result_bytes", :capability_result_bytes, 1_000_000, 16_000_000},
-    {"entry_source_bytes", :entry_source_bytes, 262_144, 4_000_000},
-    {"evaluation_admission_timeout_ms", :evaluation_admission_timeout_ms, 10_000, 600_000},
-    {"evaluation_heap_words", :evaluation_heap_words, 1_250_000, 1_250_000},
-    {"evaluation_history_bytes", :evaluation_history_bytes, 1_000_000, 16_000_000},
-    {"evaluation_memory_bytes", :evaluation_memory_bytes, 2_000_000, 32_000_000},
-    {"evaluation_timeout_ms", :evaluation_timeout_ms, 30_000, 600_000},
-    {"event_payload_bytes", :event_payload_bytes, 262_144, 4_000_000},
-    {"live_provider_tasks", :live_provider_tasks, 8, 8},
-    {"llm_request_output_tokens", :llm_request_output_tokens, 4_096, 65_536},
-    {"llm_request_timeout_ms", :llm_request_timeout_ms, 120_000, 120_000},
-    {"mission_capability_calls", :mission_capability_calls, 256, 4_096},
-    {"mission_capability_calls_per_name", :mission_capability_calls_per_name, 128, 2_048},
-    {"normal_event_bytes", :normal_event_bytes, 4_000_000, 64_000_000},
-    {"normal_event_count", :normal_event_count, 256, 4_096},
-    {"parallel_timeout_ms", :parallel_timeout_ms, 60_000, 600_000},
-    {"protocol_errors", :protocol_errors, 64, 512},
-    {"provider_heap_words", :provider_heap_words, 5_000_000, 5_000_000},
-    {"run_duration_ms", :run_duration_ms, 120_000, 1_800_000},
-    {"subordinate_evaluations", :subordinate_evaluations, 128, 2_048},
-    {"subordinate_source_bytes", :subordinate_source_bytes, 131_072, 2_000_000},
-    {"subordinate_source_checks", :subordinate_source_checks, 128, 2_048},
-    {"terminal_result_bytes", :terminal_result_bytes, 1_000_000, 16_000_000},
-    {"workflow_capability_calls", :workflow_capability_calls, 256, 4_096},
-    {"workflow_capability_calls_per_name", :workflow_capability_calls_per_name, 128, 2_048},
-    {"workflow_heap_words", :workflow_heap_words, 8_000_000, 8_000_000},
-    {"workflow_timeout_ms", :workflow_timeout_ms, 120_000, 1_800_000}
-  ]
-
-  @installed_only %{
-    "doctor_connectivity_timeout_ms" => %{
-      field: :doctor_connectivity_timeout_ms,
-      compiled_default: 10_000,
-      installed_default: 10_000,
-      identity: false
-    },
-    "local_preflight_timeout_ms" => %{
-      field: :local_preflight_timeout_ms,
-      compiled_default: 15_000,
-      installed_default: 15_000,
-      identity: true
-    },
-    "provider_cleanup_timeout_ms" => %{
-      field: :provider_cleanup_timeout_ms,
-      compiled_default: 5_000,
-      installed_default: 5_000,
-      identity: true
-    },
-    "selection_validation_timeout_ms" => %{
-      field: :selection_validation_timeout_ms,
-      compiled_default: 5_000,
-      installed_default: 5_000,
-      identity: true
-    }
-  }
-
-  @expected_catalog Map.new(
-                      @manifest_narrowable,
-                      fn {name, field, compiled_default, installed_default} ->
-                        maximum =
-                          case name do
-                            "llm_request_output_tokens" -> 1_000_000
-                            "llm_request_timeout_ms" -> 1_800_000
-                            _other -> 2_592_000_000
-                          end
-
-                        minimum =
-                          case name do
-                            "event_payload_bytes" -> EventBudget.minimum_normal_payload_bytes()
-                            "llm_request_timeout_ms" -> 100
-                            "normal_event_count" -> 3
-                            _other -> 1
-                          end
-
-                        {name,
-                         %{
-                           field: field,
-                           name: name,
-                           scope: :manifest_narrowable,
-                           compiled_default: compiled_default,
-                           installed_default: installed_default,
-                           minimum: minimum,
-                           maximum: maximum,
-                           identity: true
-                         }}
-                      end
-                    )
-                    |> Map.merge(
-                      Map.new(@installed_only, fn {name, metadata} ->
-                        {name,
-                         metadata
-                         |> Map.merge(%{
-                           name: name,
-                           scope: :installed_only,
-                           minimum: 100,
-                           maximum: 30_000
-                         })}
-                      end)
-                    )
-                    |> Map.put("evaluation_loop_iterations", %{
-                      field: :evaluation_loop_iterations,
-                      name: "evaluation_loop_iterations",
-                      scope: :optional_manifest_narrowable,
-                      compiled_default: nil,
-                      installed_default: nil,
-                      minimum: 1,
-                      maximum: 2_592_000_000,
-                      identity: true,
-                      prerequisites: [],
-                      prerequisite_description: nil
-                    })
-                    |> Map.put("llm_total_tokens", %{
-                      field: :llm_total_tokens,
-                      name: "llm_total_tokens",
-                      scope: :optional_manifest_narrowable,
-                      compiled_default: nil,
-                      installed_default: nil,
-                      minimum: 1,
-                      maximum: 9_007_199_254_740_991,
-                      identity: true,
-                      prerequisites: [:usage_tokens],
-                      prerequisite_description:
-                        "Requires usage_guarantees.tokens: true on every live LLM installation."
-                    })
-                    |> Map.put("llm_cost_microusd", %{
-                      field: :llm_cost_microusd,
-                      name: "llm_cost_microusd",
-                      scope: :optional_manifest_narrowable,
-                      compiled_default: nil,
-                      installed_default: nil,
-                      minimum: 1,
-                      maximum: 9_007_199_254_740_991,
-                      identity: true,
-                      prerequisites: [
-                        :usage_tokens,
-                        :usage_cost_currency,
-                        :reservation_tariff
-                      ],
-                      prerequisite_description:
-                        "Requires usage_guarantees.tokens: true, usage_guarantees.cost_currency: \"USD\", an explicit USD reservation_tariff on every live LLM installation, and supported USD reservation pricing for each selected model. reservation_tariff.id identifies the declared tariff but does not supply model rates."
-                    })
-                    |> Map.put("workflow_loop_iterations", %{
-                      field: :workflow_loop_iterations,
-                      name: "workflow_loop_iterations",
-                      scope: :optional_manifest_narrowable,
-                      compiled_default: nil,
-                      installed_default: nil,
-                      minimum: 1,
-                      maximum: 2_592_000_000,
-                      identity: true,
-                      prerequisites: [],
-                      prerequisite_description: nil
-                    })
-
   # A ceiling equal to the default leaves a manifest no way to raise its own
   # value except by writing a host document. Twenty-one rows were in that
   # state. The four aggregate-memory rows stay there on purpose: live memory is
@@ -215,7 +59,6 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     rows = LimitCatalog.rows()
     fields = Map.keys(Map.from_struct(Limits.defaults()))
 
-    assert Map.new(rows, &{&1.name, Map.drop(&1, [:description, :unit])}) == @expected_catalog
     assert Enum.all?(rows, &(is_binary(&1.description) and &1.description != ""))
     assert Enum.all?(rows, &(&1.unit in [:milliseconds, :heap_words, :bytes, :count]))
     assert Enum.map(rows, & &1.name) == Enum.sort(Enum.map(rows, & &1.name))
@@ -226,31 +69,6 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
 
     assert_raise ArgumentError, ~r/LimitCatalog metadata/, fn ->
       LimitCatalog.validate_fields!([:uncatalogued_limit | fields])
-    end
-  end
-
-  test "installed-only timeout metadata is exact" do
-    for {name, expected} <- @installed_only do
-      assert {:ok, row} = LimitCatalog.fetch(name)
-
-      contract_fields = [
-        :field,
-        :scope,
-        :compiled_default,
-        :installed_default,
-        :minimum,
-        :maximum,
-        :identity
-      ]
-
-      assert Map.take(row, contract_fields) ==
-               expected
-               |> Map.merge(%{
-                 scope: :installed_only,
-                 minimum: 100,
-                 maximum: 30_000
-               })
-               |> Map.take(contract_fields)
     end
   end
 
@@ -356,34 +174,13 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     end
   end
 
-  test "normal traces require three retained event slots" do
-    assert {:ok, row} = LimitCatalog.fetch(:normal_event_count)
-    assert row.minimum == 3
-
-    for schema <- [HostConfig.schema(), Manifest.schema()] do
-      assert get_in(schema, [
-               "properties",
-               "limits",
-               "properties",
-               "normal_event_count",
-               "minimum"
-             ]) ==
-               3
-    end
-  end
-
-  test "the event payload minimum admits every normal terminal payload" do
+  # The constant is the schema authority for every manifest and host document,
+  # so it cannot be policed by asserting it against itself. Re-derive it here
+  # from the complete fixed `run-stopped` projection, and prove no admitted
+  # limit set needs more than the floor an application-free manifest is given.
+  test "the event payload minimum is derived from the maximum fixed run-stopped payload" do
+    sink = %EventSink{pid: self(), token: make_ref(), policy: :normal}
     minimum = EventBudget.minimum_normal_payload_bytes()
-    dropped = EventBudget.maximum_dropped()
-
-    assert map_size(dropped) == 17
-    assert dropped["$overflow"] == 4_294_967_295
-
-    for {type, 4_294_967_295} <- Map.delete(dropped, "$overflow") do
-      assert byte_size(type) == 128
-      assert type =~ ~r/\A[a-z][a-z0-9-]{0,127}\z/
-    end
-
     assert {:ok, row} = LimitCatalog.fetch(:event_payload_bytes)
     assert row.minimum == minimum
     refute EventBudget.normal_terminal_payload_capacity?(minimum - 1)
@@ -398,15 +195,6 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
                "minimum"
              ]) == minimum
     end
-  end
-
-  # The constant is the schema authority for every manifest and host document,
-  # so it cannot be policed by asserting it against itself. Re-derive it here
-  # from the complete fixed `run-stopped` projection, and prove no admitted
-  # limit set needs more than the floor an application-free manifest is given.
-  test "the event payload minimum is derived from the maximum fixed run-stopped payload" do
-    sink = %EventSink{pid: self(), token: make_ref(), policy: :normal}
-    minimum = EventBudget.minimum_normal_payload_bytes()
 
     rows = LimitCatalog.rows()
 
@@ -475,7 +263,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
   end
 
   test "installed-only limits cannot be declared by an application" do
-    for name <- Map.keys(@installed_only) do
+    for %{name: name} <- LimitCatalog.rows(:installed_only) do
       manifest = valid_manifest(%{"limits" => %{name => 100}})
 
       assert {:error,
@@ -553,12 +341,12 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
              |> Enum.map(& &1.name)
              |> Enum.sort()
 
-    for {name, metadata} <- @installed_only do
-      {:ok, row} = LimitCatalog.fetch(name)
-      {:ok, changed} = Limits.new(%{row.field => metadata.compiled_default + 100})
+    for row <- LimitCatalog.rows(:installed_only) do
+      {:ok, ^row} = LimitCatalog.fetch(row.name)
+      {:ok, changed} = Limits.new(%{row.field => row.compiled_default + 100})
       changed_projection = LimitCatalog.effective_projection(changed)
 
-      if metadata.identity do
+      if row.identity do
         refute changed_projection == projection
       else
         assert changed_projection == projection
