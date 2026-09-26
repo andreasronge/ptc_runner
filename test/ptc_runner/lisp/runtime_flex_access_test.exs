@@ -7,22 +7,29 @@ defmodule PtcRunner.Lisp.RuntimeFlexAccessTest do
 
   test "source-level flexible key lookup covers every collection operation" do
     rows = [
-      {:string_fallback, [%{"value" => 30}, %{"value" => 10}, %{"value" => 20}], ":value"},
+      {:string_fallback, [%{"value" => 30}, %{"value" => 10}, %{"value" => 20}], ":value", true},
       {:atom_precedence,
        [%{"value" => 999, value: 30}, %{"value" => 999, value: 10}, %{"value" => 999, value: 20}],
-       ":value"},
-      {:mixed_maps, [%{value: 30}, %{"value" => 10}, %{"value" => 999, value: 20}], ":value"}
+       ":value", true},
+      {:mixed_maps, [%{value: 30}, %{"value" => 10}, %{"value" => 999, value: 20}], ":value",
+       true},
+      {:string_parameter_string_maps, [%{"value" => 30}, %{"value" => 10}, %{"value" => 20}],
+       ~S|"value"|, false},
+      {:string_parameter_atom_maps, [%{value: 30}, %{value: 10}, %{value: 20}], ~S|"value"|,
+       false}
     ]
 
-    for {case_name, items, key} <- rows do
+    for {case_name, items, key, source_sort?} <- rows do
       context = [context: %{items: items}]
 
-      assert {:ok, %{return: [10, 20, 30]}} =
-               Lisp.run_native(
-                 "(map (fn [item] (get item #{key})) (sort-by #{key} data/items))",
-                 context
-               ),
-             inspect(case_name)
+      if source_sort? do
+        assert {:ok, %{return: [10, 20, 30]}} =
+                 Lisp.run_native(
+                   "(map (fn [item] (get item #{key})) (sort-by #{key} data/items))",
+                   context
+                 ),
+               inspect(case_name)
+      end
 
       assert {:ok, %{return: 60}} = Lisp.run_native("(sum-by #{key} data/items)", context)
       assert {:ok, %{return: 20.0}} = Lisp.run_native("(avg-by #{key} data/items)", context)

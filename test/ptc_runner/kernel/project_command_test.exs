@@ -621,13 +621,13 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
   test "artifact-root diagnostics identify each failing path with or without an envelope", %{
     tmp_dir: directory
   } do
-    for {kind, envelope?} <- [
-          {:permissive_root, true},
-          {:permissive_root, false},
-          {:missing_ancestor, true},
-          {:missing_ancestor, false},
-          {:unwritable_parent, true},
-          {:unwritable_parent, false}
+    for {kind, envelope?, expected_code} <- [
+          {:permissive_root, true, "envelope/publication_failed"},
+          {:permissive_root, false, "destination/invalid_destination"},
+          {:missing_ancestor, true, "envelope/destination_parent_unavailable"},
+          {:missing_ancestor, false, "destination/invalid_destination"},
+          {:unwritable_parent, true, "envelope/publication_failed"},
+          {:unwritable_parent, false, "destination/invalid_destination"}
         ] do
       target = Path.join(directory, "#{kind}-#{envelope?}")
 
@@ -669,14 +669,13 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
       end
 
       presentation = run_project(project_path)
+      assert presentation.stderr =~ expected_code
 
       if envelope? do
         assert presentation.exit_status == CommandFrontend.envelope_failure_exit_status()
-        assert presentation.stderr =~ "envelope/"
         assert Jason.decode!(presentation.stdout) == presentation.outcome.envelope
       else
         assert presentation.exit_status == 7
-        assert presentation.stderr =~ "destination/invalid_destination"
       end
 
       case kind do
