@@ -5,12 +5,17 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-# The snapshot is cloned from the job worktree. Its origin/main ref is copied
-# from that checkout, so this range needs neither a network fetch nor GitHub
-# credentials. A missing ref must never turn an unverified job into a pass.
+# The snapshot is cloned from the job worktree. Recover main from that local
+# source if the clone did not copy its ref. No GitHub fetch or credential is
+# needed; an unavailable base must never turn an unverified job into a pass.
 if ! git show-ref --verify --quiet refs/remotes/origin/main; then
-  echo "Pre-publication gate needs origin/main in the snapshot clone." >&2
-  exit 1
+  source_path="$(git config --get remote.origin.url || true)"
+  if [[ "$source_path" != /* || ! -d "$source_path" ]] ||
+     ! git fetch --no-tags "$source_path" \
+       refs/heads/main:refs/remotes/origin/main; then
+    echo "Pre-publication gate needs main in its local source checkout." >&2
+    exit 1
+  fi
 fi
 
 head_sha="$(git rev-parse --verify 'HEAD^{commit}')"

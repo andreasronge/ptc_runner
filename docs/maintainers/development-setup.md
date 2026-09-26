@@ -107,8 +107,9 @@ scripts/worktree.sh seed <dir>    # seed another worktree
 PtcManager's `verification.before_publish` runs `scripts/ci/pre-publication`
 after bootstrap in a clean, detached snapshot checkout. The script finds the
 job's base with `git merge-base HEAD origin/main` and sends that range to the
-tracked pre-push hook. The clone copies `origin/main` from the job worktree;
-the gate fails if the ref is missing. It needs no GitHub credential or fetch.
+tracked pre-push hook. If the clone lacks `origin/main`, the script fetches
+`main` from the local job worktree; it fails if that ref is unavailable. It
+needs no GitHub credential or network fetch.
 Bootstrap and the selected gates may download public toolchain packages,
 dependencies, or the DABStep fixture when their local caches are empty, so the
 worker needs network access to those public hosts. The hook's normal test

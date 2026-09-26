@@ -8,9 +8,9 @@ defmodule PtcRunner.GitHooks.PrePublicationTest do
 
   test "detached checkout runs the hook gates for changes since the job base" do
     %{repo: repo, path: path, mix_marker: marker} = git_repo_with_change("lib/example.ex")
-    prepare_snapshot(repo)
+    snapshot = prepare_snapshot(repo)
 
-    {output, status} = run_gate(repo, path)
+    {output, status} = run_gate(snapshot, path)
 
     assert status == 0, output
     assert output =~ "All pre-push checks passed"
@@ -19,29 +19,49 @@ defmodule PtcRunner.GitHooks.PrePublicationTest do
 
   test "a failing test gate refuses publication" do
     %{repo: repo, path: path} = git_repo_with_change("lib/example.ex")
-    prepare_snapshot(repo)
+    snapshot = prepare_snapshot(repo)
 
-    {output, status} = run_gate(repo, path, [{"MIX_FAIL_GATE", "core-tests lane=library"}])
+    {output, status} = run_gate(snapshot, path, [{"MIX_FAIL_GATE", "core-tests lane=library"}])
 
     assert status != 0
     assert output =~ "core tests (library lane) failed"
   end
 
-  test "missing job base fails closed" do
-    %{repo: repo, path: path} = git_repo_with_change("lib/example.ex")
-    git!(repo, ["checkout", "--detach", "--quiet"])
+  test "a missing copied ref is recovered from the local source checkout" do
+    %{repo: repo, path: path, mix_marker: marker} = git_repo_with_change("lib/example.ex")
+    snapshot = prepare_snapshot(repo)
+    git!(snapshot, ["update-ref", "-d", "refs/remotes/origin/main"])
 
-    {output, status} = run_gate(repo, path)
+    {output, status} = run_gate(snapshot, path)
 
-    assert status != 0
-    assert output =~ "origin/main"
+    assert status == 0, output
+
+    assert git!(snapshot, ["rev-parse", "refs/remotes/origin/main"]) ==
+             git!(repo, ["rev-parse", "refs/heads/main"])
+
+    assert_core_gate_invocations(marker)
   end
 
-  defp prepare_snapshot(repo) do
+  test "missing job base fails closed" do
+    %{repo: repo, path: path} = git_repo_with_change("lib/example.ex")
+    snapshot = prepare_snapshot(repo, false)
+
+    {output, status} = run_gate(snapshot, path)
+
+    assert status != 0
+    assert output =~ "needs main in its local source checkout"
+  end
+
+  defp prepare_snapshot(repo, main? \\ true) do
     base = git!(repo, ["rev-parse", "HEAD^"])
-    git!(repo, ["update-ref", "refs/remotes/origin/main", base])
-    git!(repo, ["config", "core.hooksPath", "/dev/null"])
-    git!(repo, ["checkout", "--detach", "--quiet"])
+    head = git!(repo, ["rev-parse", "HEAD"])
+    if main?, do: git!(repo, ["update-ref", "refs/heads/main", base])
+
+    snapshot = Path.join(Path.dirname(repo), "snapshot")
+    git!(repo, ["clone", "--quiet", "--no-local", "--no-checkout", repo, snapshot])
+    git!(snapshot, ["checkout", "--detach", "--quiet", head])
+    git!(snapshot, ["config", "core.hooksPath", "/dev/null"])
+    snapshot
   end
 
   defp run_gate(repo, path, extra_env \\ []) do
