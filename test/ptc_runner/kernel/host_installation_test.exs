@@ -456,6 +456,44 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   end
 
   @tag :tmp_dir
+  test "an unacknowledged credential lease release terminates without returning", %{tmp_dir: dir} do
+    parent = self()
+    host = load_host(dir, http_config())
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, services} = HostInstallation.runtime_services(host)
+
+    resolver = fn ["token"] ->
+      send(parent, {:lease_release_timeout_started, self()})
+      receive do: (:finish -> {:ok, %{"token" => "test-secret"}})
+    end
+
+    services = replace_credential_resolver(services, resolver)
+    assert {:ok, registry} = InstallationCatalog.runtime_registry(catalog, services)
+
+    caller =
+      spawn(fn ->
+        result = ProviderRegistry.resolve_credentials(registry, ["token"])
+        send(parent, {:lease_release_timeout_result, result})
+      end)
+
+    caller_ref = Process.monitor(caller)
+    lease_owner = registry.authority_owner.lease_owner
+
+    try do
+      assert_receive {:lease_release_timeout_started, ^caller}
+      assert true = :erlang.suspend_process(lease_owner)
+      send(caller, :finish)
+
+      assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}, 2_000
+      refute_receive {:lease_release_timeout_result, _result}
+    after
+      if Process.alive?(lease_owner), do: :erlang.resume_process(lease_owner)
+      if Process.alive?(caller), do: Process.exit(caller, :kill)
+      ProviderRegistry.close(registry)
+    end
+  end
+
+  @tag :tmp_dir
   test "registry close cancels in-flight host-backed credential resolution", %{tmp_dir: dir} do
     parent = self()
     host = load_host(dir, http_config())
