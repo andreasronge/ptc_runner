@@ -189,6 +189,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
              validation_heap_words,
              validation_deadline_ms
            ),
+         invocation <-
+           %{invocation | model_call_names: Map.get(dispatch_context, :model_call_names, [])},
          {:ok, invocation} <-
            compile_request_schema(
              invocation,
@@ -454,11 +456,11 @@ defmodule PtcRunner.Kernel.Dispatcher do
          %CapabilityInvocation{
            capability: %Capability{name: name},
            llm_request_deadline_ms: deadline
-         },
+         } = invocation,
          context
        )
        when is_integer(deadline) or is_nil(deadline) do
-    if ModelCapabilities.model_call?(name),
+    if ModelCapabilities.model_call?(name, invocation.model_call_names),
       do: Map.put(context, :llm_request_deadline_ms, deadline),
       else: context
   end
@@ -629,7 +631,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
                  environment,
                  public_name,
                  arguments,
-                 invocation.event_attributes[:mission_name]
+                 invocation.event_attributes[:mission_name],
+                 invocation.model_call_names
                ) do
             :ok ->
               context =
@@ -713,7 +716,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
                    public_name,
                    result,
                    invocation.event_attributes[:mission_name],
-                   capability.inspection_capture
+                   capability.inspection_capture,
+                   invocation.model_call_names
                  ) do
               :ok ->
                 result
@@ -755,7 +759,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
           })
           |> Events.put_rejection_class(result)
 
-        _ = maybe_record_llm_usage(state, stopped_data)
+        _ = maybe_record_llm_usage(state, stopped_data, invocation.model_call_names)
 
         :telemetry.execute(
           [:ptc_runner, :capability, :stop],
@@ -786,15 +790,38 @@ defmodule PtcRunner.Kernel.Dispatcher do
     end
   end
 
-  defp inspection_input(nil, _capability_id, _environment, _name, _arguments, _mission_name),
-    do: :ok
+  defp inspection_input(
+         nil,
+         _capability_id,
+         _environment,
+         _name,
+         _arguments,
+         _mission_name,
+         _model_call_names
+       ),
+       do: :ok
 
-  defp inspection_input(sink, capability_id, environment, name, arguments, mission_name) do
+  defp inspection_input(
+         sink,
+         capability_id,
+         environment,
+         name,
+         arguments,
+         mission_name,
+         model_call_names
+       ) do
     InspectionSink.emit(
       sink,
       "capability-input",
       %{capability_id: capability_id},
-      capability_inspection_payload(environment, name, :arguments, arguments, mission_name)
+      capability_inspection_payload(
+        environment,
+        name,
+        :arguments,
+        arguments,
+        mission_name,
+        model_call_names
+      )
     )
   end
 
@@ -805,16 +832,33 @@ defmodule PtcRunner.Kernel.Dispatcher do
          _name,
          _result,
          _mission_name,
-         _capture
+         _capture,
+         _model_call_names
        ),
        do: :ok
 
-  defp inspection_output(sink, capability_id, environment, name, result, mission_name, capture) do
+  defp inspection_output(
+         sink,
+         capability_id,
+         environment,
+         name,
+         result,
+         mission_name,
+         capture,
+         model_call_names
+       ) do
     InspectionSink.emit(
       sink,
       "capability-output",
       %{capability_id: capability_id},
-      capability_inspection_payload(environment, name, :result, result, mission_name),
+      capability_inspection_payload(
+        environment,
+        name,
+        :result,
+        result,
+        mission_name,
+        model_call_names
+      ),
       output_capture(result, capture)
     )
   end
@@ -894,11 +938,18 @@ defmodule PtcRunner.Kernel.Dispatcher do
     )
   end
 
-  defp capability_inspection_payload(environment, name, key, value, mission_name) do
+  defp capability_inspection_payload(
+         environment,
+         name,
+         key,
+         value,
+         mission_name,
+         model_call_names
+       ) do
     environment
     |> capability_inspection_identity(name, mission_name)
     |> Map.put(key, value)
-    |> maybe_put_llm_request_hash(environment, name, key, value)
+    |> maybe_put_llm_request_hash(environment, name, key, value, model_call_names)
   end
 
   defp maybe_put_llm_request_hash(
@@ -906,14 +957,15 @@ defmodule PtcRunner.Kernel.Dispatcher do
          :workflow,
          name,
          :arguments,
-         arguments
+         arguments,
+         model_call_names
        ) do
-    if ModelCapabilities.model_call?(name),
+    if ModelCapabilities.model_call?(name, model_call_names),
       do: put_model_request_hash(payload, arguments),
       else: payload
   end
 
-  defp maybe_put_llm_request_hash(payload, _environment, _name, _key, _value),
+  defp maybe_put_llm_request_hash(payload, _environment, _name, _key, _value, _model_call_names),
     do: payload
 
   defp put_model_request_hash(payload, arguments) do
@@ -1105,7 +1157,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
         await_down(pid, ref)
         settlement = settlement_evidence(raw_result)
         result = enforce_completion_deadline(invocation, completed_at_ms, raw_result)
-        record_provider_diagnostics(state, capability, result)
+        record_provider_diagnostics(state, invocation, result)
 
         normalized =
           normalize_result(
@@ -1126,7 +1178,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
         cancel_provider_at_timeout(state, capability, pid, ref)
         timeout_result = await_timeout_result(invocation)
 
-        if ModelCapabilities.model_call?(capability.name), do: record_llm_timeout_evidence(state)
+        if ModelCapabilities.model_call?(capability.name, invocation.model_call_names),
+          do: record_llm_timeout_evidence(state)
 
         {:settlement, {:adapter_error, :timeout},
          post_invocation_failure(
@@ -1282,7 +1335,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
     end
   end
 
-  defp record_provider_diagnostics(state, capability, result) do
+  defp record_provider_diagnostics(state, invocation, result) do
     case replay_request_hash(result) do
       request_hash when is_binary(request_hash) ->
         RunState.record_replay_miss(state, request_hash)
@@ -1291,7 +1344,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
         :ok
     end
 
-    case llm_provider_error(capability, result) do
+    case llm_provider_error(invocation.capability, result, invocation.model_call_names) do
       %ProviderError{} = error -> RunState.record_llm_provider_failure(state, error)
       nil -> :ok
     end
@@ -1576,7 +1629,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
          _deadline_ms
        )
        when source != "llm_replay" do
-    if ModelCapabilities.model_call?(name),
+    if ModelCapabilities.model_call?(name, invocation.model_call_names),
       do: attest_unbound_model_reservation(invocation, state),
       else: {:ok, invocation}
   end
@@ -1800,12 +1853,15 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   defp llm_provider_error(
          %Capability{name: name},
-         {:error, %ProviderError{} = error}
+         {:error, %ProviderError{} = error},
+         model_call_names
        ) do
-    if ModelCapabilities.model_call?(name) and ProviderError.valid?(error), do: error, else: nil
+    if ModelCapabilities.model_call?(name, model_call_names) and ProviderError.valid?(error),
+      do: error,
+      else: nil
   end
 
-  defp llm_provider_error(_capability, _result), do: nil
+  defp llm_provider_error(_capability, _result, _model_call_names), do: nil
 
   defp terminal_provider_failure?({:error, %ProviderError{} = error}) do
     ProviderError.valid?(error) and
@@ -2224,7 +2280,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
     }
   end
 
-  defp maybe_record_llm_usage(state, data) when is_map(data) do
+  defp maybe_record_llm_usage(state, data, model_call_names) when is_map(data) do
     name = Map.get(data, :name) || Map.get(data, "name")
     alias_name = Map.get(data, :alias) || Map.get(data, "alias")
     revision = Map.get(data, :installation_revision) || Map.get(data, "installation_revision")
@@ -2232,7 +2288,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
     usage = Map.get(data, :usage) || Map.get(data, "usage")
     observation = Map.get(data, :usage_observation) || Map.get(data, "usage_observation")
 
-    if llm_spend_identity?(name, alias_name, revision) do
+    if llm_spend_identity?(name, alias_name, revision, model_call_names) do
       case spend_status(status, observation) do
         nil -> :ok
         normalized -> RunState.record_llm_usage(state, alias_name, revision, normalized, usage)
@@ -2242,11 +2298,11 @@ defmodule PtcRunner.Kernel.Dispatcher do
     end
   end
 
-  defp llm_spend_identity?(name, alias_name, revision)
+  defp llm_spend_identity?(name, alias_name, revision, model_call_names)
        when is_binary(alias_name) and is_binary(revision),
-       do: ModelCapabilities.model_call?(name)
+       do: ModelCapabilities.model_call?(name, model_call_names)
 
-  defp llm_spend_identity?(_name, _alias_name, _revision), do: false
+  defp llm_spend_identity?(_name, _alias_name, _revision, _model_call_names), do: false
 
   defp spend_status(status, _observation) when status in [:ok, "ok"], do: :ok
 

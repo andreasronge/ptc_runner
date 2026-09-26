@@ -15,12 +15,32 @@ defmodule PtcRunner.Kernel.InspectionRecord do
   @schema_version Format.schema_version()
   @envelope_keys ~w(schema_version run_id trace_id sequence timestamp record_type correlation payload)
 
-  @spec build(binary(), binary(), pos_integer(), binary(), map(), map(), pos_integer()) ::
+  @spec build(binary(), binary(), pos_integer(), binary(), map(), map(), pos_integer(), [binary()]) ::
           {:ok, map(), binary()} | {:error, :invalid_record | :limit_exceeded}
-  def build(run_id, trace_id, sequence, record_type, correlation, payload, max_record_bytes)
+  def build(
+        run_id,
+        trace_id,
+        sequence,
+        record_type,
+        correlation,
+        payload,
+        max_record_bytes,
+        model_call_names \\ []
+      )
+
+  def build(
+        run_id,
+        trace_id,
+        sequence,
+        record_type,
+        correlation,
+        payload,
+        max_record_bytes,
+        model_call_names
+      )
       when is_binary(run_id) and is_binary(trace_id) and is_integer(sequence) and sequence > 0 and
              is_binary(record_type) and is_map(correlation) and is_map(payload) and
-             is_integer(max_record_bytes) and max_record_bytes > 0 do
+             is_integer(max_record_bytes) and max_record_bytes > 0 and is_list(model_call_names) do
     with true <- record_type in InspectionRecordTypes.all(),
          :ok <- validate_raw_result(record_type, payload),
          true <- within_depth?(correlation, payload),
@@ -36,7 +56,7 @@ defmodule PtcRunner.Kernel.InspectionRecord do
            "correlation" => correlation,
            "payload" => payload
          },
-         :ok <- validate(record, run_id, trace_id, sequence),
+         :ok <- validate(record, run_id, trace_id, sequence, model_call_names),
          true <- retained_within_limit?(record, max_record_bytes),
          {:ok, encoded} <- Codec.encode_record(record),
          true <- byte_size(encoded) <= max_record_bytes do
@@ -47,12 +67,21 @@ defmodule PtcRunner.Kernel.InspectionRecord do
     end
   end
 
-  def build(_run_id, _trace_id, _sequence, _type, _correlation, _payload, _limit),
-    do: {:error, :invalid_record}
+  def build(
+        _run_id,
+        _trace_id,
+        _sequence,
+        _type,
+        _correlation,
+        _payload,
+        _limit,
+        _model_call_names
+      ),
+      do: {:error, :invalid_record}
 
-  @spec validate(map(), binary() | nil, binary() | nil, pos_integer()) ::
+  @spec validate(map(), binary() | nil, binary() | nil, pos_integer(), [binary()]) ::
           :ok | {:error, :invalid_record}
-  def validate(record, run_id, trace_id, sequence) do
+  def validate(record, run_id, trace_id, sequence, model_call_names \\ []) do
     valid? =
       MCPProtocol.within_inspection_document_depth?(record) and
         is_map(record) and Enum.sort(Map.keys(record)) == Enum.sort(@envelope_keys) and
@@ -61,10 +90,30 @@ defmodule PtcRunner.Kernel.InspectionRecord do
         (is_nil(trace_id) or record["trace_id"] == trace_id) and
         valid_id?(record["run_id"]) and valid_id?(record["trace_id"]) and
         record["sequence"] == sequence and valid_timestamp?(record["timestamp"]) and
-        record["record_type"] in InspectionRecordTypes.all() and valid_shape?(record)
+        record["record_type"] in InspectionRecordTypes.all() and
+        valid_shape?(record, model_call_names)
 
     if valid?, do: :ok, else: {:error, :invalid_record}
   end
+
+  defp valid_shape?(%{"record_type" => "capability-input"} = record, model_call_names),
+    do: valid_capability_input_shape?(record, model_call_names)
+
+  defp valid_shape?(record, _model_call_names), do: valid_shape?(record)
+
+  defp valid_capability_input_shape?(
+         %{
+           "correlation" => %{"capability_id" => id},
+           "payload" => payload
+         },
+         model_call_names
+       ) do
+    valid_id?(id) and valid_capability_payload?(payload, "arguments") and
+      valid_capability_scope?(payload, capability_input_fields(payload, model_call_names)) and
+      valid_capability_request_hash?(payload, model_call_names)
+  end
+
+  defp valid_capability_input_shape?(_record, _model_call_names), do: false
 
   defp valid_shape?(%{
          "record_type" => "run-input",
@@ -85,16 +134,6 @@ defmodule PtcRunner.Kernel.InspectionRecord do
     correlation == %{} and exact_keys?(payload, ~w(result_hash value)) and
       ResultIdentity.valid_hash?(payload["result_hash"]) and
       ResultIdentity.strict_json_hash(payload["value"]) == {:ok, payload["result_hash"]}
-  end
-
-  defp valid_shape?(%{
-         "record_type" => "capability-input",
-         "correlation" => %{"capability_id" => id},
-         "payload" => payload
-       }) do
-    valid_id?(id) and valid_capability_payload?(payload, "arguments") and
-      valid_capability_scope?(payload, capability_input_fields(payload)) and
-      valid_capability_request_hash?(payload)
   end
 
   defp valid_shape?(%{
@@ -329,26 +368,34 @@ defmodule PtcRunner.Kernel.InspectionRecord do
 
   defp valid_capability_scope?(_payload, _fields), do: false
 
-  defp capability_input_fields(%{"environment" => "workflow", "name" => name}) do
-    if ModelCapabilities.model_call?(name), do: ["arguments", "request_hash"], else: ["arguments"]
+  defp capability_input_fields(%{"environment" => "workflow", "name" => name}, model_call_names) do
+    if ModelCapabilities.model_call?(name, model_call_names),
+      do: ["arguments", "request_hash"],
+      else: ["arguments"]
   end
 
-  defp capability_input_fields(_payload), do: ["arguments"]
+  defp capability_input_fields(_payload, _model_call_names), do: ["arguments"]
 
-  defp valid_capability_request_hash?(%{
-         "environment" => "workflow",
-         "name" => name,
-         "arguments" => arguments,
-         "request_hash" => request_hash
-       }),
+  defp valid_capability_request_hash?(
+         %{
+           "environment" => "workflow",
+           "name" => name,
+           "arguments" => arguments,
+           "request_hash" => request_hash
+         },
+         model_call_names
+       ),
        do:
-         not ModelCapabilities.model_call?(name) or
+         not ModelCapabilities.model_call?(name, model_call_names) or
            LLMReplay.request_hash(arguments) == {:ok, request_hash}
 
-  defp valid_capability_request_hash?(%{"environment" => _environment, "name" => _name}),
-    do: true
+  defp valid_capability_request_hash?(
+         %{"environment" => _environment, "name" => _name},
+         _model_call_names
+       ),
+       do: true
 
-  defp valid_capability_request_hash?(_payload), do: false
+  defp valid_capability_request_hash?(_payload, _model_call_names), do: false
 
   defp valid_prelude_calls?(calls) when is_list(calls) do
     Enum.all?(calls, fn call ->

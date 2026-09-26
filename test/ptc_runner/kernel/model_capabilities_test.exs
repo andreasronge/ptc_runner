@@ -3,9 +3,17 @@ defmodule PtcRunner.Kernel.ModelCapabilitiesTest do
 
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.Dispatcher
+  alias PtcRunner.Kernel.InspectionArtifact.Assembler
+  alias PtcRunner.Kernel.InspectionArtifact.Indexes
+  alias PtcRunner.Kernel.InspectionArtifact.Limits, as: InspectionLimits
+  alias PtcRunner.Kernel.InspectionRecord
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.ModelCapabilities
+  alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
 
   test "model and chat classification accepts strings and atoms" do
@@ -60,89 +68,157 @@ defmodule PtcRunner.Kernel.ModelCapabilitiesTest do
     assert Map.has_key?(environment.capabilities, "llm-request")
   end
 
-  @site_classes %{
-    "kernel/dispatcher.ex" => %{
-      put_llm_requester_deadline: :model_call?,
-      maybe_put_llm_request_hash: :model_call?,
-      await_provider: :model_call?,
-      compile_request_schema: :chat?,
-      attest_llm_reservation: :model_call?,
-      llm_provider_error: :model_call?,
-      request_schema_value: :chat?,
-      llm_spend_identity?: :model_call?
-    },
-    "kernel/trace_log.ex" => %{
-      compile_analysis: :model_call?,
-      chat_call_count: :chat?,
-      capability_name_count: :chat?
-    },
-    "kernel/llm_usage_summary.ex" => %{
-      llm_accounting_event: :model_call?,
-      llm_usage_event?: :model_call?
-    },
-    "kernel/provider_acquisition.ex" => %{
-      no_unclaimed_llm_request: :chat?,
-      build_llm_router_entry: :chat?
-    },
-    "kernel/inspection_record.ex" => %{
-      capability_input_fields: :model_call?,
-      valid_capability_request_hash?: :model_call?
-    },
-    "kernel/inspection_artifact/conversation.ex" => %{
-      model_input?: :chat?,
-      model_output?: :chat?
-    },
-    "kernel/inspection_artifact/assembler.ex" => %{capability_class: :model_call?},
-    "kernel/llm_router.ex" => %{valid_route?: :chat?},
-    "kernel/declared_read_effect_validator.ex" => %{declaration_effects: :model_call_name},
-    "cli_progress/format.ex" => %{llm_count: :chat?}
-  }
+  test "an explicitly classified non-chat model call is hashed, attested and inspected" do
+    name = "classification-fixture-request"
+    parent = self()
+    refute ModelCapabilities.chat?(name)
+    assert ModelCapabilities.model_call?(name, [name])
 
-  test "every policy site uses its general or chat-only classification" do
-    for {path, functions} <- @site_classes do
-      source = Path.join("lib/ptc_runner", path)
-      ast = source |> File.read!() |> Code.string_to_quoted!()
-      calls = classified_function_calls(ast)
+    {:ok, capability} =
+      Capability.new(
+        name: name,
+        input_schema: %{"type" => "object", "additionalProperties" => true},
+        llm_reservation: %{
+          source: "llm",
+          output_tokens: 5,
+          tariff: nil,
+          bound: fn arguments, _tariff ->
+            send(parent, {:attested, arguments})
+            {:ok, %{total_tokens: 10, cost: nil}}
+          end
+        },
+        callback: fn arguments, context ->
+          send(parent, {:requester_context, context})
+          {:ok, %{"content" => "ok", "questions" => arguments["questions"]}}
+        end
+      )
 
-      for {function, expected} <- functions do
-        actual = Map.get(calls, function, MapSet.new())
-        assert MapSet.member?(actual, expected), "#{source}:#{function} lacks #{expected}"
+    {:ok, environment} = WorkflowEnvironment.new(capabilities: [capability])
+    {:ok, limits} = Limits.new(llm_total_tokens: 50)
+    {:ok, state} = RunState.start(limits)
 
-        opposite = if expected == :chat?, do: :model_call?, else: :chat?
-        refute MapSet.member?(actual, opposite), "#{source}:#{function} uses #{opposite}"
-      end
-    end
+    {:ok, sink} =
+      StreamingInspection.start(
+        run_id: "model-classification-run",
+        trace_id: "model-classification-trace",
+        model_call_names: [name]
+      )
+
+    arguments = %{
+      "messages" => [%{"role" => "user", "content" => "hello"}],
+      "questions" => [%{"id" => "q"}],
+      "schema" => %{"type" => "not-a-schema"}
+    }
+
+    context =
+      state
+      |> TestHelpers.dispatch_context(:workflow, 500)
+      |> Map.put(:model_call_names, [name])
+
+    assert %{status: :ok} =
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               environment,
+               name,
+               arguments,
+               context,
+               nil,
+               sink
+             )
+
+    assert_receive {:attested, ^arguments}
+    assert_receive {:requester_context, requester_context}
+    assert Map.has_key?(requester_context, :llm_request_deadline_ms)
+    assert {:ok, [input, output]} = StreamingInspection.records(sink)
+    assert input["payload"]["request_hash"] =~ ~r/\Asha256:[0-9a-f]{64}\z/
+    assert input["payload"]["arguments"] == arguments
+
+    assert InspectionRecord.validate(
+             input,
+             "model-classification-run",
+             "model-classification-trace",
+             1,
+             [name]
+           ) == :ok
+
+    indexes = Indexes.create(self())
+
+    assembly =
+      Assembler.new(indexes, InspectionLimits.defaults(), %{
+        run_id: "model-classification-run",
+        trace_id: "model-classification-trace",
+        model_call_names: [name]
+      })
+
+    {:ok, assembly} =
+      Assembler.ingest(
+        assembly,
+        input,
+        0,
+        1,
+        "input"
+      )
+
+    {:ok, assembly} =
+      Assembler.ingest(
+        assembly,
+        output,
+        1,
+        1,
+        "output"
+      )
+
+    capability_id = input["correlation"]["capability_id"]
+
+    trace_facts = %{
+      "trace_id" => "model-classification-trace",
+      "capabilities" => %{
+        capability_id => %{"environment" => "workflow", "mission_name" => nil, "name" => name}
+      }
+    }
+
+    assert {:ok, completed} = Assembler.finish(assembly, trace_facts)
+
+    assert [{_, %{class: :model}}] =
+             Indexes.lookup(
+               completed.indexes,
+               :capability_join,
+               {"model-classification-run", capability_id}
+             )
+
+    assert [{_, %{"turns" => 0, "model_exchanges" => 1}}] =
+             Indexes.lookup(completed.indexes, :counts, {"model-classification-run", :summary})
   end
 
-  defp classified_function_calls(ast) do
-    {_ast, calls} =
-      Macro.prewalk(ast, %{}, fn
-        {definition, _, [head, blocks]} = node, acc
-        when definition in [:def, :defp] and is_list(blocks) ->
-          name = function_name(head)
-          names = classification_calls(Keyword.fetch!(blocks, :do))
-          {node, Map.update(acc, name, names, &MapSet.union(&1, names))}
+  test "non-chat model classification requires a reservation attestation under a token ceiling" do
+    name = "classification-unbound-request"
 
-        node, acc ->
-          {node, acc}
-      end)
+    {:ok, capability} =
+      Capability.new(
+        name: name,
+        input_schema: %{"type" => "object"},
+        callback: fn _arguments -> {:ok, %{}} end
+      )
 
-    calls
-  end
+    {:ok, environment} = WorkflowEnvironment.new(capabilities: [capability])
+    {:ok, limits} = Limits.new(llm_total_tokens: 50)
+    {:ok, state} = RunState.start(limits)
+    context = TestHelpers.dispatch_context(state, :workflow, 500)
 
-  defp function_name({:when, _, [head | _guards]}), do: function_name(head)
-  defp function_name({name, _, _args}), do: name
+    assert %{status: :ok} =
+             Dispatcher.dispatch(state, :workflow, environment, name, %{}, context, nil, nil)
 
-  defp classification_calls(body) do
-    {_body, names} =
-      Macro.prewalk(body, MapSet.new(), fn
-        {{:., _, [{:__aliases__, _, [:ModelCapabilities]}, name]}, _, _args} = node, acc ->
-          {node, MapSet.put(acc, name)}
-
-        node, acc ->
-          {node, acc}
-      end)
-
-    names
+    assert %{status: :error, reason: :reservation_attestation_unavailable} =
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               environment,
+               name,
+               %{},
+               Map.put(context, :model_call_names, [name]),
+               nil,
+               nil
+             )
   end
 end

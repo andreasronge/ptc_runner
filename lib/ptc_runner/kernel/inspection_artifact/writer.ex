@@ -22,6 +22,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Writer do
          trace_id: trace_id,
          limits: limits,
          hook: hook,
+         model_call_names: Keyword.get(opts, :model_call_names, []),
          evidence_hash: :crypto.hash_init(:sha256),
          artifact_hash: :crypto.hash_update(:crypto.hash_init(:sha256), header),
          evidence_bytes: 0,
@@ -47,7 +48,8 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Writer do
              record_type,
              correlation,
              payload,
-             state.limits.max_record_bytes
+             state.limits.max_record_bytes,
+             state.model_call_names
            ),
          length = byte_size(encoded),
          frame_bytes = length + 8,

@@ -5,6 +5,10 @@ defmodule PtcRunner.Kernel.ModelCapabilities do
   Model calls share request hashing, reservation, spend, deadlines, and
   inspection handling. Chat calls additionally use the LLM router, structured
   output schemas, conversation turns, and chat-only counters.
+
+  Trusted callers may supply additional model-call names for one dispatch or
+  inspection assembly. The default classification remains fixed by reserved
+  name and does not use process-global state.
   """
 
   @chat_name "llm-request"
@@ -16,6 +20,19 @@ defmodule PtcRunner.Kernel.ModelCapabilities do
 
   @spec model_call?(term()) :: boolean()
   def model_call?(name), do: chat?(name)
+
+  @doc "Classifies a name with extra model-call names supplied by a trusted caller."
+  @spec model_call?(term(), [binary()]) :: boolean()
+  def model_call?(name, extra_names) when is_list(extra_names) do
+    model_call?(name) or Enum.any?(extra_names, &same_name?(&1, name))
+  end
+
+  defp same_name?(left, right) when is_binary(left) and is_binary(right), do: left == right
+
+  defp same_name?(left, right) when is_binary(left) and is_atom(right),
+    do: left == Atom.to_string(right)
+
+  defp same_name?(_left, _right), do: false
 
   @doc "Returns whether a name is reserved for current or future model calls."
   @spec reserved_name?(term()) :: boolean()
