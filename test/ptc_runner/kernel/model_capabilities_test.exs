@@ -4,14 +4,20 @@ defmodule PtcRunner.Kernel.ModelCapabilitiesTest do
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.Dispatcher
+  alias PtcRunner.Kernel.InspectionArtifact
+  alias PtcRunner.Kernel.InspectionArtifact.Admission
   alias PtcRunner.Kernel.InspectionArtifact.Assembler
+  alias PtcRunner.Kernel.InspectionArtifact.Handle
   alias PtcRunner.Kernel.InspectionArtifact.Indexes
   alias PtcRunner.Kernel.InspectionArtifact.Limits, as: InspectionLimits
   alias PtcRunner.Kernel.InspectionRecord
+  alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.ModelCapabilities
+  alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
@@ -68,7 +74,10 @@ defmodule PtcRunner.Kernel.ModelCapabilitiesTest do
     assert Map.has_key?(environment.capabilities, "llm-request")
   end
 
-  test "an explicitly classified non-chat model call is hashed, attested and inspected" do
+  @tag :tmp_dir
+  test "an explicitly classified non-chat model call is hashed, attested and inspected", %{
+    tmp_dir: directory
+  } do
     name = "classification-fixture-request"
     parent = self()
     refute ModelCapabilities.chat?(name)
@@ -189,6 +198,55 @@ defmodule PtcRunner.Kernel.ModelCapabilitiesTest do
 
     assert [{_, %{"turns" => 0, "model_exchanges" => 1}}] =
              Indexes.lookup(completed.indexes, :counts, {"model-classification-run", :summary})
+
+    path = Path.join(directory, "model-classification.ptcins")
+    {:ok, publication} = PublicationHandle.reserve_stream_for(path, :inspection, 0o600, self())
+
+    {:ok, persisted_sink} =
+      InspectionSink.start(
+        run_id: "model-classification-run",
+        trace_id: "model-classification-trace",
+        publication_handle: publication,
+        model_call_names: [name]
+      )
+
+    for record <- [input, output] do
+      assert :ok =
+               InspectionSink.emit(
+                 persisted_sink,
+                 record["record_type"],
+                 record["correlation"],
+                 record["payload"]
+               )
+    end
+
+    assert {:ok, seal} = InspectionSink.seal(persisted_sink)
+    assert :ok = InspectionArtifact.publish_handle(publication, seal)
+    assert {:ok, handle} = InspectionArtifact.open(path)
+
+    admitted_trace_facts =
+      Map.merge(trace_facts, %{"expected_model_exchange_ids" => [], "terminal?" => true})
+
+    assert {:ok, admitted} =
+             Admission.run(
+               handle,
+               Indexes.create(self()),
+               fn _run_id, _trace_id -> {:ok, admitted_trace_facts} end,
+               InspectionLimits.defaults(),
+               expected_identity: %{
+                 run_id: "model-classification-run",
+                 trace_id: "model-classification-trace",
+                 model_call_names: [name]
+               }
+             )
+
+    assert admitted.turn_evidence["missing_exchange_count"] == 0
+    assert admitted.turn_evidence["complete?"]
+
+    assert [{_, %{"turns" => 0, "model_exchanges" => 1}}] =
+             Indexes.lookup(admitted.indexes, :counts, {"model-classification-run", :summary})
+
+    Handle.close(handle)
   end
 
   test "non-chat model classification requires a reservation attestation under a token ceiling" do
@@ -220,5 +278,40 @@ defmodule PtcRunner.Kernel.ModelCapabilitiesTest do
                nil,
                nil
              )
+  end
+
+  test "conversation completeness expects only chat exchanges" do
+    events = [
+      trace_event(1, "run-started", %{"missions" => %{}}),
+      trace_event(2, "capability-started", %{
+        "capability_id" => "decision-call",
+        "environment" => "workflow",
+        "name" => "decision-request"
+      }),
+      trace_event(3, "run-stopped", %{
+        "outcome" => "ok",
+        "usage" => %{"llm_budget" => %{"total_tokens" => nil, "cost" => nil}}
+      })
+    ]
+
+    assert ModelCapabilities.model_call?("decision-request", ["decision-request"])
+    refute ModelCapabilities.chat?("decision-request")
+
+    assert %{facts_by_run_id: %{"model-classification-run" => facts}} =
+             TraceLog.compile_analysis(events, :private)
+
+    assert facts["expected_model_exchange_ids"] == []
+  end
+
+  defp trace_event(sequence, type, data) do
+    %{
+      "schema_version" => 2,
+      "run_id" => "model-classification-run",
+      "trace_id" => "model-classification-trace",
+      "sequence" => sequence,
+      "timestamp" => "2026-07-12T12:00:00Z",
+      "type" => type,
+      "data" => data
+    }
   end
 end

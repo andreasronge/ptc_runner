@@ -343,7 +343,8 @@ applies only to workflow calls, preserving the existing trace contract.
 Trusted callers can pass extra model-call names through a dispatch context and
 the corresponding inspection sink and assembler. This explicit scope supports
 non-chat policy tests without changing the canonical trace format or relying
-on global state.
+on global state. Artifact admission takes the same names through its expected
+identity when a scoped inspection record is read.
 
 `Dispatcher` validates capability input before callback entry, reserves
 budgets, bounds the trusted callback worker, normalizes output, and rejects late

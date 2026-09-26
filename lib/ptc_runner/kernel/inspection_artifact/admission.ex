@@ -44,7 +44,8 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Admission do
       handle: handle,
       evidence_end: handle.footer.evidence_offset + handle.footer.evidence_bytes,
       hook: hook,
-      limits: limits
+      limits: limits,
+      model_call_names: (identity && Map.get(identity, :model_call_names, [])) || []
     }
 
     with :ok <- maybe_hook(mutate_hook, :before_frames),
@@ -131,7 +132,8 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Admission do
              record,
              state.run_id,
              state.trace_id,
-             state.record_count + 1
+             state.record_count + 1,
+             ctx.model_call_names
            ),
          digest <- :crypto.hash(:sha256, payload),
          {:ok, state} <- Assembler.ingest(state, record, payload_offset, length, digest) do

@@ -391,7 +391,7 @@ defmodule PtcRunner.Kernel.TraceLog do
           |> Enum.filter(fn event ->
             event["type"] == "capability-started" and
               stringify(event_data(event, "environment")) == "workflow" and
-              ModelCapabilities.model_call?(event_data(event, "name"))
+              ModelCapabilities.chat?(event_data(event, "name"))
           end)
           |> Enum.map(&event_data(&1, "capability_id"))
           |> Enum.filter(&is_binary/1)
