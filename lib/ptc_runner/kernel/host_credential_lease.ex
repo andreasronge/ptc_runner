@@ -244,8 +244,9 @@ defmodule PtcRunner.Kernel.HostCredentialLease do
     workers = tracked_workers(table)
     monitors = Enum.map(workers, &{&1, Process.monitor(&1)})
 
-    if Process.alive?(lease_owner), do: Process.exit(lease_owner, :kill)
+    # A trapping worker must receive its own kill before the owner's linked exit.
     Enum.each(workers, &Process.exit(&1, :kill))
+    if Process.alive?(lease_owner), do: Process.exit(lease_owner, :kill)
 
     await_down(lease_owner, lease_monitor)
     Enum.each(monitors, fn {worker, monitor} -> await_down(worker, monitor) end)
