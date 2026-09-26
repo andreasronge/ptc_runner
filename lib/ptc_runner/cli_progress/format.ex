@@ -1,5 +1,6 @@
 defmodule PtcRunner.CLIProgress.Format do
   @moduledoc false
+  alias PtcRunner.Kernel.ModelCapabilities
 
   @spec interactive(map(), pos_integer()) :: binary()
   def interactive(frame, width) do
@@ -72,7 +73,7 @@ defmodule PtcRunner.CLIProgress.Format do
   defp llm_count(%{usage: %{capability_calls: calls}}) when is_map(calls) do
     Enum.reduce(calls, 0, fn
       {name, count}, total when is_integer(count) ->
-        if to_string(name) == "llm-request", do: total + count, else: total
+        if ModelCapabilities.chat?(name), do: total + count, else: total
 
       {_scope, nested}, total when is_map(nested) ->
         total + llm_count(%{usage: %{capability_calls: nested}})

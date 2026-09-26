@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.DeclaredReadEffectValidator do
 
   alias PtcRunner.Kernel.ExportEffect
   alias PtcRunner.Kernel.MissionInventory
+  alias PtcRunner.Kernel.ModelCapabilities
 
   @analysis_operations ~w(runs open read counters)
 
@@ -121,10 +122,6 @@ defmodule PtcRunner.Kernel.DeclaredReadEffectValidator do
     end)
   end
 
-  defp declaration_effects(%{descriptor: %{source: source}})
-       when source in [:llm, :llm_replay],
-       do: [{"llm-request", :unknown}]
-
   defp declaration_effects(%{
          name: name,
          descriptor: %{source: source},
@@ -136,6 +133,13 @@ defmodule PtcRunner.Kernel.DeclaredReadEffectValidator do
 
   defp declaration_effects(%{name: name, descriptor: %{source: :ptc_inspection_snapshot}}),
     do: analysis_effects(name)
+
+  defp declaration_effects(%{descriptor: %{source: source}}) do
+    case ModelCapabilities.model_call_name(source) do
+      nil -> []
+      name -> [{name, :unknown}]
+    end
+  end
 
   defp declaration_effects(_declaration), do: []
 

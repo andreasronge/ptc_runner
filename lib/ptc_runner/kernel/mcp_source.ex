@@ -63,6 +63,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   alias PtcRunner.Kernel.MCPRequestContext
   alias PtcRunner.Kernel.MCPStdioTransport
   alias PtcRunner.Kernel.MCPTransportReason
+  alias PtcRunner.Kernel.ModelCapabilities
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderRegistry
 
@@ -486,6 +487,7 @@ defmodule PtcRunner.Kernel.MCPSource do
     Map.keys(mapping) --
       [:as, :effect, :description, :model_visible, :error_feedback, :inspection_capture] == [] and
       MCPProtocol.valid_tool_name?(upstream) and public =~ @name and
+      not ModelCapabilities.reserved_name?(public) and
       not MapSet.member?(public_names, public) and
       (is_nil(validation.description) or valid_string?(validation.description, 4_096)) and
       is_boolean(validation.model_visible) and validation.error_feedback in [:closed, :bounded] and

@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.InspectionRecord do
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.LLMReplay
   alias PtcRunner.Kernel.MCPProtocol
+  alias PtcRunner.Kernel.ModelCapabilities
   alias PtcRunner.Kernel.ResultIdentity
   alias PtcRunner.Lisp.RetainedSize
 
@@ -328,21 +329,21 @@ defmodule PtcRunner.Kernel.InspectionRecord do
 
   defp valid_capability_scope?(_payload, _fields), do: false
 
-  defp capability_input_fields(%{
-         "environment" => "workflow",
-         "name" => "llm-request"
-       }),
-       do: ["arguments", "request_hash"]
+  defp capability_input_fields(%{"environment" => "workflow", "name" => name}) do
+    if ModelCapabilities.model_call?(name), do: ["arguments", "request_hash"], else: ["arguments"]
+  end
 
   defp capability_input_fields(_payload), do: ["arguments"]
 
   defp valid_capability_request_hash?(%{
          "environment" => "workflow",
-         "name" => "llm-request",
+         "name" => name,
          "arguments" => arguments,
          "request_hash" => request_hash
        }),
-       do: LLMReplay.request_hash(arguments) == {:ok, request_hash}
+       do:
+         not ModelCapabilities.model_call?(name) or
+           LLMReplay.request_hash(arguments) == {:ok, request_hash}
 
   defp valid_capability_request_hash?(%{"environment" => _environment, "name" => _name}),
     do: true

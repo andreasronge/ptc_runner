@@ -63,6 +63,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.LLMReplay
   alias PtcRunner.Kernel.LLMUsage
+  alias PtcRunner.Kernel.ModelCapabilities
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.RoutedCapability
   alias PtcRunner.Kernel.RunState
@@ -451,13 +452,16 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   defp put_llm_requester_deadline(
          %CapabilityInvocation{
-           capability: %Capability{name: "llm-request"},
+           capability: %Capability{name: name},
            llm_request_deadline_ms: deadline
          },
          context
        )
-       when is_integer(deadline) or is_nil(deadline),
-       do: Map.put(context, :llm_request_deadline_ms, deadline)
+       when is_integer(deadline) or is_nil(deadline) do
+    if ModelCapabilities.model_call?(name),
+      do: Map.put(context, :llm_request_deadline_ms, deadline),
+      else: context
+  end
 
   defp put_llm_requester_deadline(_invocation, context), do: context
 
@@ -900,18 +904,24 @@ defmodule PtcRunner.Kernel.Dispatcher do
   defp maybe_put_llm_request_hash(
          payload,
          :workflow,
-         "llm-request",
+         name,
          :arguments,
          arguments
        ) do
+    if ModelCapabilities.model_call?(name),
+      do: put_model_request_hash(payload, arguments),
+      else: payload
+  end
+
+  defp maybe_put_llm_request_hash(payload, _environment, _name, _key, _value),
+    do: payload
+
+  defp put_model_request_hash(payload, arguments) do
     case LLMReplay.request_hash(arguments) do
       {:ok, request_hash} -> Map.put(payload, :request_hash, request_hash)
       :error -> payload
     end
   end
-
-  defp maybe_put_llm_request_hash(payload, _environment, _name, _key, _value),
-    do: payload
 
   defp capability_inspection_identity(environment, name, mission_name) do
     %{environment: environment, name: name}
@@ -1116,7 +1126,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
         cancel_provider_at_timeout(state, capability, pid, ref)
         timeout_result = await_timeout_result(invocation)
 
-        if capability.name == "llm-request", do: record_llm_timeout_evidence(state)
+        if ModelCapabilities.model_call?(capability.name), do: record_llm_timeout_evidence(state)
 
         {:settlement, {:adapter_error, :timeout},
          post_invocation_failure(
@@ -1480,7 +1490,28 @@ defmodule PtcRunner.Kernel.Dispatcher do
   end
 
   defp compile_request_schema(
-         %CapabilityInvocation{capability: %Capability{name: "llm-request"}} = invocation,
+         %CapabilityInvocation{capability: %Capability{name: name}} = invocation,
+         state,
+         environment,
+         requested_timeout_ms,
+         validation_heap_words,
+         validation_deadline_ms
+       ) do
+    if ModelCapabilities.chat?(name),
+      do:
+        compile_chat_request_schema(
+          invocation,
+          state,
+          environment,
+          requested_timeout_ms,
+          validation_heap_words,
+          validation_deadline_ms
+        ),
+      else: {:ok, invocation}
+  end
+
+  defp compile_chat_request_schema(
+         invocation,
          state,
          environment,
          requested_timeout_ms,
@@ -1514,16 +1545,6 @@ defmodule PtcRunner.Kernel.Dispatcher do
     end
   end
 
-  defp compile_request_schema(
-         invocation,
-         _state,
-         _environment,
-         _timeout_ms,
-         _heap_words,
-         _deadline_ms
-       ),
-       do: {:ok, invocation}
-
   defp attest_llm_reservation(
          %CapabilityInvocation{llm_source: "llm"} = invocation,
          state,
@@ -1547,7 +1568,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   defp attest_llm_reservation(
          %CapabilityInvocation{
-           capability: %Capability{name: "llm-request"},
+           capability: %Capability{name: name},
            llm_source: source
          } = invocation,
          state,
@@ -1555,15 +1576,21 @@ defmodule PtcRunner.Kernel.Dispatcher do
          _deadline_ms
        )
        when source != "llm_replay" do
+    if ModelCapabilities.model_call?(name),
+      do: attest_unbound_model_reservation(invocation, state),
+      else: {:ok, invocation}
+  end
+
+  defp attest_llm_reservation(invocation, _state, _heap_words, _deadline_ms),
+    do: {:ok, invocation}
+
+  defp attest_unbound_model_reservation(invocation, state) do
     limits = state_limits(state)
 
     if is_nil(limits.llm_total_tokens) and is_nil(limits.llm_cost_microusd),
       do: {:ok, invocation},
       else: {:error, :reservation_attestation_unavailable}
   end
-
-  defp attest_llm_reservation(invocation, _state, _heap_words, _deadline_ms),
-    do: {:ok, invocation}
 
   defp attest_live_llm_reservation(
          %CapabilityInvocation{reservation_bound: bound} = invocation,
@@ -1772,10 +1799,10 @@ defmodule PtcRunner.Kernel.Dispatcher do
   defp replay_request_hash(_result), do: nil
 
   defp llm_provider_error(
-         %Capability{name: "llm-request"},
+         %Capability{name: name},
          {:error, %ProviderError{} = error}
        ) do
-    if ProviderError.valid?(error), do: error, else: nil
+    if ModelCapabilities.model_call?(name) and ProviderError.valid?(error), do: error, else: nil
   end
 
   defp llm_provider_error(_capability, _result), do: nil
@@ -2016,16 +2043,20 @@ defmodule PtcRunner.Kernel.Dispatcher do
     do: {:ok, value}
 
   defp request_schema_value(
-         %CapabilityInvocation{capability: %Capability{name: "llm-request"}},
+         %CapabilityInvocation{capability: %Capability{name: name}},
          value
        ) do
+    if ModelCapabilities.chat?(name), do: chat_request_schema_value(value), else: {:ok, value}
+  end
+
+  defp request_schema_value(_invocation, value), do: {:ok, value}
+
+  defp chat_request_schema_value(value) do
     case Map.get(value, "structured_output") do
       object when is_map(object) and not is_struct(object) -> {:ok, object}
       _missing -> {:error, :output_schema_mismatch}
     end
   end
-
-  defp request_schema_value(_invocation, value), do: {:ok, value}
 
   defp normalize_structured_output(
          %CapabilityInvocation{request_validator: validator} = invocation,
@@ -2212,9 +2243,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
   end
 
   defp llm_spend_identity?(name, alias_name, revision)
-       when name in ["llm-request", :"llm-request"] and is_binary(alias_name) and
-              is_binary(revision),
-       do: true
+       when is_binary(alias_name) and is_binary(revision),
+       do: ModelCapabilities.model_call?(name)
 
   defp llm_spend_identity?(_name, _alias_name, _revision), do: false
 

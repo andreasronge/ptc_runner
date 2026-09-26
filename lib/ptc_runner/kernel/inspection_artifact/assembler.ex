@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
   alias PtcRunner.Kernel.InspectionArtifact.Format
   alias PtcRunner.Kernel.InspectionArtifact.Indexes
   alias PtcRunner.Kernel.InspectionArtifact.ValueHash
+  alias PtcRunner.Kernel.ModelCapabilities
   alias PtcRunner.Kernel.ResultIdentity
   alias PtcRunner.Kernel.RunAnalysisRelationships
   alias PtcRunner.Lisp.RetainedSize
@@ -411,7 +412,10 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
     %{state | conversation: conversation}
   end
 
-  defp capability_class(%{environment: "workflow", name: "llm-request"}), do: :model
+  defp capability_class(%{environment: "workflow", name: name}) do
+    if ModelCapabilities.model_call?(name), do: :model, else: :capability
+  end
+
   defp capability_class(_input), do: :capability
 
   defp compatible_capability?(nil, _record), do: false
