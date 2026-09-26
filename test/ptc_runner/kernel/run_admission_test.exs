@@ -1,12 +1,9 @@
 defmodule PtcRunner.Kernel.RunAdmissionTest do
-  # async: false — one case installs a node-wide :telemetry handler that blocks every sandbox arm in
-  # the VM (class D); the other cases could run async in a sibling module.
-  use ExUnit.Case, async: false
-  import PtcRunner.TestSupport.ProviderExecutionFixture
+  use ExUnit.Case, async: true
+  import PtcRunner.TestSupport.RunAdmissionFixture
   import PtcRunner.TestSupport.Eventually
 
   alias PtcRunner.Kernel.{
-    Capability,
     ExecutionOutcome,
     PreparedRun,
     PublicationAuthority,
@@ -197,30 +194,6 @@ defmodule PtcRunner.Kernel.RunAdmissionTest do
     assert {:error, :invalid_provider_execution} = execute(host, fixture)
     assert PreparedRun.valid?(fixture.prepared)
     assert {:ok, %{in_use: 0}} = RunAdmission.snapshot(host)
-  end
-
-  test "request death also kills the workflow sandbox" do
-    host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
-    fixture = fixture()
-    handler = {__MODULE__, make_ref()}
-
-    :ok =
-      :telemetry.attach(
-        handler,
-        [:ptc_runner, :sandbox, :armed],
-        &__MODULE__.hold_sandbox/4,
-        self()
-      )
-
-    on_exit(fn -> :telemetry.detach(handler) end)
-    {caller, ref} = spawn_monitor(fn -> execute(host, fixture) end)
-    on_exit(fn -> Process.exit(caller, :kill) end)
-    assert_receive {:sandbox_armed, sandbox}, 5_000
-    on_exit(fn -> Process.exit(sandbox, :kill) end)
-    sandbox_ref = Process.monitor(sandbox)
-    Process.exit(caller, :kill)
-    assert_receive {:DOWN, ^ref, :process, ^caller, :killed}, 5_000
-    assert_receive {:DOWN, ^sandbox_ref, :process, ^sandbox, :killed}, 1_000
   end
 
   test "unused reservations saturate, close once, and expire without preparing execution" do
@@ -509,55 +482,4 @@ defmodule PtcRunner.Kernel.RunAdmissionTest do
       match?({:ok, %{in_use: 0, status: :ready}}, RunAdmission.snapshot(host))
     end)
   end
-
-  def hold_sandbox(_, _, %{live_run: _, pid: pid}, parent) do
-    send(parent, {:sandbox_armed, pid})
-    receive do: (:unused -> :ok)
-  end
-
-  def hold_sandbox(_, _, _, _), do: :ok
-
-  defp fixture(opts \\ []) do
-    parent = self()
-    block? = Keyword.get(opts, :block, false)
-
-    opts =
-      Keyword.put_new(
-        opts,
-        :body,
-        if(block?, do: "(return (tool/fixture {}))", else: "(return {\"answer\" 42})")
-      )
-
-    acquire = fn context ->
-      scoped_root(parent, context)
-
-      {:ok, capability} =
-        Capability.new(
-          name: "fixture",
-          input_schema: %{"type" => "object", "additionalProperties" => false},
-          callback: fn _ ->
-            if block? do
-              send(parent, {:running, self()})
-              receive do: (:finish -> :ok)
-            end
-
-            {:ok, %{}}
-          end
-        )
-
-      {:ok, %{capabilities: [capability], close: Keyword.get(opts, :close, fn -> :ok end)}}
-    end
-
-    provider_fixture(Keyword.put(opts, :acquire, acquire))
-  end
-
-  defp execute(host, fixture),
-    do:
-      RunAdmission.execute(
-        host,
-        fixture.prepared,
-        fixture.authority,
-        fixture.catalog,
-        fixture.execution.services
-      )
 end

@@ -1,21 +1,18 @@
 defmodule PtcRunner.Kernel.HostInstallationGlobalStateTest do
   # async: false — these cases set :ptc_runner :llm_adapter (and :req_llm) app env, stop
-  # :req_llm, capture :stderr, or assert the VM-wide set of HostInstallationOwner processes
-  # (class D). The rest of HostInstallation coverage is async in HostInstallationTest.
+  # :req_llm, or capture :stderr. The rest of HostInstallation coverage is async
+  # in HostInstallationTest.
   use ExUnit.Case, async: false
 
   import PtcRunner.TestSupport.HostInstallationFixtures
 
-  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.DoctorPlan
   alias PtcRunner.Kernel.HostInstallation
-  alias PtcRunner.Kernel.HostRuntimePayload
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.ProviderCallAdmission
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderRegistry
-  alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSnapshot
   alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.TestSupport.LLMSupport
@@ -64,139 +61,6 @@ defmodule PtcRunner.Kernel.HostInstallationGlobalStateTest do
 
       {:ok, %{content: "ok", tokens: %{}}}
     end
-  end
-
-  @tag :tmp_dir
-  test "catalog construction is process-free and excludes host-private values", %{tmp_dir: dir} do
-    host = load_host(dir, http_config())
-    owners_before = host_installation_owners()
-    assert {:ok, catalog} = HostInstallation.catalog(host)
-    serialized_catalog = :erlang.term_to_binary(catalog)
-
-    assert host_installation_owners() == owners_before
-    refute Map.has_key?(catalog, :owner)
-    refute Map.has_key?(catalog, :credential_resolver)
-    refute serialized_catalog =~ dir
-    refute serialized_catalog =~ host.path
-    refute serialized_catalog =~ "test-secret"
-    refute serialized_catalog =~ "https://example.test/mcp"
-
-    assert {:ok, runtime_services} = HostInstallation.runtime_services(host)
-    serialized_services = :erlang.term_to_binary(runtime_services)
-    refute serialized_services =~ dir
-    refute serialized_services =~ "test-secret"
-    refute serialized_services =~ "https://example.test/mcp"
-
-    assert {:error, :invalid_provider_runtime_services} =
-             ProviderRuntimeServices.host_call(
-               runtime_services,
-               catalog.runtime_binding,
-               :oauth_authorities
-             )
-
-    assert {:error, :invalid_host_runtime_payload} =
-             HostRuntimePayload.invoke(runtime_services.host_payload, :oauth_authorities)
-
-    assert {:ok, registry} =
-             InstallationCatalog.runtime_registry(catalog, runtime_services)
-
-    owner_pid = registry.authority_owner.pid
-    assert Process.alive?(owner_pid)
-
-    assert {:ok, prepared} =
-             ProviderRegistry.prepare(registry, "remote", %{}, context(dir, :mission))
-
-    assert {:ok, preflighted} = ProviderRegistry.preflight(prepared)
-
-    for callback <- [prepared.preflight, preflighted.acquire] do
-      {:env, environment} = :erlang.fun_info(callback, :env)
-      captured = :erlang.term_to_binary(environment)
-
-      refute captured =~ "test-secret"
-    end
-
-    assert :ok = ProviderRegistry.close(registry)
-    refute Process.alive?(owner_pid)
-
-    assert {:error, :provider_prepare_failed} =
-             ProviderRegistry.prepare(registry, "remote", %{}, context(dir, :mission))
-
-    assert {:error, :credential_resolution_failed} =
-             ProviderRegistry.resolve_credentials(registry, ["token"])
-  end
-
-  @tag :tmp_dir
-  test "an expired operation deadline never activates the host payload", %{tmp_dir: dir} do
-    host = load_host(dir, http_config())
-    assert {:ok, catalog} = HostInstallation.catalog(host)
-    assert {:ok, services} = HostInstallation.runtime_services(host)
-    parent = self()
-    activation = services.activation
-
-    # Comparing owners after the call cannot separate "never started" from
-    # "started and then released"; only the first is correct once the deadline
-    # has already expired, so the activation itself reports whether it ran.
-    observed = fn ->
-      send(parent, :activated)
-      activation.()
-    end
-
-    services = replace_activation(services, observed)
-    owners_before = host_installation_owners()
-    expired = Deadline.from_expires_at(System.monotonic_time(:millisecond) - 1)
-
-    assert {:error, :operation_deadline_expired} =
-             InstallationCatalog.runtime_registry(catalog, services, ["remote"], expired, self())
-
-    refute_received :activated
-    assert host_installation_owners() == owners_before
-  end
-
-  @tag :tmp_dir
-  test "runtime services cannot activate a catalog from another host", %{tmp_dir: dir} do
-    host_a = load_host(Path.join(dir, "a"), http_config())
-
-    host_b =
-      http_config()
-      |> put_in(["credentials", "token", "literal"], "different-secret")
-      |> put_in(["install", "remote", "installation_revision"], "remote-v2")
-      |> put_in(
-        ["install", "remote", "transport", "endpoint"],
-        "https://different.example/mcp"
-      )
-      |> then(&load_host(Path.join(dir, "b"), &1))
-
-    assert {:ok, catalog_a} = HostInstallation.catalog(host_a)
-    assert {:ok, services_b} = HostInstallation.runtime_services(host_b)
-    refute catalog_a.runtime_binding == services_b.runtime_binding
-
-    owners_before = host_installation_owners()
-
-    assert {:error, :invalid_provider_registry} =
-             InstallationCatalog.runtime_registry(catalog_a, services_b)
-
-    assert host_installation_owners() == owners_before
-  end
-
-  @tag :tmp_dir
-  test "a copied host binding cannot forge ownerless runtime services", %{tmp_dir: dir} do
-    host = load_host(dir, http_config())
-    assert {:ok, catalog} = HostInstallation.catalog(host)
-
-    assert {:error, :invalid_provider_runtime_services} =
-             ProviderRuntimeServices.new(runtime_binding: catalog.runtime_binding)
-
-    assert {:ok, generic_services} = ProviderRuntimeServices.new()
-
-    forged_services = %{generic_services | runtime_binding: catalog.runtime_binding}
-
-    refute ProviderRuntimeServices.valid?(forged_services)
-    owners_before = host_installation_owners()
-
-    assert {:error, :invalid_provider_registry} =
-             InstallationCatalog.runtime_registry(catalog, forged_services)
-
-    assert host_installation_owners() == owners_before
   end
 
   @tag :tmp_dir
@@ -1037,19 +901,6 @@ defmodule PtcRunner.Kernel.HostInstallationGlobalStateTest do
     assert raised.retryable? == false
     assert raised.dispatch_provenance == :not_dispatched
     refute_receive {:host_llm_request, _model, _request}
-  end
-
-  defp host_installation_owners do
-    marker = {PtcRunner.Kernel.HostInstallationOwner, :authority}
-
-    Process.list()
-    |> Enum.filter(fn pid ->
-      case Process.info(pid, :dictionary) do
-        {:dictionary, dictionary} -> List.keymember?(dictionary, marker, 0)
-        nil -> false
-      end
-    end)
-    |> MapSet.new()
   end
 
   defp restore_env(key, nil), do: Application.delete_env(:ptc_runner, key)

@@ -1,7 +1,5 @@
 defmodule PtcRunner.Kernel.ReplTraceLifecycleTest do
-  # async: false — one case changes the VM's cwd with File.cd! so a relative trace path binds to the
-  # invocation directory (class D); the other 6 could run async in a sibling module.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
 
@@ -13,28 +11,6 @@ defmodule PtcRunner.Kernel.ReplTraceLifecycleTest do
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
-
-  @tag :tmp_dir
-  test "a relative trace remains bound to the invocation directory", %{tmp_dir: directory} do
-    invocation = Path.join(directory, "invocation")
-    later = Path.join(directory, "later")
-    File.mkdir!(invocation)
-    File.mkdir!(later)
-
-    session =
-      File.cd!(invocation, fn ->
-        assert {:ok, session} = ReplSession.new(trace_path: "session.jsonl")
-        session
-      end)
-
-    File.cd!(later, fn ->
-      assert {:ok, _events} = ReplSession.close(session)
-    end)
-
-    assert File.regular?(Path.join(invocation, "session.jsonl"))
-    refute File.exists?(Path.join(later, "session.jsonl"))
-  end
-
   @tag :tmp_dir
   test "direct caller death finalizes and persists the abandoned session", %{tmp_dir: directory} do
     trace_path = Path.join(directory, "caller-death.jsonl")

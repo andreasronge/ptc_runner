@@ -192,25 +192,6 @@
       ],
       "type": "type_i"
     },
-    "7176eb95877d0a68a314e511d592ee7937370bf91f16a8867dd3c0bcb72a86a1": {
-      "describe": "type_i mass=41 test/ptc_runner/kernel/execution_session_owner_privacy_test.exs:237 <-> test/ptc_runner/kernel/run_coordinator_execution_test.exs:774",
-      "files": [
-        "test/ptc_runner/kernel/execution_session_owner_privacy_test.exs",
-        "test/ptc_runner/kernel/run_coordinator_execution_test.exs"
-      ],
-      "mass": 41,
-      "occurrences": [
-        {
-          "file": "test/ptc_runner/kernel/execution_session_owner_privacy_test.exs",
-          "snippet": "f4c9f6562146cf16154889b064b9a4666bc10473cb7a18fa35ee5aec07fad47b"
-        },
-        {
-          "file": "test/ptc_runner/kernel/run_coordinator_execution_test.exs",
-          "snippet": "f4c9f6562146cf16154889b064b9a4666bc10473cb7a18fa35ee5aec07fad47b"
-        }
-      ],
-      "type": "type_i"
-    },
     "71ac557332e8abad794dafc0046fd067e9c840fae278265805469cf0cf41050f": {
       "describe": "type_ii mass=34 lib/ptc_runner/kernel/execution_policy.ex:61 <-> lib/ptc_runner/kernel/installation_catalog.ex:120 <-> lib/ptc_runner/kernel/selection_rules.ex:86",
       "files": [

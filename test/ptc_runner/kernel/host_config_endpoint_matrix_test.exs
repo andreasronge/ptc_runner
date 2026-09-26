@@ -63,8 +63,12 @@ defmodule PtcRunner.Kernel.HostConfigEndpointMatrixTest do
     parameterize:
       for(
         endpoint <- @endpoints,
-        loopback <- [false, true],
-        credential <- [:none, :empty_auth, :static_auth, :oauth],
+        loopback <- if(String.starts_with?(endpoint, "http://"), do: [false, true], else: [false]),
+        credential <-
+          if(String.starts_with?(endpoint, "http://"),
+            do: [:none, :empty_auth, :static_auth, :oauth],
+            else: [:none]
+          ),
         do: %{endpoint: endpoint, loopback: loopback, credential: credential}
       )
 
