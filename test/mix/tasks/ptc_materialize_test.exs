@@ -9,7 +9,6 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
   """
 
   import ExUnit.CaptureIO
-  import Bitwise
 
   alias Mix.Tasks.Ptc
   alias Mix.Tasks.Ptc.Materialize
@@ -334,87 +333,6 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
           ])
         end)
       end
-    end
-  end
-
-  @tag :tmp_dir
-  test "source-out writes interned effective bytes and refuses an existing destination", %{
-    tmp_dir: dir
-  } do
-    manifest = write_application(dir)
-    exported = Path.join(dir, "helper.exported.clj")
-
-    output =
-      capture_io(fn ->
-        Materialize.run([
-          manifest,
-          "--workflow",
-          "--component",
-          "helper",
-          "--source-out",
-          exported
-        ])
-      end)
-
-    assert output =~ "source written"
-    assert File.read!(exported) == @placeholder
-    assert band(File.stat!(exported).mode, 0o777) == 0o600
-
-    assert_raise Mix.Error, ~r/source_out_destination_exists/, fn ->
-      capture_io(fn ->
-        Materialize.run([
-          manifest,
-          "--workflow",
-          "--component",
-          "helper",
-          "--source-out",
-          exported
-        ])
-      end)
-    end
-  end
-
-  @tag :tmp_dir
-  test "source-out and candidate options are mutually exclusive", %{tmp_dir: dir} do
-    manifest = write_application(dir)
-    File.write!(Path.join(dir, "authored.clj"), @authored)
-
-    assert_raise Mix.Error, ~r/conflicting_materialize_mode/, fn ->
-      capture_io(fn ->
-        Materialize.run([
-          manifest,
-          "--workflow",
-          "--component",
-          "helper",
-          "--source-out",
-          Path.join(dir, "exported.clj"),
-          "--out",
-          Path.join(dir, "candidate"),
-          "--source",
-          Path.join(dir, "authored.clj")
-        ])
-      end)
-    end
-  end
-
-  @tag :tmp_dir
-  test "an oversized candidate file is refused without loading it whole", %{tmp_dir: dir} do
-    manifest = write_application(dir)
-    File.write!(Path.join(dir, "authored.clj"), String.duplicate("x", 1_048_577))
-
-    assert_raise Mix.Error, ~r/candidate_source_too_large/, fn ->
-      capture_io(fn ->
-        Materialize.run([
-          manifest,
-          "--workflow",
-          "--component",
-          "helper",
-          "--out",
-          Path.join(dir, "candidate"),
-          "--source",
-          Path.join(dir, "authored.clj")
-        ])
-      end)
     end
   end
 

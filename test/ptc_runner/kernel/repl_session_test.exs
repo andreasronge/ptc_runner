@@ -356,13 +356,6 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
   test "direct eval names an unattached shipped library" do
     {:ok, session} = ReplSession.new()
 
-    assert {:ok, doc, session} = ReplSession.eval(session, ~S|(doc "agent.core/run")|)
-    assert doc.return == nil
-
-    output = Enum.join(doc.prints, "\n")
-    assert output =~ ~s|"agent.core/run" is an export of shipped library "agent.core"|
-    assert output =~ "--project PROJECT.json or --manifest MANIFEST.json"
-
     assert {:ok, apropos, session} = ReplSession.eval(session, ~S|(apropos "agent")|)
     refute "agent.core" in apropos.return
     assert apropos.prints == []

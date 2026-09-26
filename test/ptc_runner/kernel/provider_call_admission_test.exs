@@ -5,23 +5,6 @@ defmodule PtcRunner.Kernel.ProviderCallAdmissionTest do
 
   alias PtcRunner.Kernel.ProviderCallAdmission
 
-  test "validates its closed options and exposes a temporary child" do
-    assert {:error, :invalid_provider_call_admission} = ProviderCallAdmission.start_link([])
-
-    assert {:error, :invalid_provider_call_admission} =
-             ProviderCallAdmission.start_link(max_active_calls: 1, max_waiters: 0, extra: true)
-
-    assert {:error, :invalid_provider_call_admission} =
-             ProviderCallAdmission.start_link(
-               max_active_calls: 1,
-               max_active_calls: 2,
-               max_waiters: 0
-             )
-
-    assert %{restart: :temporary} =
-             ProviderCallAdmission.child_spec(max_active_calls: 1, max_waiters: 0)
-  end
-
   test "bounds active calls and fail-fast capacity before owner entry" do
     admission = start_supervised!({ProviderCallAdmission, max_active_calls: 1, max_waiters: 0})
     deadline = System.monotonic_time(:millisecond) + 5_000

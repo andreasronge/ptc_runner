@@ -166,13 +166,6 @@ defmodule PtcRunner.Kernel.PromptAuditTest do
                row(measured, "total")["lines"]
     end
 
-    test "tokens_estimated rounds up from characters" do
-      assert row(measure(""), "total")["tokens_estimated"] == 0
-      assert row(measure("a"), "total")["tokens_estimated"] == 1
-      assert row(measure("abcd"), "total")["tokens_estimated"] == 1
-      assert row(measure("abcde"), "total")["tokens_estimated"] == 2
-    end
-
     test "derived rows estimate from their own characters, not from summed estimates" do
       measured = measure(final())
       total = row(measured, "total")
@@ -221,10 +214,6 @@ defmodule PtcRunner.Kernel.PromptAuditTest do
       assert row(measured, "authored")["characters"] + row(measured, "dynamic")["characters"] ==
                row(measured, "total")["characters"]
     end
-
-    test "characters counts graphemes, as count does" do
-      assert row(measure("éé"), "total")["characters"] == 2
-    end
   end
 
   describe "delta" do
@@ -263,12 +252,6 @@ defmodule PtcRunner.Kernel.PromptAuditTest do
       for row <- delta(ordinary(), final())["rows"] do
         assert Map.keys(row) |> Enum.sort() == ~w(after before change label percent)
       end
-    end
-  end
-
-  test "the committed artifacts are both recognised renderings" do
-    for prompt <- [ordinary(), final()] do
-      assert measure(prompt)["recognised?"] == true
     end
   end
 

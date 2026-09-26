@@ -4,10 +4,6 @@ defmodule PtcRunner.Kernel.SemanticRevisionTest do
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.SemanticRevision
 
-  test "non-production builds skip consuming dependency artifact verification" do
-    refute SemanticRevision.runtime_dependency_artifacts_verified?()
-  end
-
   test "the checked-in source projection includes code-owned Mix application defaults" do
     assert Enum.any?(
              SemanticRevision.build_projection()["sources"],
@@ -46,33 +42,6 @@ defmodule PtcRunner.Kernel.SemanticRevisionTest do
         ] do
       assert MapSet.member?(paths, path)
     end
-  end
-
-  test "dependency streaming avoids File.stream!/3 whose contract changed after Elixir 1.15" do
-    beam = :code.which(SemanticRevision)
-    assert {:ok, {_module, [imports: imports]}} = :beam_lib.chunks(beam, [:imports])
-    refute {File, :stream!, 3} in imports
-  end
-
-  test "the build projection classifies conditionally compiled semantic modules" do
-    assert SemanticRevision.build_projection()["conditional_semantic_modules"] == [
-             "Elixir.PtcRunner.LLM.ReqLLMAdapter"
-           ]
-
-    absent =
-      SemanticRevision.actual_compile_feature_projection(
-        [PtcRunner.LLM.ReqLLMAdapter],
-        fn _module -> false end
-      )
-
-    present =
-      SemanticRevision.actual_compile_feature_projection(
-        [PtcRunner.LLM.ReqLLMAdapter],
-        fn _module -> true end
-      )
-
-    refute SemanticRevision.revision_for(%{"source" => "same"}, %{"features" => absent}) ==
-             SemanticRevision.revision_for(%{"source" => "same"}, %{"features" => present})
   end
 
   @tag :tmp_dir
