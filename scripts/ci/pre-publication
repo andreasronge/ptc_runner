@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Run the tracked pre-push plan in PtcManager's detached, exact-SHA checkout.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$repo_root"
+
+# The snapshot is cloned from the job worktree. Its origin/main ref is copied
+# from that checkout, so this range needs neither a network fetch nor GitHub
+# credentials. A missing ref must never turn an unverified job into a pass.
+if ! git show-ref --verify --quiet refs/remotes/origin/main; then
+  echo "Pre-publication gate needs origin/main in the snapshot clone." >&2
+  exit 1
+fi
+
+head_sha="$(git rev-parse --verify 'HEAD^{commit}')"
+if ! base_sha="$(git merge-base "$head_sha" refs/remotes/origin/main)" ||
+   [ -z "$base_sha" ]; then
+  echo "Pre-publication gate could not find the job base commit." >&2
+  exit 1
+fi
+
+# The hook's own docs routing and classify-changes plan select every gate.
+# A synthetic ref tuple gives it the job's cumulative diff against the base.
+# Run serially because the worker gate has a bounded resource budget.
+printf 'refs/heads/ptc-manager %s refs/heads/main %s\n' "$head_sha" "$base_sha" |
+  PTC_PRE_PUSH_SERIAL=1 \
+  "$repo_root/.githooks/pre-push"
