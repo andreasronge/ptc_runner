@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
   alias PtcRunner.Kernel.InspectionArtifact.Format
   alias PtcRunner.Kernel.InspectionArtifact.Indexes
   alias PtcRunner.Kernel.InspectionArtifact.ValueHash
+  alias PtcRunner.Kernel.ModelCapabilities
   alias PtcRunner.Kernel.ResultIdentity
   alias PtcRunner.Kernel.RunAnalysisRelationships
   alias PtcRunner.Lisp.RetainedSize
@@ -22,6 +23,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
       limits: limits,
       run_id: identity && identity.run_id,
       trace_id: identity && identity.trace_id,
+      model_call_names: (identity && Map.get(identity, :model_call_names, [])) || [],
       schema_version: Format.schema_version(),
       first_timestamp: nil,
       last_timestamp: nil,
@@ -411,8 +413,11 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
     %{state | conversation: conversation}
   end
 
-  defp capability_class(%{environment: "workflow", name: "llm-request"}), do: :model
-  defp capability_class(_input), do: :capability
+  defp capability_class(%{environment: "workflow", name: name}, model_call_names) do
+    if ModelCapabilities.model_call?(name, model_call_names), do: :model, else: :capability
+  end
+
+  defp capability_class(_input, _model_call_names), do: :capability
 
   defp compatible_capability?(nil, _record), do: false
 
@@ -685,7 +690,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
     |> Enum.reduce_while({:ok, state}, fn {id, input}, {:ok, acc} ->
       output = Map.get(acc.outputs, id)
       exception = Map.get(acc.exceptions, id)
-      class = capability_class(input)
+      class = capability_class(input, state.model_call_names)
       collection = if class == :model, do: :model_exchanges, else: :capability_calls
 
       locator = {:capability, id, input.sequence}
@@ -858,10 +863,14 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
     pairs = Enum.to_list(state.inputs)
 
     model =
-      Enum.filter(pairs, fn {_id, input} -> capability_class(input) == :model end)
+      Enum.filter(pairs, fn {_id, input} ->
+        capability_class(input, state.model_call_names) == :model
+      end)
 
     calls =
-      Enum.reject(pairs, fn {_id, input} -> capability_class(input) == :model end)
+      Enum.reject(pairs, fn {_id, input} ->
+        capability_class(input, state.model_call_names) == :model
+      end)
 
     counts = %{
       "turns" => length(conversation.turns),

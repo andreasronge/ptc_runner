@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.LLMRouter do
   alias PtcRunner.Kernel.CapabilityInvocation
   alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.LLMCapability
+  alias PtcRunner.Kernel.ModelCapabilities
   alias PtcRunner.Kernel.RoutedCapability
   alias PtcRunner.LLM.Requirements
 
@@ -81,7 +82,8 @@ defmodule PtcRunner.Kernel.LLMRouter do
       @route_keys -- keys == [] and
       is_binary(route.alias) and route.alias =~ @alias and route.source in @sources and
       is_binary(route.installation_revision) and route.installation_revision =~ @alias and
-      is_boolean(route.default?) and match?(%Capability{name: "llm-request"}, route.capability) and
+      is_boolean(route.default?) and match?(%Capability{}, route.capability) and
+      ModelCapabilities.chat?(route.capability.name) and
       valid_max_calls?(route.max_calls) and
       valid_reservation_route?(route) and
       valid_structured_output_mode?(Map.get(route, :structured_output_mode)) and

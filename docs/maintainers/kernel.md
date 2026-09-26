@@ -330,6 +330,22 @@ Server-side timers, the run deadline, owner monitors, and lease tokens ensure
 that an expired, dead, or stale evaluator cannot overlap the next one. Exact
 admission outcomes are documented by `RunState` and `Evaluation`.
 
+`ModelCapabilities` owns the reserved capability-name classification used by
+model policy. `model_call?/1` applies to request hashes, reservations, spend,
+deadlines, usage, and private model exchanges; `chat?/1` additionally selects
+structured-output handling, chat routing, conversation turns, and LLM call
+counts. Both currently recognize only `llm-request`. `decision-request` is
+reserved for a future model-call capability. MCP public tool mappings cannot
+use either reserved name. Manifest provider selections and component
+requirements do not create capabilities; host-built capabilities are trusted
+and retain model-call treatment by name. The model-exchange inspection class
+applies only to workflow calls, preserving the existing trace contract.
+Trusted callers can pass extra model-call names through a dispatch context and
+the corresponding inspection sink and assembler. This explicit scope supports
+non-chat policy tests without changing the canonical trace format or relying
+on global state. Artifact admission takes the same names through its expected
+identity when a scoped inspection record is read.
+
 `Dispatcher` validates capability input before callback entry, reserves
 budgets, bounds the trusted callback worker, normalizes output, and rejects late
 completion. It may retain small schema-authored correction facts, but never

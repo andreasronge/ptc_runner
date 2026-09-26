@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
 
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.LLMUsage
+  alias PtcRunner.Kernel.ModelCapabilities
   alias PtcRunner.Kernel.ProviderSnapshot
   alias PtcRunner.Kernel.ResultLimit
 
@@ -330,10 +331,10 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
     name = stringify(field(event, "data", "name"))
 
     cond do
-      type == "capability-started" and name == "llm-request" ->
+      type == "capability-started" and ModelCapabilities.model_call?(name) ->
         parse_llm_identity(event, :start)
 
-      type == "capability-stopped" and name == "llm-request" ->
+      type == "capability-stopped" and ModelCapabilities.model_call?(name) ->
         parse_llm_identity(event, :stop)
 
       type == "capability-started" ->
@@ -465,7 +466,7 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
 
   defp llm_usage_event?(event) do
     field(event, "type") == "capability-stopped" and
-      field(event, "data", "name") == "llm-request" and
+      ModelCapabilities.model_call?(field(event, "data", "name")) and
       is_binary(field(event, "data", "alias")) and
       is_binary(field(event, "data", "installation_revision"))
   end

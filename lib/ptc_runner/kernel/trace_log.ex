@@ -53,6 +53,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.LLMBudget
   alias PtcRunner.Kernel.LLMUsageSummary
+  alias PtcRunner.Kernel.ModelCapabilities
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.QueryCursor
@@ -390,7 +391,7 @@ defmodule PtcRunner.Kernel.TraceLog do
           |> Enum.filter(fn event ->
             event["type"] == "capability-started" and
               stringify(event_data(event, "environment")) == "workflow" and
-              event_data(event, "name") == "llm-request"
+              ModelCapabilities.chat?(event_data(event, "name"))
           end)
           |> Enum.map(&event_data(&1, "capability_id"))
           |> Enum.filter(&is_binary/1)
@@ -2984,7 +2985,7 @@ defmodule PtcRunner.Kernel.TraceLog do
         %{
           workflow: Enum.sum(Map.values(workflow)),
           mission: Enum.sum(Map.values(mission)),
-          llm: Map.get(workflow, "llm-request", 0),
+          llm: chat_call_count(workflow),
           complete?: true
         }
 
@@ -2995,7 +2996,7 @@ defmodule PtcRunner.Kernel.TraceLog do
           %{
             workflow: scoped_terminal_call_count(calls, "workflow/"),
             mission: scoped_terminal_call_count(calls, "mission/"),
-            llm: Map.get(calls, "workflow/llm-request", 0),
+            llm: chat_call_count(calls, "workflow/"),
             complete?: true
           }
         else
@@ -3014,7 +3015,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     %{
       workflow: quota_backed_capability_call_count(events, "workflow"),
       mission: quota_backed_capability_call_count(events, "mission"),
-      llm: capability_name_count(events, "workflow", "llm-request"),
+      llm: capability_name_count(events, "workflow"),
       complete?: false
     }
   end
@@ -3151,11 +3152,20 @@ defmodule PtcRunner.Kernel.TraceLog do
     end)
   end
 
-  defp capability_name_count(events, environment, name) do
+  defp chat_call_count(calls, prefix \\ "") do
+    Enum.reduce(calls, 0, fn {name, count}, total ->
+      if is_binary(name) and String.starts_with?(name, prefix) and
+           ModelCapabilities.chat?(String.replace_prefix(name, prefix, "")),
+         do: total + count,
+         else: total
+    end)
+  end
+
+  defp capability_name_count(events, environment) do
     Enum.count(events, fn event ->
       event["type"] == "capability-started" and
         stringify(event_data(event, "environment")) == environment and
-        event_data(event, "name") == name
+        ModelCapabilities.chat?(event_data(event, "name"))
     end)
   end
 

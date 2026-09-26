@@ -46,6 +46,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.LLMRouter
   alias PtcRunner.Kernel.MissionReplTarget
+  alias PtcRunner.Kernel.ModelCapabilities
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderCallbackBoundary
   alias PtcRunner.Kernel.ProviderCleanup
@@ -814,14 +815,18 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
 
   defp no_unclaimed_llm_request(entries) do
     if Enum.any?(entries, fn entry ->
-         Enum.any?(entry.capabilities, &(&1.name == "llm-request"))
+         Enum.any?(entry.capabilities, &ModelCapabilities.chat?(&1.name))
        end),
        do: {:error, :invalid_workflow_llm_provider},
        else: :ok
   end
 
   defp build_llm_router_entry(entries) do
-    with true <- Enum.all?(entries, &match?([%{name: "llm-request"}], &1.capabilities)),
+    with true <-
+           Enum.all?(entries, fn entry ->
+             match?([%{name: _}], entry.capabilities) and
+               ModelCapabilities.chat?(hd(entry.capabilities).name)
+           end),
          routes <- Enum.map(entries, &llm_route/1),
          {:ok, router} <- LLMRouter.new(routes) do
       {:ok,

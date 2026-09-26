@@ -41,7 +41,8 @@ defmodule PtcRunner.Kernel.InspectionSink do
       :max_record_bytes,
       :max_total_bytes,
       :max_records,
-      :writer_hook
+      :writer_hook,
+      :model_call_names
     ]
 
     limit_opts = Keyword.take(opts, [:max_record_bytes, :max_total_bytes, :max_records])
@@ -56,11 +57,14 @@ defmodule PtcRunner.Kernel.InspectionSink do
          {:ok, limits} <- Limits.merge(limit_opts),
          writer_hook when is_nil(writer_hook) or is_function(writer_hook, 1) <-
            Keyword.get(opts, :writer_hook),
+         model_call_names when is_list(model_call_names) <-
+           Keyword.get(opts, :model_call_names, []),
+         true <- Enum.all?(model_call_names, &is_binary/1),
          token <- make_ref(),
          {:ok, pid} <-
            GenServer.start(
              __MODULE__,
-             {token, owner, run_id, trace_id, handle, limits, writer_hook}
+             {token, owner, run_id, trace_id, handle, limits, writer_hook, model_call_names}
            ) do
       {:ok, %__MODULE__{pid: pid, token: token}}
     else
@@ -153,8 +157,11 @@ defmodule PtcRunner.Kernel.InspectionSink do
   end
 
   @impl GenServer
-  def init({token, owner, run_id, trace_id, handle, limits, writer_hook}) do
-    case Writer.new(handle, run_id, trace_id, limits, writer_hook: writer_hook) do
+  def init({token, owner, run_id, trace_id, handle, limits, writer_hook, model_call_names}) do
+    case Writer.new(handle, run_id, trace_id, limits,
+           writer_hook: writer_hook,
+           model_call_names: model_call_names
+         ) do
       {:ok, writer} ->
         {:ok,
          %{

@@ -26,7 +26,8 @@ defmodule PtcRunner.Kernel.CapabilityInvocation do
                 llm_output_tokens: nil,
                 llm_reservation_tariff: nil,
                 reservation_bound: nil,
-                reservation: nil
+                reservation: nil,
+                model_call_names: []
               ]
 
   @type t :: %__MODULE__{
@@ -48,7 +49,8 @@ defmodule PtcRunner.Kernel.CapabilityInvocation do
           llm_output_tokens: pos_integer() | nil,
           llm_reservation_tariff: map() | nil,
           reservation_bound: function() | nil,
-          reservation: map() | nil
+          reservation: map() | nil,
+          model_call_names: [binary()]
         }
 
   @doc false

@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Conversation do
   alias PtcRunner.Kernel.ConversationMessage
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.GeneratedSourceAssociation
+  alias PtcRunner.Kernel.ModelCapabilities
 
   @type node_row :: %{
           complete_hash: binary(),
@@ -320,12 +321,12 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Conversation do
   end
 
   defp model_input?(%{"record_type" => "capability-input", "payload" => payload}),
-    do: payload["environment"] == "workflow" and payload["name"] == "llm-request"
+    do: payload["environment"] == "workflow" and ModelCapabilities.chat?(payload["name"])
 
   defp model_input?(_record), do: false
 
   defp model_output?(%{"record_type" => "capability-output", "payload" => payload}),
-    do: payload["environment"] == "workflow" and payload["name"] == "llm-request"
+    do: payload["environment"] == "workflow" and ModelCapabilities.chat?(payload["name"])
 
   defp model_output?(_record), do: false
 
