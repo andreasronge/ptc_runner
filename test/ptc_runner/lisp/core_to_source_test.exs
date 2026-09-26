@@ -192,24 +192,24 @@ defmodule PtcRunner.Lisp.CoreToSourceTest do
       {core_ast, core_ast2, reformatted}
     end
 
-    test "simple arithmetic" do
-      {ast1, ast2, _} = roundtrip("(+ 1 2)")
-      assert ast1 == ast2
-    end
-
-    test "let binding" do
-      {ast1, ast2, _} = roundtrip("(let [x 1] (+ x 2))")
-      assert ast1 == ast2
-    end
-
-    test "nested function call" do
-      {ast1, ast2, _} = roundtrip("(map inc [1 2 3])")
-      assert ast1 == ast2
-    end
-
-    test "if expression" do
-      {ast1, ast2, _} = roundtrip("(if true 1 0)")
-      assert ast1 == ast2
+    test "ordinary source forms survive a parse, analyze, format round trip" do
+      for source <- [
+            "(+ 1 2)",
+            "(let [x 1] (+ x 2))",
+            "(map inc [1 2 3])",
+            "(if true 1 0)",
+            "(def x (+ 1 2))",
+            "(do (def x 1) (+ x 2))",
+            "(fn [x] (+ x 1))",
+            "(or x [])",
+            ~S({"a" 1 "b" 2}),
+            ~S|(get data/task "key")|,
+            ~S|(def episodes (take 10 (conj (or episodes []) {"task" data/task "success" data/success})))|,
+            ~S|[{"a" 1} {"b" 2}]|
+          ] do
+        {before_ast, after_ast, _source} = roundtrip(source)
+        assert before_ast == after_ast, source
+      end
     end
 
     test "analyzer-generated case and condp temporaries format as parseable source" do
@@ -226,49 +226,6 @@ defmodule PtcRunner.Lisp.CoreToSourceTest do
       assert {:ok, _raw_ast} = Parser.parse(reformatted)
       assert {:ok, %{return: [42, one, one]}} = Lisp.run_native(reformatted)
       assert one == Keyword.new("one")
-    end
-
-    test "def with expression" do
-      {ast1, ast2, _} = roundtrip("(def x (+ 1 2))")
-      assert ast1 == ast2
-    end
-
-    test "do block" do
-      {ast1, ast2, _} = roundtrip("(do (def x 1) (+ x 2))")
-      assert ast1 == ast2
-    end
-
-    test "fn expression" do
-      {ast1, ast2, _} = roundtrip("(fn [x] (+ x 1))")
-      assert ast1 == ast2
-    end
-
-    test "or with default pattern" do
-      {ast1, ast2, _} = roundtrip("(or x [])")
-      assert ast1 == ast2
-    end
-
-    test "map literal" do
-      {ast1, ast2, _} = roundtrip(~S({"a" 1 "b" 2}))
-      assert ast1 == ast2
-    end
-
-    test "data access" do
-      {ast1, ast2, _} = roundtrip("(get data/task \"key\")")
-      assert ast1 == ast2
-    end
-
-    test "typical ALMA update_code" do
-      source =
-        ~S|(def episodes (take 10 (conj (or episodes []) {"task" data/task "success" data/success})))|
-
-      {ast1, ast2, _} = roundtrip(source)
-      assert ast1 == ast2
-    end
-
-    test "vector with nested maps" do
-      {ast1, ast2, _} = roundtrip(~S|[{"a" 1} {"b" 2}]|)
-      assert ast1 == ast2
     end
   end
 

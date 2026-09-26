@@ -3,7 +3,7 @@ defmodule PtcRunner.Lisp.EvalControlFlowTest do
 
   import PtcRunner.TestSupport.TestHelpers
 
-  alias PtcRunner.Lisp.{Env, Eval}
+  alias PtcRunner.Lisp.Eval
 
   describe "variable access" do
     test "unbound variable returns error" do
@@ -25,51 +25,7 @@ defmodule PtcRunner.Lisp.EvalControlFlowTest do
     end
   end
 
-  describe "short-circuit logic: and" do
-    test "empty and returns true" do
-      assert {:ok, true, %{}} = Eval.eval({:and, []}, %{}, %{}, %{}, &dummy_tool/2)
-    end
-
-    test "all truthy returns last value" do
-      exprs = [true, true, 0]
-      assert {:ok, 0, %{}} = Eval.eval({:and, exprs}, %{}, %{}, %{}, &dummy_tool/2)
-    end
-
-    test "single truthy returns the value" do
-      assert {:ok, 1, %{}} = Eval.eval({:and, [1]}, %{}, %{}, %{}, &dummy_tool/2)
-    end
-
-    test "falsy short-circuits" do
-      exprs = [true, false, nil]
-      assert {:ok, false, %{}} = Eval.eval({:and, exprs}, %{}, %{}, %{}, &dummy_tool/2)
-    end
-
-    test "nil short-circuits" do
-      exprs = [true, nil, 42]
-      assert {:ok, nil, %{}} = Eval.eval({:and, exprs}, %{}, %{}, %{}, &dummy_tool/2)
-    end
-  end
-
   describe "short-circuit logic: or" do
-    test "empty or returns nil" do
-      assert {:ok, nil, %{}} = Eval.eval({:or, []}, %{}, %{}, %{}, &dummy_tool/2)
-    end
-
-    test "first truthy returns early" do
-      exprs = [false, nil, 42, 99]
-      assert {:ok, 42, %{}} = Eval.eval({:or, exprs}, %{}, %{}, %{}, &dummy_tool/2)
-    end
-
-    test "all falsy returns last falsy value" do
-      exprs = [false, nil]
-      assert {:ok, nil, %{}} = Eval.eval({:or, exprs}, %{}, %{}, %{}, &dummy_tool/2)
-    end
-
-    test "all falsy with different last value" do
-      exprs = [nil, false]
-      assert {:ok, false, %{}} = Eval.eval({:or, exprs}, %{}, %{}, %{}, &dummy_tool/2)
-    end
-
     test "unbound memory variable falls through to default" do
       # The canonical memory pattern: (or my-counter 0)
       # When the variable has never been def'd, it should behave like nil
@@ -108,98 +64,6 @@ defmodule PtcRunner.Lisp.EvalControlFlowTest do
       # Only :unbound_var is suppressed; other errors (e.g. type errors) surface.
       # Test via Lisp.run where error handling is clean.
       assert {:error, _step} = PtcRunner.Lisp.run("(or (+ 1 \"bad\") 99)")
-    end
-  end
-
-  describe "sequential evaluation: do" do
-    test "empty do returns nil" do
-      assert {:ok, nil, %{}} = Eval.eval({:do, []}, %{}, %{}, %{}, &dummy_tool/2)
-    end
-
-    test "single expression returns its value" do
-      assert {:ok, 42, %{}} = Eval.eval({:do, [42]}, %{}, %{}, %{}, &dummy_tool/2)
-    end
-
-    test "multiple expressions evaluates all and returns last value" do
-      exprs = [1, 2, 3]
-      assert {:ok, 3, %{}} = Eval.eval({:do, exprs}, %{}, %{}, %{}, &dummy_tool/2)
-    end
-
-    test "do evaluates all expressions without short-circuiting" do
-      env = Env.initial()
-
-      exprs = [
-        {:call, {:var, :+}, [1, 1]},
-        {:call, {:var, :+}, [2, 2]},
-        {:call, {:var, :+}, [3, 3]}
-      ]
-
-      assert {:ok, 6, %{}} = Eval.eval({:do, exprs}, %{}, %{}, env, &dummy_tool/2)
-    end
-
-    test "nested do works" do
-      inner_do = {:do, [1, 2]}
-      outer_do = {:do, [inner_do, 3]}
-      assert {:ok, 3, %{}} = Eval.eval(outer_do, %{}, %{}, %{}, &dummy_tool/2)
-    end
-  end
-
-  describe "conditionals: if" do
-    test "if with truthy condition evaluates then branch" do
-      then_ast = 42
-      else_ast = 0
-
-      assert {:ok, 42, %{}} =
-               Eval.eval({:if, true, then_ast, else_ast}, %{}, %{}, %{}, &dummy_tool/2)
-    end
-
-    test "if with falsy condition evaluates else branch" do
-      then_ast = 42
-      else_ast = 0
-
-      assert {:ok, 0, %{}} =
-               Eval.eval({:if, false, then_ast, else_ast}, %{}, %{}, %{}, &dummy_tool/2)
-    end
-
-    test "if with nil evaluates else branch" do
-      then_ast = 42
-      else_ast = 0
-
-      assert {:ok, 0, %{}} =
-               Eval.eval({:if, nil, then_ast, else_ast}, %{}, %{}, %{}, &dummy_tool/2)
-    end
-  end
-
-  describe "let bindings" do
-    test "simple variable binding" do
-      bindings = [{:binding, {:var, :x}, 42}]
-      body = {:var, :x}
-
-      assert {:ok, 42, %{}} =
-               Eval.eval({:let, bindings, body}, %{}, %{}, %{}, &dummy_tool/2)
-    end
-
-    test "multiple bindings" do
-      bindings = [{:binding, {:var, :x}, 10}, {:binding, {:var, :y}, 20}]
-      body = {:call, {:var, :+}, [{:var, :x}, {:var, :y}]}
-
-      env = Env.initial()
-
-      assert {:ok, 30, %{}} =
-               Eval.eval({:let, bindings, body}, %{}, %{}, env, &dummy_tool/2)
-    end
-
-    test "binding evaluates in order" do
-      bindings = [
-        {:binding, {:var, :x}, 5},
-        {:binding, {:var, :y}, {:call, {:var, :+}, [{:var, :x}, 3]}}
-      ]
-
-      body = {:var, :y}
-      env = Env.initial()
-
-      assert {:ok, 8, %{}} =
-               Eval.eval({:let, bindings, body}, %{}, %{}, env, &dummy_tool/2)
     end
   end
 

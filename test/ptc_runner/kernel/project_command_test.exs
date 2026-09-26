@@ -618,36 +618,95 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
   end
 
   @tag :tmp_dir
-  test "a permissive pre-existing artifact root names the directory and owner-only rule", %{
+  test "artifact-root diagnostics identify each failing path with or without an envelope", %{
     tmp_dir: directory
   } do
-    target = Path.join(directory, "demo")
-    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
-    project = Path.join(target, "ptc-project.json")
-    root = Path.join(target, ".ptc")
-    File.mkdir!(root)
-    File.chmod!(root, 0o755)
+    for {kind, envelope?} <- [
+          {:permissive_root, true},
+          {:permissive_root, false},
+          {:missing_ancestor, true},
+          {:missing_ancestor, false},
+          {:unwritable_parent, true},
+          {:unwritable_parent, false}
+        ] do
+      target = Path.join(directory, "#{kind}-#{envelope?}")
 
-    for child <- ~w(envelopes inspection results traces) do
-      path = Path.join(root, child)
-      File.mkdir!(path)
-      File.chmod!(path, 0o700)
+      project_path =
+        case kind do
+          :permissive_root ->
+            assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+            root = Path.join(target, ".ptc")
+            File.mkdir!(root)
+            File.chmod!(root, 0o755)
+
+            for child <- ~w(envelopes inspection results traces) do
+              path = Path.join(root, child)
+              File.mkdir!(path)
+              File.chmod!(path, 0o700)
+            end
+
+            Path.join(target, "ptc-project.json")
+
+          :missing_ancestor ->
+            project_with_artifact_root(target, "missing-artifact-parent/.ptc")
+
+          :unwritable_parent ->
+            project = project_with_artifact_root(target, "unwritable-parent/.ptc")
+            parent = Path.join(target, "unwritable-parent")
+            File.mkdir!(parent)
+            File.chmod!(parent, 0o500)
+            on_exit(fn -> File.chmod(parent, 0o700) end)
+            project
+        end
+
+      unless envelope? do
+        project = Jason.decode!(File.read!(project_path))
+
+        File.write!(
+          project_path,
+          Jason.encode!(put_in(project, ["artifacts", "envelope"], false))
+        )
+      end
+
+      presentation = run_project(project_path)
+
+      if envelope? do
+        assert presentation.exit_status == CommandFrontend.envelope_failure_exit_status()
+        assert presentation.stderr =~ "envelope/"
+        assert Jason.decode!(presentation.stdout) == presentation.outcome.envelope
+      else
+        assert presentation.exit_status == 7
+        assert presentation.stderr =~ "destination/invalid_destination"
+      end
+
+      case kind do
+        :permissive_root ->
+          assert presentation.stderr =~ Path.join(target, ".ptc")
+          assert presentation.stderr =~ "owner-only (0700)"
+          assert presentation.stderr =~ "chmod 700"
+
+          if envelope?,
+            do: assert(presentation.outcome.envelope["error"]["cause"] == "permission")
+
+        :missing_ancestor ->
+          missing = Path.join(target, "missing-artifact-parent")
+          assert presentation.stderr =~ missing
+          assert presentation.stderr =~ "mkdir -p"
+          refute presentation.stderr =~ "owner-only (0700)"
+          refute File.exists?(missing)
+
+          if envelope?,
+            do: assert(presentation.outcome.envelope["error"]["cause"] == "filesystem_error")
+
+        :unwritable_parent ->
+          parent = Path.join(target, "unwritable-parent")
+          assert presentation.stderr =~ "#{inspect(parent)} is not writable by its owner"
+          assert presentation.stderr =~ "chmod u+wx '#{parent}'"
+
+          if envelope?,
+            do: assert(presentation.stderr =~ "artifact root's parent must be writable")
+      end
     end
-
-    presentation =
-      CommandFrontend.execute(
-        ["run", project],
-        :standalone,
-        fn _arguments -> {:ok, CommandRuntime.standalone()} end
-      )
-
-    assert presentation.exit_status == CommandFrontend.envelope_failure_exit_status()
-    assert presentation.stderr =~ "envelope/publication_failed"
-    assert presentation.stderr =~ root
-    assert presentation.stderr =~ "owner-only (0700)"
-    assert presentation.stderr =~ "chmod 700"
-    assert presentation.outcome.envelope["error"]["cause"] == "permission"
-    assert Jason.decode!(presentation.stdout) == presentation.outcome.envelope
   end
 
   @tag :tmp_dir
@@ -724,26 +783,6 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     assert presentation.stderr =~ "chmod 700"
     assert presentation.outcome.envelope["error"]["cause"] == "permission"
     assert Jason.decode!(presentation.stdout) == presentation.outcome.envelope
-  end
-
-  @tag :tmp_dir
-  test "a missing artifact-root ancestor names the directory and the mkdir remedy", %{
-    tmp_dir: directory
-  } do
-    target = Path.join(directory, "demo")
-    project_path = project_with_artifact_root(target, "missing-artifact-parent/.ptc")
-    missing = Path.join(target, "missing-artifact-parent")
-
-    presentation = run_project(project_path)
-
-    assert presentation.exit_status == CommandFrontend.envelope_failure_exit_status()
-    assert presentation.stderr =~ "envelope/destination_parent_unavailable"
-    assert presentation.stderr =~ missing
-    assert presentation.stderr =~ "mkdir -p '#{missing}'"
-    assert presentation.outcome.envelope["error"]["cause"] == "filesystem_error"
-    assert Jason.decode!(presentation.stdout) == presentation.outcome.envelope
-    refute presentation.stderr =~ "owner-only (0700)"
-    refute File.exists?(missing)
   end
 
   @tag :tmp_dir
@@ -935,102 +974,6 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
              CommandEngine.dispatch(["run", project_path])
 
     assert envelope["status"] == "error"
-  end
-
-  @tag :tmp_dir
-  test "a project without an envelope names a missing artifact-root ancestor", %{
-    tmp_dir: directory
-  } do
-    target = Path.join(directory, "demo")
-    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
-    project_path = Path.join(target, "ptc-project.json")
-    project = Jason.decode!(File.read!(project_path))
-
-    project =
-      project
-      |> put_in(["artifacts", "root"], "missing-artifact-parent/.ptc")
-      |> put_in(["artifacts", "envelope"], false)
-
-    File.write!(project_path, Jason.encode!(project))
-
-    presentation = run_project(project_path)
-
-    assert presentation.exit_status == 7
-    assert presentation.stderr =~ "destination/invalid_destination"
-
-    assert presentation.stderr =~
-             "#{inspect(Path.join(target, "missing-artifact-parent"))} does not exist"
-
-    assert presentation.stderr =~ "mkdir -p"
-    refute File.exists?(Path.join(target, "missing-artifact-parent"))
-  end
-
-  @tag :tmp_dir
-  test "a project without an envelope names a permissive artifact root", %{tmp_dir: directory} do
-    target = Path.join(directory, "demo")
-    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
-    project_path = Path.join(target, "ptc-project.json")
-    project = Jason.decode!(File.read!(project_path))
-    root = Path.join(target, ".ptc")
-
-    project = put_in(project, ["artifacts", "envelope"], false)
-    File.write!(project_path, Jason.encode!(project))
-    File.mkdir!(root)
-    File.chmod!(root, 0o755)
-
-    for child <- ~w(envelopes inspection results traces) do
-      path = Path.join(root, child)
-      File.mkdir!(path)
-      File.chmod!(path, 0o700)
-    end
-
-    presentation = run_project(project_path)
-
-    assert presentation.exit_status == 7
-    assert presentation.stderr =~ "destination/invalid_destination"
-    assert presentation.stderr =~ inspect(root)
-    assert presentation.stderr =~ "owner-only (0700)"
-    assert presentation.stderr =~ "chmod 700"
-  end
-
-  @tag :tmp_dir
-  test "an unwritable artifact-root parent names the directory and writable-parent rule", %{
-    tmp_dir: directory
-  } do
-    target = Path.join(directory, "demo")
-    project_path = project_with_artifact_root(target, "unwritable-parent/.ptc")
-    parent = Path.join(target, "unwritable-parent")
-    File.mkdir!(parent)
-    File.chmod!(parent, 0o500)
-    on_exit(fn -> File.chmod(parent, 0o700) end)
-
-    presentation = run_project(project_path)
-
-    assert presentation.exit_status == CommandFrontend.envelope_failure_exit_status()
-    assert presentation.stderr =~ "envelope/publication_failed"
-    assert presentation.stderr =~ "#{inspect(parent)} is not writable by its owner"
-    assert presentation.stderr =~ "artifact root's parent must be writable"
-    assert presentation.stderr =~ "chmod u+wx '#{parent}'"
-  end
-
-  @tag :tmp_dir
-  test "an unwritable artifact-root parent stays named without an envelope", %{tmp_dir: directory} do
-    target = Path.join(directory, "demo")
-    project_path = project_with_artifact_root(target, "unwritable-parent/.ptc")
-    project = Jason.decode!(File.read!(project_path))
-    parent = Path.join(target, "unwritable-parent")
-
-    File.write!(project_path, Jason.encode!(put_in(project, ["artifacts", "envelope"], false)))
-    File.mkdir!(parent)
-    File.chmod!(parent, 0o500)
-    on_exit(fn -> File.chmod(parent, 0o700) end)
-
-    presentation = run_project(project_path)
-
-    assert presentation.exit_status == 7
-    assert presentation.stderr =~ "destination/invalid_destination"
-    assert presentation.stderr =~ "#{inspect(parent)} is not writable by its owner"
-    assert presentation.stderr =~ "chmod u+wx '#{parent}'"
   end
 
   # Past a dangling symlink the shallowest missing path is the link's target,

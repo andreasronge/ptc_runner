@@ -459,62 +459,241 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     :ok = RunState.stop(state)
   end
 
-  test "failing a max_calls envelope names the alias on the command diagnostic" do
-    run_id = "max-calls-fail"
-    run_ref = "cmd-00000000000000000000000000"
-    leaf = capability(self(), :capped_fail, %{content: "paid", tokens: %{}})
+  test "failing limit envelopes preserve each authenticated diagnostic" do
+    for kind <- [:max_calls, :public_quota, :token_budget, :cost_budget] do
+      run_id = "#{kind}-table-fail"
+      run_ref = "cmd-00000000000000000000000000"
 
-    assert {:ok, router} =
-             LLMRouter.new([route("expensive", "llm", "expensive-v1", false, leaf, 1)])
+      {router, limits, source, message, code, event_data} =
+        case kind do
+          :max_calls ->
+            leaf = capability(self(), :table_cap_fail, %{content: "paid", tokens: %{}})
 
-    assert {:ok, config} = config(router, run_id)
+            {:ok, router} =
+              LLMRouter.new([route("expensive", "llm", "expensive-v1", false, leaf, 1)])
 
-    source =
-      ~S|(do (llm/request {"model" "expensive" "messages" []}) (fail (llm/request {"model" "expensive" "messages" []})))|
+            {:ok, message} = RuntimeLimitDiagnostic.max_calls_message("expensive", 1)
 
-    assert {:error, command_outcome, _counters, events} =
-             project_run(source, config, run_id, run_ref)
+            {router, nil,
+             ~S|(do (llm/request {"model" "expensive" "messages" []}) (fail (llm/request {"model" "expensive" "messages" []})))|,
+             message, "capability_quota_exceeded",
+             %{reason: :capability_quota, limit: :max_calls, alias: "expensive", limit_value: 1}}
 
-    assert {:ok, expected} = RuntimeLimitDiagnostic.max_calls_message("expensive", 1)
-    assert command_outcome.envelope["error"]["code"] == "capability_quota_exceeded"
-    assert command_outcome.envelope["error"]["message"] == expected
+          :public_quota ->
+            leaf = capability(self(), :table_quota_fail, %{content: "paid", tokens: %{}})
+            {:ok, router} = LLMRouter.new([route("shared", "llm", "shared-v1", true, leaf)])
+            {:ok, limits} = Limits.new(workflow_capability_calls_per_name: 1)
 
-    assert command_outcome.envelope["error"]["source"] == %{
-             "kind" => "runtime",
-             "name" => "ptc-runtime"
-           }
+            {:ok, message} =
+              RuntimeLimitDiagnostic.capability_quota_message(
+                :workflow_capability_calls_per_name,
+                "llm-request",
+                1
+              )
 
-    assert [
+            {router, limits,
+             ~S|(do (llm/request {"messages" []}) (fail (llm/request {"messages" []})))|, message,
+             "capability_quota_exceeded",
              %{
-               type: "limit-exceeded",
-               data: %{
-                 reason: :capability_quota,
-                 limit: :max_calls,
-                 alias: "expensive",
-                 limit_value: 1
-               }
+               reason: :capability_quota,
+               limit: :workflow_capability_calls_per_name,
+               name: "llm-request",
+               limit_value: 1
+             }}
+
+          :token_budget ->
+            leaf = capability(self(), :table_token_fail, %{content: "paid", tokens: %{}})
+            {:ok, router} = LLMRouter.new([route("primary", "llm", "primary-v1", true, leaf)])
+            {:ok, limits} = Limits.new(llm_total_tokens: 1)
+            {:ok, message} = RuntimeLimitDiagnostic.budget_message(:llm_total_tokens, 1, 4_096, 1)
+
+            {router, limits, ~S|(fail (llm/request {"messages" []}))|, message,
+             "runtime_limit_exceeded",
+             %{
+               reason: :llm_total_tokens,
+               limit: :llm_total_tokens,
+               limit_value: 1,
+               requested: 4_096,
+               remaining: 1
+             }}
+
+          :cost_budget ->
+            leaf = priced_capability(self(), :table_cost_fail, %{content: "paid", tokens: %{}})
+            {:ok, router} = LLMRouter.new([cost_route("primary", true, leaf)])
+            {:ok, limits} = Limits.new(llm_cost_microusd: 2_400)
+
+            {:ok, message} =
+              RuntimeLimitDiagnostic.budget_message(:llm_cost_microusd, 2_400, 2_419, 2_400)
+
+            {router, limits, ~S|(fail (llm/request {"messages" []}))|, message,
+             "runtime_limit_exceeded",
+             %{
+               reason: :llm_cost_microusd,
+               limit: :llm_cost_microusd,
+               limit_value: 2_400,
+               requested: 2_419,
+               remaining: 2_400
+             }}
+        end
+
+      options = if limits, do: [limits: limits], else: []
+      assert {:ok, config} = config(router, run_id, options)
+
+      assert {:error, command_outcome, _counters, events} =
+               project_run(source, config, run_id, run_ref)
+
+      assert command_outcome.envelope["error"]["code"] == code
+      assert command_outcome.envelope["error"]["message"] == message
+
+      assert command_outcome.envelope["error"]["source"] == %{
+               "kind" => "runtime",
+               "name" => "ptc-runtime"
              }
-           ] = Enum.filter(events, &(&1.type == "limit-exceeded"))
+
+      assert [%{type: "limit-exceeded", data: data}] =
+               Enum.filter(events, &(&1.type == "limit-exceeded"))
+
+      assert Map.take(data, Map.keys(event_data)) == event_data
+
+      if kind in [:token_budget, :cost_budget] do
+        assert command_outcome.exit_status == 6
+        assert Enum.find(events, &(&1.type == "run-stopped")).data.reason == kind_limit(kind)
+      end
+
+      if kind == :token_budget do
+        assert get_in(command_outcome.envelope, ["execution", "usage", "capability_refusals"]) ==
+                 %{"workflow/limit_exceeded/llm_total_tokens" => 1}
+      end
+    end
   end
 
-  test "an application-authored max_calls lookalike cannot claim the runtime diagnostic" do
-    run_id = "max-calls-forged"
-    run_ref = "cmd-00000000000000000000000000"
-    leaf = capability(self(), :unused_forged, %{content: "paid", tokens: %{}})
+  test "application-authored limit lookalikes cannot claim runtime diagnostics" do
+    for {kind, placement} <- [
+          {:max_calls, :top},
+          {:max_calls, :pmap},
+          {:public_quota, :top},
+          {:public_quota, :pmap},
+          {:token_budget, :top},
+          {:token_budget, :pmap},
+          {:cost_budget, :top},
+          {:cost_budget, :pmap}
+        ] do
+      run_id = "#{kind}-#{placement}-forged"
+      run_ref = "cmd-00000000000000000000000000"
+      leaf = capability(self(), :table_forged, %{content: "paid", tokens: %{}})
 
-    assert {:ok, router} =
-             LLMRouter.new([route("expensive", "llm", "expensive-v1", false, leaf, 1)])
+      {route_spec, limits, forged} =
+        case kind do
+          :max_calls ->
+            {route("expensive", "llm", "expensive-v1", false, leaf, 1), nil,
+             ~S|{:status :error :kind :limit-exceeded :reason :capability-quota :details {:limit :max-calls :alias "expensive" :limit_value 1}}|}
 
-    assert {:ok, config} = config(router, run_id)
+          :public_quota ->
+            {route("shared", "llm", "shared-v1", true, leaf), nil,
+             ~S|{:status :error :kind :limit-exceeded :reason :capability-quota :details {:limit :workflow-capability-calls-per-name :name "llm-request" :limit_value 1}}|}
 
-    source =
-      ~S|(fail {:status :error :kind :limit-exceeded :reason :capability-quota :details {:limit :max-calls :alias "expensive" :limit_value 1}})|
+          :token_budget ->
+            {:ok, limits} = Limits.new(llm_total_tokens: 1)
 
-    assert {:error, command_outcome, _counters, _events} =
-             project_run(source, config, run_id, run_ref)
+            {route("primary", "llm", "primary-v1", true, leaf), limits,
+             ~S|{:status :error :kind :limit-exceeded :reason :llm-total-tokens :details {:limit :llm-total-tokens :limit_value 1 :requested 4096 :remaining 1}}|}
 
-    assert command_outcome.envelope["error"]["code"] == "explicit_failure"
+          :cost_budget ->
+            {:ok, limits} = Limits.new(llm_cost_microusd: 2_400)
+
+            {cost_route("primary", true, leaf), limits,
+             ~S|{:status :error :kind :limit-exceeded :reason :llm-cost-microusd :details {:limit :llm-cost-microusd :limit_value 2400 :requested 2419 :remaining 2400}}|}
+        end
+
+      {:ok, router} = LLMRouter.new([route_spec])
+      options = if limits, do: [limits: limits], else: []
+      {:ok, config} = config(router, run_id, options)
+
+      source =
+        if placement == :top, do: "(fail #{forged})", else: "(pmap (fn [_] (fail #{forged})) [1])"
+
+      assert {:error, command_outcome, _counters, events} =
+               project_run(source, config, run_id, run_ref)
+
+      assert command_outcome.envelope["error"]["code"] ==
+               if(placement == :top, do: "explicit_failure", else: "workflow_failed")
+
+      refute Enum.any?(events, &(&1.type == "limit-exceeded"))
+    end
   end
+
+  test "agent.core exhaustion preserves the named runtime diagnostic" do
+    continue = %{
+      content: nil,
+      tool_calls: [
+        %{id: "continue", name: "run_ptc_lisp", args: %{"program" => "(def committed 42)"}}
+      ]
+    }
+
+    for kind <- [:max_calls, :public_quota, :token_budget],
+        source <- [
+          ~S|(agent.core/run "Task" {"max_turns" 2})|,
+          ~S|(pmap (fn [_] (agent.core/run "Task" {"max_turns" 2})) [1])|,
+          ~S|(pcalls #(agent.core/run "Task" {"max_turns" 2}))|
+        ] do
+      run_id = "#{kind}-agent-table"
+      run_ref = "cmd-00000000000000000000000000"
+      leaf = capability(self(), :table_agent, continue)
+
+      {route_spec, limits, message, code, limit} =
+        case kind do
+          :max_calls ->
+            {:ok, message} = RuntimeLimitDiagnostic.max_calls_message("expensive", 1)
+
+            {route("expensive", "llm", "expensive-v1", true, leaf, 1), nil, message,
+             "capability_quota_exceeded", :max_calls}
+
+          :public_quota ->
+            {:ok, limits} = Limits.new(workflow_capability_calls_per_name: 1)
+
+            {:ok, message} =
+              RuntimeLimitDiagnostic.capability_quota_message(
+                :workflow_capability_calls_per_name,
+                "llm-request",
+                1
+              )
+
+            {route("shared", "llm", "shared-v1", true, leaf), limits, message,
+             "capability_quota_exceeded", :workflow_capability_calls_per_name}
+
+          :token_budget ->
+            {:ok, limits} = Limits.new(llm_total_tokens: 1)
+            {:ok, message} = RuntimeLimitDiagnostic.budget_message(:llm_total_tokens, 1, 4_096, 1)
+
+            {route("primary", "llm", "primary-v1", true, leaf), limits, message,
+             "runtime_limit_exceeded", :llm_total_tokens}
+        end
+
+      {:ok, router} = LLMRouter.new([route_spec])
+      options = if limits, do: [limits: limits], else: []
+      {:ok, config} = agent_router_config(router, run_id, options)
+
+      assert {:error, command_outcome, _counters, events} =
+               project_run(source, config, run_id, run_ref)
+
+      assert command_outcome.envelope["error"]["code"] == code
+      assert command_outcome.envelope["error"]["message"] == message
+
+      assert Enum.any?(events, fn event ->
+               event.type == "limit-exceeded" and event.data[:limit] == limit and
+                 (kind != :max_calls or event.data[:alias] == "expensive") and
+                 (kind != :public_quota or event.data[:name] == "llm-request")
+             end)
+
+      if kind == :token_budget do
+        assert command_outcome.exit_status == 6
+        assert Enum.find(events, &(&1.type == "run-stopped")).data.reason == :llm_total_tokens
+      end
+    end
+  end
+
+  defp kind_limit(:token_budget), do: :llm_total_tokens
+  defp kind_limit(:cost_budget), do: :llm_cost_microusd
 
   test "spending an alias cap without a refused call cannot claim the runtime diagnostic" do
     run_id = "max-calls-spent-not-refused"
@@ -533,45 +712,6 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
              project_run(source, config, run_id, run_ref)
 
     assert command_outcome.envelope["error"]["code"] == "explicit_failure"
-  end
-
-  test "agent.core exhausts a per-alias cap as the named runtime diagnostic" do
-    run_id = "max-calls-agent"
-    run_ref = "cmd-00000000000000000000000000"
-
-    continue = %{
-      content: nil,
-      tool_calls: [
-        %{id: "continue", name: "run_ptc_lisp", args: %{"program" => "(def committed 42)"}}
-      ]
-    }
-
-    leaf = capability(self(), :agent_capped, continue)
-
-    assert {:ok, router} =
-             LLMRouter.new([route("expensive", "llm", "expensive-v1", true, leaf, 1)])
-
-    cases = [
-      ~S|(agent.core/run "Task" {"max_turns" 2})|,
-      ~S|(pmap (fn [_] (agent.core/run "Task" {"max_turns" 2})) [1])|,
-      ~S|(pcalls #(agent.core/run "Task" {"max_turns" 2}))|
-    ]
-
-    for source <- cases do
-      assert {:ok, fresh} = agent_router_config(router, run_id)
-
-      assert {:error, command_outcome, _counters, events} =
-               project_run(source, fresh, run_id, run_ref)
-
-      assert {:ok, expected} = RuntimeLimitDiagnostic.max_calls_message("expensive", 1)
-      assert command_outcome.envelope["error"]["code"] == "capability_quota_exceeded"
-      assert command_outcome.envelope["error"]["message"] == expected
-
-      assert Enum.any?(events, fn event ->
-               event.type == "limit-exceeded" and event.data[:limit] == :max_calls and
-                 event.data[:alias] == "expensive"
-             end)
-    end
   end
 
   test "failing a max_calls envelope inside pmap or pcalls names the alias" do
@@ -609,25 +749,6 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
                }
              ] = Enum.filter(events, &(&1.type == "limit-exceeded"))
     end
-  end
-
-  test "a forged max_calls lookalike inside pmap cannot claim the runtime diagnostic" do
-    run_id = "max-calls-parallel-forged"
-    run_ref = "cmd-00000000000000000000000000"
-    leaf = capability(self(), :unused_parallel_forged, %{content: "paid", tokens: %{}})
-
-    assert {:ok, router} =
-             LLMRouter.new([route("expensive", "llm", "expensive-v1", false, leaf, 1)])
-
-    assert {:ok, config} = config(router, run_id)
-
-    source =
-      ~S|(pmap (fn [_] (fail {:status :error :kind :limit-exceeded :reason :capability-quota :details {:limit :max-calls :alias "expensive" :limit_value 1}})) [1])|
-
-    assert {:error, command_outcome, _counters, _events} =
-             project_run(source, config, run_id, run_ref)
-
-    assert command_outcome.envelope["error"]["code"] == "workflow_failed"
   end
 
   test "a spent public quota binds before a stricter alias cap" do
@@ -888,161 +1009,6 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     :ok = RunState.stop(state)
   end
 
-  test "failing a public quota envelope names the limit on the command diagnostic" do
-    run_id = "per-name-quota-fail"
-    run_ref = "cmd-00000000000000000000000000"
-    leaf = capability(self(), :quota_fail, %{content: "paid", tokens: %{}})
-
-    assert {:ok, router} =
-             LLMRouter.new([route("shared", "llm", "shared-v1", true, leaf)])
-
-    {:ok, limits} = Limits.new(workflow_capability_calls_per_name: 1)
-    assert {:ok, config} = config(router, run_id, limits: limits)
-
-    source =
-      ~S|(do (llm/request {"messages" []}) (fail (llm/request {"messages" []})))|
-
-    assert {:error, command_outcome, _counters, events} =
-             project_run(source, config, run_id, run_ref)
-
-    assert {:ok, expected} =
-             RuntimeLimitDiagnostic.capability_quota_message(
-               :workflow_capability_calls_per_name,
-               "llm-request",
-               1
-             )
-
-    assert command_outcome.envelope["error"]["code"] == "capability_quota_exceeded"
-    assert command_outcome.envelope["error"]["message"] == expected
-
-    assert [
-             %{
-               type: "limit-exceeded",
-               data: %{
-                 reason: :capability_quota,
-                 limit: :workflow_capability_calls_per_name,
-                 name: "llm-request",
-                 limit_value: 1
-               }
-             }
-           ] = Enum.filter(events, &(&1.type == "limit-exceeded"))
-  end
-
-  test "an application-authored public quota lookalike cannot claim the runtime diagnostic" do
-    run_id = "per-name-quota-forged"
-    run_ref = "cmd-00000000000000000000000000"
-    leaf = capability(self(), :unused_quota_forged, %{content: "paid", tokens: %{}})
-
-    assert {:ok, router} =
-             LLMRouter.new([route("shared", "llm", "shared-v1", true, leaf)])
-
-    assert {:ok, config} = config(router, run_id)
-
-    source =
-      ~S|(fail {:status :error :kind :limit-exceeded :reason :capability-quota :details {:limit :workflow-capability-calls-per-name :name "llm-request" :limit_value 1}})|
-
-    assert {:error, command_outcome, _counters, _events} =
-             project_run(source, config, run_id, run_ref)
-
-    assert command_outcome.envelope["error"]["code"] == "explicit_failure"
-  end
-
-  test "agent.core exhausts a public per-name quota as the named runtime diagnostic" do
-    run_id = "per-name-quota-agent"
-    run_ref = "cmd-00000000000000000000000000"
-
-    continue = %{
-      content: nil,
-      tool_calls: [
-        %{id: "continue", name: "run_ptc_lisp", args: %{"program" => "(def committed 42)"}}
-      ]
-    }
-
-    leaf = capability(self(), :agent_quota, continue)
-
-    assert {:ok, router} =
-             LLMRouter.new([route("shared", "llm", "shared-v1", true, leaf)])
-
-    {:ok, limits} = Limits.new(workflow_capability_calls_per_name: 1)
-
-    {:ok, components} =
-      Library.components(
-        ~w(agent.core agent.failure agent.feedback agent.machine agent.native agent.prompt agent.retry kernel llm result workflow.event)
-      )
-
-    assert {:ok, config} = run_config(router, run_id, components, limits: limits)
-
-    assert {:error, command_outcome, _counters, events} =
-             project_run(~S|(agent.core/run "Task" {"max_turns" 2})|, config, run_id, run_ref)
-
-    assert {:ok, expected} =
-             RuntimeLimitDiagnostic.capability_quota_message(
-               :workflow_capability_calls_per_name,
-               "llm-request",
-               1
-             )
-
-    assert command_outcome.envelope["error"]["code"] == "capability_quota_exceeded"
-    assert command_outcome.envelope["error"]["message"] == expected
-
-    assert Enum.any?(events, fn event ->
-             event.type == "limit-exceeded" and
-               event.data[:limit] == :workflow_capability_calls_per_name and
-               event.data[:name] == "llm-request"
-           end)
-  end
-
-  test "failing an aggregate token-budget envelope names the reservation on the command diagnostic" do
-    run_id = "token-budget-fail"
-    run_ref = "cmd-00000000000000000000000000"
-    leaf = capability(self(), :token_budget_fail, %{content: "paid", tokens: %{}})
-
-    assert {:ok, router} =
-             LLMRouter.new([route("primary", "llm", "primary-v1", true, leaf)])
-
-    {:ok, limits} = Limits.new(llm_total_tokens: 1)
-    assert {:ok, config} = config(router, run_id, limits: limits)
-
-    assert {:error, command_outcome, _counters, events} =
-             project_run(
-               ~S|(fail (llm/request {"messages" []}))|,
-               config,
-               run_id,
-               run_ref
-             )
-
-    assert {:ok, expected} = RuntimeLimitDiagnostic.budget_message(:llm_total_tokens, 1, 4_096, 1)
-    assert command_outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
-    assert command_outcome.envelope["error"]["message"] == expected
-
-    assert command_outcome.envelope["error"]["source"] == %{
-             "kind" => "runtime",
-             "name" => "ptc-runtime"
-           }
-
-    assert command_outcome.exit_status == 6
-
-    assert [
-             %{
-               type: "limit-exceeded",
-               data: %{
-                 reason: :llm_total_tokens,
-                 limit: :llm_total_tokens,
-                 limit_value: 1,
-                 requested: 4_096,
-                 remaining: 1
-               }
-             }
-           ] = Enum.filter(events, &(&1.type == "limit-exceeded"))
-
-    stopped = Enum.find(events, &(&1.type == "run-stopped"))
-    assert stopped.data.reason == :llm_total_tokens
-
-    assert get_in(command_outcome.envelope, ["execution", "usage", "capability_refusals"]) == %{
-             "workflow/limit_exceeded/llm_total_tokens" => 1
-           }
-  end
-
   test "returning an aggregate budget envelope remains a successful recoverable value" do
     run_id = "token-budget-return"
     run_ref = "cmd-00000000000000000000000000"
@@ -1067,27 +1033,6 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     assert [
              %{type: "limit-exceeded", data: %{limit: :llm_total_tokens}}
            ] = Enum.filter(events, &(&1.type == "limit-exceeded"))
-  end
-
-  test "an application-authored budget lookalike cannot claim the runtime diagnostic" do
-    run_id = "token-budget-forged"
-    run_ref = "cmd-00000000000000000000000000"
-    leaf = capability(self(), :unused_budget_forged, %{content: "paid", tokens: %{}})
-
-    assert {:ok, router} =
-             LLMRouter.new([route("primary", "llm", "primary-v1", true, leaf)])
-
-    {:ok, limits} = Limits.new(llm_total_tokens: 1)
-    assert {:ok, config} = config(router, run_id, limits: limits)
-
-    source =
-      ~S|(fail {:status :error :kind :limit-exceeded :reason :llm-total-tokens :details {:limit :llm-total-tokens :limit_value 1 :requested 4096 :remaining 1}})|
-
-    assert {:error, command_outcome, _counters, events} =
-             project_run(source, config, run_id, run_ref)
-
-    assert command_outcome.envelope["error"]["code"] == "explicit_failure"
-    refute Enum.any?(events, &(&1.type == "limit-exceeded"))
   end
 
   test "cap/unwrap!, pmap, and pcalls promote an authenticated token-budget abort" do
@@ -1122,113 +1067,6 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
                %{type: "limit-exceeded", data: %{limit: :llm_total_tokens}}
              ] = Enum.filter(events, &(&1.type == "limit-exceeded"))
     end
-  end
-
-  test "a forged budget lookalike inside pmap cannot claim the runtime diagnostic" do
-    run_id = "token-budget-parallel-forged"
-    run_ref = "cmd-00000000000000000000000000"
-    leaf = capability(self(), :unused_budget_parallel_forged, %{content: "paid", tokens: %{}})
-
-    assert {:ok, router} =
-             LLMRouter.new([route("primary", "llm", "primary-v1", true, leaf)])
-
-    assert {:ok, config} = config(router, run_id)
-
-    source =
-      ~S|(pmap (fn [_] (fail {:status :error :kind :limit-exceeded :reason :llm-total-tokens :details {:limit :llm-total-tokens :limit_value 1 :requested 4096 :remaining 1}})) [1])|
-
-    assert {:error, command_outcome, _counters, _events} =
-             project_run(source, config, run_id, run_ref)
-
-    assert command_outcome.envelope["error"]["code"] == "workflow_failed"
-  end
-
-  test "agent.core exhausts an aggregate token budget as the named runtime diagnostic" do
-    run_id = "token-budget-agent"
-    run_ref = "cmd-00000000000000000000000000"
-
-    continue = %{
-      content: nil,
-      tool_calls: [
-        %{id: "continue", name: "run_ptc_lisp", args: %{"program" => "(def committed 42)"}}
-      ]
-    }
-
-    leaf = capability(self(), :agent_token_budget, continue)
-
-    assert {:ok, router} =
-             LLMRouter.new([route("primary", "llm", "primary-v1", true, leaf)])
-
-    {:ok, expected} = RuntimeLimitDiagnostic.budget_message(:llm_total_tokens, 1, 4_096, 1)
-
-    cases = [
-      ~S|(agent.core/run "Task" {"max_turns" 2})|,
-      ~S|(pmap (fn [_] (agent.core/run "Task" {"max_turns" 2})) [1])|,
-      ~S|(pcalls #(agent.core/run "Task" {"max_turns" 2}))|
-    ]
-
-    for source <- cases do
-      {:ok, limits} = Limits.new(llm_total_tokens: 1)
-      assert {:ok, fresh} = agent_router_config(router, run_id, limits: limits)
-
-      assert {:error, command_outcome, _counters, events} =
-               project_run(source, fresh, run_id, run_ref),
-             source
-
-      assert command_outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
-      assert command_outcome.envelope["error"]["message"] == expected
-      assert command_outcome.exit_status == 6
-
-      assert Enum.any?(events, fn event ->
-               event.type == "limit-exceeded" and event.data[:limit] == :llm_total_tokens
-             end)
-
-      stopped = Enum.find(events, &(&1.type == "run-stopped"))
-      assert stopped.data.reason == :llm_total_tokens
-    end
-  end
-
-  test "failing an aggregate cost-budget envelope names the reservation on the command diagnostic" do
-    run_id = "cost-budget-fail"
-    run_ref = "cmd-00000000000000000000000000"
-    leaf = priced_capability(self(), :cost_budget_fail, %{content: "paid", tokens: %{}})
-
-    assert {:ok, router} =
-             LLMRouter.new([cost_route("primary", true, leaf)])
-
-    {:ok, limits} = Limits.new(llm_cost_microusd: 2_400)
-    assert {:ok, config} = config(router, run_id, limits: limits)
-
-    assert {:error, command_outcome, _counters, events} =
-             project_run(
-               ~S|(fail (llm/request {"messages" []}))|,
-               config,
-               run_id,
-               run_ref
-             )
-
-    assert {:ok, expected} =
-             RuntimeLimitDiagnostic.budget_message(:llm_cost_microusd, 2_400, 2_419, 2_400)
-
-    assert command_outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
-    assert command_outcome.envelope["error"]["message"] == expected
-    assert command_outcome.exit_status == 6
-
-    assert [
-             %{
-               type: "limit-exceeded",
-               data: %{
-                 reason: :llm_cost_microusd,
-                 limit: :llm_cost_microusd,
-                 limit_value: 2_400,
-                 requested: 2_419,
-                 remaining: 2_400
-               }
-             }
-           ] = Enum.filter(events, &(&1.type == "limit-exceeded"))
-
-    stopped = Enum.find(events, &(&1.type == "run-stopped"))
-    assert stopped.data.reason == :llm_cost_microusd
   end
 
   test "exhausting protocol_errors names the limit on the command diagnostic" do
