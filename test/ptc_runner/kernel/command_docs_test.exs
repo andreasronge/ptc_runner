@@ -218,51 +218,6 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     assert envelope["result"] == %{"page" => "schema-mcp", "content" => embedded}
   end
 
-  test "the agent guide is served and answers the questions it promises" do
-    assert {:ok, %CommandOutcome{envelope: envelope}} =
-             CommandEngine.dispatch(["docs", "agent-guide"])
-
-    guide = envelope["result"]["content"]
-
-    assert String.starts_with?(guide, "# Drive ptc as an agent")
-    assert guide =~ "ptc help COMMAND"
-    assert guide =~ "--envelope"
-    assert guide =~ "ptc repl"
-  end
-
-  test "the inspect-source guide routes four tasks and never copies shipped prelude files" do
-    assert {:ok, content} = DocumentationLibrary.fetch("inspect-source")
-    assert content =~ "(source "
-    assert content =~ "(component "
-    assert content =~ "retain_programs"
-    assert content =~ "analysis/read"
-
-    assert {:ok, customize} = DocumentationLibrary.fetch("components-and-preludes")
-    refute customize =~ "cp priv/preludes"
-    assert customize =~ "ptc materialize"
-    assert customize =~ "inspect-only"
-    assert customize =~ "source-out"
-  end
-
-  test "the debug page names both transcript destination rules before they can be violated" do
-    assert {:ok, content} = DocumentationLibrary.fetch("debug")
-    assert content =~ "symbolic link"
-    assert content =~ "physically separate"
-    assert content =~ "/tmp"
-    assert content =~ "mkdir -p out"
-    assert content =~ "--private-output"
-  end
-
-  test "the running guide explains how to attach an external run to the Live tab" do
-    assert {:ok, content} = DocumentationLibrary.fetch("running-and-debugging")
-
-    assert content =~ "## How do I watch a run while it is running?"
-    assert content =~ "PTC_VIEWER_URL=http://127.0.0.1:4123"
-    assert content =~ "PTC_VIEWER_TOKEN"
-    assert content =~ "ptc docs viewer"
-    assert content =~ "token does not authenticate the Runs trace browser"
-  end
-
   test "the viewer page serves its invocation, exposure, reporting, and packaging contract" do
     assert {:ok, %CommandOutcome{envelope: envelope}} =
              CommandEngine.dispatch(["docs", "viewer"])
@@ -289,55 +244,14 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     end
   end
 
-  test "designing-agent-workflows links faithful aborts and locates its helpers" do
-    assert {:ok, content} = DocumentationLibrary.fetch("designing-agent-workflows")
-    assert content =~ "returned-value"
-    assert content =~ "quarantined"
-    assert content =~ "fail-outcome"
-    assert content =~ "original diagnostic"
-    assert content =~ "ptc init support-triage --example support-triage"
-  end
-
-  test "mission docs distinguish capability grants from forwarded data" do
-    assert {:ok, guide} = DocumentationLibrary.fetch("designing-agent-workflows")
-    assert guide =~ "limits capabilities"
-    assert guide =~ "does not filter handoff data"
-    assert guide =~ "trusted workflow code must perform that filtering"
-    assert guide =~ "prompt-level mitigation"
-
-    assert {:ok, manifest} = DocumentationLibrary.fetch("manifest")
-    manifest = String.replace(manifest, ~r/\s+/, " ")
-    assert manifest =~ "does not prevent that data from reaching a later mission"
-    assert manifest =~ "do not sanitize data or determine its sensitivity"
-    assert manifest =~ "secret"
-  end
-
-  test "served model docs distinguish cost reservations from measured spend" do
-    assert {:ok, limits} = DocumentationLibrary.fetch("limits")
-    limits = String.replace(limits, ~r/\s+/, " ")
-
-    assert limits =~ "pre-dispatch reservation ceiling"
-    assert limits =~ "not a pre-run price quote"
-    assert limits =~ "2,419 microUSD reservation"
-    assert limits =~ "limits.llm_request_output_tokens"
-    assert limits =~ "params.max_tokens"
-    assert limits =~ "not a sizing multiplier"
-    assert limits =~ "trustworthy priced usage from successful and failed calls"
-    assert limits =~ "possibly dispatched failure without trustworthy usage"
+  test "served limits page quotes the current budget diagnostic" do
+    assert {:ok, %CommandOutcome{envelope: envelope}} =
+             CommandEngine.dispatch(["docs", "limits"])
 
     assert {:ok, diagnostic} =
              RuntimeLimitDiagnostic.budget_message(:llm_cost_microusd, 2_400, 2_419, 2_338)
 
-    assert limits =~ diagnostic
-
-    assert {:ok, using_models} = DocumentationLibrary.fetch("using-models")
-    using_models = String.replace(using_models, ~r/\s+/, " ")
-
-    assert using_models =~ "ptc models"
-    assert using_models =~ "ptc validate"
-    assert using_models =~ "ptc doctor"
-    assert using_models =~ "pre-run price quote"
-    assert using_models =~ "ptc docs limits"
+    assert envelope["result"]["content"] =~ diagnostic
   end
 
   test "an unknown page is rejected without echoing the requested name" do

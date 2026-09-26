@@ -888,6 +888,36 @@ defmodule PtcRunner.ReplFrontendTest do
     refute output =~ File.cwd!()
   end
 
+  test "describes the private analysis profile through JSONL" do
+    output =
+      capture_io(fn ->
+        run_repl(["--describe-profile", "private-run-analysis-v2", "--format", "jsonl"])
+      end)
+
+    assert [description] = decode_jsonl(output)
+    assert description["type"] == "profile"
+    assert description["id"] == "private-run-analysis-v2"
+    assert description["components"] == ["cap", "analysis", "prompt.audit"]
+    assert description["resources"] |> Map.keys() |> Enum.sort() == ["inspection", "traces"]
+
+    assert description["frontend"]["private_unattended"]["input_modes"] ==
+             ["eval", "load", "script", "stdin"]
+  end
+
+  test "describes the private catalog profile through JSONL" do
+    output =
+      capture_io(fn ->
+        run_repl(["--describe-profile", "private-run-catalog-v1", "--format", "jsonl"])
+      end)
+
+    assert [description] = decode_jsonl(output)
+    assert description["type"] == "profile"
+    assert description["id"] == "private-run-catalog-v1"
+    assert description["components"] == ["cap", "analysis.catalog"]
+    assert description["explicit_capabilities"] == ["analysis-catalog"]
+    assert description["resources"] |> Map.keys() |> Enum.sort() == ["inspection", "traces"]
+  end
+
   test "the default format prints the whole private profile contract" do
     output = capture_io(fn -> run_repl(["--describe-profile", "private-run-analysis-v2"]) end)
 

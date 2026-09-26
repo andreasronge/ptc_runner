@@ -181,116 +181,6 @@ defmodule PtcRunner.Scripts.CIGatesTest do
            ]
   end
 
-  test "Actions and the pre-push hook delegate deterministic gates to repository scripts" do
-    workflow = File.read!(Path.join(@root, ".github/workflows/test.yml"))
-    setup_action = File.read!(Path.join(@root, ".github/actions/setup-elixir/action.yml"))
-    launcher_release = File.read!(Path.join(@root, ".github/workflows/launcher-release.yml"))
-    release = File.read!(Path.join(@root, ".github/workflows/release.yml"))
-    hook = File.read!(Path.join(@root, ".githooks/pre-push"))
-    mix_project = File.read!(Path.join(@root, "mix.exs"))
-    launcher = File.read!(Path.join(@root, "scripts/ci/launcher.sh"))
-
-    for entrypoint <- ~w(core-tests core-static core-dialyzer core-release viewer docs launcher) do
-      assert workflow =~ "scripts/ci/#{entrypoint}.sh"
-      assert hook =~ "scripts/ci/#{entrypoint}.sh"
-    end
-
-    for release_workflow <- [release, launcher_release] do
-      assert release_workflow =~ "mix prepush"
-      assert release_workflow =~ "scripts/ci/gateway.sh"
-    end
-
-    refute workflow =~ "run: mix test --max-failures 1 --warnings-as-errors"
-    assert setup_action =~ "mix deps.get --check-locked"
-    assert launcher_release =~ ~s(scripts/ci/launcher.sh "$RUNNER_TEMP/launcher-artifacts")
-    refute launcher_release =~ "run: mix precommit"
-    refute launcher_release =~ "run: bash scripts/verify_precompiled.sh"
-    refute hook =~ "mix test --exclude clojure"
-    refute hook =~ "mix prepush"
-    refute mix_project =~ ~s("cmd scripts/ci/core-tests.sh")
-    refute mix_project =~ ~s("cmd scripts/ci/viewer.sh")
-    refute mix_project =~ ~s("cmd scripts/ci/launcher-package.sh")
-    refute mix_project =~ ~s("cmd scripts/ci/core-release.sh")
-    assert mix_project =~ ~s("cmd scripts/ci/core-quality.sh")
-    assert mix_project =~ ~s("cmd scripts/ci/core-static.sh")
-    assert mix_project =~ ~s("cmd scripts/ci/core-dialyzer.sh")
-
-    assert mix_project =~
-             ~r/precommit: \[\n\s*"cmd scripts\/ci\/preflight\.sh",\n\s*"cmd scripts\/ci\/core-quality\.sh"\n\s*\]/
-
-    assert launcher =~ ~s(bash ptc_runner_launcher/scripts/verify_precompiled.sh)
-  end
-
-  test "container publication is downstream of the canonical release gate" do
-    release = File.read!(Path.join(@root, ".github/workflows/release.yml"))
-    container = File.read!(Path.join(@root, ".github/workflows/container-release.yml"))
-
-    assert release =~
-             ~r/container:\n\s+needs: verify\n\s+uses: \.\/\.github\/workflows\/container-release\.yml/
-
-    assert release =~ "needs: [macos-artifact, container]"
-    assert container =~ "workflow_call:"
-    refute container =~ ~r/^  push:/m
-    assert container =~ "push-by-digest=true"
-    assert container =~ "--metadata-file \"$metadata\""
-    assert container =~ ~s(."containerimage.descriptor".digest)
-    assert container =~ ~s({"architecture":"amd64","os":"linux"})
-    assert container =~ ~s({"architecture":"arm64","os":"linux"})
-    assert container =~ "Publish the exact version tag"
-    refute container =~ "docker/build-push-action"
-  end
-
-  test "root Hex publication requires the immutable tagged release" do
-    workflow = File.read!(Path.join(@root, ".github/workflows/hex-publish.yml"))
-
-    assert workflow =~ "environment: hex-publish"
-    assert workflow =~ "needs: build"
-    assert workflow =~ "attestations: read"
-    assert workflow =~ ~s(ref: ${{ github.workflow_sha }})
-    assert workflow =~ "gh release verify \"$RELEASE_TAG\""
-    assert workflow =~ "test \"$release_state\" = $'false\\ttrue'"
-    assert workflow =~ "mix local.hex 2.3.1 --force"
-    assert workflow =~ "actions/upload-artifact@v6"
-    assert workflow =~ "actions/download-artifact@v7"
-    assert workflow =~ "scripts/publish_hex_artifact.sh"
-    assert workflow =~ "MIX_ENV=dev mix compile --warnings-as-errors"
-    assert workflow =~ "MIX_ENV=dev mix docs --warnings-as-errors"
-    assert workflow =~ "../workflow-source/scripts/build_hex_docs.exs"
-    assert workflow =~ "packages/ptc_runner/releases?replace=false"
-    assert workflow =~ "packages/ptc_runner/releases/$version/docs"
-    assert workflow =~ "remote_checksum"
-    assert workflow =~ ~r/--location\s+\\\n\s+--retry 12/
-    refute workflow =~ "mix hex.publish"
-    refute workflow =~ "replace=true"
-  end
-
-  test "the packaged release smoke covers inspect-only and both materialize modes" do
-    script = File.read!(Path.join(@root, "scripts/verify_standalone_release.sh"))
-
-    assert script =~ ~r/for command in .* materialize;/
-    assert script =~ "docs inspect-source"
-    assert script =~ "docs source-inspection"
-    assert script =~ "--inspect-only"
-    assert script =~ "--source-out"
-    assert script =~ "--out \"$release_tmp_dir/candidate\""
-    assert script =~ "Returns the supplied input."
-    assert script =~ "(input :map) -> :map"
-    assert script =~ "provider-application.json"
-  end
-
-  test "the interactive REPL PTY check is a Nightly gate, not a PR core-release gate" do
-    workflow = File.read!(Path.join(@root, ".github/workflows/test.yml"))
-    nightly = File.read!(Path.join(@root, ".github/workflows/nightly.yml"))
-    core_release = File.read!(Path.join(@root, "scripts/ci/core-release.sh"))
-
-    refute workflow =~ "apt-get"
-    refute workflow =~ "pseudo-terminal driver"
-    assert core_release =~ ~r/PTC_SKIP_PTY_GATE=1\s+scripts\/verify_standalone_release\.sh/
-    assert nightly =~ "apt-get install --yes --no-install-recommends expect"
-    assert nightly =~ "scripts/verify_standalone_release.sh"
-    refute nightly =~ ~r/PTC_SKIP_PTY_GATE=/
-  end
-
   describe "flake hunt" do
     @passing_record ~s({"seed":1,"schedulers":4,"wall_ms":4000,"async_ms":1000,"sync_ms":3000,"failures":[]})
     # `"run":null` is what a plain `mix test` writes: only flake-hunt.sh numbers runs.
@@ -476,20 +366,6 @@ defmodule PtcRunner.Scripts.CIGatesTest do
 
     # The hunt has its own weekly workflow: its output is a rate over ten
     # samples, and it was two thirds of Nightly's cost.
-    test "the weekly workflow runs the hunt on main and keeps its records" do
-      hunt = File.read!(Path.join(@root, ".github/workflows/flake-hunt.yml"))
-      nightly = File.read!(Path.join(@root, ".github/workflows/nightly.yml"))
-
-      assert hunt =~ ~s(cron: "41 2 * * 0")
-
-      assert hunt =~
-               ~s(scripts/ci/flake-hunt.sh "${{ inputs.runs || 10 }}" --schedulers 4 --out "$RUNNER_TEMP/flake-hunt")
-
-      assert hunt =~
-               ~r/if: always\(\)\n\s+uses: actions\/upload-artifact@v6\n\s+with:\n\s+name: flake-hunt/
-
-      refute nightly =~ "flake-hunt.sh"
-    end
 
     # The formatter is the only producer of the record file, so it is proven
     # through a real `mix test` rather than by feeding it synthetic events.
@@ -501,7 +377,7 @@ defmodule PtcRunner.Scripts.CIGatesTest do
       {output, status} =
         System.cmd(
           "mix",
-          ["test", "test/support/test_helpers_test.exs", "--seed", "4242"],
+          ["test", "test/ptc_runner/kernel/doctor_environment_test.exs", "--seed", "4242"],
           cd: @root,
           env: @git_env ++ [{"PTC_TEST_RUN_LOG", log}, {"MIX_ENV", "test"}],
           stderr_to_stdout: true

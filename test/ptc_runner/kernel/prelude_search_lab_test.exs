@@ -7,8 +7,6 @@ defmodule PtcRunner.Kernel.PreludeSearchLabTest do
   alias PtcRunner.Labs.PreludeSearch.Phase1
   alias PtcRunner.Labs.PreludeSearch.Statistics
 
-  @moduletag :nightly
-
   lab = Path.expand("../../../scripts/labs/prelude-search", __DIR__)
   Code.require_file("support/mutations.exs", lab)
   Code.require_file("support/inputs.exs", lab)
@@ -16,6 +14,7 @@ defmodule PtcRunner.Kernel.PreludeSearchLabTest do
   Code.require_file("support/statistics.exs", lab)
   Code.require_file("support/phase1.exs", lab)
 
+  @tag :nightly
   @tag :tmp_dir
   test "stopped model commands finalize evidence and replay only the completed prefix", %{
     tmp_dir: tmp
@@ -58,6 +57,7 @@ defmodule PtcRunner.Kernel.PreludeSearchLabTest do
              )
   end
 
+  @tag :nightly
   @tag :tmp_dir
   test "a real Kernel timeout remains privately analyzable and preserves a replayable prefix", %{
     tmp_dir: tmp
@@ -388,6 +388,7 @@ defmodule PtcRunner.Kernel.PreludeSearchLabTest do
     assert report.checked_per_solved == 1.0
   end
 
+  @tag :nightly
   test "Phase 0 re-executes every recorded execution byte-equally" do
     output =
       Path.join(System.tmp_dir!(), "prelude-search-test-#{System.unique_integer([:positive])}")

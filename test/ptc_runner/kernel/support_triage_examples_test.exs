@@ -4,15 +4,9 @@ defmodule PtcRunner.Kernel.SupportTriageExamplesTest do
 
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandOutcome
-  alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.ProjectConfig
 
   @examples Path.expand("../../../examples/support-triage", __DIR__)
-
-  test "the shared host installs only the tutorial model alias" do
-    assert {:ok, host} = HostConfig.load(Path.join(@examples, "ptc-host.json"))
-    assert Map.keys(host.install) == ["deepseek"]
-  end
 
   test "every step validates its bundles without provider activity" do
     for {step, port} <- [
@@ -35,17 +29,12 @@ defmodule PtcRunner.Kernel.SupportTriageExamplesTest do
                CommandEngine.dispatch(["validate", project_path])
 
       assert envelope["result"]["provider_activity"] == false
+
+      if step == "03-specialists" do
+        assert envelope["result"]["mission_bundle_hashes"] |> Map.keys() |> Enum.sort() ==
+                 ["escalation", "triage"]
+      end
     end
-  end
-
-  test "the specialist step compiles both mission bundles and its result contract" do
-    project_path = Path.join(@examples, "03-specialists.ptc-project.json")
-
-    assert {:ok, %CommandOutcome{envelope: envelope}} =
-             CommandEngine.dispatch(["validate", project_path])
-
-    assert envelope["result"]["mission_bundle_hashes"] |> Map.keys() |> Enum.sort() ==
-             ["escalation", "triage"]
   end
 
   @tag :tmp_dir

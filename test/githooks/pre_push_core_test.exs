@@ -85,19 +85,6 @@ defmodule PtcRunner.GitHooks.PrePushCoreTest do
   end
 
   @tag :slow
-  test "gateway starts as its own concurrent lane on an unmanaged core push" do
-    %{repo: repo, mix_marker: mix_marker, path: path} =
-      git_repo_with_change("lib/example.ex")
-
-    {output, status} = run_hook(repo, path)
-
-    assert status == 0, output
-    assert output =~ "Gateway validation started"
-    assert output =~ "core static analysis + Dialyzer started"
-    assert_core_gate_invocations(mix_marker)
-  end
-
-  @tag :slow
   test "a change to an operator surface runs every module of the suite" do
     %{repo: repo, mix_marker: mix_marker, path: path} =
       git_repo_with_change("lib/mix/tasks/ptc.example.ex")

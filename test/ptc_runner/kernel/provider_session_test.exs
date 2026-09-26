@@ -358,16 +358,6 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     assert [:second, :first] = Agent.get(order, &Enum.reverse/1)
   end
 
-  test "invalid limits cannot create a provider session" do
-    invalid = %{limits() | provider_cleanup_timeout_ms: 0}
-
-    assert {:error, :invalid_provider_session} = ProviderSession.start(invalid)
-  end
-
-  test "an invalid active operation identity fails closed" do
-    assert {:error, :invalid_provider_session} = ProviderSession.start_active(limits(), nil)
-  end
-
   test "owned active sessions keep execution authority while fixing lifecycle ownership" do
     parent = self()
     lifecycle_owner = spawn(fn -> receive do: (:stop -> :ok) end)

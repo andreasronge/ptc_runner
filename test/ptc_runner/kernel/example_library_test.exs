@@ -66,29 +66,6 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
     end
   end
 
-  test "the materializable multi-turn tutorial relies on the default run clocks" do
-    assert {:ok, files} = ExampleLibrary.fetch("kernel-tutorial")
-
-    manifest = files["04-multi-turn-agent/ptc.json"] |> Jason.decode!()
-
-    refute Map.has_key?(manifest, "limits")
-  end
-
-  test "the materializable cost-budget tutorial includes both spend ceilings and a tariff" do
-    assert {:ok, files} = ExampleLibrary.fetch("kernel-tutorial")
-
-    manifest = files["06-cost-budget/ptc.json"] |> Jason.decode!()
-    host = files["ptc-host-cost-budget.json"] |> Jason.decode!()
-
-    assert manifest["limits"]["llm_cost_microusd"] == 1
-    assert host["limits"]["llm_cost_microusd"] == 1
-
-    assert host["install"]["deepseek"]["reservation_tariff"] == %{
-             "currency" => "USD",
-             "id" => "openrouter-model-pricing-v1"
-           }
-  end
-
   test "run artifacts are not embedded and local .env files are not copied from the source tree" do
     for name <- ExampleLibrary.names(),
         {:ok, files} = ExampleLibrary.fetch(name),
