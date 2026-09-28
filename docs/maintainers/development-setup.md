@@ -105,7 +105,8 @@ scripts/worktree.sh seed <dir>    # seed another worktree
 ## Git hooks
 
 PtcManager's `verification.before_publish` runs `scripts/ci/pre-publication`
-after bootstrap in a clean, detached snapshot checkout. The script finds the
+after bootstrap in a clean, detached snapshot checkout. Bootstrap skips cache
+seeding when the standalone clone has no separate main checkout. The script finds the
 job's base with `git merge-base HEAD origin/main` and sends that range to the
 tracked pre-push hook. If the clone lacks `origin/main`, the script fetches
 `main` from the local job worktree; it fails if that ref is unavailable. It
