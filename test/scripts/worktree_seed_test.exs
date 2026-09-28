@@ -244,6 +244,38 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
            ]
   end
 
+  test "manager bootstrap initializes a detached standalone snapshot" do
+    %{main: main, log: log, path: path} = repo_with_origin()
+    git!(main, ["checkout", "--quiet", "--detach", "HEAD"])
+    git!(main, ["config", "core.hooksPath", "/dev/null"])
+
+    for script <- ~w(worktree.sh mise-runtime.sh) do
+      write_executable!(
+        main,
+        "scripts/#{script}",
+        File.read!(Path.join(Path.dirname(@script), script))
+      )
+    end
+
+    write_executable!(
+      main,
+      "scripts/ptc/bootstrap",
+      File.read!(Path.join(Path.dirname(@script), "ptc/bootstrap"))
+    )
+
+    write_executable!(main, "examples/dabstep-fraud/fetch-data.sh", "#!/bin/sh\nexit 0\n")
+
+    {output, status} =
+      System.cmd("bash", ["scripts/ptc/bootstrap"],
+        cd: main,
+        env: GitEnv.clear(PATH: path <> ":" <> System.fetch_env!("PATH"), PTC_INIT_LOG: log),
+        stderr_to_stdout: true
+      )
+
+    assert status == 0, output
+    assert File.read!(log) =~ "mise|exec -- mix compile|#{main}|0022"
+  end
+
   defp repo_with_worktree do
     root =
       Path.join(

@@ -210,6 +210,12 @@ defmodule PtcRunner.TestSupport.PrePushFixture do
   def install_hook_fixture!(repo, opts) do
     copy_executable!(@hook, Path.join(repo, ".githooks/pre-push"))
     copy_executable!(@classifier, Path.join(repo, "scripts/ci/classify-changes.sh"))
+
+    copy_executable!(
+      Path.expand("../../scripts/ci/pre-publication", __DIR__),
+      Path.join(repo, "scripts/ci/pre-publication")
+    )
+
     File.mkdir_p!(Path.join(repo, "test/support"))
 
     registry = Path.join(repo, "test/support/executable_guides.txt")

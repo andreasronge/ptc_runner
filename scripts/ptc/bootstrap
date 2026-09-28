@@ -4,7 +4,13 @@ set -euo pipefail
 # Herdr creates the worktree. Reuse compatible build artifacts from the main
 # checkout, then let PtcRunner's existing worktree initializer install hooks,
 # fetch dependencies, and validate the pinned toolchain before an agent starts.
-./scripts/worktree.sh seed .
+# A detached snapshot is a standalone clone: its only worktree is itself,
+# so there is no separate main checkout from which to seed artifacts.
+main_checkout="$(git worktree list --porcelain |
+  awk '/^worktree /{sub(/^worktree /, ""); print; exit}')"
+if [ "$(cd "$main_checkout" && pwd -P)" != "$(pwd -P)" ]; then
+  ./scripts/worktree.sh seed .
+fi
 ./scripts/worktree.sh init .
 
 # `mix nightly` reads the real DABStep dataset, which is gitignored and fetched
@@ -17,9 +23,6 @@ set -euo pipefail
 # surfaces at the end of a long validation run. `nightly.yml` already fetches
 # the same dataset for CI; this is the same restore for a managed worktree.
 dabstep=examples/dabstep-fraud
-main_checkout="$(git worktree list --porcelain |
-  awk '/^worktree /{sub(/^worktree /, ""); print; exit}')"
-
 # The main checkout is the cache here too, exactly as it is for the build
 # artifacts above. Correctness never rests on the copy: fetch-data.sh verifies
 # whatever is on disk against its pinned checksums and re-downloads only what
