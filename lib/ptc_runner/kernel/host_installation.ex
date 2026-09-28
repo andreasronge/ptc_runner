@@ -1752,12 +1752,23 @@ defmodule PtcRunner.Kernel.HostInstallation do
          {:ok, capability} <-
            DecisionCapability.new(
              requester: fn request, requester_context ->
+               bound_requester = fn request, context ->
+                 requester.(
+                   request,
+                   Map.put(
+                     context,
+                     :provider_run_state,
+                     Map.get(requester_context, :provider_run_state)
+                   )
+                 )
+               end
+
                if is_nil(admission),
                  do: requester.(request, requester_context),
                  else:
                    ProviderCallOwner.run(
                      admission,
-                     requester,
+                     bound_requester,
                      request,
                      llm_requester_context(requester_context)
                      |> maybe_put_cleanup_timeout(

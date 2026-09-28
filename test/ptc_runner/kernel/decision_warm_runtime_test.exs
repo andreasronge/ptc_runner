@@ -77,7 +77,7 @@ defmodule PtcRunner.Kernel.DecisionWarmRuntimeTest do
       provider_snapshot_pins: discovery["provider_snapshot_pins"]
     }
 
-    admission = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+    admission = start_supervised!({RunAdmission, max_concurrent_runs: 2})
 
     {:ok, warm} =
       WarmProviderRuntime.start_link(
@@ -91,8 +91,20 @@ defmodule PtcRunner.Kernel.DecisionWarmRuntimeTest do
 
     on_exit(fn -> if Process.alive?(warm), do: GenServer.stop(warm) end)
     {:ok, bound} = WarmProviderRuntime.template(warm, "decisions")
-    result = ServingTemplate.call(bound, input, admission)
-    assert ServingOutcome.code(result) == :success, inspect(result)
+
+    for _ <- 1..2 do
+      result = ServingTemplate.call(bound, input, admission)
+      assert ServingOutcome.code(result) == :success, inspect(result)
+    end
+
+    for item <-
+          Task.async_stream(1..2, fn _ -> ServingTemplate.call(bound, input, admission) end,
+            max_concurrency: 2
+          ) do
+      assert {:ok, result} = item
+      assert ServingOutcome.code(result) == :success, inspect(result)
+    end
+
     assert :ok = WarmProviderRuntime.drain(warm, System.monotonic_time(:millisecond) + 2000)
     GenServer.stop(warm)
   end

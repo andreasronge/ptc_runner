@@ -665,5 +665,7 @@ and defaults to tokens and USD cost required. Set it to the corresponding live
 guarantee when replaying responses without cost; an enabled cost ceiling still
 requires USD usage. Replay calls use the host's `llm_request_timeout_ms` bound,
 including through warm serving runtimes and shared provider admission.
+Warm decision replay retains the fixture acquisition while each run has an
+independent response cursor; repeated calls inside one run consume its sequence.
 See `examples/decision-refund-triage/ptc-project.json` for a
 complete offline project.
