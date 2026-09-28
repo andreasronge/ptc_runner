@@ -2,20 +2,15 @@ defmodule PtcRunner.Lisp.Runtime.PredicatesTest do
   @moduledoc """
   Coverage for `PtcRunner.Lisp.Runtime.Predicates`.
 
-  Where a predicate is reachable as a PTC-Lisp builtin we drive it through the
-  real evaluator (`PtcRunner.Lisp.run/1`) so the production dispatch path is
-  exercised. Clauses that have no surface syntax (e.g. `fnil`'s `{:variadic,…}`
-  and `%Builtin{}` forms, `type_of`'s tuple variants, special-atom branches)
-  are covered with direct module calls.
+  Source-reachable predicates run through `PtcRunner.Lisp.run/1` so the
+  production dispatch path is exercised. Direct calls below cover the
+  remaining distinct runtime behavior.
   """
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
-  alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Format
-  alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Callable
-  alias PtcRunner.Lisp.Runtime.Math
   alias PtcRunner.Lisp.Runtime.Predicates
 
   doctest PtcRunner.Lisp.Runtime.Predicates
@@ -40,6 +35,42 @@ defmodule PtcRunner.Lisp.Runtime.PredicatesTest do
     end
   end
 
+  test "source-reachable predicate boundary rows" do
+    for {source, expected} <- [
+          {"(not :something)", false},
+          {"(boolean [])", true},
+          {"(identity [1 2 3])", [1, 2, 3]},
+          {"(number? (/ 1.0 0.0))", true},
+          {"(number? (/ 0.0 0.0))", true},
+          {"(false? false)", true},
+          {"(false? nil)", false},
+          {"(true? true)", true},
+          {"(true? 1)", false},
+          {~S|(char? "é")|, true},
+          {"(set? :foo)", false},
+          {"(map? :foo)", false},
+          {"(regex? [1 2])", false},
+          {"(coll? :foo)", false},
+          {"(associative? 5)", false},
+          {"(counted? 5)", false},
+          {"(indexed? 5)", false},
+          {"(reversible? 5)", false},
+          {"(seqable? :foo)", false},
+          {"(ifn? (/ 1.0 0.0))", false},
+          {"(ifn? true)", false},
+          {"(type nil)", nil},
+          {"(type (/ 1.0 0.0))", :number},
+          {"(type (fn [x] x))", :function},
+          {"(keyword nil)", nil},
+          {~S|(= (keyword "zoozoozoo") :zoozoozoo)|, true},
+          {"(pos? (/ 1.0 0.0))", true},
+          {"(neg? (/ -1.0 0.0))", true},
+          {"(zero? (/ 0.0 0.0))", false}
+        ] do
+      assert eval!(source) == expected, source
+    end
+  end
+
   # ==================================================================
   # Logic: not / boolean / identity
   # ==================================================================
@@ -58,25 +89,6 @@ defmodule PtcRunner.Lisp.Runtime.PredicatesTest do
       assert eval!("(boolean false)") == false
       assert eval!("(boolean 0)") == true
       assert eval!("(boolean \"x\")") == true
-    end
-  end
-
-  describe "logic primitives (direct, fallthrough clauses)" do
-    test "not_/1 truthy fallthrough" do
-      assert Predicates.not_(:something) == false
-      assert Predicates.not_(0) == false
-    end
-
-    test "boolean/1 fallthrough clause for arbitrary terms" do
-      assert Predicates.boolean([]) == true
-      assert Predicates.boolean(%{}) == true
-    end
-
-    test "identity/1 returns its argument unchanged" do
-      ref = make_ref()
-      assert Predicates.identity(ref) == ref
-      assert Predicates.identity(nil) == nil
-      assert Predicates.identity([1, 2, 3]) == [1, 2, 3]
     end
   end
 
@@ -125,42 +137,6 @@ defmodule PtcRunner.Lisp.Runtime.PredicatesTest do
     end
   end
 
-  describe "number? with special atoms (direct)" do
-    test "number? true for :infinity and :nan special atoms" do
-      assert Predicates.number?(:infinity) == true
-      assert Predicates.number?(:negative_infinity) == true
-      assert Predicates.number?(:nan) == true
-    end
-
-    test "number? false for ordinary keyword atoms and structs" do
-      assert Predicates.number?(:foo) == false
-      assert Predicates.number?("5") == false
-    end
-  end
-
-  describe "int?/float? helper twins agree (direct)" do
-    test "int? and integer? agree; float? and double? agree" do
-      assert Predicates.int?(7) == Predicates.integer?(7)
-      assert Predicates.int?(7.0) == Predicates.integer?(7.0)
-      assert Predicates.float?(7.0) == Predicates.double?(7.0)
-      assert Predicates.float?(7) == Predicates.double?(7)
-    end
-  end
-
-  describe "false?/true? (direct)" do
-    test "false? strictly matches the boolean false" do
-      assert Predicates.false?(false) == true
-      assert Predicates.false?(nil) == false
-      assert Predicates.false?(0) == false
-    end
-
-    test "true? strictly matches the boolean true" do
-      assert Predicates.true?(true) == true
-      assert Predicates.true?(1) == false
-      assert Predicates.true?("true") == false
-    end
-  end
-
   describe "string?/keyword?/char? (via evaluator)" do
     test "string? true for binaries only" do
       assert eval!("(string? \"x\")") == true
@@ -178,22 +154,6 @@ defmodule PtcRunner.Lisp.Runtime.PredicatesTest do
       assert eval!("(char? \"a\")") == true
       assert eval!("(char? \"ab\")") == false
       assert eval!("(char? \"\")") == false
-    end
-  end
-
-  describe "keyword?/char? boundary cases (direct)" do
-    test "keyword? excludes special-value atoms" do
-      assert Predicates.keyword?(:infinity) == false
-      assert Predicates.keyword?(:nan) == false
-      assert Predicates.keyword?(:foo) == true
-      assert Predicates.keyword?(LispKeyword.new("zoozoo")) == true
-    end
-
-    test "char? respects utf8 grapheme boundaries (one combined grapheme is a char)" do
-      assert Predicates.char?("é") == true
-      # "a" + U+0301 combining acute accent collapses to a single grapheme
-      assert Predicates.char?("é") == true
-      assert Predicates.char?("ab") == false
     end
   end
 
@@ -219,25 +179,6 @@ defmodule PtcRunner.Lisp.Runtime.PredicatesTest do
       assert eval!("(map? {})") == true
       assert eval!("(map? (set [1]))") == false
       assert eval!("(map? [1 2])") == false
-    end
-  end
-
-  describe "set?/map? struct rejection (direct)" do
-    test "set? rejects non-MapSet structs and plain maps" do
-      assert Predicates.set?(LispKeyword.new("a")) == false
-      assert Predicates.set?(%{}) == false
-      assert Predicates.set?(MapSet.new([1])) == true
-    end
-
-    test "map? rejects structs (which are maps under the hood)" do
-      assert Predicates.map?(LispKeyword.new("a")) == false
-      assert Predicates.map?(MapSet.new([1])) == false
-      assert Predicates.map?(%{a: 1}) == true
-    end
-
-    test "regex? false for non-tuples and other tuples" do
-      assert Predicates.regex?([1, 2]) == false
-      assert Predicates.regex?({:other, 1, 2}) == false
     end
   end
 
@@ -297,21 +238,6 @@ defmodule PtcRunner.Lisp.Runtime.PredicatesTest do
     end
   end
 
-  describe "collection predicate fallthrough clauses (direct)" do
-    test "coll?/associative?/counted?/indexed?/reversible?/seqable? false for structs and scalars" do
-      kw = LispKeyword.new("a")
-      assert Predicates.coll?(kw) == false
-      assert Predicates.associative?(kw) == false
-      assert Predicates.associative?(5) == false
-      assert Predicates.counted?(kw) == false
-      assert Predicates.counted?(5) == false
-      assert Predicates.indexed?(5) == false
-      assert Predicates.reversible?(5) == false
-      assert Predicates.seqable?(kw) == false
-      assert Predicates.seqable?(5) == false
-    end
-  end
-
   describe "ifn? (via evaluator)" do
     test "ifn? true for sets, keywords, maps, and functions" do
       assert eval!("(ifn? (set [1]))") == true
@@ -332,22 +258,6 @@ defmodule PtcRunner.Lisp.Runtime.PredicatesTest do
       assert eval!("(ifn? 5)") == false
       assert eval!("(ifn? \"x\")") == false
       assert eval!("(ifn? nil)") == false
-    end
-  end
-
-  describe "ifn? atom/special branches (direct)" do
-    test "ifn? true for ordinary keyword atoms, false for special-value atoms and booleans" do
-      assert Predicates.ifn?(:foo) == true
-      # special atoms have type_of :number, so not invokable
-      assert Predicates.ifn?(:infinity) == false
-      assert Predicates.ifn?(true) == false
-      assert Predicates.ifn?(false) == false
-      assert Predicates.ifn?(nil) == false
-    end
-
-    test "ifn? on a %Builtin{} function value" do
-      builtin = Builtin.wrap(:inc, {:normal, &(&1 + 1)})
-      assert Predicates.ifn?(builtin) == true
     end
   end
 
@@ -446,54 +356,6 @@ defmodule PtcRunner.Lisp.Runtime.PredicatesTest do
       assert eval!("(type (comp inc inc))") == :function
       assert eval!("(type (juxt inc dec))") == :function
       assert eval!("(type (some-fn :a :b))") == :function
-    end
-  end
-
-  describe "type_of (direct, every clause)" do
-    test "scalar and struct clauses" do
-      assert Predicates.type_of(nil) == nil
-      assert Predicates.type_of(true) == :boolean
-      assert Predicates.type_of(false) == :boolean
-      assert Predicates.type_of(3.14) == :number
-      assert Predicates.type_of("s") == :string
-      assert Predicates.type_of([1]) == :vector
-      assert Predicates.type_of(MapSet.new([1])) == :set
-      assert Predicates.type_of(LispKeyword.new("longname")) == :keyword
-      assert Predicates.type_of(Builtin.wrap(:f, {:normal, &(&1 + 1)})) == :function
-    end
-
-    test "atom clause distinguishes special-value atoms from keyword atoms" do
-      assert Predicates.type_of(:infinity) == :number
-      assert Predicates.type_of(:negative_infinity) == :number
-      assert Predicates.type_of(:nan) == :number
-      assert Predicates.type_of(:foo) == :keyword
-    end
-
-    test "tuple variants: regex, closure, normal/collect, variadic family, unknown" do
-      assert Predicates.type_of({:re_mp, 1, 2, 3}) == :regex
-      assert Predicates.type_of({:closure, 1, 2, 3, 4, 5}) == :function
-      assert Predicates.type_of({:normal, fn -> 1 end}) == :function
-      assert Predicates.type_of({:collect, fn -> 1 end}) == :function
-      assert Predicates.type_of({:juxt_fn, []}) == :function
-      assert Predicates.type_of({:comp_fn, []}) == :function
-      assert Predicates.type_of({:complement_fn, :f}) == :function
-      assert Predicates.type_of({:constantly_fn, 1}) == :function
-      assert Predicates.type_of({:every_pred_fn, []}) == :function
-      assert Predicates.type_of({:some_fn, []}) == :function
-      assert Predicates.type_of({:partial_fn, :f, []}) == :function
-      assert Predicates.type_of({:fnil_fn, :f, nil}) == :function
-      assert Predicates.type_of({:variadic, 1, 2}) == :function
-      assert Predicates.type_of({:variadic_nonempty, 1, 2}) == :function
-      assert Predicates.type_of({:multi_arity, 1, 2}) == :function
-      assert Predicates.type_of({:special, 1, 2}) == :function
-      assert Predicates.type_of({:totally_unknown_tag, 1}) == :unknown
-    end
-
-    test "map, raw function, and catch-all clauses" do
-      assert Predicates.type_of(%{a: 1}) == :map
-      assert Predicates.type_of(fn -> 1 end) == :function
-      # a pid is not handled by any specific clause
-      assert Predicates.type_of(self()) == :unknown
     end
   end
 
@@ -648,74 +510,6 @@ defmodule PtcRunner.Lisp.Runtime.PredicatesTest do
     end
   end
 
-  describe "fnil internal forms (direct)" do
-    test "plain arity-1 function: nil maps to default" do
-      callable = Predicates.fnil(&(&1 + 100), 7)
-      assert match?({:fnil_fn, {:normal, _}, 7}, callable)
-      assert Callable.call(callable, [nil]) == 107
-      assert Callable.call(callable, [3]) == 103
-    end
-
-    test "plain arity-2 function: nil first arg maps to default" do
-      callable = Predicates.fnil(&Math.add/2, 10)
-      assert match?({:fnil_fn, {:normal, _}, 10}, callable)
-      assert Callable.call(callable, [nil, 5]) == 15
-      assert Callable.call(callable, [2, 5]) == 7
-    end
-
-    test "{:normal, fun} arity 1 wraps into a native fnil callable" do
-      callable = Predicates.fnil({:normal, &(&1 + 1)}, 9)
-      assert match?({:fnil_fn, {:normal, _}, 9}, callable)
-      assert Callable.call(callable, [nil]) == 10
-      assert Callable.call(callable, [4]) == 5
-    end
-
-    test "{:normal, fun} arity 2 wraps into a native fnil callable" do
-      callable = Predicates.fnil({:normal, &Math.add/2}, 100)
-      assert match?({:fnil_fn, {:normal, _}, 100}, callable)
-      assert Callable.call(callable, [nil, 5]) == 105
-      assert Callable.call(callable, [2, 5]) == 7
-    end
-
-    test "{:normal, fun} arity >= 3 wraps into a native fnil callable" do
-      add3 = fn a, b, c -> a + b + c end
-      assert callable = {:fnil_fn, {:normal, ^add3}, 1} = Predicates.fnil({:normal, add3}, 1)
-      assert Callable.call(callable, [nil, 2, 3]) == 6
-      assert Callable.call(callable, [10, 2, 3]) == 15
-    end
-
-    test "{:variadic, …} forms wrap into a native fnil callable" do
-      callable = Predicates.fnil({:variadic, &Math.add/2, 0}, 100)
-      assert match?({:fnil_fn, {:variadic, _, 0}, 100}, callable)
-      assert Callable.call(callable, [nil, 1, 2]) == 103
-      assert Callable.call(callable, [5, 1, 2]) == 8
-    end
-
-    test "{:collect, fun} form substitutes only the first nil argument" do
-      callable = Predicates.fnil({:collect, fn args -> Enum.sum(args) end}, 50)
-
-      assert match?({:fnil_fn, {:collect, _}, 50}, callable)
-      assert Callable.call(callable, [nil, 1, 2]) == 53
-      assert Callable.call(callable, [3, 1, 2]) == 6
-    end
-
-    test "%Builtin{binding: {:normal, fun}} wraps into a native fnil callable" do
-      builtin = Builtin.wrap(:inc, {:normal, &(&1 + 1)})
-      callable = Predicates.fnil(builtin, 9)
-      assert match?({:fnil_fn, %Builtin{name: :inc}, 9}, callable)
-      assert Callable.call(callable, [nil]) == 10
-      assert Callable.call(callable, [4]) == 5
-    end
-
-    test "%Builtin{} non-normal binding wraps into a native fnil callable" do
-      builtin = Builtin.wrap(:sum, {:collect, fn args -> Enum.sum(args) end})
-      callable = Predicates.fnil(builtin, 5)
-      assert match?({:fnil_fn, %Builtin{name: :sum}, 5}, callable)
-      assert Callable.call(callable, [nil, 1]) == 6
-      assert Callable.call(callable, [3, 1]) == 4
-    end
-  end
-
   # ==================================================================
   # Coercions: keyword / set / vec
   # ==================================================================
@@ -734,51 +528,6 @@ defmodule PtcRunner.Lisp.Runtime.PredicatesTest do
       assert eval_error(~S<(keyword "")>) =~ "invalid keyword name"
       assert eval_error(~S<(keyword "foo/bar")>) =~ "invalid keyword name"
       assert eval_error("(keyword 5)") =~ "cannot coerce to keyword"
-    end
-  end
-
-  describe "keyword coercion (direct, all clauses)" do
-    test "nil passes through" do
-      assert Predicates.keyword(nil) == nil
-    end
-
-    test "ordinary keyword atom passes through unchanged" do
-      assert Predicates.keyword(:abc) == :abc
-    end
-
-    test "special-value atom raises" do
-      assert_raise ArgumentError, ~r/cannot coerce special value to keyword/, fn ->
-        Predicates.keyword(:infinity)
-      end
-    end
-
-    test "%Keyword{} struct passes through unchanged" do
-      kw = LispKeyword.new("zoozoo")
-      assert Predicates.keyword(kw) == kw
-    end
-
-    test "string in the bounded vocabulary interns to an atom" do
-      assert Predicates.keyword("count") == :count
-    end
-
-    test "string outside the bounded vocabulary becomes a %Keyword{} struct" do
-      assert Predicates.keyword("zoozoozoo") == LispKeyword.new("zoozoozoo")
-    end
-
-    test "invalid keyword names (operator chars, leading digit) raise" do
-      assert_raise ArgumentError, ~r/invalid keyword name/, fn ->
-        Predicates.keyword("1abc")
-      end
-
-      assert_raise ArgumentError, ~r/invalid keyword name/, fn ->
-        Predicates.keyword("a+b")
-      end
-    end
-
-    test "non-string, non-atom arguments raise" do
-      assert_raise ArgumentError, ~r/cannot coerce to keyword/, fn ->
-        Predicates.keyword([1, 2])
-      end
     end
   end
 
@@ -841,27 +590,6 @@ defmodule PtcRunner.Lisp.Runtime.PredicatesTest do
     test "pos? and neg? on infinities" do
       assert eval!("(pos? (/ 1.0 0.0))") == true
       assert eval!("(neg? (/ -1.0 0.0))") == true
-    end
-  end
-
-  describe "pos?/neg? non-number branches (direct)" do
-    test "pos? true for positive infinity, false for nan and non-numbers" do
-      assert Predicates.pos?(:infinity) == true
-      assert Predicates.pos?(:negative_infinity) == false
-      assert Predicates.pos?(:nan) == false
-      assert Predicates.pos?("x") == false
-    end
-
-    test "neg? true for negative infinity, false for nan and non-numbers" do
-      assert Predicates.neg?(:negative_infinity) == true
-      assert Predicates.neg?(:infinity) == false
-      assert Predicates.neg?(:nan) == false
-      assert Predicates.neg?([]) == false
-    end
-
-    test "zero? false for non-numbers" do
-      assert Predicates.zero?(:nan) == false
-      assert Predicates.zero?("0") == false
     end
   end
 

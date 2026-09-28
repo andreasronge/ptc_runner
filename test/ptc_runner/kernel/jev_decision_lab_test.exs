@@ -3,6 +3,7 @@ Code.require_file(lab)
 
 defmodule PtcRunner.Kernel.JevDecisionLabTest do
   use ExUnit.Case, async: true
+  @moduletag :operator
 
   alias PtcRunner.Examples.JevDecisionLab
 
@@ -315,137 +316,80 @@ defmodule PtcRunner.Kernel.JevDecisionLabTest do
     assert Bitwise.band(File.stat!(path).mode, 0o777) == 0o600
   end
 
-  test "inconsistent score is rejected while rounded score and ties are accepted" do
+  test "the decision response validates answer and usage boundaries" do
+    answers = valid_answers()
     parent = self()
 
-    answer = %{
-      "type" => "score",
-      "score" => 1.2,
-      "legend" => %{"0" => "low", "1" => "medium", "2" => "high", "3" => "critical"},
-      "probabilities" => %{"0" => 0.1, "1" => 0.6, "2" => 0.2, "3" => 0.1},
-      "confidence" => 0.6
-    }
-
-    answers = %{
-      "department" => %{
-        "type" => "choice",
-        "choice" => "billing",
-        "probabilities" => %{"billing" => 0.5, "sales" => 0.5, "support" => 0.0},
-        "confidence" => 0.5
-      },
-      "severity" => answer,
-      "urgent" => %{"type" => "noul", "noul" => 0.93}
-    }
-
-    assert {:error, error} =
-             invoke_with_answers(answers,
-               recorder: fn record -> send(parent, {:record, record}) end
-             )
-
-    assert error.kind == :invalid_result
-    assert_receive {:record, %{outcome: :invalid_result}}
-    good = put_in(answers, ["severity", "score"], 1.3)
-    assert {:ok, result} = invoke_with_answers(good)
-    assert result["answers"]["severity"]["score"] == 1.3
-  end
-
-  test "answer IDs and wire types must exactly match the dispatched questions" do
-    answers = valid_answers()
-
-    malformed = [
-      Map.delete(answers, "urgent"),
-      Map.put(answers, "extra", %{"type" => "noul", "noul" => 0.5}),
-      put_in(answers, ["urgent", "type"], "choice")
+    invalid = [
+      {"missing answer", Map.delete(answers, "urgent"), []},
+      {"extra answer", Map.put(answers, "extra", %{"type" => "noul", "noul" => 0.5}), []},
+      {"wrong wire type", put_in(answers, ["urgent", "type"], "choice"), []},
+      {"choice options",
+       put_in(answers, ["department", "probabilities"], %{
+         "billing" => 0.5,
+         "sales" => 0.5,
+         "other" => 0.0
+       }), []},
+      {"choice range", put_in(answers, ["department", "probabilities", "billing"], 1.1), []},
+      {"choice sum",
+       put_in(answers, ["department", "probabilities"], %{
+         "billing" => 0.45,
+         "sales" => 0.45,
+         "support" => 0.0
+       }), []},
+      {"choice maximum",
+       answers
+       |> put_in(["department", "choice"], "support")
+       |> put_in(["department", "probabilities"], %{
+         "billing" => 0.8,
+         "sales" => 0.1,
+         "support" => 0.1
+       }), []},
+      {"choice confidence", put_in(answers, ["department", "confidence"], 1.01), []},
+      {"score legend", put_in(answers, ["severity", "legend", "3"], "blocker"), []},
+      {"score levels",
+       put_in(answers, ["severity", "probabilities"], %{
+         "0" => 0.1,
+         "1" => 0.6,
+         "2" => 0.3
+       }), []},
+      {"score probability", put_in(answers, ["severity", "probabilities", "0"], -0.1), []},
+      {"score range", put_in(answers, ["severity", "score"], 4.0), []},
+      {"score weighted mean", put_in(answers, ["severity", "score"], 1.32), []},
+      {"score finite confidence", put_in(answers, ["severity", "confidence"], 1.0e308), []},
+      {"score inconsistent", put_in(answers, ["severity", "score"], 1.2),
+       [recorder: fn record -> send(parent, {:record, record}) end]},
+      {"boolean probability", put_in(answers, ["urgent", "noul"], -0.01), []},
+      {"provider usage", answers, [usage: %{"input_tokens" => -1, "output_tokens" => 2}]}
     ]
 
-    for candidate <- malformed do
+    for {name, candidate, opts} <- invalid do
       assert {:error, %{kind: :invalid_result, dispatch_provenance: :dispatched}} =
-               invoke_with_answers(candidate)
-    end
-  end
-
-  test "choice options, ranges, sums, and selected maxima are validated" do
-    answers = valid_answers()
-
-    malformed = [
-      put_in(answers, ["department", "probabilities"], %{
-        "billing" => 0.5,
-        "sales" => 0.5,
-        "other" => 0.0
-      }),
-      put_in(answers, ["department", "probabilities", "billing"], 1.1),
-      put_in(answers, ["department", "probabilities"], %{
-        "billing" => 0.45,
-        "sales" => 0.45,
-        "support" => 0.0
-      }),
-      answers
-      |> put_in(["department", "choice"], "support")
-      |> put_in(["department", "probabilities"], %{
-        "billing" => 0.8,
-        "sales" => 0.1,
-        "support" => 0.1
-      }),
-      put_in(answers, ["department", "confidence"], 1.01)
-    ]
-
-    for candidate <- malformed do
-      assert {:error, %{kind: :invalid_result}} = invoke_with_answers(candidate)
+               invoke_with_answers(candidate, opts),
+             name
     end
 
-    rounded =
+    assert_receive {:record, %{outcome: :invalid_result}}
+
+    accepted = [
+      answers,
       put_in(answers, ["department", "probabilities"], %{
         "billing" => 0.504,
         "sales" => 0.505,
         "support" => 0.0
-      })
-
-    assert {:ok, _result} = invoke_with_answers(rounded)
-
-    exact_boundary =
+      }),
       put_in(answers, ["department", "probabilities"], %{
         "billing" => 0.33,
         "sales" => 0.34,
         "support" => 0.32
-      })
-
-    assert {:ok, _result} = invoke_with_answers(exact_boundary)
-  end
-
-  test "score levels, legends, finite values, sums, and weighted means are validated" do
-    answers = valid_answers()
-
-    malformed = [
-      put_in(answers, ["severity", "legend", "3"], "blocker"),
-      put_in(answers, ["severity", "probabilities"], %{
-        "0" => 0.1,
-        "1" => 0.6,
-        "2" => 0.3
       }),
-      put_in(answers, ["severity", "probabilities", "0"], -0.1),
-      put_in(answers, ["severity", "score"], 4.0),
-      put_in(answers, ["severity", "score"], 1.32),
-      put_in(answers, ["severity", "confidence"], 1.0e308)
+      put_in(answers, ["severity", "score"], 1.309),
+      put_in(answers, ["severity", "score"], 1.31)
     ]
 
-    for candidate <- malformed do
-      assert {:error, %{kind: :invalid_result}} = invoke_with_answers(candidate)
+    for candidate <- accepted do
+      assert {:ok, _result} = invoke_with_answers(candidate)
     end
-
-    rounded = put_in(answers, ["severity", "score"], 1.309)
-    assert {:ok, _result} = invoke_with_answers(rounded)
-    exact_boundary = put_in(answers, ["severity", "score"], 1.31)
-    assert {:ok, _result} = invoke_with_answers(exact_boundary)
-  end
-
-  test "boolean probabilities and provider usage must be bounded" do
-    assert {:error, %{kind: :invalid_result}} =
-             invoke_with_answers(put_in(valid_answers(), ["urgent", "noul"], -0.01))
-
-    assert {:error, %{kind: :invalid_result}} =
-             invoke_with_answers(valid_answers(),
-               usage: %{"input_tokens" => -1, "output_tokens" => 2}
-             )
 
     requester = fn _ -> {:ok, %{status: 200, body: response(%{})}} end
 

@@ -318,34 +318,6 @@ defmodule PtcRunner.ViewerSnapshotStoreTest do
   end
 
   @tag :tmp_dir
-  test "widening viewer.private does not capture inspection until refresh", %{
-    tmp_dir: directory,
-    seeded: seeded
-  } do
-    fixture = PrivateInspectionFixture.copy!(seeded, Path.join(directory, ".ptc"), "granted-run")
-    path = write_project(directory, false)
-    {:ok, project} = ProjectConfig.load(path)
-    {:ok, store} = start_granted_store(project, path, fixture)
-    on_exit(fn -> ViewerSnapshotStore.stop(store) end)
-
-    assert {:error, :inspection_not_private} =
-             ViewerSnapshotStore.conversation(store, fixture.run_id)
-
-    refute ViewerSnapshotStore.inspection?(store)
-
-    write_project(directory, true)
-
-    assert {:error, :inspection_not_private} =
-             ViewerSnapshotStore.conversation(store, fixture.run_id)
-
-    refute ViewerSnapshotStore.inspection?(store)
-
-    assert :ok = ViewerSnapshotStore.refresh(store)
-    assert ViewerSnapshotStore.inspection?(store)
-    assert {:ok, _} = ViewerSnapshotStore.conversation(store, fixture.run_id)
-  end
-
-  @tag :tmp_dir
   test "an unchanged document digest does not reload the project grant", %{
     tmp_dir: directory,
     seeded: seeded

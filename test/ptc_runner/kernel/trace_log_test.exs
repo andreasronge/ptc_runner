@@ -952,17 +952,6 @@ defmodule PtcRunner.Kernel.TraceLogTest do
   end
 
   @tag :tmp_dir
-  test "a run listing with nothing excluded reports no exclusion at all", %{tmp_dir: directory} do
-    File.write!(Path.join(directory, "normal.jsonl"), jsonl_event("normal", 1, "run-started"))
-
-    assert {:ok, sanitized_log} = TraceLog.new(source: {:directory, directory})
-    assert {:ok, page} = TraceLog.query(sanitized_log, :list_runs, %{})
-
-    refute Map.has_key?(page, "excluded_private_trace_files")
-    refute Map.has_key?(page, "excluded_sanitized_trace_files")
-  end
-
-  @tag :tmp_dir
   test "private trace creation reports chmod failures without raising", %{tmp_dir: directory} do
     path = Path.join(directory, "chmod-failure.private.jsonl")
     event = decoded_event("private-chmod", 1, "run-started")

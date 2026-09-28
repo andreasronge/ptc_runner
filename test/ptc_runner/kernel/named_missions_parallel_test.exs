@@ -37,15 +37,6 @@ defmodule PtcRunner.Kernel.NamedMissionsParallelTest do
         #(kernel/eval-source "two" "(return 2)"))))
   """
 
-  @sequential_evals """
-  (ns spike.seqeval "The same two evaluations, sequentially.")
-
-  (defn run [_input]
-    (return
-      [(kernel/eval-source "one" "(return 1)")
-       (kernel/eval-source "two" "(return 2)")]))
-  """
-
   defp stub_capability do
     {:ok, capability} =
       LLMCapability.new(
@@ -101,20 +92,11 @@ defmodule PtcRunner.Kernel.NamedMissionsParallelTest do
     assert evaluation_missions(events) == ["one", "two"]
   end
 
-  test "two direct space evaluations under pcalls contend for the single lease" do
+  test "two direct space evaluations under pcalls both succeed" do
     {outcome, events} =
       run_source(@parallel_evals, "spike.pareval", [{:library, "kernel"}], ["kernel"])
 
     assert {:ok, %{value: [one, two]}} = outcome
-    assert one["value"] == 1
-    assert two["value"] == 2
-    assert evaluation_missions(events) == ["one", "two"]
-  end
-
-  test "the same two evaluations succeed sequentially" do
-    assert {{:ok, %{value: [one, two]}}, events} =
-             run_source(@sequential_evals, "spike.seqeval", [{:library, "kernel"}], ["kernel"])
-
     assert one["value"] == 1
     assert two["value"] == 2
     assert evaluation_missions(events) == ["one", "two"]

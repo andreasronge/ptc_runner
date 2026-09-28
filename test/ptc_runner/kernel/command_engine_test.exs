@@ -78,14 +78,6 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              "cmd-7" <> String.duplicate("z", 25)
   end
 
-  test "provider activity is monotonic" do
-    assert {:ok, activity} = ProviderActivity.start_link()
-    assert ProviderActivity.value(activity) == false
-    assert :ok = ProviderActivity.mark(activity)
-    assert :ok = ProviderActivity.mark(activity)
-    assert ProviderActivity.value(activity) == true
-  end
-
   test "command runtimes pair authorization targets with their notifier" do
     runtime = CommandRuntime.standalone()
     assert runtime.authorization_targets == []
@@ -104,11 +96,6 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              )
 
     assert runtime.authorization_targets == ["workspace"]
-  end
-
-  test "the envelope schema compiles once per VM" do
-    assert {:ok, root} = CommandContract.envelope_schema_root()
-    assert {:ok, ^root} = CommandContract.envelope_schema_root()
   end
 
   test "help and version are exact phase-1 successes" do

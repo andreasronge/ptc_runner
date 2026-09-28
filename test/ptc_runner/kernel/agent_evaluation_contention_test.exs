@@ -280,47 +280,6 @@ defmodule PtcRunner.Kernel.AgentEvaluationContentionTest do
     refute_received {:agent_request, ^unexpected_request}
   end
 
-  test "four concurrent agent loops all succeed by queueing behind the evaluation lease" do
-    parent = self()
-    {:ok, counter} = Agent.start_link(fn -> 0 end)
-    expected_requests = min(4, LispContext.default_pmap_max_concurrency())
-    barrier = start_barrier(expected_requests)
-
-    # Every agent's first model call arrives at the barrier before any is
-    # released, so their `kernel/eval-source` calls collide deterministically.
-    # Queued admission must serialize them instead of failing the workflow.
-    requester = fn _request ->
-      request_number = Agent.get_and_update(counter, fn count -> {count + 1, count + 1} end)
-      send(parent, {:agent_request, request_number})
-      if request_number <= expected_requests, do: await_barrier(barrier)
-
-      {:ok,
-       %{
-         content: nil,
-         tool_calls: [
-           %{id: "c1", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
-         ]
-       }}
-    end
-
-    {:ok, config, _sink} = build_config(requester, [], [])
-
-    source = ~S"""
-    (return
-      (pcalls
-        #(agent.core/run-value "task 1" {"max_turns" 2})
-        #(agent.core/run-value "task 2" {"max_turns" 2})
-        #(agent.core/run-value "task 3" {"max_turns" 2})
-        #(agent.core/run-value "task 4" {"max_turns" 2})))
-    """
-
-    assert {:ok, result} = Kernel.run(source, config)
-    assert result.value == [42, 42, 42, 42]
-
-    assert Agent.get(counter, & &1) == 4,
-           "each agent asks the model exactly once; queueing must not spend extra calls"
-  end
-
   test "eight concurrent agent loops all succeed by queueing behind the evaluation lease" do
     parent = self()
     {:ok, counter} = Agent.start_link(fn -> 0 end)

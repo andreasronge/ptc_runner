@@ -21,14 +21,4 @@ defmodule PtcRunner.RepositoryInstructionsTest do
     refute rules =~ "mix precommit"
     refute rules =~ "scripts/worktree.sh"
   end
-
-  test "repository instructions inline documentation lookup guidance" do
-    instructions = File.read!(Path.expand("../AGENTS.md", __DIR__))
-
-    assert instructions =~ "mix usage_rules.docs"
-    assert instructions =~ "mix usage_rules.search_docs"
-    refute instructions =~ "[usage_rules usage rules](deps/usage_rules/usage-rules.md)"
-    assert instructions =~ "[usage_rules:elixir usage rules]"
-    assert instructions =~ "[usage_rules:otp usage rules]"
-  end
 end

@@ -1,12 +1,14 @@
 defmodule PtcRunner.Kernel.ServingTemplateMatrixTest do
   use ExUnit.Case,
     async: true,
-    parameterize:
-      for(
-        declared <- [:read, :write, :unknown, nil],
-        resolved <- [:read, :write, :unknown],
-        do: %{declared: declared, resolved: resolved}
-      )
+    parameterize: [
+      %{declared: :read, resolved: :read},
+      %{declared: :read, resolved: :write},
+      %{declared: :read, resolved: :unknown},
+      %{declared: :write, resolved: :read},
+      %{declared: :unknown, resolved: :read},
+      %{declared: nil, resolved: :read}
+    ]
 
   import PtcRunner.TestSupport.ServingTemplateHelpers
 

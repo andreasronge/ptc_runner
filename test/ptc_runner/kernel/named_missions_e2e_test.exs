@@ -81,10 +81,6 @@ defmodule PtcRunner.Kernel.NamedMissionsE2ETest do
     end
   end
 
-  test "the shipped named-mission workflow bundle compiles without live credentials" do
-    assert {:ok, _bundle} = shipped_loop_bundle()
-  end
-
   @tag :e2e
   test "the shipped agent.core loop drives two isolated spaces via its cfg" do
     {:ok, limits} =

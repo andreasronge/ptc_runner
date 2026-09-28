@@ -300,110 +300,33 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
-  test "an unknown namespace in a workflow session names the switch that opens a mission", %{
-    tmp_dir: directory
-  } do
+  test "workflow session mission hints follow the actual diagnostic", %{tmp_dir: directory} do
     manifest_path = write_workflow_repl_manifest(directory)
 
-    # The analyzer lists thirty-odd language namespaces and names no mission,
-    # because a workflow session carries none. Which switch would add them is a
-    # REPL fact the analyzer cannot know.
-    error =
-      assert_raise Mix.Error, fn ->
-        run_repl(["--manifest", manifest_path, "-e", "(review/summarize 1)"])
+    for {source, fragments, hint?} <- [
+          {"(review/summarize 1)", ["unknown namespace review/"], true},
+          {"(data/input)", ["data/input is not callable"], true},
+          {"(data/tickets)", ["data/tickets is not a granted data name", "Granted: data/input"],
+           true},
+          {~S|(let [x "data/foo is not a granted data name. Granted: x"] (x))|,
+           ["value is not callable"], false},
+          {"data/inupt", ["data/inupt is not a granted data name", "Granted: data/input"], true},
+          {~S|(let [x "not callable: data/tickets"] (x))|, ["value is not callable"], false}
+        ] do
+      error =
+        assert_raise Mix.Error, fn ->
+          run_repl(["--manifest", manifest_path, "-e", source])
+        end
+
+      for fragment <- fragments, do: assert(error.message =~ fragment, source)
+
+      if hint? do
+        assert error.message =~ "--mission NAME"
+        assert error.message =~ "declared: review, writing"
+      else
+        refute error.message =~ "--mission NAME"
       end
-
-    assert error.message =~ "unknown namespace review/"
-    assert error.message =~ "--mission NAME"
-    assert error.message =~ "declared: review, writing"
-  end
-
-  @tag :tmp_dir
-  test "calling the granted workflow input in a workflow session still names the switch that opens a mission",
-       %{tmp_dir: directory} do
-    manifest_path = write_workflow_repl_manifest(directory)
-
-    error =
-      assert_raise Mix.Error, fn ->
-        run_repl(["--manifest", manifest_path, "-e", "(data/input)"])
-      end
-
-    assert error.message =~ "data/input is not callable"
-    assert error.message =~ "--mission NAME"
-    assert error.message =~ "declared: review, writing"
-  end
-
-  @tag :tmp_dir
-  test "an ungranted data name in a workflow session is rejected and still names the switch",
-       %{tmp_dir: directory} do
-    manifest_path = write_workflow_repl_manifest(directory)
-
-    # Strict workflow lookup answers before callability, so the miss -- not
-    # `not_callable` -- is what has to carry the hint.
-    error =
-      assert_raise Mix.Error, fn ->
-        run_repl(["--manifest", manifest_path, "-e", "(data/tickets)"])
-      end
-
-    assert error.message =~ "data/tickets is not a granted data name"
-    assert error.message =~ "Granted: data/input"
-    assert error.message =~ "--mission NAME"
-    assert error.message =~ "declared: review, writing"
-  end
-
-  @tag :tmp_dir
-  test "a workflow session does not hint --mission for an error that merely quotes the grant diagnostic",
-       %{tmp_dir: directory} do
-    manifest_path = write_workflow_repl_manifest(directory)
-
-    error =
-      assert_raise Mix.Error, fn ->
-        run_repl([
-          "--manifest",
-          manifest_path,
-          "-e",
-          ~S|(let [x "data/foo is not a granted data name. Granted: x"] (x))|
-        ])
-      end
-
-    assert error.message =~ "value is not callable"
-    refute error.message =~ "--mission NAME"
-  end
-
-  @tag :tmp_dir
-  test "a bare misspelled data name in a workflow session is rejected instead of answering nil",
-       %{
-         tmp_dir: directory
-       } do
-    manifest_path = write_workflow_repl_manifest(directory)
-
-    error =
-      assert_raise Mix.Error, fn ->
-        run_repl(["--manifest", manifest_path, "-e", "data/inupt"])
-      end
-
-    assert error.message =~ "data/inupt is not a granted data name"
-    assert error.message =~ "Granted: data/input"
-  end
-
-  @tag :tmp_dir
-  test "a workflow session does not hint --mission for an unrelated not_callable string", %{
-    tmp_dir: directory
-  } do
-    manifest_path = write_workflow_repl_manifest(directory)
-
-    error =
-      assert_raise Mix.Error, fn ->
-        run_repl([
-          "--manifest",
-          manifest_path,
-          "-e",
-          ~S|(let [x "not callable: data/tickets"] (x))|
-        ])
-      end
-
-    assert error.message =~ "value is not callable"
-    refute error.message =~ "--mission NAME"
+    end
   end
 
   @tag :tmp_dir
@@ -963,6 +886,36 @@ defmodule PtcRunner.ReplFrontendTest do
     assert description["frontend"]["output_formats"] == ["clojure", "jsonl"]
     refute output =~ "#Function<"
     refute output =~ File.cwd!()
+  end
+
+  test "describes the private analysis profile through JSONL" do
+    output =
+      capture_io(fn ->
+        run_repl(["--describe-profile", "private-run-analysis-v2", "--format", "jsonl"])
+      end)
+
+    assert [description] = decode_jsonl(output)
+    assert description["type"] == "profile"
+    assert description["id"] == "private-run-analysis-v2"
+    assert description["components"] == ["cap", "analysis", "prompt.audit"]
+    assert description["resources"] |> Map.keys() |> Enum.sort() == ["inspection", "traces"]
+
+    assert description["frontend"]["private_unattended"]["input_modes"] ==
+             ["eval", "load", "script", "stdin"]
+  end
+
+  test "describes the private catalog profile through JSONL" do
+    output =
+      capture_io(fn ->
+        run_repl(["--describe-profile", "private-run-catalog-v1", "--format", "jsonl"])
+      end)
+
+    assert [description] = decode_jsonl(output)
+    assert description["type"] == "profile"
+    assert description["id"] == "private-run-catalog-v1"
+    assert description["components"] == ["cap", "analysis.catalog"]
+    assert description["explicit_capabilities"] == ["analysis-catalog"]
+    assert description["resources"] |> Map.keys() |> Enum.sort() == ["inspection", "traces"]
   end
 
   test "the default format prints the whole private profile contract" do

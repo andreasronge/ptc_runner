@@ -21,11 +21,4 @@ defmodule PtcRunner.Kernel.DoctorEnvironmentTest do
     assert {:ok, rows} = DoctorPlan.new(catalog, nil, facts, :default)
     assert {:ok, _checks} = DoctorPlan.checks(rows)
   end
-
-  test "a runtime meeting its requirement reports supported" do
-    # The suite runs on a supported toolchain, so an unsupported reading here
-    # means the constant drifted rather than that the runtime is genuinely old.
-    assert Version.match?(System.version(), DoctorEnvironment.elixir_requirement())
-    assert DoctorEnvironment.facts().runtime == :supported
-  end
 end

@@ -153,6 +153,7 @@ defmodule PtcRunner.Kernel.CommandMaterializeTest do
     assert outcome.envelope["status"] == "ok"
     assert outcome.envelope["result"]["mode"] == "source-out"
     assert File.read!(exported) == @placeholder
+    assert Bitwise.band(File.stat!(exported).mode, 0o777) == 0o600
 
     assert {:error, refused} =
              CommandEngine.dispatch([

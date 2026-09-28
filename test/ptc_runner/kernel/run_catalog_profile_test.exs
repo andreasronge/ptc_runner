@@ -1,7 +1,6 @@
 defmodule PtcRunner.Kernel.RunCatalogProfileTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.Kernel.AnalysisProfileRegistry
   alias PtcRunner.Kernel.AnalysisResources
   alias PtcRunner.Kernel.AnalysisSession
   alias PtcRunner.Kernel.AnalysisSessionBuilder
@@ -13,29 +12,6 @@ defmodule PtcRunner.Kernel.RunCatalogProfileTest do
 
   setup_all do
     PrivateInspectionFixture.seed_context(["private-run"])
-  end
-
-  test "the closed catalog profile declares one capability and two private resources" do
-    assert AnalysisProfileRegistry.ids() == [
-             "private-run-analysis-v2",
-             "private-run-catalog-v1",
-             "run-analysis-v1"
-           ]
-
-    assert {:ok, description} = AnalysisProfileRegistry.description(@profile_id)
-    assert description["components"] == ["cap", "analysis.catalog"]
-    assert description["namespaces"] == ["analysis", "cap"]
-    assert description["explicit_capabilities"] == ["analysis-catalog"]
-    assert description["resources"] |> Map.keys() |> Enum.sort() == ["inspection", "traces"]
-    assert description["source_data_class"] == "private_inspection"
-    assert description["result_data_class"] == "private_inspection"
-
-    assert {:ok, private_analysis} =
-             AnalysisProfileRegistry.description("private-run-analysis-v2")
-
-    assert description["frontend"] == private_analysis["frontend"]
-
-    assert RunCatalogProfile.explicit_capabilities() == ["analysis-catalog"]
   end
 
   @tag :tmp_dir

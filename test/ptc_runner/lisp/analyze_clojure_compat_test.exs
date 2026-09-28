@@ -9,136 +9,33 @@ defmodule PtcRunner.Lisp.AnalyzeClojureCompatTest do
 
   alias PtcRunner.Lisp.Analyze
 
-  describe "clojure.string namespace normalization" do
-    test "clojure.string/join normalizes to join" do
-      raw = {:ns_symbol, :"clojure.string", :join}
-      assert {:ok, {:var, :join}} = Analyze.analyze(raw)
-    end
-
-    test "clojure.string/split normalizes to split" do
-      raw = {:ns_symbol, :"clojure.string", :split}
-      assert {:ok, {:var, :split}} = Analyze.analyze(raw)
-    end
-
-    test "clojure.string/includes? normalizes to includes?" do
-      raw = {:ns_symbol, :"clojure.string", :includes?}
-      assert {:ok, {:var, :includes?}} = Analyze.analyze(raw)
-    end
-
-    test "clojure.string/blank? normalizes to blank?" do
-      raw = {:ns_symbol, :"clojure.string", :blank?}
-      assert {:ok, {:var, :blank?}} = Analyze.analyze(raw)
-    end
-
-    test "clojure.string/trim normalizes to trim" do
-      raw = {:ns_symbol, :"clojure.string", :trim}
-      assert {:ok, {:var, :trim}} = Analyze.analyze(raw)
-    end
-  end
-
-  describe "str shorthand namespace" do
-    test "str/join normalizes to join" do
-      raw = {:ns_symbol, :str, :join}
-      assert {:ok, {:var, :join}} = Analyze.analyze(raw)
-    end
-
-    test "str/split normalizes to split" do
-      raw = {:ns_symbol, :str, :split}
-      assert {:ok, {:var, :split}} = Analyze.analyze(raw)
-    end
-  end
-
-  describe "string shorthand namespace" do
-    test "string/replace normalizes to replace" do
-      raw = {:ns_symbol, :string, :replace}
-      assert {:ok, {:var, :replace}} = Analyze.analyze(raw)
-    end
-  end
-
-  describe "clojure.core namespace normalization" do
-    test "clojure.core/map normalizes to map" do
-      raw = {:ns_symbol, :"clojure.core", :map}
-      assert {:ok, {:var, :map}} = Analyze.analyze(raw)
-    end
-
-    test "clojure.core/filter normalizes to filter" do
-      raw = {:ns_symbol, :"clojure.core", :filter}
-      assert {:ok, {:var, :filter}} = Analyze.analyze(raw)
-    end
-
-    test "clojure.core/reduce normalizes to reduce" do
-      raw = {:ns_symbol, :"clojure.core", :reduce}
-      assert {:ok, {:var, :reduce}} = Analyze.analyze(raw)
-    end
-
-    test "clojure.core/str normalizes to str even though it is displayed as string" do
-      raw = {:ns_symbol, :"clojure.core", :str}
-      assert {:ok, {:var, :str}} = Analyze.analyze(raw)
-    end
-
-    test "clojure.core/subs normalizes to subs even though it is displayed as string" do
-      raw = {:ns_symbol, :"clojure.core", :subs}
-      assert {:ok, {:var, :subs}} = Analyze.analyze(raw)
-    end
-
-    test "clojure.core/re-find normalizes to re-find even though it is displayed as regex" do
-      raw = {:ns_symbol, :"clojure.core", :"re-find"}
-      assert {:ok, {:var, :"re-find"}} = Analyze.analyze(raw)
-    end
-
-    test "clojure.core/abs normalizes to abs even though it is displayed as math" do
-      raw = {:ns_symbol, :"clojure.core", :abs}
-      assert {:ok, {:var, :abs}} = Analyze.analyze(raw)
-    end
-  end
-
-  describe "core shorthand namespace" do
-    test "core/map normalizes to map" do
-      raw = {:ns_symbol, :core, :map}
-      assert {:ok, {:var, :map}} = Analyze.analyze(raw)
-    end
-
-    test "core/first normalizes to first" do
-      raw = {:ns_symbol, :core, :first}
-      assert {:ok, {:var, :first}} = Analyze.analyze(raw)
-    end
-  end
-
-  describe "clojure.set namespace normalization" do
-    test "clojure.set/set normalizes to set" do
-      raw = {:ns_symbol, :"clojure.set", :set}
-      assert {:ok, {:var, :set}} = Analyze.analyze(raw)
-    end
-  end
-
-  describe "clojure.walk namespace normalization" do
-    test "clojure.walk/prewalk normalizes to prewalk" do
-      raw = {:ns_symbol, :"clojure.walk", :prewalk}
-      assert {:ok, {:var, :prewalk}} = Analyze.analyze(raw)
-    end
-
-    test "clojure.walk/postwalk normalizes to postwalk" do
-      raw = {:ns_symbol, :"clojure.walk", :postwalk}
-      assert {:ok, {:var, :postwalk}} = Analyze.analyze(raw)
-    end
-
-    test "clojure.walk/walk normalizes to walk" do
-      raw = {:ns_symbol, :"clojure.walk", :walk}
-      assert {:ok, {:var, :walk}} = Analyze.analyze(raw)
-    end
-  end
-
-  describe "set shorthand namespace" do
-    test "set/contains? normalizes to contains?" do
-      raw = {:ns_symbol, :set, :contains?}
-      assert {:ok, {:var, :contains?}} = Analyze.analyze(raw)
-    end
-  end
-
-  describe "walk shorthand namespace" do
-    test "walk/prewalk normalizes to prewalk" do
-      raw = {:ns_symbol, :walk, :prewalk}
-      assert {:ok, {:var, :prewalk}} = Analyze.analyze(raw)
+  test "known Clojure namespaces normalize each supported symbol" do
+    for {namespace, function} <- [
+          {:"clojure.string", :join},
+          {:"clojure.string", :split},
+          {:"clojure.string", :includes?},
+          {:"clojure.string", :blank?},
+          {:"clojure.string", :trim},
+          {:str, :join},
+          {:str, :split},
+          {:string, :replace},
+          {:"clojure.core", :map},
+          {:"clojure.core", :filter},
+          {:"clojure.core", :reduce},
+          {:"clojure.core", :str},
+          {:"clojure.core", :subs},
+          {:"clojure.core", :"re-find"},
+          {:"clojure.core", :abs},
+          {:core, :map},
+          {:core, :first},
+          {:"clojure.set", :set},
+          {:"clojure.walk", :prewalk},
+          {:"clojure.walk", :postwalk},
+          {:"clojure.walk", :walk},
+          {:set, :contains?},
+          {:walk, :prewalk}
+        ] do
+      assert {:ok, {:var, ^function}} = Analyze.analyze({:ns_symbol, namespace, function})
     end
   end
 

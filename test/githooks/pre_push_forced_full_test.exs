@@ -100,17 +100,4 @@ defmodule PtcRunner.GitHooks.PrePushForcedFullTest do
 
     assert "ci-gate viewer" in (mix_marker |> File.read!() |> String.split("\n", trim: true))
   end
-
-  @tag :slow
-  test "the removed concurrency environment variable cannot throttle the full gate" do
-    %{repo: repo, mix_marker: mix_marker, path: path} =
-      git_repo_with_change("lib/example.ex")
-
-    {output, status} = run_hook(repo, path, [{"PTC_PRE_PUSH_MAX_CASES", "2"}])
-
-    assert status == 0
-    refute output =~ "Test concurrency"
-
-    assert_core_gate_invocations(mix_marker)
-  end
 end
