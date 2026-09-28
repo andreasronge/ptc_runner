@@ -383,3 +383,18 @@ results, credentials, paths, or arbitrary user text in labels.
 
 The generated application-manifest schema is the exact field reference; this
 guide documents the additional semantic and authority rules applied at load.
+
+### Selecting a decision provider
+
+A workflow selects one host-installed `decision` or `decision_replay` provider
+by name through `providers.workflow`, just as it selects a chat installation:
+
+```json
+{"providers":{"workflow":[{"name":"decisions"}]}}
+```
+
+Include `{"library":"decision"}` in `workflow.components`, declare it as a
+dependency of the calling component, and call `decision/request` with `state`
+and named `questions`. The workflow owns probability thresholds. Live alpha
+OpenRouter Decisions configuration and the required per-call reservation
+bounds belong to [the host installation](host-installation.md#decision-model-installations).

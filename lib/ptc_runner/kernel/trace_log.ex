@@ -2944,6 +2944,7 @@ defmodule PtcRunner.Kernel.TraceLog do
       "workflow_capability_calls" => call_counts.workflow,
       "mission_capability_calls" => call_counts.mission,
       "llm_calls" => call_counts.llm,
+      "decision_calls" => call_counts.decision,
       "call_counts_complete" => call_counts.complete?,
       "llm_budget" => terminal_llm_budget(stopped),
       "llm_spend" => terminal_llm_spend(stopped),
@@ -2986,6 +2987,7 @@ defmodule PtcRunner.Kernel.TraceLog do
           workflow: Enum.sum(Map.values(workflow)),
           mission: Enum.sum(Map.values(mission)),
           llm: chat_call_count(workflow),
+          decision: Map.get(workflow, "decision-request", 0),
           complete?: true
         }
 
@@ -2997,6 +2999,7 @@ defmodule PtcRunner.Kernel.TraceLog do
             workflow: scoped_terminal_call_count(calls, "workflow/"),
             mission: scoped_terminal_call_count(calls, "mission/"),
             llm: chat_call_count(calls, "workflow/"),
+            decision: Map.get(calls, "workflow/decision-request", 0),
             complete?: true
           }
         else
@@ -3004,7 +3007,7 @@ defmodule PtcRunner.Kernel.TraceLog do
         end
 
       calls when is_map(calls) ->
-        %{workflow: 0, mission: 0, llm: 0, complete?: true}
+        %{workflow: 0, mission: 0, llm: 0, decision: 0, complete?: true}
 
       _legacy_or_incomplete ->
         observed_call_counts(events)
@@ -3016,6 +3019,13 @@ defmodule PtcRunner.Kernel.TraceLog do
       workflow: quota_backed_capability_call_count(events, "workflow"),
       mission: quota_backed_capability_call_count(events, "mission"),
       llm: capability_name_count(events, "workflow"),
+      decision:
+        Enum.count(
+          events,
+          &(&1["type"] == "capability-started" and
+              stringify(event_data(&1, "environment")) == "workflow" and
+              event_data(&1, "name") == "decision-request")
+        ),
       complete?: false
     }
   end

@@ -26,7 +26,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   are not started, and remote endpoints are not contacted. Those operations
   belong to the later preflight and acquisition phases.
 
-  The closed V1 source identifiers are `mcp`, `llm`, `llm_replay`,
+  The closed V1 source identifiers are `mcp`, `llm`, `llm_replay`, `decision`, `decision_replay`,
   `ptc_trace_snapshot`, `ptc_private_trace_snapshot`, and `ptc_inspection_snapshot`. LLM credentials are explicit bindings passed to
   the adapter per request rather than ambient provider-specific environment
   lookup. The native snapshot sources fix host-relative directories and
@@ -55,6 +55,8 @@ defmodule PtcRunner.Kernel.HostConfig do
   name a read mapping. MCP effects form the closed `read`/`write` operator
   classification; server-supplied annotations cannot widen or narrow it.
   """
+
+  alias PtcRunner.Kernel.LLMUsage
 
   alias PtcRunner.Kernel.ConfinedFile
   alias PtcRunner.Kernel.InstallationConfigDigest
@@ -240,12 +242,21 @@ defmodule PtcRunner.Kernel.HostConfig do
               }
             }
 
+  @type decision_installation :: %{
+          required(:source) => :decision | :decision_replay,
+          required(:installation_revision) => binary(),
+          required(:installation_config_digest) => binary(),
+          required(:max_total_tokens_per_call) => pos_integer(),
+          required(:max_cost_microusd_per_call) => pos_integer(),
+          optional(atom()) => term()
+        }
+
   @type t :: %__MODULE__{
           path: binary(),
           directory: binary(),
           runtime: %{stdio_launcher: binary() | nil},
           credentials: %{binary() => credential()},
-          install: %{binary() => installation()}
+          install: %{binary() => installation() | decision_installation()}
         }
 
   @doc false
@@ -358,7 +369,7 @@ defmodule PtcRunner.Kernel.HostConfig do
              runtime: %{stdio_launcher: binary() | nil},
              limits: Limits.t(),
              credentials: %{binary() => credential()},
-             install: %{binary() => installation()}
+             install: %{binary() => installation() | decision_installation()}
            }}
           | {:error, :invalid_host_config}
   def decode(value, directory) when is_map(value) and is_binary(directory) do
@@ -725,6 +736,12 @@ defmodule PtcRunner.Kernel.HostConfig do
         "ptc_inspection_snapshot" ->
           inspection_snapshot_installation(value)
 
+        "decision" ->
+          decision_installation(value, credentials, limits)
+
+        "decision_replay" ->
+          decision_replay_installation(value)
+
         "llm_replay" ->
           llm_replay_installation(value)
 
@@ -771,6 +788,87 @@ defmodule PtcRunner.Kernel.HostConfig do
       _reason -> {:error, :invalid_installation}
     end
   end
+
+  defp decision_installation(value, credentials, limits) do
+    allowed =
+      ~w(source model credential routing usage_guarantees reservation_tariff installation_revision ceilings data_class accepts_data max_cost_per_call max_total_tokens_per_call)
+
+    with :ok <-
+           exact_keys(
+             value,
+             allowed,
+             ~w(source model credential usage_guarantees installation_revision max_cost_per_call max_total_tokens_per_call)
+           ),
+         model when is_binary(model) <- value["model"],
+         true <- valid_string?(model, 256),
+         credential when is_binary(credential) <- value["credential"],
+         true <- Map.has_key?(credentials, credential),
+         {:ok, routing} <- decision_routing(Map.get(value, "routing", %{})),
+         {:ok, guarantees} <- usage_guarantees(value["usage_guarantees"]),
+         :ok <- usage_guarantee_requirements(guarantees, limits),
+         {:ok, tariff} <- reservation_tariff(value["reservation_tariff"]),
+         {:ok, bounds} <- decision_bounds(value),
+         {:ok, revision} <- revision(value["installation_revision"]),
+         {:ok, ceilings} <- llm_ceilings(Map.get(value, "ceilings", %{}), limits),
+         {:ok, data_class} <- data_class(Map.get(value, "data_class", "normal")),
+         {:ok, accepts_data} <- accepts_data(Map.get(value, "accepts_data", ["normal"])) do
+      {:ok,
+       Map.merge(bounds, %{
+         source: :decision,
+         model: model,
+         credential: credential,
+         routing: routing,
+         usage_guarantees: guarantees,
+         reservation_tariff: tariff,
+         installation_revision: revision,
+         ceilings: ceilings,
+         data_class: data_class,
+         accepts_data: accepts_data
+       })}
+    else
+      _ -> {:error, :invalid_installation}
+    end
+  end
+
+  defp decision_replay_installation(value) do
+    with {:ok, bounds} <- decision_bounds(value),
+         {:ok, replay} <-
+           value
+           |> Map.drop(~w(max_cost_per_call max_total_tokens_per_call))
+           |> Map.put("source", "llm_replay")
+           |> llm_replay_installation() do
+      {:ok, Map.merge(replay, bounds) |> Map.put(:source, :decision_replay)}
+    else
+      _ -> {:error, :invalid_installation}
+    end
+  end
+
+  defp decision_bounds(%{
+         "max_cost_per_call" => %{"currency" => "USD", "amount" => amount} = cost,
+         "max_total_tokens_per_call" => tokens
+       })
+       when map_size(cost) == 2 and is_binary(amount) and is_integer(tokens) and tokens > 0 do
+    with true <- tokens <= LLMUsage.maximum_integer(),
+         true <- Regex.match?(~r/\A(?:0|[1-9][0-9]*)(?:\.[0-9]+)?\z/, amount),
+         {:ok, microunits} when microunits > 0 <-
+           LLMUsage.ceil_scaled_decimal(amount, 1_000_000, 1) do
+      {:ok, %{max_cost_microusd_per_call: microunits, max_total_tokens_per_call: tokens}}
+    else
+      _ -> {:error, :invalid_decision_bounds}
+    end
+  end
+
+  defp decision_bounds(_), do: {:error, :invalid_decision_bounds}
+
+  defp decision_routing(value) when is_map(value) do
+    if Map.keys(value) -- ~w(zdr data_collection allow_fallbacks) == [] and
+         Enum.all?(value, fn
+           {"data_collection", v} -> v in ["allow", "deny"]
+           {_, v} -> is_boolean(v)
+         end), do: {:ok, value}, else: {:error, :invalid_routing}
+  end
+
+  defp decision_routing(_), do: {:error, :invalid_routing}
 
   defp llm_installation(value, credentials, limits) do
     allowed =
@@ -1600,11 +1698,72 @@ defmodule PtcRunner.Kernel.HostConfig do
       "oneOf" => [
         mcp_installation_schema(),
         llm_installation_schema(),
+        decision_installation_schema(),
+        decision_replay_installation_schema(),
         trace_snapshot_installation_schema("ptc_trace_snapshot"),
         trace_snapshot_installation_schema("ptc_private_trace_snapshot"),
         inspection_snapshot_installation_schema(),
         llm_replay_installation_schema()
       ]
+    }
+  end
+
+  defp decision_installation_schema do
+    chat = llm_installation_schema()
+
+    properties =
+      chat["properties"]
+      |> Map.drop(~w(cache params structured_output_mode))
+      |> Map.put("source", %{"const" => "decision"})
+      |> Map.put(
+        "routing",
+        closed_object(%{
+          "zdr" => %{"type" => "boolean"},
+          "data_collection" => %{"enum" => ["allow", "deny"]},
+          "allow_fallbacks" => %{"type" => "boolean"}
+        })
+      )
+      |> Map.merge(decision_bounds_schema())
+
+    required_object(
+      properties,
+      ~w(source model credential usage_guarantees installation_revision max_cost_per_call max_total_tokens_per_call)
+    )
+  end
+
+  defp decision_replay_installation_schema do
+    replay = llm_replay_installation_schema()
+
+    properties =
+      replay["properties"]
+      |> Map.put("source", %{"const" => "decision_replay"})
+      |> Map.merge(decision_bounds_schema())
+
+    required_object(
+      properties,
+      ~w(source fixtures installation_revision max_cost_per_call max_total_tokens_per_call)
+    )
+  end
+
+  defp decision_bounds_schema do
+    %{
+      "max_cost_per_call" =>
+        required_object(
+          %{
+            "currency" => %{"const" => "USD"},
+            "amount" => %{
+              "type" => "string",
+              "pattern" => "^(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+              "maxLength" => 64
+            }
+          },
+          ~w(currency amount)
+        ),
+      "max_total_tokens_per_call" => %{
+        "type" => "integer",
+        "minimum" => 1,
+        "maximum" => LLMUsage.maximum_integer()
+      }
     }
   end
 

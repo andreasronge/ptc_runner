@@ -479,7 +479,46 @@ narrows these aliases.</li><li><a href="/guides/building-agents/">Building agent
 capabilities.</li><li><a href="/reference/cli/">Running and debugging</a> runs and inspects the
 application.</li><li><a href="/reference/mcp/">Connecting tools with MCP</a> installs external
 tools without putting transport authority in a manifest.</li><li><a href="/guides/evaluating-with-replay/">Evaluating with replay</a> fixes model responses for
-deterministic comparisons.</li></ul>
+deterministic comparisons.</li></ul><h2 id="decision-model-installations">Decision model installations</h2><p><code class="inline">decision</code> installs the <strong>alpha</strong> <a href="https://openrouter.ai/typesafe/jev-1.13">OpenRouter Decisions backend</a>. Its vendor-neutral capability
+is <code class="inline">decision-request</code>, exposed by the shipped <code class="inline">decision/request</code> prelude.
+Boolean answers contain probabilities; your workflow applies thresholds.
+Measured probabilities, distributions, and confidence may be null for a
+backend that cannot measure them. The result records the served model ID.</p><pre><code class="json language-json">{
+  &quot;credentials&quot;: {&quot;decisions_key&quot;: {&quot;env&quot;: &quot;OPENROUTER_API_KEY&quot;}},
+  &quot;install&quot;: {
+    &quot;decisions&quot;: {
+      &quot;source&quot;: &quot;decision&quot;,
+      &quot;model&quot;: &quot;typesafe/jev-1.13&quot;,
+      &quot;credential&quot;: &quot;decisions_key&quot;,
+      &quot;routing&quot;: {&quot;zdr&quot;: true, &quot;data_collection&quot;: &quot;deny&quot;, &quot;allow_fallbacks&quot;: false},
+      &quot;usage_guarantees&quot;: {&quot;tokens&quot;: true, &quot;cost_currency&quot;: &quot;USD&quot;},
+      &quot;max_cost_per_call&quot;: {&quot;currency&quot;: &quot;USD&quot;, &quot;amount&quot;: &quot;0.01&quot;},
+      &quot;max_total_tokens_per_call&quot;: 8000,
+      &quot;installation_revision&quot;: &quot;decisions-v1&quot;
+    }
+  }
+}</code></pre><p>The closed installation requires <code class="inline">model</code>, a <code class="inline">credential</code> binding name,
+<code class="inline">usage_guarantees</code>, <code class="inline">installation_revision</code>, and both per-call bounds.
+Credentials are resolved from <code class="inline">credentials</code>; literal keys are refused.
+Optional <code class="inline">routing</code> accepts only boolean <code class="inline">zdr</code>, <code class="inline">data_collection</code> (<code class="inline">allow</code> or
+<code class="inline">deny</code>), and boolean <code class="inline">allow_fallbacks</code>, sent as the backend's <code class="inline">provider</code> field.
+Optional <code class="inline">reservation_tariff</code> identifies a host policy; it does not compute a
+reservation. <code class="inline">ceilings</code>, <code class="inline">data_class</code>, and <code class="inline">accepts_data</code> use the same fields
+as live LLM installations. Decision sources belong in the workflow.</p><p><code class="inline">max_cost_per_call</code> is a positive USD decimal string. <code class="inline">0.01</code> USD is recommended
+for this first backend. <code class="inline">max_total_tokens_per_call</code> is a positive integer;
+<code class="inline">8000</code> is recommended, and hosts sending large <code class="inline">state</code> inputs must raise it.
+When the corresponding ceiling is enabled, each call reserves exactly these
+bounds against <code class="inline">llm_cost_microusd</code> and <code class="inline">llm_total_tokens</code>, shared with chat
+calls. Validated reported cost and tokens settle after the response. An
+exceeded bound is still charged in full and fails permanently with
+<code class="inline">invalid_result</code>, without retry. Decision calls also count against
+<code class="inline">max_active_provider_calls</code>.</p><p><code class="inline">decision_replay</code> uses the same JSON Lines fixture format and request hashing
+as <code class="inline">llm_replay</code>, with vendor-neutral decision responses. It requires <code class="inline">fixtures</code>,
+<code class="inline">installation_revision</code>, <code class="inline">max_cost_per_call</code>, and <code class="inline">max_total_tokens_per_call</code>;
+no credential or model selector is needed. Its optional <code class="inline">ceilings</code> are the
+replay ceilings. Reservations and settlement use the same shared ledgers as
+live decisions. See <code class="inline">examples/decision-refund-triage/ptc-project.json</code> for a
+complete offline project.</p>
 </article>
 <nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/application-manifest/">&larr; Application-manifest reference</a><a class="pager-next" href="/reference/project-files/">Project-configuration reference &rarr;</a></nav>
 <footer>

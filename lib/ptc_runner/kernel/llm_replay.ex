@@ -1,6 +1,11 @@
 defmodule PtcRunner.Kernel.LLMReplay do
   @moduledoc """
-  Serves language-model responses from a frozen fixture file.
+  Serves model-call responses from a frozen fixture file.
+
+  Both chat and decision replay installations use this same fixture owner and
+  request hash. Decision fixtures carry vendor-neutral `model`, `answers`, and
+  `usage`; successful chat fixtures carry `tokens` for accounting. The calling
+  capability validates the response contract and shares the run budget ledgers.
 
   Evaluation needs a workflow LLM whose answers do not move between a baseline
   run and a candidate run, otherwise a behavioural difference cannot be

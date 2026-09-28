@@ -154,7 +154,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     {"Agent entry points", ~w(agent.main agent.core)},
     {"Agent loop policy",
      ~w(agent.prompt agent.feedback agent.retry agent.native agent.failure agent.machine)},
-    {"Evaluation and models", ~w(kernel llm)},
+    {"Evaluation and models", ~w(kernel llm decision)},
     {"Workflow helpers", ~w(cap runtime result workflow.event)},
     {"Run evidence", ~w(analysis debug.nav prompt.audit)}
   ]

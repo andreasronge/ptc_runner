@@ -162,6 +162,14 @@ defmodule PtcRunner.Kernel.Capability do
   defp valid_validator(nil), do: :ok
   defp valid_validator(validate) when is_function(validate, 1), do: :ok
   defp valid_validator(_validate), do: {:error, :invalid_capability}
+
+  defp valid_llm_reservation(
+         %{source: source, total_tokens: tokens, cost_microusd: cost} = reservation
+       )
+       when source in ["decision", "decision_replay"] and map_size(reservation) == 7 and
+              is_integer(tokens) and tokens > 0 and is_integer(cost) and cost > 0,
+       do: :ok
+
   defp valid_llm_reservation(nil), do: :ok
 
   defp valid_llm_reservation(%{source: "llm_replay"} = reservation)

@@ -30,7 +30,7 @@ defmodule PtcRunner.Kernel.ModelCapabilitiesTest do
     end
 
     for name <- ["decision-request", :"decision-request"] do
-      refute ModelCapabilities.model_call?(name)
+      assert ModelCapabilities.model_call?(name)
       refute ModelCapabilities.chat?(name)
       assert ModelCapabilities.reserved_name?(name)
     end

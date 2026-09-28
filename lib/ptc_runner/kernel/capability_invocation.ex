@@ -85,6 +85,25 @@ defmodule PtcRunner.Kernel.CapabilityInvocation do
   defp put_llm_reservation(invocation, %{source: "llm_replay"}),
     do: %{invocation | llm_source: "llm_replay"}
 
+  defp put_llm_reservation(
+         invocation,
+         %{source: source, total_tokens: tokens, cost_microusd: cost} = metadata
+       )
+       when source in ["decision", "decision_replay"],
+       do: %{
+         invocation
+         | llm_source: source,
+           reservation: %{total_tokens: tokens, cost_microusd: cost},
+           usage_projection: :llm_tokens,
+           route_key: metadata.alias,
+           max_calls: metadata.max_calls,
+           request_timeout_ms: metadata.request_timeout_ms,
+           event_attributes: %{
+             alias: metadata.alias,
+             installation_revision: metadata.installation_revision
+           }
+       }
+
   defp put_llm_reservation(invocation, _reservation), do: invocation
 
   @doc false

@@ -3,7 +3,7 @@ defmodule PtcRunner.Kernel.Library do
   Shipped PTC-Lisp libraries as explicit Kernel components.
 
   Available component IDs are `kernel`, `runtime`, `cap`, `workflow.event`,
-  `llm`, `agent.native`, `agent.core`, `agent.failure`, `agent.feedback`,
+  `llm`, `decision`, `agent.native`, `agent.core`, `agent.failure`, `agent.feedback`,
   `agent.machine`, `agent.retry`, `agent.prompt`, `agent.main`, `result`,
   `analysis`, `debug.nav`, and `prompt.audit`.
 
@@ -74,6 +74,8 @@ defmodule PtcRunner.Kernel.Library do
   @runtime_path Path.expand("../../../priv/preludes/kernel/runtime.clj", __DIR__)
   @cap_path Path.expand("../../../priv/preludes/kernel/cap.clj", __DIR__)
   @workflow_event_path Path.expand("../../../priv/preludes/kernel/workflow.event.clj", __DIR__)
+  @decision_path Path.expand("../../../priv/preludes/kernel/decision.clj", __DIR__)
+  @external_resource @decision_path
   @llm_path Path.expand("../../../priv/preludes/kernel/llm.clj", __DIR__)
   @agent_native_path Path.expand("../../../priv/preludes/kernel/agent.native.clj", __DIR__)
   @agent_prompt_path Path.expand("../../../priv/preludes/kernel/agent.prompt.clj", __DIR__)
@@ -110,6 +112,7 @@ defmodule PtcRunner.Kernel.Library do
     "cap" => File.read!(@cap_path),
     "workflow.event" => File.read!(@workflow_event_path),
     "llm" => File.read!(@llm_path),
+    "decision" => File.read!(@decision_path),
     "agent.native" => File.read!(@agent_native_path),
     "agent.prompt" => File.read!(@agent_prompt_path),
     "agent.core" => File.read!(@agent_core_path),

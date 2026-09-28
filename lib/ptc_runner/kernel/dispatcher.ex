@@ -542,7 +542,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
   defp maybe_put_route_quota(route, _invocation), do: route
 
   defp maybe_put_llm_reservation(route, %CapabilityInvocation{llm_source: source} = invocation)
-       when source in ["llm", "llm_replay"] do
+       when source in ["llm", "llm_replay", "decision", "decision_replay"] do
     route
     |> Map.put(:source, source)
     |> maybe_put_positive(:output_tokens, invocation.llm_output_tokens)
@@ -750,6 +750,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
           |> maybe_put_settlement_usage(settlement, invocation.usage_projection)
           |> maybe_put_usage_observation(settlement, invocation.usage_projection)
           |> maybe_put_llm_result_metadata(result, invocation.usage_projection)
+          |> maybe_put_decision_model(result, public_name)
           |> Map.merge(%{
             capability_id: capability_id,
             environment: environment,
@@ -1281,7 +1282,10 @@ defmodule PtcRunner.Kernel.Dispatcher do
   defp settlement_evidence({:ok, value}) when is_map(value) and not is_struct(value) do
     case Map.fetch(value, "tokens") do
       :error ->
-        {:adapter_success, :missing}
+        case LLMUsage.decision_usage(Map.get(value, "usage")) do
+          nil -> {:adapter_success, :missing}
+          usage -> {:adapter_success, {:valid, usage}}
+        end
 
       {:ok, usage} ->
         case LLMUsage.normalize(usage) do
@@ -1321,7 +1325,11 @@ defmodule PtcRunner.Kernel.Dispatcher do
           %{
             status: :error,
             kind: :provider_error,
-            reason: :reservation_bound_exceeded,
+            reason:
+              if(capability.name == "decision-request",
+                do: :invalid_result,
+                else: :reservation_bound_exceeded
+              ),
             retryable?: false
           },
           environment,
@@ -1597,6 +1605,14 @@ defmodule PtcRunner.Kernel.Dispatcher do
         end
     end
   end
+
+  defp attest_llm_reservation(
+         %CapabilityInvocation{llm_source: source} = invocation,
+         _state,
+         _heap,
+         _deadline
+       )
+       when source in ["decision", "decision_replay"], do: {:ok, invocation}
 
   defp attest_llm_reservation(
          %CapabilityInvocation{llm_source: "llm"} = invocation,
@@ -2238,6 +2254,15 @@ defmodule PtcRunner.Kernel.Dispatcher do
         post_invocation_failure(llm_request_timeout(), environment, invocation.capability)
     end
   end
+
+  defp maybe_put_decision_model(
+         data,
+         %{status: :ok, value: %{"model" => model}},
+         "decision-request"
+       )
+       when is_binary(model), do: Map.put(data, :served_model, model)
+
+  defp maybe_put_decision_model(data, _result, _name), do: data
 
   defp maybe_put_llm_result_metadata(data, %{status: :ok, value: value}, :llm_tokens)
        when is_map(value) do

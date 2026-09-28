@@ -13,13 +13,18 @@ defmodule PtcRunner.Kernel.ModelCapabilities do
 
   @chat_name "llm-request"
   @future_model_names ["decision-request"]
-  @model_sources %{llm: @chat_name, llm_replay: @chat_name}
+  @model_sources %{
+    llm: @chat_name,
+    llm_replay: @chat_name,
+    decision: "decision-request",
+    decision_replay: "decision-request"
+  }
 
   @spec model_call_name(atom()) :: binary() | nil
   def model_call_name(source), do: Map.get(@model_sources, source)
 
   @spec model_call?(term()) :: boolean()
-  def model_call?(name), do: chat?(name)
+  def model_call?(name), do: chat?(name) or same_name?("decision-request", name)
 
   @doc "Classifies a name with extra model-call names supplied by a trusted caller."
   @spec model_call?(term(), [binary()]) :: boolean()

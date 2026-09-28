@@ -39,7 +39,7 @@ enforces stopping. Jev selects or scores bounded options; a generative model
 handles novel explanations when needed. Abstain/escalate must be available
 when no offered explanation is supported.
 
-The [Jev lab](../../scripts/labs/jev-decision/README.md) records six ticket
+The [decision replay example](../../examples/decision-refund-triage/README.md) records six ticket
 decisions in one request for USD 0.000028014. It reports no latency measurement
 and tests neither debugging nor probability calibration on debugging cases.
 Jev's typed outputs do not establish correct diagnoses. Its documented

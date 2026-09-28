@@ -8,6 +8,8 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   Envelope validation compiles the strict `schema/0` once per VM and reuses the
   JSV root. `published_schema/0` materializes the external structural contract.
+  Initialization seals published entry names; examples with identical entry
+  lists share one schema alternative.
   """
 
   alias PtcRunner.Kernel.AgentConfigDiagnostic
@@ -2281,6 +2283,8 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   # The scaffold's own list, plus one sealed list per embedded example tree, so
   # `--example` cannot publish a top-level entry the contract did not admit.
+  # Different example trees may publish the same entry names. Their public
+  # init result is identical, so oneOf must contain each shape only once.
   defp init_result do
     scaffold = ["AGENTS.md", ".gitignore", "main.clj", "ptc.json", "ptc-project.json"]
 
@@ -2291,7 +2295,7 @@ defmodule PtcRunner.Kernel.CommandContract do
       end)
 
     closed(~w(created), %{
-      "created" => %{"oneOf" => [%{"const" => scaffold} | examples]}
+      "created" => %{"oneOf" => Enum.uniq([%{"const" => scaffold} | examples])}
     })
   end
 
