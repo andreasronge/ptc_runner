@@ -104,6 +104,28 @@ defmodule PtcRunner.Kernel.DecisionExampleTest do
     assert usage["capability_calls"]["workflow/decision-request"] == 1
   end
 
+  @tag :tmp_dir
+  test "replay accepts costless usage with the corresponding live guarantee", %{tmp_dir: dir} do
+    project = copy_example(dir)
+    directory = Path.dirname(project)
+    host_path = Path.join(directory, "ptc-host.json")
+    host = host_path |> File.read!() |> Jason.decode!()
+
+    host =
+      put_in(host, ["install", "frozen-decisions", "usage_guarantees"], %{
+        "tokens" => true,
+        "cost_currency" => nil
+      })
+
+    File.write!(host_path, Jason.encode!(host))
+    fixture_path = Path.join(directory, "replay.jsonl")
+    fixture = fixture_path |> File.read!() |> Jason.decode!()
+    fixture = update_in(fixture, ["response", "usage"], &Map.delete(&1, "cost"))
+    File.write!(fixture_path, Jason.encode!(fixture) <> "\n")
+    assert {:ok, outcome} = CommandEngine.dispatch(["run", project])
+    assert outcome.envelope["result"]["value"]["refund_ticket_ids"] == ["T-1001", "T-1004"]
+  end
+
   defp copy_example(dir) do
     dest = Path.join(dir, "example")
     File.cp_r!(@example, dest)

@@ -1773,7 +1773,12 @@ defmodule PtcRunner.Kernel.HostInstallation do
                alias: context.provider,
                installation_revision: installation.installation_revision,
                max_calls: selected.max_calls,
-               request_timeout_ms: Map.get(installation.ceilings, :request_timeout_ms)
+               request_timeout_ms:
+                 Map.get(
+                   installation.ceilings,
+                   :request_timeout_ms,
+                   host.limits.llm_request_timeout_ms
+                 )
              },
              usage_guarantees:
                Map.get(installation, :usage_guarantees, %{tokens: true, cost_currency: "USD"}),

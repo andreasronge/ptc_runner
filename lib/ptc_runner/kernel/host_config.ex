@@ -740,7 +740,7 @@ defmodule PtcRunner.Kernel.HostConfig do
           decision_installation(value, credentials, limits)
 
         "decision_replay" ->
-          decision_replay_installation(value)
+          decision_replay_installation(value, limits)
 
         "llm_replay" ->
           llm_replay_installation(value)
@@ -830,14 +830,22 @@ defmodule PtcRunner.Kernel.HostConfig do
     end
   end
 
-  defp decision_replay_installation(value) do
+  defp decision_replay_installation(value, limits) do
     with {:ok, bounds} <- decision_bounds(value),
+         {:ok, guarantees} <-
+           usage_guarantees(
+             Map.get(value, "usage_guarantees", %{"tokens" => true, "cost_currency" => "USD"})
+           ),
+         :ok <- usage_guarantee_requirements(guarantees, limits),
          {:ok, replay} <-
            value
-           |> Map.drop(~w(max_cost_per_call max_total_tokens_per_call))
+           |> Map.drop(~w(max_cost_per_call max_total_tokens_per_call usage_guarantees))
            |> Map.put("source", "llm_replay")
            |> llm_replay_installation() do
-      {:ok, Map.merge(replay, bounds) |> Map.put(:source, :decision_replay)}
+      {:ok,
+       Map.merge(replay, bounds)
+       |> Map.put(:source, :decision_replay)
+       |> Map.put(:usage_guarantees, guarantees)}
     else
       _ -> {:error, :invalid_installation}
     end
@@ -1737,6 +1745,7 @@ defmodule PtcRunner.Kernel.HostConfig do
     properties =
       replay["properties"]
       |> Map.put("source", %{"const" => "decision_replay"})
+      |> Map.put("usage_guarantees", llm_installation_schema()["properties"]["usage_guarantees"])
       |> Map.merge(decision_bounds_schema())
 
     required_object(

@@ -660,5 +660,10 @@ as `llm_replay`, with vendor-neutral decision responses. It requires `fixtures`,
 `installation_revision`, `max_cost_per_call`, and `max_total_tokens_per_call`;
 no credential or model selector is needed. Its optional `ceilings` are the
 replay ceilings. Reservations and settlement use the same shared ledgers as
-live decisions. See `examples/decision-refund-triage/ptc-project.json` for a
+live decisions. Optional `usage_guarantees` uses the live installation's shape
+and defaults to tokens and USD cost required. Set it to the corresponding live
+guarantee when replaying responses without cost; an enabled cost ceiling still
+requires USD usage. Replay calls use the host's `llm_request_timeout_ms` bound,
+including through warm serving runtimes and shared provider admission.
+See `examples/decision-refund-triage/ptc-project.json` for a
 complete offline project.
