@@ -1,8 +1,14 @@
 defmodule PtcRunner.Kernel.LLMReplayOwner do
   @moduledoc false
 
-  # Holds immutable replay responses and atomic sequence positions. A retained
+  # Holds immutable replay responses and atomic remaining-list cursors. A retained
   # installation gives each run its own cursor, reclaimed when that run exits.
+  #
+  # Each cursor references a tail of the immutable source list in this process.
+  # Taking its head is constant work; no list traversal or per-run fixture copy
+  # is needed. Empty tails remain recorded so exhaustion cannot restart a key.
+  # The source stays retained until installation shutdown, even after all runs
+  # consume it. Nil scope is the installation's cursor and needs no monitor.
   #
   # This is a GenServer rather than an Agent for two reasons. It monitors the
   # owning process so a run that fails between acquisition and cleanup cannot
@@ -54,18 +60,18 @@ defmodule PtcRunner.Kernel.LLMReplayOwner do
       {:ok, responses} ->
         cursor =
           Map.get_lazy(state.cursors, scope, fn ->
-            %{monitor: if(is_pid(scope), do: Process.monitor(scope)), positions: %{}}
+            %{monitor: if(is_pid(scope), do: Process.monitor(scope)), remaining: %{}}
           end)
 
-        position = Map.get(cursor.positions, key, 0)
+        remaining = Map.get(cursor.remaining, key, responses)
         state = %{state | cursors: Map.put(state.cursors, scope, cursor)}
 
-        case Enum.fetch(responses, position) do
-          {:ok, response} ->
-            cursor = %{cursor | positions: Map.put(cursor.positions, key, position + 1)}
+        case remaining do
+          [response | tail] ->
+            cursor = %{cursor | remaining: Map.put(cursor.remaining, key, tail)}
             {:reply, {:ok, response}, %{state | cursors: Map.put(state.cursors, scope, cursor)}}
 
-          :error ->
+          [] ->
             {:reply, {:error, :exhausted}, state}
         end
 
