@@ -511,7 +511,7 @@ collections
 but they require a correlated inspection snapshot and private authority.
 <code class="inline">analysis/runs</code> defaults to a compact projection containing run ID, status,
 duration, LLM calls, evaluations, terminal reason, and completeness flags.
-<code class="inline">call_counts_complete</code> applies to <code class="inline">llm_calls</code> and the workflow and mission
+<code class="inline">call_counts_complete</code> applies to <code class="inline">llm_calls</code>, <code class="inline">decision_calls</code>, and the workflow and mission
 capability counts in the full view: <code class="inline">true</code> means terminal usage supplied run
 totals; <code class="inline">false</code> means the values count retained events and may be low after
 retention loss. <code class="inline">complete</code> only reports whether the run has a terminal event.

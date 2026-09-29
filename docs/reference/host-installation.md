@@ -609,3 +609,63 @@ does not expose endpoints, commands, paths, credentials, or OAuth authority.
   tools without putting transport authority in a manifest.
 - [Evaluating with replay](../guides/evaluating-with-replay.md) fixes model responses for
   deterministic comparisons.
+
+## Decision model installations
+
+`decision` installs the **alpha** [OpenRouter Decisions backend](https://openrouter.ai/typesafe/jev-1.13). Its vendor-neutral capability
+is `decision-request`, exposed by the shipped `decision/request` prelude.
+Boolean answers contain probabilities; your workflow applies thresholds.
+Measured probabilities, distributions, and confidence may be null for a
+backend that cannot measure them. The result records the served model ID.
+
+```json
+{
+  "credentials": {"decisions_key": {"env": "OPENROUTER_API_KEY"}},
+  "install": {
+    "decisions": {
+      "source": "decision",
+      "model": "typesafe/jev-1.13",
+      "credential": "decisions_key",
+      "routing": {"zdr": true, "data_collection": "deny", "allow_fallbacks": false},
+      "usage_guarantees": {"tokens": true, "cost_currency": "USD"},
+      "max_cost_per_call": {"currency": "USD", "amount": "0.01"},
+      "max_total_tokens_per_call": 8000,
+      "installation_revision": "decisions-v1"
+    }
+  }
+}
+```
+
+The closed installation requires `model`, a `credential` binding name,
+`usage_guarantees`, `installation_revision`, and both per-call bounds.
+Credentials are resolved from `credentials`; literal keys are refused.
+Optional `routing` accepts only boolean `zdr`, `data_collection` (`allow` or
+`deny`), and boolean `allow_fallbacks`, sent as the backend's `provider` field.
+Optional `reservation_tariff` identifies a host policy; it does not compute a
+reservation. `ceilings`, `data_class`, and `accepts_data` use the same fields
+as live LLM installations. Decision sources belong in the workflow.
+
+`max_cost_per_call` is a positive USD decimal string. `0.01` USD is recommended
+for this first backend. `max_total_tokens_per_call` is a positive integer;
+`8000` is recommended, and hosts sending large `state` inputs must raise it.
+When the corresponding ceiling is enabled, each call reserves exactly these
+bounds against `llm_cost_microusd` and `llm_total_tokens`, shared with chat
+calls. Validated reported cost and tokens settle after the response. An
+exceeded bound is still charged in full and fails permanently with
+`invalid_result`, without retry. Decision calls also count against
+`max_active_provider_calls`.
+
+`decision_replay` uses the same JSON Lines fixture format and request hashing
+as `llm_replay`, with vendor-neutral decision responses. It requires `fixtures`,
+`installation_revision`, `max_cost_per_call`, and `max_total_tokens_per_call`;
+no credential or model selector is needed. Its optional `ceilings` are the
+replay ceilings. Reservations and settlement use the same shared ledgers as
+live decisions. Optional `usage_guarantees` uses the live installation's shape
+and defaults to tokens and USD cost required. Set it to the corresponding live
+guarantee when replaying responses without cost; an enabled cost ceiling still
+requires USD usage. Replay calls use the host's `llm_request_timeout_ms` bound,
+including through warm serving runtimes and shared provider admission.
+Warm decision replay retains the fixture acquisition while each run has an
+independent response cursor; repeated calls inside one run consume its sequence.
+See `examples/decision-refund-triage/ptc-project.json` for a
+complete offline project.

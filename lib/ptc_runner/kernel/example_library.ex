@@ -34,6 +34,8 @@ defmodule PtcRunner.Kernel.ExampleLibrary do
      "A stale web parser repaired from bounded evidence, replayed without an LLM key and verified on a held-out page"},
     {"debug-a-failed-run", "examples/debug-a-failed-run",
      "An agent repairs its own debugging workflow, then uses it to diagnose and repair an application"},
+    {"decision-refund-triage", "examples/decision-refund-triage",
+     "Batched refund questions with replayed probabilities and a workflow threshold"},
     {"llm-replay", "examples/llm-replay",
      "A frozen-model project with the replay fixture its host document selects"},
     {"named-mission-reader-writer", "examples/named-mission-reader-writer",

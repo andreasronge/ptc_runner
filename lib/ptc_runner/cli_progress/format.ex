@@ -11,7 +11,13 @@ defmodule PtcRunner.CLIProgress.Format do
       remaining(frame)
     ]
 
-    optional = [llm(frame), evaluations(frame), workers(frame), spend(frame)]
+    optional = [
+      decision_calls(frame),
+      llm(frame),
+      evaluations(frame),
+      workers(frame),
+      spend(frame)
+    ]
 
     Enum.reduce(optional, Enum.reject(primary, &is_nil/1), fn segment, segments ->
       candidate = Enum.reject(segments ++ [segment], &is_nil/1)
@@ -25,8 +31,11 @@ defmodule PtcRunner.CLIProgress.Format do
   def milestone(frame, event) do
     details =
       case event do
-        "still running" -> [llm_calls(frame), remaining(frame)]
-        _terminal -> [outcome_reason(frame), llm_calls(frame), spend(frame)]
+        "still running" ->
+          [llm_calls(frame), decision_calls(frame), remaining(frame)]
+
+        _terminal ->
+          [outcome_reason(frame), llm_calls(frame), decision_calls(frame), spend(frame)]
       end
 
     "[#{duration(frame.elapsed_ms)}] " <>
@@ -70,13 +79,23 @@ defmodule PtcRunner.CLIProgress.Format do
     end
   end
 
-  defp llm_count(%{usage: %{capability_calls: calls}}) when is_map(calls) do
+  defp llm_count(frame), do: model_count(frame, &ModelCapabilities.chat?/1)
+
+  defp decision_calls(frame) do
+    case model_count(frame, &(&1 in ["decision-request", :"decision-request"])) do
+      0 -> nil
+      1 -> "1 decision call"
+      count -> "#{count} decision calls"
+    end
+  end
+
+  defp model_count(%{usage: %{capability_calls: calls}}, predicate) when is_map(calls) do
     Enum.reduce(calls, 0, fn
       {name, count}, total when is_integer(count) ->
-        if ModelCapabilities.chat?(name), do: total + count, else: total
+        if predicate.(name), do: total + count, else: total
 
       {_scope, nested}, total when is_map(nested) ->
-        total + llm_count(%{usage: %{capability_calls: nested}})
+        total + model_count(%{usage: %{capability_calls: nested}}, predicate)
 
       _entry, total ->
         total
@@ -85,7 +104,7 @@ defmodule PtcRunner.CLIProgress.Format do
     _ -> 0
   end
 
-  defp llm_count(_), do: 0
+  defp model_count(_, _), do: 0
 
   defp evaluations(%{
          usage: %{subordinate_evaluations: used},

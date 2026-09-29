@@ -1943,17 +1943,21 @@ defmodule PtcRunner.Kernel.RunState do
     end
   end
 
-  defp llm_bound(%{source: "llm", total_tokens: bound}, :total_tokens)
-       when is_integer(bound) and bound in 0..@maximum_integer,
+  defp llm_bound(%{source: source, total_tokens: bound}, :total_tokens)
+       when source in ["llm", "decision", "decision_replay"] and is_integer(bound) and
+              bound in 0..@maximum_integer,
        do: bound
 
-  defp llm_bound(%{source: "llm", cost_microusd: bound}, :cost)
-       when is_integer(bound) and bound in 0..@maximum_integer,
+  defp llm_bound(%{source: source, cost_microusd: bound}, :cost)
+       when source in ["llm", "decision", "decision_replay"] and is_integer(bound) and
+              bound in 0..@maximum_integer,
        do: bound
 
   defp llm_bound(_route, _key), do: nil
 
-  defp live_llm_route?(%{source: "llm"}), do: true
+  defp live_llm_route?(%{source: source}) when source in ["llm", "decision", "decision_replay"],
+    do: true
+
   defp live_llm_route?(_route), do: false
 
   defp llm_reservation(state, route) do

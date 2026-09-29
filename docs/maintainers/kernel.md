@@ -853,3 +853,20 @@ with `FORCE_FULL_PRE_PUSH=1`. Invoke `mix prepush` directly only for static or
 Dialyzer diagnosis, or when hooks are unavailable. Secret-dependent and model-driven
 E2E tests require their documented credentials; deterministic tests remain the
 authority for containment, ownership, accounting, rollback, and cleanup.
+
+### Decision model calls
+
+`decision-request` is a reserved model-call name in `ModelCapabilities` and is
+not chat. It shares hashing, reservation settlement, spend, deadlines, provider
+admission, and the `:model` inspection class; conversation reconstruction and
+chat routing stay chat-only. Trace call counts and CLI progress distinguish
+`decision` from `llm` calls.
+
+`DecisionCapability` owns the public contract; `DecisionContract` validates the
+accepted question subset and measured distributions. `OpenRouterDecisions`
+is the alpha backend adapter and contains vendor wire names. Host acquisition
+binds its credential and routing policy. `decision_replay` reuses `LLMReplay`
+without another cursor owner or fixture format. Decision reservation metadata
+carries fixed host cost and token maxima directly, without a tariff estimate.
+`RunState` charges both kinds against its existing ledgers and settles reported
+usage even when output admission rejects an answer or a reservation is exceeded.
