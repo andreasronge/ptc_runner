@@ -1,7 +1,39 @@
 defmodule PtcRunner.Kernel.DecisionContract do
   @moduledoc false
+  alias PtcRunner.Kernel.LLMUsage
   @rounding_tolerance 0.01
   @float_epsilon 1.0e-12
+  @doc false
+  @spec answer_schema() :: map()
+  def answer_schema do
+    probability = %{"type" => ["number", "null"], "minimum" => 0, "maximum" => 1}
+
+    %{
+      "type" => "object",
+      "description" =>
+        "Boolean, choice or score answer. Fields required for each type and request-dependent consistency are validated at runtime.",
+      "properties" => %{
+        "type" => %{"type" => "string", "enum" => ["boolean", "choice", "score"]},
+        "value" => %{
+          "type" => ["boolean", "null"],
+          "description" =>
+            "Optional discrete boolean answer. False is an answer; missing or null means absent. Never inferred by thresholding probability."
+        },
+        "probability" => probability,
+        "confidence" => probability,
+        "choice" => %{"type" => "string"},
+        "score" => %{"type" => "number", "minimum" => 0},
+        "legend" => %{"type" => "object", "additionalProperties" => %{"type" => "string"}},
+        "probabilities" => %{
+          "type" => ["object", "null"],
+          "additionalProperties" => Map.put(probability, "type", "number")
+        }
+      },
+      "required" => ["type", "confidence"],
+      "additionalProperties" => true
+    }
+  end
+
   @spec validate_request(term()) :: :ok | {:error, String.t()}
   def validate_request(%{"state" => state, "questions" => questions})
       when is_map(questions) and map_size(questions) > 0 and is_map(state) do
@@ -49,10 +81,12 @@ defmodule PtcRunner.Kernel.DecisionContract do
   defp nullable_probability?(value), do: probability?(value)
 
   defp valid_answer?(
-         %{"type" => "boolean", "probability" => probability, "confidence" => confidence},
+         %{"type" => "boolean", "probability" => probability, "confidence" => confidence} = answer,
          %{"type" => "boolean"}
        ),
-       do: nullable_probability?(probability) and nullable_probability?(confidence)
+       do:
+         nullable_probability?(probability) and nullable_probability?(confidence) and
+           (is_nil(answer["value"]) or is_boolean(answer["value"]))
 
   defp valid_answer?(
          %{
@@ -118,7 +152,11 @@ defmodule PtcRunner.Kernel.DecisionContract do
   defp valid_usage?(%{"input_tokens" => input, "output_tokens" => output} = usage) do
     valid_token_usage?(input, output) and
       (not Map.has_key?(usage, "cost") or
-         (finite_number?(usage["cost"]) and usage["cost"] >= 0))
+         ((is_number(usage["cost"]) or is_map(usage["cost"])) and
+            match?(
+              {:ok, _},
+              LLMUsage.normalize(%{"total_cost" => usage["cost"]})
+            )))
   end
 
   defp valid_usage?(_), do: false

@@ -29,7 +29,9 @@ defmodule PtcRunner.Kernel.HostConfig do
   The closed V1 source identifiers are `mcp`, `llm`, `llm_replay`, `decision`, `decision_replay`,
   `ptc_trace_snapshot`, `ptc_private_trace_snapshot`, and `ptc_inspection_snapshot`. LLM credentials are explicit bindings passed to
   the adapter per request rather than ambient provider-specific environment
-  lookup. The native snapshot sources fix host-relative directories and
+  lookup. Chat decision installations resolve an installed `llm` alias in
+  `json_schema` mode during decode and retain its declaration in their
+  configuration identity. The native snapshot sources fix host-relative directories and
   expose only PtcRunner's canonical or private inspection query vocabularies.
   Every installation requires a public, non-secret `installation_revision`
   matching `\\A[a-z][a-z0-9._-]{0,127}\\z`; command decoding reports its
@@ -698,6 +700,7 @@ defmodule PtcRunner.Kernel.HostConfig do
              do: oauth.installation_id
            ),
          true <- ids == Enum.uniq(ids),
+         {:ok, installations} <- resolve_decision_chats(installations),
          {:ok, installations} <- InstallationConfigDigest.attach_all(installations) do
       {:ok, installations}
     else
@@ -786,6 +789,63 @@ defmodule PtcRunner.Kernel.HostConfig do
        }}
     else
       _reason -> {:error, :invalid_installation}
+    end
+  end
+
+  defp resolve_decision_chats(installations) do
+    Enum.reduce_while(installations, {:ok, %{}}, fn {name, installation}, {:ok, acc} ->
+      case resolve_decision_chat(installation, installations) do
+        {:ok, resolved} -> {:cont, {:ok, Map.put(acc, name, resolved)}}
+        error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp resolve_decision_chat(
+         %{source: :decision, backend: :chat, llm: alias_name} = decision,
+         installations
+       ) do
+    with %{source: :llm, structured_output_mode: :json_schema} = llm <-
+           Map.get(installations, alias_name),
+         true <- decision.data_class == llm.data_class,
+         true <- MapSet.subset?(MapSet.new(decision.accepts_data), MapSet.new(llm.accepts_data)) do
+      {:ok,
+       decision
+       |> Map.put(:chat_installation, llm)
+       |> Map.put(:credential, llm.credential)
+       |> Map.put(:usage_guarantees, llm.usage_guarantees)}
+    else
+      _ -> {:error, :invalid_installation}
+    end
+  end
+
+  defp resolve_decision_chat(installation, _installations), do: {:ok, installation}
+
+  defp decision_installation(%{"backend" => "chat"} = value, _credentials, limits) do
+    with :ok <-
+           exact_keys(
+             value,
+             ~w(source backend llm installation_revision ceilings data_class accepts_data max_cost_per_call max_total_tokens_per_call),
+             ~w(source backend llm installation_revision max_cost_per_call max_total_tokens_per_call)
+           ),
+         true <- valid_name?(value["llm"]),
+         {:ok, bounds} <- decision_bounds(value),
+         {:ok, revision} <- revision(value["installation_revision"]),
+         {:ok, ceilings} <- llm_ceilings(Map.get(value, "ceilings", %{}), limits),
+         {:ok, data_class} <- data_class(Map.get(value, "data_class", "normal")),
+         {:ok, accepts_data} <- accepts_data(Map.get(value, "accepts_data", ["normal"])) do
+      {:ok,
+       Map.merge(bounds, %{
+         source: :decision,
+         backend: :chat,
+         llm: value["llm"],
+         installation_revision: revision,
+         ceilings: ceilings,
+         data_class: data_class,
+         accepts_data: accepts_data
+       })}
+    else
+      _ -> {:error, :invalid_installation}
     end
   end
 
@@ -1707,6 +1767,7 @@ defmodule PtcRunner.Kernel.HostConfig do
         mcp_installation_schema(),
         llm_installation_schema(),
         decision_installation_schema(),
+        chat_decision_installation_schema(),
         decision_replay_installation_schema(),
         trace_snapshot_installation_schema("ptc_trace_snapshot"),
         trace_snapshot_installation_schema("ptc_private_trace_snapshot"),
@@ -1736,6 +1797,19 @@ defmodule PtcRunner.Kernel.HostConfig do
     required_object(
       properties,
       ~w(source model credential usage_guarantees installation_revision max_cost_per_call max_total_tokens_per_call)
+    )
+  end
+
+  defp chat_decision_installation_schema do
+    properties =
+      decision_installation_schema()["properties"]
+      |> Map.drop(~w(model credential routing usage_guarantees reservation_tariff))
+      |> Map.put("backend", %{"const" => "chat"})
+      |> Map.put("llm", bounded_string(128))
+
+    required_object(
+      properties,
+      ~w(source backend llm installation_revision max_cost_per_call max_total_tokens_per_call)
     )
   end
 

@@ -1,7 +1,9 @@
 defmodule PtcRunner.Kernel.DecisionDistributionTest do
   use ExUnit.Case, async: true
+  alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.DecisionCapability
   alias PtcRunner.Kernel.Dispatcher
+  alias PtcRunner.Kernel.JSONSchema
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
@@ -66,6 +68,45 @@ defmodule PtcRunner.Kernel.DecisionDistributionTest do
       nil,
       nil
     )
+  end
+
+  test "discovery publishes the nullable discrete boolean contract" do
+    {:ok, capability} = DecisionCapability.new(requester: fn _, _ -> {:ok, %{}} end)
+    metadata = Capability.metadata(capability)
+    {:ok, _, compiled} = JSONSchema.compile(metadata.output_schema)
+    response = %{"model" => "fixture", "answers" => valid_answers(), "usage" => %{}}
+    assert JSONSchema.valid?(compiled, response)
+
+    for value <- [true, false, nil] do
+      assert JSONSchema.valid?(
+               compiled,
+               put_in(response, ["answers", "urgent", "value"], value)
+             )
+    end
+
+    for value <- [0, "false", %{}] do
+      refute JSONSchema.valid?(
+               compiled,
+               put_in(response, ["answers", "urgent", "value"], value)
+             )
+    end
+  end
+
+  test "boolean discrete values preserve false and reject other types" do
+    for value <- [true, false, nil] do
+      answers = put_in(valid_answers(), ["urgent", "value"], value)
+      assert %{status: :ok, value: result} = invoke_with_answers(answers)
+      assert result["answers"]["urgent"]["value"] == value
+      assert result["answers"]["urgent"]["probability"] == 0.93
+    end
+
+    assert %{status: :ok, value: result} = invoke_with_answers(valid_answers())
+    refute Map.has_key?(result["answers"]["urgent"], "value")
+
+    for value <- [0, 1, "false", [], %{}] do
+      assert %{status: :error, kind: :invalid_result} =
+               invoke_with_answers(put_in(valid_answers(), ["urgent", "value"], value))
+    end
   end
 
   test "the decision response validates answer and usage boundaries" do

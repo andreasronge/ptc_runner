@@ -8,7 +8,8 @@ defmodule PtcRunner.Kernel.JSONSchema do
   `maximum`, `minLength`, `maxLength`, `minItems`, `maxItems`, `maxProperties`,
   and the single bounded `sha256` string format. General type unions are
   unsupported, roots are objects, and a missing `additionalProperties` on an
-  object is normalized to `false`. A non-root node may use one scalar type or
+  object is normalized to `false`. `additionalProperties` accepts a boolean
+  or a child schema compiled under the same depth and size bounds. A non-root node may use one scalar type or
   the bounded nullable form `[<non-null type>, "null"]`; source order is
   canonicalized and other type unions remain unsupported.
 
@@ -461,7 +462,8 @@ defmodule PtcRunner.Kernel.JSONSchema do
          {:ok, items} <- normalize_items(schema, type, path, depth),
          {:ok, property_names} <- normalize_property_names(schema, type, path, depth),
          :ok <- validate_required(schema, type, properties),
-         :ok <- validate_additional_properties(schema, type),
+         {:ok, additional_properties} <-
+           normalize_additional_properties(schema, type, path, depth),
          :ok <- validate_max_properties(schema, type) do
       normalized =
         schema
@@ -469,7 +471,7 @@ defmodule PtcRunner.Kernel.JSONSchema do
         |> maybe_put("properties", properties)
         |> maybe_put("items", items)
         |> maybe_put("propertyNames", property_names)
-        |> normalize_additional_properties(type)
+        |> maybe_put("additionalProperties", additional_properties)
 
       {:ok, normalized}
     else
@@ -669,24 +671,21 @@ defmodule PtcRunner.Kernel.JSONSchema do
     end
   end
 
-  defp validate_additional_properties(schema, "object") do
+  defp normalize_additional_properties(schema, "object", path, depth) do
     case Map.get(schema, "additionalProperties", false) do
-      value when is_boolean(value) -> :ok
-      _value -> {:error, {:invalid_keyword_value, [{:property, "additionalProperties"}]}}
+      value when is_boolean(value) ->
+        {:ok, value}
+
+      child when is_map(child) ->
+        normalize(child, [{:property, "additionalProperties"} | path], depth + 1)
+
+      _ ->
+        {:error, {:invalid_keyword_value, [{:property, "additionalProperties"}]}}
     end
   end
 
-  defp validate_additional_properties(schema, _type) do
-    case not_applicable(schema, "additionalProperties") do
-      {:ok, nil} -> :ok
-      error -> error
-    end
-  end
-
-  defp normalize_additional_properties(schema, "object"),
-    do: Map.put_new(schema, "additionalProperties", false)
-
-  defp normalize_additional_properties(schema, _type), do: schema
+  defp normalize_additional_properties(schema, _type, _path, _depth),
+    do: not_applicable(schema, "additionalProperties")
 
   defp validate_text(schema, key) do
     case Map.fetch(schema, key) do

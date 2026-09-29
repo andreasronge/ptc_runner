@@ -614,7 +614,10 @@ does not expose endpoints, commands, paths, credentials, or OAuth authority.
 
 `decision` installs the **alpha** [OpenRouter Decisions backend](https://openrouter.ai/typesafe/jev-1.13). Its vendor-neutral capability
 is `decision-request`, exposed by the shipped `decision/request` prelude.
-Boolean answers contain probabilities; your workflow applies thresholds.
+Jev boolean answers contain measured probabilities; your workflow applies thresholds.
+An optional boolean `value` carries a discrete answer: `false` is an answer,
+while missing or null means absent. Providers never threshold probabilities
+to invent this field.
 Measured probabilities, distributions, and confidence may be null for a
 backend that cannot measure them. The result records the served model ID.
 
@@ -654,6 +657,51 @@ calls. Validated reported cost and tokens settle after the response. An
 exceeded bound is still charged in full and fails permanently with
 `invalid_result`, without retry. Decision calls also count against
 `max_active_provider_calls`.
+
+### JSON-schema chat backend
+
+A `decision` installation with `backend: "chat"` names an existing `llm`
+installation through `llm`. Decode refuses missing aliases, other sources,
+and LLM modes other than `json_schema`.
+
+```json
+{
+  "source": "decision",
+  "backend": "chat",
+  "llm": "structured-chat",
+  "installation_revision": "chat-decisions-v1",
+  "max_cost_per_call": {"currency": "USD", "amount": "0.01"},
+  "max_total_tokens_per_call": 8000
+}
+```
+
+This closed variant requires the six fields above and accepts `ceilings`,
+`data_class`, and `accepts_data`. The linked LLM owns its model, credential,
+cache, parameters and usage guarantees; do not repeat those on the decision
+installation. Data classes must match, and the decision's accepted data must
+be a subset of the linked LLM's. Configuration identity includes the linked
+LLM declaration. Only the decision alias needs selection in the manifest.
+
+The bounded chat schema supports up to 128 named questions.
+One request sends state and all question instructions and criteria with an
+object schema: booleans, option-name enums, and integer score-level enums.
+Boolean `value`, choice `choice`, and score `score` carry the discrete answers.
+All probabilities, distributions and confidence are null. The answer model
+identifies the adapter-attested public chat selector (`private` when hidden);
+served-model identity for chat remains the LLM adapter's existing contract.
+Usage keeps reported tokens and optional USD cost (normalized fixed-point
+`{"currency":"USD","microunits":200}` is accepted as well as numeric cost).
+
+Each call reserves and settles the decision bounds, occupies one shared
+admission slot, and records one decision model exchange. The underlying chat
+callback does not create another capability call, reservation or exchange.
+
+Choose policy explicitly: use a measured probability when present and a
+supplied `value` otherwise, or require measurement and abstain/escalate when
+it is null. Test absence with `nil?` so `false` remains a real answer.
+Unavailable measurement is not low confidence. Backend interchangeability
+promises the contract, not identical answers or measurements; a workflow
+requiring probabilities must handle their absence.
 
 `decision_replay` uses the same JSON Lines fixture format and request hashing
 as `llm_replay`, with vendor-neutral decision responses. It requires `fixtures`,

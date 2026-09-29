@@ -9,13 +9,22 @@ defmodule PtcRunner.Kernel.DecisionCapability do
   option names to string descriptions. Score criteria are two to ten ordered
   string descriptions, indexed from zero. Other question keys are refused.
 
-  Success contains the served `model`, `answers` keyed by the same IDs, and
-  reported `usage`. Boolean answers have `probability`; choice answers have
+  Success contains the backend `model`, `answers` keyed by the same IDs, and
+  reported `usage`. Boolean answers have `probability` and optional `value`
+  (`true`, `false`, or null). False is a discrete answer; missing or null
+  means none was supplied. Providers never infer `value` by thresholding a
+  probability. Choice answers have
   `choice` and `probabilities`; score answers have weighted `score`, `legend`,
   and per-level `probabilities`. Each carries `confidence`. Probabilities,
   distributions, and confidence may be null when a backend cannot measure
   them. Measured distributions and weighted scores allow 0.01 rounding error.
   The provider applies no thresholds; workflows choose their own policy.
+  Chat backends supply discrete answers with null measurements. Workflows
+  may use those answers or require measurements and abstain or escalate when
+  unavailable. Unavailable probability is not low confidence; switching
+  backends does not promise identical answers or measurements. Jev records
+  its served model; chat uses the adapter-attested public selector, or
+  `private` when the selector is hidden.
 
   Model calls use the shared chat spend, token, admission, deadline, replay,
   and inspection machinery. Host installations declare positive per-call cost
@@ -64,7 +73,7 @@ defmodule PtcRunner.Kernel.DecisionCapability do
     Capability.new(
       name: "decision-request",
       description:
-        "Evaluate named boolean, choice, or score questions against state; workflows apply thresholds",
+        "Evaluate named boolean, choice, or score questions; workflows choose measurement or discrete-answer policy",
       effect: :read,
       input_schema: %{
         "type" => "object",
@@ -79,7 +88,10 @@ defmodule PtcRunner.Kernel.DecisionCapability do
         "type" => "object",
         "properties" => %{
           "model" => %{"type" => "string"},
-          "answers" => %{"type" => "object", "additionalProperties" => true},
+          "answers" => %{
+            "type" => "object",
+            "additionalProperties" => DecisionContract.answer_schema()
+          },
           "usage" => %{"type" => "object", "additionalProperties" => true}
         },
         "required" => ["model", "answers", "usage"],

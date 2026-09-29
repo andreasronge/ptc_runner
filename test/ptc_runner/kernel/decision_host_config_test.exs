@@ -2,6 +2,50 @@ defmodule PtcRunner.Kernel.DecisionHostConfigTest do
   use ExUnit.Case, async: true
   alias PtcRunner.Kernel.HostConfig
 
+  test "chat decisions require an installed json_schema LLM alias" do
+    chat = %{
+      "source" => "llm",
+      "model" => "test:model",
+      "credential" => "key",
+      "structured_output_mode" => "json_schema",
+      "installation_revision" => "chat-v1",
+      "usage_guarantees" => %{"tokens" => true, "cost_currency" => nil}
+    }
+
+    decision = %{
+      "source" => "decision",
+      "backend" => "chat",
+      "llm" => "chat",
+      "installation_revision" => "decision-v1",
+      "max_cost_per_call" => %{"currency" => "USD", "amount" => "0.01"},
+      "max_total_tokens_per_call" => 8000
+    }
+
+    config = %{
+      "credentials" => %{"key" => %{"env" => "TEST_KEY"}},
+      "install" => %{"decisions" => decision, "chat" => chat}
+    }
+
+    assert {:ok, decoded} = HostConfig.decode(config, ".")
+    assert decoded.install["decisions"].chat_installation.structured_output_mode == :json_schema
+    assert decoded.install["decisions"].credential == "key"
+    assert decoded.install["decisions"].usage_guarantees.cost_currency == nil
+
+    for mode <- ["json_object", "unsupported"] do
+      assert {:error, :invalid_host_config} =
+               HostConfig.decode(
+                 put_in(config, ["install", "chat", "structured_output_mode"], mode),
+                 "."
+               )
+    end
+
+    assert {:error, :invalid_host_config} =
+             HostConfig.decode(update_in(config, ["install"], &Map.delete(&1, "chat")), ".")
+
+    assert {:error, :invalid_host_config} =
+             HostConfig.decode(put_in(config, ["install", "decisions", "llm"], "decisions"), ".")
+  end
+
   @tag :tmp_dir
   test "decision installations require explicit bounds and credential bindings", %{tmp_dir: dir} do
     installation = %{
