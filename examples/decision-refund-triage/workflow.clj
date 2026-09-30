@@ -10,7 +10,11 @@
           {"refund_ticket_ids"
            (->> tickets
                 (filter (fn [ticket]
-                          (>= (get-in answers [(str "T_" (subs (get ticket "id") 2)) "probability"]) 0.5)))
+                          (let [answer (get answers (str "T_" (subs (get ticket "id") 2)))
+                                probability (get answer "probability")]
+                            (if (nil? probability)
+                              (true? (get answer "value"))
+                              (>= probability 0.5)))))
                 (map (fn [ticket] (get ticket "id")))
                 vec)
            "decisions" answers
