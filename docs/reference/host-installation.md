@@ -302,7 +302,12 @@ such as `<think>` are rejected, so configure your server to separate reasoning
 or disable thinking. Valid reported usage is retained for budget settlement
 even when the content is rejected. To use Ollama schema output, select
 `openai-compat:http://localhost:11434/v1|<model>`.
-Configured credentials are sent as `Authorization: Bearer <credential>`.
+For `openai-compat:`, `credential` may be omitted, including when the alias
+backs a `chat` decision installation. No credential is resolved and no
+`Authorization` header is sent in that case. Other live LLM routes require a
+credential binding. Configured credentials are sent as
+`Authorization: Bearer <credential>`; an unset configured credential still
+fails acquisition.
 `unsupported` refuses a request `schema` before dispatch.
 Changing the mode requires a new `installation_revision`. A schema
 together with a non-empty `tools` list is invalid. Success is a

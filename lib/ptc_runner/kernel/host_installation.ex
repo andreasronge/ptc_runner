@@ -422,7 +422,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   end
 
   def installation_credential_names(%{source: source, credential: credential})
-      when source in [:llm, :decision], do: [credential]
+      when source in [:llm, :decision] and is_binary(credential), do: [credential]
 
   def installation_credential_names(_installation), do: []
 
@@ -722,7 +722,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   end
 
   defp prepare(_host, %{source: :llm} = installation, selection, context, _oauth_runtime) do
-    credential_names = [installation.credential]
+    credential_names = installation_credential_names(installation)
 
     with :ok <- placement(installation, context.destination),
          {:ok, selected} <- llm_selection(installation, selection, context) do
@@ -1188,6 +1188,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp selection_error(:ptc_private_trace_snapshot), do: :invalid_trace_snapshot_selection
   defp selection_error(:ptc_inspection_snapshot), do: :invalid_inspection_snapshot_selection
 
+  defp installation_credential(%{credential: nil}, _credentials), do: {:ok, nil}
+
+  defp installation_credential(%{credential: name}, credentials),
+    do: Map.fetch(credentials, name)
+
   defp credential_names(%{type: :stdio, env: env}),
     do: env |> Map.values() |> Enum.uniq() |> Enum.sort()
 
@@ -1255,7 +1260,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
          {:ok, requirements} <- probe_llm_requirements(installation, context),
          {:ok, prepared_model} <- prepare_llm_model(model, requirements, adapter),
          {:ok, credential} <-
-           Map.fetch(Map.get(context, :credentials, %{}), installation.credential),
+           installation_credential(installation, Map.get(context, :credentials, %{})),
          {:ok, deadline_ms, max_heap_words} <- connectivity_probe_bounds(context),
          cleanup_timeout_ms when is_integer(cleanup_timeout_ms) and cleanup_timeout_ms > 0 <-
            get_in(context, [:limits, :provider_cleanup_timeout_ms]) do
@@ -1611,7 +1616,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
          adapter,
          credentials
        ) do
-    with {:ok, credential} <- Map.fetch(credentials, installation.credential),
+    with {:ok, credential} <- installation_credential(installation, credentials),
          {:ok, requester} <-
            PtcRunner.LLM.callback(prepared_model, %{
              credential: credential,
@@ -1867,7 +1872,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
          {:ok, requirements} <- live_llm_requirements(chat, context),
          {:ok, prepared} <- prepare_llm_model(model, requirements, adapter),
          :ok <- provider_application_ready(adapter, model),
-         {:ok, credential} <- Map.fetch(credentials, installation.credential),
+         {:ok, credential} <- installation_credential(installation, credentials),
          {:ok, callback} <-
            PtcRunner.LLM.callback(prepared, %{credential: credential, cache: chat.cache}),
          true <-

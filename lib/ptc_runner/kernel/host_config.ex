@@ -29,7 +29,9 @@ defmodule PtcRunner.Kernel.HostConfig do
   The closed V1 source identifiers are `mcp`, `llm`, `llm_replay`, `decision`, `decision_replay`,
   `ptc_trace_snapshot`, `ptc_private_trace_snapshot`, and `ptc_inspection_snapshot`. LLM credentials are explicit bindings passed to
   the adapter per request rather than ambient provider-specific environment
-  lookup. Chat decision installations resolve an installed `llm` alias in
+  lookup. Only `openai-compat:` LLM installations may omit the credential;
+  acquisition then resolves no credential and sends no Authorization header.
+  Chat decision installations resolve an installed `llm` alias in
   `json_schema` mode during decode and retain its declaration in their
   configuration identity. The native snapshot sources fix host-relative directories and
   expose only PtcRunner's canonical or private inspection query vocabularies.
@@ -174,7 +176,7 @@ defmodule PtcRunner.Kernel.HostConfig do
           | %{
               source: :llm,
               model: binary(),
-              credential: binary(),
+              credential: binary() | nil,
               cache: boolean(),
               params: %{
                 optional(:temperature) => float(),
@@ -946,12 +948,11 @@ defmodule PtcRunner.Kernel.HostConfig do
            exact_keys(
              value,
              allowed,
-             ~w(source model credential structured_output_mode usage_guarantees installation_revision)
+             ~w(source model structured_output_mode usage_guarantees installation_revision)
            ),
          model when is_binary(model) <- value["model"],
          true <- valid_string?(model, 256),
-         credential when is_binary(credential) <- value["credential"],
-         true <- Map.has_key?(credentials, credential),
+         {:ok, credential} <- llm_credential(value, model, credentials),
          cache when is_boolean(cache) <- Map.get(value, "cache", false),
          {:ok, params} <- llm_params(Map.get(value, "params", %{})),
          {:ok, structured_output_mode} <-
@@ -984,6 +985,23 @@ defmodule PtcRunner.Kernel.HostConfig do
     else
       {:error, {:optional_budget_prerequisite, _limit, _prerequisite}} = error -> error
       _reason -> {:error, :invalid_installation}
+    end
+  end
+
+  defp llm_credential(value, model, credentials) do
+    case Map.fetch(value, "credential") do
+      :error ->
+        if String.starts_with?(model, "openai-compat:"),
+          do: {:ok, nil},
+          else: {:error, :invalid_installation}
+
+      {:ok, name} when is_binary(name) ->
+        if Map.has_key?(credentials, name),
+          do: {:ok, name},
+          else: {:error, :invalid_installation}
+
+      _ ->
+        {:error, :invalid_installation}
     end
   end
 
@@ -1783,6 +1801,7 @@ defmodule PtcRunner.Kernel.HostConfig do
     properties =
       chat["properties"]
       |> Map.drop(~w(cache params structured_output_mode))
+      |> Map.put("credential", name_schema())
       |> Map.put("source", %{"const" => "decision"})
       |> Map.put(
         "routing",
@@ -1875,7 +1894,12 @@ defmodule PtcRunner.Kernel.HostConfig do
       %{
         "source" => %{"const" => "llm"},
         "model" => bounded_string(256),
-        "credential" => name_schema(),
+        "credential" =>
+          Map.put(
+            name_schema(),
+            "description",
+            "Optional only for openai-compat: models. When omitted, no credential is resolved and no Authorization header is sent; configured credentials must resolve."
+          ),
         "cache" => %{"type" => "boolean", "default" => false},
         "params" =>
           closed_object(%{
@@ -1944,12 +1968,17 @@ defmodule PtcRunner.Kernel.HostConfig do
       [
         "source",
         "model",
-        "credential",
         "structured_output_mode",
         "usage_guarantees",
         "installation_revision"
       ]
     )
+    |> Map.put("allOf", [
+      %{
+        "if" => %{"properties" => %{"model" => %{"pattern" => "^openai-compat:"}}},
+        "else" => %{"required" => ["credential"]}
+      }
+    ])
   end
 
   defp trace_snapshot_installation_schema(source) do
