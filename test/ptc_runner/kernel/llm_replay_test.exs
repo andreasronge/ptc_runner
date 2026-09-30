@@ -218,6 +218,31 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
     end
 
     @tag :tmp_dir
+    test "concurrent requester calls consume one run sequence exactly once", %{tmp_dir: dir} do
+      {:ok, key} = LLMReplay.request_hash(@request)
+      write(dir, [%{"request_hash" => key, "responses" => Enum.map(1..100, &%{"turn" => &1})}])
+      {:ok, replay} = start(dir)
+      on_exit(fn -> LLMReplay.stop(replay) end)
+      requester = LLMReplay.requester(replay)
+
+      results =
+        1..120
+        |> Task.async_stream(fn _ -> requester.(@request, LLMSupport.llm_context()) end,
+          max_concurrency: 32
+        )
+        |> Enum.map(fn {:ok, result} -> result end)
+
+      assert Enum.count(results, &match?({:error, %ProviderError{kind: :not_found}}, &1)) == 20
+
+      assert results
+             |> Enum.flat_map(fn
+               {:ok, %{"turn" => turn}} -> [turn]
+               {:error, %ProviderError{}} -> []
+             end)
+             |> Enum.sort() == Enum.to_list(1..100)
+    end
+
+    @tag :tmp_dir
     test "an unmatched request fails closed rather than reusing another response", %{
       tmp_dir: dir
     } do

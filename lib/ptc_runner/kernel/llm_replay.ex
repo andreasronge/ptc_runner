@@ -57,7 +57,10 @@ defmodule PtcRunner.Kernel.LLMReplay do
   the immutable fixtures, with a separate atomic cursor for each run state.
   Concurrent runs cannot consume each other's responses; each run's cursor
   is reclaimed when its state owner exits. Repeated calls within one run
-  still consume the sequence in order and fail when it is exhausted.
+  still consume the sequence in order and fail when it is exhausted. Cursors
+  reference remaining list tails inside the fixture owner, so advancement takes
+  constant lookup work and shares fixture storage across runs. The immutable
+  source remains available until the installation owner shuts down.
 
   Every failure is closed. An unknown hash, an exhausted sequence, a malformed
   or oversized response, a duplicate entry, or a fixture past its ceilings all
