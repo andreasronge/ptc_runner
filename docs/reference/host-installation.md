@@ -617,6 +617,11 @@ is `decision-request`, exposed by the shipped `decision/request` prelude.
 Boolean answers contain probabilities; your workflow applies thresholds.
 Measured probabilities, distributions, and confidence may be null for a
 backend that cannot measure them. The result records the served model ID.
+Trace events and inspection model exchanges retain a valid response model ID
+as `served_model` even when answer admission or a reservation overrun rejects
+the call. The final result remains a permanent failure; rejected answers are
+not published as successful results, and configured aliases are not substituted
+for missing or invalid response identity.
 
 ```json
 {

@@ -665,6 +665,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
         {settlement, invocation_result} = split_settlement(invocation_result)
         {result, exception_diagnostic} = split_exception_diagnostic(invocation_result)
 
+        decision_evidence = maybe_put_decision_model(%{}, result, public_name)
+
         inspection_attempt = %{
           sink: inspection_sink,
           capability_id: capability_id,
@@ -714,7 +716,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
                    capability_id,
                    environment,
                    public_name,
-                   result,
+                   {result, decision_evidence},
                    invocation.event_attributes[:mission_name],
                    capability.inspection_capture,
                    invocation.model_call_names
@@ -750,7 +752,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
           |> maybe_put_settlement_usage(settlement, invocation.usage_projection)
           |> maybe_put_usage_observation(settlement, invocation.usage_projection)
           |> maybe_put_llm_result_metadata(result, invocation.usage_projection)
-          |> maybe_put_decision_model(result, public_name)
+          |> Map.merge(decision_evidence)
           |> Map.merge(%{
             capability_id: capability_id,
             environment: environment,
@@ -843,7 +845,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
          capability_id,
          environment,
          name,
-         result,
+         {result, decision_evidence},
          mission_name,
          capture,
          model_call_names
@@ -859,7 +861,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
         result,
         mission_name,
         model_call_names
-      ),
+      )
+      |> Map.merge(decision_evidence),
       output_capture(result, capture)
     )
   end
@@ -2260,7 +2263,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
          %{status: :ok, value: %{"model" => model}},
          "decision-request"
        )
-       when is_binary(model), do: Map.put(data, :served_model, model)
+       when is_binary(model) and byte_size(model) > 0, do: Map.put(data, :served_model, model)
 
   defp maybe_put_decision_model(data, _result, _name), do: data
 

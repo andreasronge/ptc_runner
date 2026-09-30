@@ -483,7 +483,12 @@ deterministic comparisons.</li></ul><h2 id="decision-model-installations">Decisi
 is <code class="inline">decision-request</code>, exposed by the shipped <code class="inline">decision/request</code> prelude.
 Boolean answers contain probabilities; your workflow applies thresholds.
 Measured probabilities, distributions, and confidence may be null for a
-backend that cannot measure them. The result records the served model ID.</p><pre><code class="json language-json">{
+backend that cannot measure them. The result records the served model ID.
+Trace events and inspection model exchanges retain a valid response model ID
+as <code class="inline">served_model</code> even when answer admission or a reservation overrun rejects
+the call. The final result remains a permanent failure; rejected answers are
+not published as successful results, and configured aliases are not substituted
+for missing or invalid response identity.</p><pre><code class="json language-json">{
   &quot;credentials&quot;: {&quot;decisions_key&quot;: {&quot;env&quot;: &quot;OPENROUTER_API_KEY&quot;}},
   &quot;install&quot;: {
     &quot;decisions&quot;: {

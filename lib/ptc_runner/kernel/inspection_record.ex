@@ -145,7 +145,7 @@ defmodule PtcRunner.Kernel.InspectionRecord do
       valid_id?(id) and valid_capability_payload?(payload, value_key) and
         (value_key != "result_identity" or
            InspectionValueIdentity.valid?(payload[value_key])) and
-        valid_capability_scope?(payload, [value_key])
+        valid_capability_output_scope?(payload, value_key)
     end)
   end
 
@@ -367,6 +367,17 @@ defmodule PtcRunner.Kernel.InspectionRecord do
         valid_id?(payload["mission_name"])
 
   defp valid_capability_scope?(_payload, _fields), do: false
+
+  defp valid_capability_output_scope?(
+         %{"name" => "decision-request", "served_model" => model} = payload,
+         value_key
+       )
+       when is_binary(model) and byte_size(model) > 0 do
+    valid_capability_scope?(payload, [value_key, "served_model"])
+  end
+
+  defp valid_capability_output_scope?(payload, value_key),
+    do: valid_capability_scope?(payload, [value_key])
 
   defp capability_input_fields(%{"environment" => "workflow", "name" => name}, model_call_names) do
     if ModelCapabilities.model_call?(name, model_call_names),

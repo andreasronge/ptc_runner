@@ -54,6 +54,7 @@ defmodule PtcRunner.Kernel.DecisionExampleTest do
     assert stopped["data"]["served_model"] == "typesafe/jev-1.13-20260917"
     assert [exchange] = page["items"]
     assert exchange["request_hash"] =~ ~r/\Asha256:[0-9a-f]{64}\z/
+    assert exchange["served_model"] == "typesafe/jev-1.13-20260917"
     assert exchange["result"]["value"]["model"] == "typesafe/jev-1.13-20260917"
   end
 
@@ -71,37 +72,90 @@ defmodule PtcRunner.Kernel.DecisionExampleTest do
     assert outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
   end
 
-  @tag :tmp_dir
-  test "decision replay settles overruns at reported cost and tokens", %{tmp_dir: dir} do
-    project = copy_example(dir)
-    directory = Path.dirname(project)
-    host_path = Path.join(directory, "ptc-host.json")
+  for {scenario, response_patch, cost, tokens, model} <- [
+        {:cost_overrun,
+         %{"usage" => %{"input_tokens" => 300, "output_tokens" => 30, "cost" => 0.02}}, 20_000,
+         330, "typesafe/jev-1.13-20260917"},
+        {:token_overrun,
+         %{"usage" => %{"input_tokens" => 9000, "output_tokens" => 10, "cost" => 0.000028}}, 28,
+         9010, "typesafe/jev-1.13-20260917"},
+        {:rejected_answer, %{"answers" => %{}}, 28, 330, "typesafe/jev-1.13-20260917"},
+        {:invalid_model, %{"model" => ""}, 28, 330, nil}
+      ] do
+    @tag :tmp_dir
+    test "decision replay retains response evidence for #{scenario}", %{tmp_dir: dir} do
+      project = copy_example(dir)
+      directory = Path.dirname(project)
+      host_path = Path.join(directory, "ptc-host.json")
 
-    host =
-      host_path
-      |> File.read!()
-      |> Jason.decode!()
-      |> Map.put("limits", %{"llm_cost_microusd" => 100_000, "llm_total_tokens" => 20_000})
+      host =
+        host_path
+        |> File.read!()
+        |> Jason.decode!()
+        |> Map.put("limits", %{"llm_cost_microusd" => 100_000, "llm_total_tokens" => 20_000})
 
-    File.write!(host_path, Jason.encode!(host))
-    fixture_path = Path.join(directory, "replay.jsonl")
+      File.write!(host_path, Jason.encode!(host))
+      fixture_path = Path.join(directory, "replay.jsonl")
 
-    fixture =
-      fixture_path
-      |> File.read!()
-      |> Jason.decode!()
-      |> put_in(["response", "usage"], %{
-        "input_tokens" => 9000,
-        "output_tokens" => 10,
-        "cost" => 0.02
-      })
+      fixture =
+        fixture_path
+        |> File.read!()
+        |> Jason.decode!()
+        |> update_in(["response"], &Map.merge(&1, unquote(Macro.escape(response_patch))))
 
-    File.write!(fixture_path, Jason.encode!(fixture) <> "\n")
-    assert {:error, outcome} = CommandEngine.dispatch(["run", project])
-    usage = outcome.envelope["execution"]["usage"]
-    assert usage["llm_budget"]["cost"]["charged_microusd"] == 20_000
-    assert usage["llm_budget"]["total_tokens"]["charged"] == 9010
-    assert usage["capability_calls"]["workflow/decision-request"] == 1
+      File.write!(fixture_path, Jason.encode!(fixture) <> "\n")
+      assert {:error, outcome} = CommandEngine.dispatch(["run", project])
+      usage = outcome.envelope["execution"]["usage"]
+      assert usage["llm_budget"]["cost"]["charged_microusd"] == unquote(cost)
+      assert usage["llm_budget"]["total_tokens"]["charged"] == unquote(tokens)
+      assert usage["capability_calls"]["workflow/decision-request"] == 1
+      artifacts = Path.join(directory, ".ptc")
+      [trace_path] = Path.wildcard(Path.join([artifacts, "traces", "*.jsonl"]))
+
+      stopped =
+        trace_path
+        |> File.read!()
+        |> String.split("\n", trim: true)
+        |> Enum.map(&Jason.decode!/1)
+        |> Enum.find(
+          &(&1["type"] == "capability-stopped" and &1["data"]["name"] == "decision-request")
+        )
+
+      assert stopped["data"]["served_model"] == unquote(model)
+      assert stopped["data"]["status"] == "error"
+
+      assert {:ok, trace} =
+               TraceSnapshot.start({:directory, Path.join(artifacts, "traces")}, owner: self())
+
+      assert {:ok, inspection} =
+               InspectionSnapshot.start({:directory, Path.join(artifacts, "inspection")}, trace,
+                 owner: self()
+               )
+
+      on_exit(fn ->
+        InspectionSnapshot.stop(inspection)
+        TraceSnapshot.stop(trace)
+      end)
+
+      assert {:ok, page} =
+               InspectionSnapshot.query(inspection, :model_exchanges, %{
+                 "run_id" => outcome.envelope["run_ref"]
+               })
+
+      assert [exchange] = page["items"]
+      assert exchange["served_model"] == unquote(model)
+      assert exchange["result"]["status"] == "error"
+
+      assert exchange["result"]["reason"] ==
+               unquote(
+                 if scenario in [:cost_overrun, :token_overrun],
+                   do: "invalid_result",
+                   else: "output_schema_mismatch"
+               )
+
+      assert exchange["result"]["retryable?"] == false
+      refute Map.has_key?(exchange["result"], "value")
+    end
   end
 
   @tag :tmp_dir
