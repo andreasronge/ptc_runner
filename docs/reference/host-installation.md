@@ -630,7 +630,7 @@ does not expose endpoints, commands, paths, credentials, or OAuth authority.
 
 ## Decision model installations
 
-`decision` installs the **alpha** [OpenRouter Decisions backend](https://openrouter.ai/typesafe/jev-1.13). Its vendor-neutral capability
+`decision` installs a generic HTTP backend, a JSON-schema chat backend, or the **alpha** [OpenRouter Decisions backend](https://openrouter.ai/typesafe/jev-1.13). Its vendor-neutral capability
 is `decision-request`, exposed by the shipped `decision/request` prelude.
 Jev boolean answers contain measured probabilities; your workflow applies thresholds.
 An optional boolean `value` carries a discrete answer: `false` is an answer,
@@ -671,7 +671,7 @@ Optional `reservation_tariff` identifies a host policy; it does not compute a
 reservation. `ceilings`, `data_class`, and `accepts_data` use the same fields
 as live LLM installations. Decision sources belong in the workflow.
 
-`max_cost_per_call` is a positive USD decimal string. `0.01` USD is recommended
+`max_cost_per_call` is a non-negative USD decimal string for every decision backend, including replay. `0.01` USD is recommended
 for this first backend. `max_total_tokens_per_call` is a positive integer;
 `8000` is recommended, and hosts sending large `state` inputs must raise it.
 When the corresponding ceiling is enabled, each call reserves exactly these
@@ -680,6 +680,78 @@ calls. Validated reported cost and tokens settle after the response. An
 exceeded bound is still charged in full and fails permanently with
 `invalid_result`, without retry. Decision calls also count against
 `max_active_provider_calls`.
+
+### HTTP backend
+
+Use `backend: "http"` to send measured decisions to a host-owned endpoint.
+This closed variant requires `source`, `backend`, `endpoint`, `model`,
+`usage_guarantees`, `installation_revision`, and both per-call bounds.
+Optional fields are `credential`, `allow_insecure_loopback`, `ceilings`,
+`data_class`, and `accepts_data`. Unknown fields are refused.
+
+```json
+{
+  "source": "decision",
+  "backend": "http",
+  "endpoint": "http://127.0.0.1:8321/decisions",
+  "allow_insecure_loopback": true,
+  "model": "anyjev/qwen3-8b@cal-2026-09",
+  "usage_guarantees": {"tokens": true, "cost_currency": null},
+  "max_cost_per_call": {"currency": "USD", "amount": "0"},
+  "max_total_tokens_per_call": 8000,
+  "ceilings": {"request_timeout_ms": 45000},
+  "installation_revision": "local-decisions-v1"
+}
+```
+
+HTTPS endpoints are allowed anywhere. Plain HTTP requires
+`allow_insecure_loopback: true` and a literal `127.0.0.1` or `::1` address;
+`localhost` is refused. HTTPS must omit the allowance or set it to false.
+Userinfo, fragments, whitespace and control characters are refused. Optional
+`credential` names a host credential binding and sends a Bearer header; it
+requires HTTPS. Workflow code cannot choose the endpoint.
+
+The server receives a JSON POST with `model`, `state`, and `questions`:
+
+```json
+{"model":"local-v1","state":{"number":2},"questions":{"positive":{"type":"boolean","instructions":"Is the number positive?"}}}
+```
+
+A small offline fixture server can answer that request with:
+
+```json
+{"model":"local-v1@cal-1","answers":{"positive":{"type":"boolean","probability":0.9,"confidence":0.8}},"usage":{"input_tokens":20,"output_tokens":10,"cost":0}}
+```
+
+Boolean wire types stay `boolean`. The response follows the public decision
+contract and can be saved as a `decision_replay` fixture response; request
+hashes use the same provider-neutral `state` and `questions`. The recording
+fixture in `test/support/decision_http_fixture.ex` demonstrates a minimal
+local server. Invalid answers fail permanently while valid usage and served
+model identity still settle. Served identifiers may differ from declared
+selectors; the mismatch is recorded without rejecting it. Acquisition identity
+contains the declared model and backend, excludes the endpoint, and changing
+the endpoint changes the installation configuration digest.
+
+Automatic HTTP retries and redirects are disabled for both HTTP and
+OpenRouter decisions. Any 3xx response is a non-retryable protocol failure;
+request state is never sent to a redirect target. The receive timeout is the
+minimum of `ceilings.request_timeout_ms`, `limits.llm_request_timeout_ms`, and
+the remaining run deadline. Calls occupy the shared provider admission slot.
+
+A zero cost bound is a host declaration. With the cost ledger enabled,
+`cost_currency: null` is refused at load; use `"USD"` and report cost. Reported
+`cost: 0` settles zero with complete accounting. Missing cost charges the
+reservation (zero) and marks the ledger incomplete; the recorded amount may
+be below real spend. Positive reported cost under a zero bound is preserved
+and charged, and the call fails permanently with `invalid_result` without
+retry. With the cost ledger disabled, the cost bound is unused. Token bounds
+remain positive.
+
+The runtime constrains only the configured destination. A local server can
+forward data elsewhere; the runtime cannot establish the server's data-handling
+behavior. `doctor`, including `doctor --connect`, does not check connectivity
+for this backend. Data policy and workflow-only placement apply unchanged.
 
 ### JSON-schema chat backend
 

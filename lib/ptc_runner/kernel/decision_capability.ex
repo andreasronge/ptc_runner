@@ -27,8 +27,8 @@ defmodule PtcRunner.Kernel.DecisionCapability do
   `private` when the selector is hidden.
 
   Model calls use the shared chat spend, token, admission, deadline, replay,
-  and inspection machinery. Host installations declare positive per-call cost
-  and token bounds; they never estimate decision reservations from tokens.
+  and inspection machinery. Host installations declare non-negative per-call cost
+  and positive token bounds; they never estimate decision reservations from tokens.
   Invalid responses and bound overruns are permanent `invalid_result` failures.
   """
   alias PtcRunner.Kernel.LLMUsage

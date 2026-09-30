@@ -329,7 +329,7 @@ guide documents the additional semantic and authority rules applied at load.</p>
 by name through <code class="inline">providers.workflow</code>, just as it selects a chat installation:</p><pre><code class="json language-json">{&quot;providers&quot;:{&quot;workflow&quot;:[{&quot;name&quot;:&quot;decisions&quot;}]}}</code></pre><p>Include <code class="inline">{&quot;library&quot;:&quot;decision&quot;}</code> in <code class="inline">workflow.components</code>, declare it as a
 dependency of the calling component, and call <code class="inline">decision/request</code> with <code class="inline">state</code>
 and named <code class="inline">questions</code>. The workflow owns probability thresholds. Live alpha
-OpenRouter Decisions configuration and the required per-call reservation
+HTTP, chat, and OpenRouter Decisions configuration and the required per-call reservation
 bounds belong to <a href="/reference/host-installation/#decision-model-installations">the host installation</a>.</p>
 </article>
 <nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/signature-syntax/">&larr; Signature reference</a><a class="pager-next" href="/reference/host-installation/">Host-configuration reference &rarr;</a></nav>
