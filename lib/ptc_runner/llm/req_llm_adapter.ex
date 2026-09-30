@@ -403,9 +403,10 @@ if Code.ensure_loaded?(ReqLLM) do
     @doc """
     Generate a structured JSON object from an LLM.
 
-    Only supported for ReqLLM providers whose sealed mode is attested.
-    Direct `ollama:` and `openai-compat:` routes return
-    `{:error, :structured_output_not_supported}`.
+    Supported for ReqLLM providers whose sealed mode is attested and direct
+    `openai-compat:` servers declared to support strict JSON schemas. The schema
+    is sent unchanged and the entire response content must decode to one object.
+    Direct `ollama:` routes return `{:error, :structured_output_not_supported}`.
     """
     @spec generate_object(String.t() | ReqLLMPreparedModel.t(), [map()], map(), keyword()) ::
             {:ok, map()} | {:error, term()}
@@ -432,8 +433,32 @@ if Code.ensure_loaded?(ReqLLM) do
         {:ollama, _model_name} ->
           {:error, :structured_output_not_supported}
 
-        {:openai_compat, _base_url, _model_name} ->
-          {:error, :structured_output_not_supported}
+        {:openai_compat, base_url, model_name} ->
+          response_format = %{
+            type: "json_schema",
+            json_schema: %{name: "ptc_response", strict: true, schema: schema}
+          }
+
+          with {:ok, result} <-
+                 call_openai_compat(
+                   base_url,
+                   model_name,
+                   messages,
+                   Keyword.put(opts, :response_format, response_format)
+                 ) do
+            case decode_direct_object(result.content) do
+              {:ok, object} ->
+                {:ok, %{object: object, tokens: result.tokens}}
+
+              _invalid ->
+                {:error,
+                 ProviderError.new(
+                   :invalid_result,
+                   "LLM provider returned an invalid JSON object",
+                   dispatch_provenance: :dispatched
+                 )}
+            end
+          end
 
         {:req_llm, model_id} ->
           with {:ok, prepared, _status} <- prepare_req_llm_model(model_id),
@@ -596,6 +621,15 @@ if Code.ensure_loaded?(ReqLLM) do
       end
     end
 
+    defp decode_direct_object(content) when is_binary(content) do
+      case Jason.decode(content) do
+        {:ok, object} when is_map(object) -> {:ok, object}
+        _invalid -> :error
+      end
+    end
+
+    defp decode_direct_object(_content), do: :error
+
     defp call_openai_compat(base_url, model, messages, opts) do
       timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
       http_opts = Keyword.get(opts, :req_http_options, [])
@@ -608,7 +642,8 @@ if Code.ensure_loaded?(ReqLLM) do
           :top_p,
           :presence_penalty,
           :frequency_penalty,
-          :reasoning_effort
+          :reasoning_effort,
+          :response_format
         ])
 
       formatted_messages =
@@ -622,6 +657,15 @@ if Code.ensure_loaded?(ReqLLM) do
             Map.merge(%{model: model, messages: formatted_messages}, Map.new(generation_opts)),
           receive_timeout: timeout
         ] ++ http_opts
+
+      request_opts =
+        case Keyword.get(opts, :api_key) do
+          key when is_binary(key) and byte_size(key) > 0 ->
+            Keyword.put(request_opts, :auth, {:bearer, key})
+
+          _absent ->
+            request_opts
+        end
 
       case Req.post("#{base_url}/chat/completions", request_opts) do
         {:ok, %{status: 200, body: body}} ->
@@ -2089,6 +2133,9 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp attest_structured_mode(model, :json_schema) do
       case parse_provider(model) do
+        {:openai_compat, _base_url, _model_name} ->
+          :ok
+
         {:req_llm, selector} ->
           if native_json_schema_selector?(selector),
             do: :ok,

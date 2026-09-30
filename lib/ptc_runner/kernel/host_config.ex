@@ -1915,6 +1915,8 @@ defmodule PtcRunner.Kernel.HostConfig do
             }
           }),
         "structured_output_mode" => %{
+          "description" =>
+            "Direct openai-compat: supports json_schema as your declaration of strict server schema support (which the adapter cannot verify); configured credentials are sent as Authorization: Bearer; schemas are sent unchanged and returned objects are validated. Direct ollama: refuses structured modes. Direct routes refuse reservation tariffs and cost budgets; token budgets require usage_guarantees.tokens: true.",
           "type" => "string",
           "enum" => ["json_schema", "json_object", "unsupported"]
         },

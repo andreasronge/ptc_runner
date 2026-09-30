@@ -288,11 +288,28 @@ that provider's actual JSON-object control: OpenAI-style `response_format`
 `json_object` on OpenRouter, OpenAI, Groq, Fireworks, xAI, Azure OpenAI, and
 Vertex OpenAI-compatible MaaS. Anthropic, Bedrock, Google AI Studio, Vertex
 Claude/Gemini, and Azure Claude have no such control and stay `unsupported` or
-`json_schema`. Direct `ollama:` and `openai-compat:` selectors are refused for
-both structured modes. `unsupported` refuses a request `schema` before dispatch.
+`json_schema`. Direct `ollama:` selectors refuse both structured modes.
+Direct `openai-compat:` selectors support `json_schema` and refuse `json_object`.
+For `openai-compat:`, the mode is your declaration that the server supports
+OpenAI-style `response_format` with `type: "json_schema"`, a `json_schema` name
+of `ptc_response`, and `strict: true`. The request schema is sent unchanged;
+server support for strict schemas varies, and the adapter cannot verify that
+an arbitrary server enforces it. Returned objects are checked by the
+`llm/request` request validator and, separately, by the chat decision backend.
+A server that ignores `response_format` fails only when its answer does not
+match the schema. Content must be exactly one JSON object: reasoning prefixes
+such as `<think>` are rejected, so configure your server to separate reasoning
+or disable thinking. To use Ollama schema output, select
+`openai-compat:http://localhost:11434/v1|<model>`.
+Configured credentials are sent as `Authorization: Bearer <credential>`.
+`unsupported` refuses a request `schema` before dispatch.
 Changing the mode requires a new `installation_revision`. A schema
 together with a non-empty `tools` list is invalid. Success is a
 `structured_output` object; encoded `content` is not duplicated.
+
+Direct routes retain their budget rules: an `openai-compat:` installation can
+serve a token budget with `usage_guarantees.tokens: true`, but cannot serve a
+cost budget. Direct routes refuse every `reservation_tariff` at prepare.
 
 ### Usage guarantees
 

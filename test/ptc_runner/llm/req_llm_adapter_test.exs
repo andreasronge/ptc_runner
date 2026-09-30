@@ -40,23 +40,12 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
       assert {:error, :structured_output_not_supported} =
                ReqLLMAdapter.generate_object("ollama:model", [], %{})
     end
-
-    test "returns structured_output_not_supported for openai-compat" do
-      assert {:error, :structured_output_not_supported} =
-               ReqLLMAdapter.generate_object("openai-compat:http://localhost|model", [], %{})
-    end
   end
 
   describe "generate_object!/4" do
     test "raises for ollama" do
       assert_raise RuntimeError, ~r/structured_output_not_supported/, fn ->
         ReqLLMAdapter.generate_object!("ollama:model", [], %{})
-      end
-    end
-
-    test "raises for openai-compat" do
-      assert_raise RuntimeError, ~r/structured_output_not_supported/, fn ->
-        ReqLLMAdapter.generate_object!("openai-compat:http://localhost|model", [], %{})
       end
     end
   end
