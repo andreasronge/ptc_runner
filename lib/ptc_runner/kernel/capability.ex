@@ -226,11 +226,9 @@ defmodule PtcRunner.Kernel.Capability do
   end
 
   defp callable_children_by_type({:ok, "object", _nullable?}, schema) do
-    schema
-    |> Map.get("properties", %{})
-    |> Enum.all?(fn {name, child} ->
+    Enum.all?(Map.get(schema, "properties", %{}), fn {name, child} ->
       KeyNormalizer.normalize_key(name) == name and callable_input_schema?(child)
-    end)
+    end) and callable_input_schema?(Map.get(schema, "additionalProperties"))
   end
 
   defp callable_children_by_type({:ok, "array", _nullable?}, %{"items" => items}),

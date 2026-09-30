@@ -50,6 +50,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   results copy that content identity unchanged for citations.
   """
 
+  alias PtcRunner.Kernel.ChatDecisions
   alias PtcRunner.Kernel.DecisionCapability
   alias PtcRunner.Kernel.OpenRouterDecisions
 
@@ -181,6 +182,13 @@ defmodule PtcRunner.Kernel.HostInstallation do
   # :req_llm, which is the long-standing behaviour rather than a regression. The
   # request-time check in `provider_application_ready/2` is route-aware, so the
   # error a caller actually sees is correct.
+  defp maybe_provider_application(implementation, %{
+         source: :decision,
+         backend: :chat,
+         chat_installation: chat
+       }),
+       do: maybe_provider_application(implementation, chat)
+
   defp maybe_provider_application(implementation, %{source: :llm}) do
     if Application.get_env(
          :ptc_runner,
@@ -1196,6 +1204,19 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
+  defp local_preflight(
+         _host,
+         %{source: :decision, backend: :chat, chat_installation: chat} = installation,
+         selection,
+         context
+       ) do
+    with :ok <- placement(installation, context.destination),
+         {:ok, _selected} <- normalize_runtime_selection(installation, selection, context),
+         {:ok, model, adapter} <- preflight_llm(chat.model) do
+      maybe_prepare_llm_contract(chat, context, model, adapter)
+    end
+  end
+
   defp local_preflight(_host, %{source: :decision} = installation, selection, context) do
     with :ok <- placement(installation, context.destination),
          {:ok, _selected} <- normalize_runtime_selection(installation, selection, context),
@@ -1832,6 +1853,38 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
       {:ok, LLMReplay.requester(replay), fn -> LLMReplay.stop(replay) end, acquisition,
        acquisition["fixture_set_hash"]}
+    end
+  end
+
+  defp decision_requester(
+         _host,
+         %{source: :decision, backend: :chat, chat_installation: chat} = installation,
+         _selected,
+         context,
+         credentials
+       ) do
+    with {:ok, model, adapter} <- preflight_llm(chat.model),
+         {:ok, requirements} <- live_llm_requirements(chat, context),
+         {:ok, prepared} <- prepare_llm_model(model, requirements, adapter),
+         :ok <- provider_application_ready(adapter, model),
+         {:ok, credential} <- Map.fetch(credentials, installation.credential),
+         {:ok, callback} <-
+           PtcRunner.LLM.callback(prepared, %{credential: credential, cache: chat.cache}),
+         true <-
+           cancellation_witness_supported?(prepared, Map.get(context, :provider_call_admission)) do
+      public_model = PtcRunner.LLM.attested_public_model(adapter, model)
+
+      chat_callback = fn request, context ->
+        with :ok <- provider_application_ready(adapter, model), do: callback.(request, context)
+      end
+
+      requester =
+        ChatDecisions.requester(chat_callback, public_model || "private")
+
+      {:ok, requester, nil,
+       %{"source" => "decision", "backend" => "chat", "model" => public_model}, nil}
+    else
+      _ -> {:error, :invalid_llm_provider}
     end
   end
 

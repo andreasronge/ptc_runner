@@ -875,7 +875,9 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
       TestHelpers.dispatch_context(
         state,
         :mission,
-        Keyword.get(opts, :timeout_ms, 100),
+        # Functional assertions need scheduling headroom in the full async suite.
+        # Deadline tests supply their own timeout explicitly.
+        Keyword.get(opts, :timeout_ms, 5_000),
         lease: lease,
         mission_name: "default"
       ),

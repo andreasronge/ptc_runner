@@ -2,7 +2,9 @@ defmodule PtcRunner.Kernel.DecisionProviderTest do
   use ExUnit.Case, async: true
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
 
+  alias PtcRunner.Kernel.ChatDecisions
   alias PtcRunner.Kernel.DecisionCapability
+  alias PtcRunner.Kernel.DecisionContract
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMCapability
@@ -22,9 +24,43 @@ defmodule PtcRunner.Kernel.DecisionProviderTest do
     "usage" => %{"input_tokens" => 10, "output_tokens" => 5, "cost" => 0.000075}
   }
 
+  defp chat_decision_requester do
+    ChatDecisions.requester(
+      fn _, _ ->
+        {:ok, %{object: %{"q" => false}, tokens: %{input: 10, output: 5, total_cost: 0.000075}}}
+      end,
+      "served-chat"
+    )
+  end
+
+  test "chat token errors still settle independently valid reported cost" do
+    requester =
+      ChatDecisions.requester(
+        fn _, _ ->
+          {:ok, %{object: %{"q" => false}, tokens: %{input: -1, output: 5, total_cost: 0.000075}}}
+        end,
+        "served-chat"
+      )
+
+    {state, environment} =
+      runtime([decision(requester, 200, 40)], llm_total_tokens: 100, llm_cost_microusd: 500)
+
+    assert %{status: :error, kind: :invalid_result, retryable?: false} =
+             dispatch(state, environment, "decision-request", @request)
+
+    assert RunState.usage(state).llm_budget["cost"]["charged_microusd"] == 75
+  end
+
   test "exact declared reservations settle reported usage and overruns never retry" do
-    for {cost, tokens, outcome} <- [{200, 40, :ok}, {50, 40, :error}, {200, 12, :error}] do
+    for backend <- [:measured, :chat],
+        {cost, tokens, outcome} <- [{200, 40, :ok}, {50, 40, :error}, {200, 12, :error}] do
       parent = self()
+
+      requester =
+        case backend do
+          :measured -> fn _, _ -> {:ok, @response} end
+          :chat -> chat_decision_requester()
+        end
 
       capability =
         decision(
@@ -37,7 +73,7 @@ defmodule PtcRunner.Kernel.DecisionProviderTest do
             )
 
             send(parent, :called)
-            {:ok, @response}
+            requester.(@request, context)
           end,
           cost,
           tokens
@@ -70,7 +106,7 @@ defmodule PtcRunner.Kernel.DecisionProviderTest do
       decision(
         fn _, _ ->
           send(parent, :decision_dispatched)
-          {:ok, @response}
+          chat_decision_requester().(@request, %{})
         end,
         200,
         40
@@ -168,36 +204,55 @@ defmodule PtcRunner.Kernel.DecisionProviderTest do
       end
     end
 
-    chat_requester = request.(:chat, {:ok, %{content: "ok"}})
-    decision_requester = request.(:decision, {:ok, @response})
+    for backend <- [:measured, :chat] do
+      chat_requester = request.(:chat, {:ok, %{content: "ok"}})
 
-    {:ok, chat} =
-      LLMCapability.new(
-        requester: fn req, ctx -> ProviderCallOwner.run(admission, chat_requester, req, ctx) end
-      )
+      decision_requester =
+        case backend do
+          :measured ->
+            request.(:decision, {:ok, @response})
 
-    {:ok, decision} =
-      DecisionCapability.new(
-        requester: fn req, ctx ->
-          ProviderCallOwner.run(admission, decision_requester, req, ctx)
+          :chat ->
+            ChatDecisions.requester(
+              request.(
+                :decision,
+                {:ok,
+                 %{object: %{"q" => false}, tokens: %{input: 10, output: 5, total_cost: 0.000075}}}
+              ),
+              "served-chat"
+            )
         end
-      )
 
-    context = %{llm_request_deadline_ms: System.monotonic_time(:millisecond) + 5000}
-    first = Task.async(fn -> chat.callback.(%{"messages" => []}, context) end)
-    assert_receive {:entered, :chat, first_worker}
-    second = Task.async(fn -> decision.callback.(@request, context) end)
+      {:ok, chat} =
+        LLMCapability.new(
+          requester: fn req, ctx -> ProviderCallOwner.run(admission, chat_requester, req, ctx) end
+        )
 
-    assert_eventually(fn ->
-      match?({:ok, %{active: 1, waiting: 1}}, ProviderCallAdmission.snapshot(admission))
-    end)
+      {:ok, decision} =
+        DecisionCapability.new(
+          requester: fn req, ctx ->
+            ProviderCallOwner.run(admission, decision_requester, req, ctx)
+          end
+        )
 
-    refute_received {:entered, :decision, _}
-    send(first_worker, :complete)
-    assert {:ok, _} = Task.await(first)
-    assert_receive {:entered, :decision, second_worker}
-    send(second_worker, :complete)
-    assert {:ok, @response} = Task.await(second)
+      context = %{llm_request_deadline_ms: System.monotonic_time(:millisecond) + 5000}
+      first = Task.async(fn -> chat.callback.(%{"messages" => []}, context) end)
+      assert_receive {:entered, :chat, first_worker}
+      second = Task.async(fn -> decision.callback.(@request, context) end)
+
+      assert_eventually(fn ->
+        match?({:ok, %{active: 1, waiting: 1}}, ProviderCallAdmission.snapshot(admission))
+      end)
+
+      refute_received {:entered, :decision, _}
+      send(first_worker, :complete)
+      assert {:ok, _} = Task.await(first)
+      assert_receive {:entered, :decision, second_worker}
+      send(second_worker, :complete)
+      assert {:ok, response} = Task.await(second)
+      assert DecisionContract.valid_response?(response, @request["questions"])
+      if backend == :chat, do: assert(response["answers"]["q"]["value"] == false)
+    end
   end
 
   test "request validation rejects malformed criteria before dispatch and admits large legal state" do

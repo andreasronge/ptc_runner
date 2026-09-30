@@ -1,8 +1,10 @@
 defmodule PtcRunner.Kernel.DecisionExampleTest do
   use ExUnit.Case, async: true
   @moduletag :operator
+  alias PtcRunner.Kernel.ChatDecisions
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.InspectionSnapshot
+  alias PtcRunner.Kernel.LLMReplay
   alias PtcRunner.Kernel.TraceSnapshot
 
   @example Path.expand("../../../examples/decision-refund-triage", __DIR__)
@@ -178,6 +180,97 @@ defmodule PtcRunner.Kernel.DecisionExampleTest do
     File.write!(fixture_path, Jason.encode!(fixture) <> "\n")
     assert {:ok, outcome} = CommandEngine.dispatch(["run", project])
     assert outcome.envelope["result"]["value"]["refund_ticket_ids"] == ["T-1001", "T-1004"]
+  end
+
+  @tag :tmp_dir
+  test "one manifest handles measured and discrete replay answers and can require measurement", %{
+    tmp_dir: dir
+  } do
+    project = copy_example(dir)
+    directory = Path.dirname(project)
+    manifest_path = Path.join(directory, "ptc.json")
+
+    request = %{
+      "state" => %{},
+      "questions" => %{
+        "q" => %{"type" => "boolean", "instructions" => "Does the state meet the condition?"}
+      }
+    }
+
+    manifest = manifest_path |> File.read!() |> Jason.decode!()
+    manifest = put_in(manifest, ["input", "value"], request)
+    File.write!(manifest_path, Jason.encode!(manifest))
+    manifest_bytes = File.read!(manifest_path)
+
+    File.write!(Path.join(directory, "workflow.clj"), """
+    (ns example.decision)
+    (defn run [request]
+      (let [response (decision/request request)
+            answer (get-in response ["answers" "q"])
+            probability (get answer "probability")
+            value (get answer "value")]
+        (return {"use_available" (if (nil? probability)
+                                   (if (nil? value) "escalate" value)
+                                   (>= probability 0.5))
+                 "require_measured" (if (nil? probability) "escalate" (>= probability 0.5))})))
+    """)
+
+    {:ok, hash} = LLMReplay.request_hash(request)
+
+    for discrete <- [true, false] do
+      measured = %{
+        "model" => "measured",
+        "answers" => %{
+          "q" => %{
+            "type" => "boolean",
+            "probability" => if(discrete, do: 0.9, else: 0.1),
+            "confidence" => nil
+          }
+        },
+        "usage" => %{"input_tokens" => 10, "output_tokens" => 2}
+      }
+
+      chat =
+        ChatDecisions.requester(
+          fn _, _ ->
+            {:ok, %{object: %{"q" => discrete}, tokens: %{input: 10, output: 2}}}
+          end,
+          "chat"
+        )
+
+      {:ok, unmeasured} = chat.(request, %{})
+
+      for {response, required} <- [{measured, discrete}, {unmeasured, "escalate"}] do
+        host_path = Path.join(directory, "ptc-host.json")
+        host = host_path |> File.read!() |> Jason.decode!()
+
+        host =
+          put_in(host, ["install", "frozen-decisions", "usage_guarantees"], %{
+            "tokens" => true,
+            "cost_currency" => nil
+          })
+
+        File.write!(host_path, Jason.encode!(host))
+
+        File.write!(
+          Path.join(directory, "replay.jsonl"),
+          Jason.encode!(%{
+            "schema_version" => 2,
+            "request_hash" => hash,
+            "response" => response
+          }) <> "\n"
+        )
+
+        assert {:ok, outcome} = CommandEngine.dispatch(["run", project])
+
+        assert outcome.envelope["result"]["value"] == %{
+                 "use_available" => discrete,
+                 "require_measured" => required
+               }
+
+        assert File.read!(manifest_path) == manifest_bytes
+      end
+    end
   end
 
   defp copy_example(dir) do
