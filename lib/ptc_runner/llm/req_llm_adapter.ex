@@ -434,30 +434,18 @@ if Code.ensure_loaded?(ReqLLM) do
           {:error, :structured_output_not_supported}
 
         {:openai_compat, base_url, model_name} ->
-          response_format = %{
-            type: "json_schema",
-            json_schema: %{name: "ptc_response", strict: true, schema: schema}
-          }
+          case call_openai_compat_object(base_url, model_name, messages, schema, opts) do
+            {:ok, %{object: _object}} = result ->
+              result
 
-          with {:ok, result} <-
-                 call_openai_compat(
-                   base_url,
-                   model_name,
-                   messages,
-                   Keyword.put(opts, :response_format, response_format)
-                 ) do
-            case decode_direct_object(result.content) do
-              {:ok, object} ->
-                {:ok, %{object: object, tokens: result.tokens}}
+            {:ok, _usage_only} ->
+              {:error,
+               ProviderError.new(:invalid_result, "LLM provider returned an invalid JSON object",
+                 dispatch_provenance: :dispatched
+               )}
 
-              _invalid ->
-                {:error,
-                 ProviderError.new(
-                   :invalid_result,
-                   "LLM provider returned an invalid JSON object",
-                   dispatch_provenance: :dispatched
-                 )}
-            end
+            error ->
+              error
           end
 
         {:req_llm, model_id} ->
@@ -618,6 +606,29 @@ if Code.ensure_loaded?(ReqLLM) do
 
         {:error, reason} ->
           {:error, reason}
+      end
+    end
+
+    defp call_openai_compat_object(base_url, model, messages, schema, opts) do
+      response_format = %{
+        type: "json_schema",
+        json_schema: %{name: "ptc_response", strict: true, schema: schema}
+      }
+
+      with {:ok, result} <-
+             call_openai_compat(
+               base_url,
+               model,
+               messages,
+               Keyword.put(opts, :response_format, response_format)
+             ) do
+        candidate = %{tokens: result.tokens}
+
+        case decode_direct_object(result.content) do
+          {:ok, object} -> {:ok, Map.put(candidate, :object, object)}
+          # The Kernel rejects the missing object while settling observed usage.
+          :error -> {:ok, candidate}
+        end
       end
     end
 
@@ -1709,7 +1720,7 @@ if Code.ensure_loaded?(ReqLLM) do
       case target.structured_output_mode do
         :json_schema ->
           target
-          |> generate_object(messages, schema, opts)
+          |> generate_schema_candidate(messages, schema, opts)
           |> case do
             {:ok, result} -> {:ok, result}
             error -> normalize_call_result(error)
@@ -1725,6 +1736,30 @@ if Code.ensure_loaded?(ReqLLM) do
           {:error, ProviderError.new(:invalid_result, "LLM provider returned an invalid result")}
       end
     end
+
+    defp generate_schema_candidate(
+           %ReqLLMPreparedModel{model: nil} = target,
+           messages,
+           schema,
+           opts
+         ) do
+      case parse_provider(target.selector) do
+        {:openai_compat, base_url, model} ->
+          call_openai_compat_object(
+            base_url,
+            model,
+            messages,
+            schema,
+            merge_exact_options(target, opts)
+          )
+
+        _route ->
+          generate_object(target, messages, schema, opts)
+      end
+    end
+
+    defp generate_schema_candidate(target, messages, schema, opts),
+      do: generate_object(target, messages, schema, opts)
 
     defp generate_json(%ReqLLMPreparedModel{model: %LLMDB.Model{}} = model, messages, opts) do
       call_req_llm_json(model, messages, merge_exact_options(model, opts))

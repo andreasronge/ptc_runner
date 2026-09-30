@@ -66,6 +66,14 @@ defmodule PtcRunner.Kernel.OpenAICompatCommandTest do
         refute Map.has_key?(value, "structured_output")
         refute Map.has_key?(value, "answers")
         assert_receive {:wire, _}
+
+        if unquote(status) == 200 do
+          usage = outcome.envelope["execution"]["usage"]
+          assert usage["llm_budget"]["total_tokens"]["charged"] == 12
+
+          assert [%{"usage" => %{"input" => 10, "output" => 2}, "missing_usage_calls" => 0}] =
+                   usage["llm_usage"]
+        end
       end
     end
 

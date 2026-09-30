@@ -299,7 +299,8 @@ an arbitrary server enforces it. Returned objects are checked by the
 A server that ignores `response_format` fails only when its answer does not
 match the schema. Content must be exactly one JSON object: reasoning prefixes
 such as `<think>` are rejected, so configure your server to separate reasoning
-or disable thinking. To use Ollama schema output, select
+or disable thinking. Valid reported usage is retained for budget settlement
+even when the content is rejected. To use Ollama schema output, select
 `openai-compat:http://localhost:11434/v1|<model>`.
 Configured credentials are sent as `Authorization: Bearer <credential>`.
 `unsupported` refuses a request `schema` before dispatch.
