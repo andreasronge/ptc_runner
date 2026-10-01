@@ -84,9 +84,6 @@ defmodule PtcRunner.Kernel.ProjectResolver do
     end
   end
 
-  defp document_error(argv, frontend, {:project_unavailable, _reason} = failure),
-    do: parse_document_error(argv, frontend, failure)
-
   defp document_error(["models", _project_path | rest], frontend, reason) do
     if switch?(rest, "--host-config") do
       # A project and an explicit host are conflicting authority modes, but the

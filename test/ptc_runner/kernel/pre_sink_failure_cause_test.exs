@@ -52,8 +52,15 @@ defmodule PtcRunner.Kernel.PreSinkFailureCauseTest do
   test "an unreadable document is not retried as an application", %{tmp_dir: dir} do
     path = Path.join(dir, "unreadable.json")
     File.write!(path, <<255>>)
-    assert {:error, outcome} = CommandEngine.dispatch(["validate", path])
-    assert_public_cause(outcome, "application_unavailable", "invalid_configuration", dir)
+
+    for argv <- [["validate", path], ["models", path], ["doctor", path, "--connect"]] do
+      assert {:error, outcome} = CommandEngine.dispatch(argv)
+      assert_public_cause(outcome, "application_unavailable", "invalid_configuration", dir)
+
+      assert {:error, invalid} = CommandEngine.dispatch(argv ++ ["--unknown-switch"])
+      assert invalid.envelope["error"]["code"] == "invalid_arguments"
+      refute Map.has_key?(invalid.envelope["error"], "cause")
+    end
   end
 
   @tag :tmp_dir

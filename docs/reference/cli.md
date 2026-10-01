@@ -427,6 +427,10 @@ expires is `lock_timeout`. An unknown environment callback failure keeps
 `internal_error` with a closed cause. Causes never include filesystem paths,
 callback payloads, exception names, messages, or stack traces.
 
+An unreadable project document also retains its read cause for `models PROJECT`
+and `doctor PROJECT --connect`, even before its host configuration can be
+derived. Invalid command switches still take precedence as argument errors.
+
 <!-- BEGIN GENERATED: command failure causes (mix ptc.gen_docs) -->
 
 The optional `error.cause` in a V5 envelope gives a closed, public reason

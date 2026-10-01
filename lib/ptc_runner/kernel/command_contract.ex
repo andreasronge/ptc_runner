@@ -1222,6 +1222,9 @@ defmodule PtcRunner.Kernel.CommandContract do
        when mode in [:validate, :materialize],
        do: true
 
+  # A supplied project document can fail its read before models derives a host.
+  defp diagnostic_pair_allowed?(:models, :application, :application_unavailable), do: true
+
   defp diagnostic_pair_allowed?(mode, :application, code)
        when mode in [:validate, :doctor, {:doctor, :connect}, :materialize] and
               code in @static_application_codes,
