@@ -317,7 +317,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
                environment,
                "llm-request",
                arguments,
-               TestHelpers.dispatch_context(state, :workflow, 100),
+               TestHelpers.dispatch_context(state, :workflow, 5_000),
                nil,
                inspection_sink
              )
