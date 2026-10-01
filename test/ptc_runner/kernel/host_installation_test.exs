@@ -359,6 +359,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
     try do
       assert_receive {:installed_acquire_started, callback_worker}, 5_000
+      callback_ref = Process.monitor(callback_worker)
 
       assert_receive {:installed_callback_result,
                       {:error,
@@ -368,7 +369,9 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
                        }}},
                      10_000
 
-      refute Process.alive?(callback_worker)
+      # The outer deadline can return before the nested cancellation guard
+      # handles its caller exit. Observe teardown instead of racing the guard.
+      assert_receive {:DOWN, ^callback_ref, :process, ^callback_worker, :killed}, 5_000
       assert_receive {:DOWN, ^caller_ref, :process, ^caller, :normal}
     after
       if Process.alive?(caller), do: Process.exit(caller, :kill)
