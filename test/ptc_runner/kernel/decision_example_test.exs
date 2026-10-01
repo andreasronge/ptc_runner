@@ -112,16 +112,7 @@ defmodule PtcRunner.Kernel.DecisionExampleTest do
       assert usage["llm_budget"]["total_tokens"]["charged"] == unquote(tokens)
       assert usage["capability_calls"]["workflow/decision-request"] == 1
       artifacts = Path.join(directory, ".ptc")
-      [trace_path] = Path.wildcard(Path.join([artifacts, "traces", "*.jsonl"]))
-
-      stopped =
-        trace_path
-        |> File.read!()
-        |> String.split("\n", trim: true)
-        |> Enum.map(&Jason.decode!/1)
-        |> Enum.find(
-          &(&1["type"] == "capability-stopped" and &1["data"]["name"] == "decision-request")
-        )
+      stopped = decision_stopped_event(artifacts)
 
       assert stopped["data"]["served_model"] == unquote(model)
       assert stopped["data"]["status"] == "error"
@@ -158,6 +149,38 @@ defmodule PtcRunner.Kernel.DecisionExampleTest do
       assert exchange["result"]["retryable?"] == false
       refute Map.has_key?(exchange["result"], "value")
     end
+  end
+
+  @tag :tmp_dir
+  test "missing promised cost fails as usage_unavailable and marks the ledger incomplete", %{
+    tmp_dir: dir
+  } do
+    project = copy_example(dir)
+    directory = Path.dirname(project)
+    host_path = Path.join(directory, "ptc-host.json")
+
+    host =
+      host_path
+      |> File.read!()
+      |> Jason.decode!()
+      |> Map.put("limits", %{"llm_cost_microusd" => 100_000})
+
+    File.write!(host_path, Jason.encode!(host))
+    fixture_path = Path.join(directory, "replay.jsonl")
+    fixture = fixture_path |> File.read!() |> Jason.decode!()
+    fixture = update_in(fixture, ["response", "usage"], &Map.delete(&1, "cost"))
+    File.write!(fixture_path, Jason.encode!(fixture) <> "\n")
+
+    assert {:error, outcome} = CommandEngine.dispatch(["run", project])
+    cost = outcome.envelope["execution"]["usage"]["llm_budget"]["cost"]
+    assert cost["state"] == "incomplete"
+    assert cost["charged_microusd"] == 10_000
+
+    stopped = decision_stopped_event(Path.join(directory, ".ptc"))
+
+    assert stopped["data"]["status"] == "error"
+    assert stopped["data"]["kind"] == "provider_error"
+    assert stopped["data"]["reason"] == "usage_unavailable"
   end
 
   @tag :tmp_dir
@@ -271,6 +294,18 @@ defmodule PtcRunner.Kernel.DecisionExampleTest do
         assert File.read!(manifest_path) == manifest_bytes
       end
     end
+  end
+
+  defp decision_stopped_event(artifacts) do
+    [trace_path] = Path.wildcard(Path.join([artifacts, "traces", "*.jsonl"]))
+
+    trace_path
+    |> File.read!()
+    |> String.split("\n", trim: true)
+    |> Enum.map(&Jason.decode!/1)
+    |> Enum.find(
+      &(&1["type"] == "capability-stopped" and &1["data"]["name"] == "decision-request")
+    )
   end
 
   defp copy_example(dir) do

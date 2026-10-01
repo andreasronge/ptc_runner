@@ -152,8 +152,7 @@ defmodule PtcRunner.Kernel.DecisionDistributionTest do
       {"score weighted mean", put_in(answers, ["severity", "score"], 1.32), []},
       {"score finite confidence", put_in(answers, ["severity", "confidence"], 1.0e308), []},
       {"score inconsistent", put_in(answers, ["severity", "score"], 1.2), []},
-      {"boolean probability", put_in(answers, ["urgent", "probability"], -0.01), []},
-      {"provider usage", answers, [usage: %{"input_tokens" => -1, "output_tokens" => 2}]}
+      {"boolean probability", put_in(answers, ["urgent", "probability"], -0.01), []}
     ]
 
     for {name, candidate, opts} <- invalid do
@@ -161,6 +160,9 @@ defmodule PtcRunner.Kernel.DecisionDistributionTest do
                invoke_with_answers(candidate, opts),
              name
     end
+
+    assert %{status: :error, kind: :provider_error, reason: :usage_unavailable, retryable?: false} =
+             invoke_with_answers(answers, usage: %{"input_tokens" => -1, "output_tokens" => 2})
 
     accepted = [
       answers,
