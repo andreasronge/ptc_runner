@@ -108,7 +108,12 @@ defmodule PtcRunner.Kernel.TraceLog do
   printf 'READY\n'
   command=$(dd bs=1 count=1 2>/dev/null)
   [ "$command" = W ]
-  head -c "$byte_count" > "$temporary_name"
+  # BSD head rejects a zero byte count.
+  if [ "$byte_count" -gt 0 ]; then
+    head -c "$byte_count" > "$temporary_name"
+  else
+    : > "$temporary_name"
+  fi
   printf 'DATA\n'
   sentinel=$(dd bs=1 count=1 2>/dev/null)
   [ "$sentinel" = X ]
