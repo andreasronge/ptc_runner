@@ -191,15 +191,6 @@ defmodule PtcRunner.Kernel.RunAdmission do
   def await(_), do: {:error, :execution_session_unavailable}
 
   @doc false
-  @spec release_monitor(execution()) :: :ok
-  def release_monitor({__MODULE__, caller, owner}) when caller == self() do
-    if ref = ExecutionSessionOwner.monitor(owner), do: Process.demonitor(ref, [:flush])
-    :ok
-  end
-
-  def release_monitor(_execution), do: :ok
-
-  @doc false
   @spec reservation_snapshot(reservation()) :: {:ok, snapshot()} | {:error, atom()}
   def reservation_snapshot({__MODULE__, host, _}), do: snapshot(host)
 
