@@ -92,31 +92,38 @@ defmodule PtcRunner.Kernel.CommandRuntime do
   def valid?(_runtime), do: false
 
   @doc false
-  @spec setup_environment(t()) :: :ok | {:error, atom()}
+  @spec setup_environment(t()) :: :ok | {:error, atom() | CommandDiagnostic.t()}
   def setup_environment(%__MODULE__{environment_setup: nil} = runtime) do
-    if valid?(runtime), do: :ok, else: {:error, :environment_setup_failed}
+    if valid?(runtime), do: :ok, else: environment_failure(:invalid_command_runtime)
   end
 
   def setup_environment(%__MODULE__{} = runtime) do
     if valid?(runtime) do
       case runtime.environment_setup.() do
         :ok -> :ok
-        # The dotenv attachment classifies its own failure, because only it
-        # knows the operator named the file. Everything else stays
-        # undifferentiated.
+        # Only the dotenv attachment may name a file-specific code. Other
+        # callbacks retain a closed cause under the shared internal code.
         {:error, reason} when reason in @environment_file_errors -> {:error, reason}
-        _failure -> {:error, :environment_setup_failed}
+        {:error, reason} -> environment_failure(reason)
+        _failure -> environment_failure(:unexpected_exception)
       end
     else
-      {:error, :environment_setup_failed}
+      environment_failure(:invalid_command_runtime)
     end
   rescue
-    _exception -> {:error, :environment_setup_failed}
+    _exception -> environment_failure(:unexpected_exception)
   catch
-    _kind, _reason -> {:error, :environment_setup_failed}
+    _kind, _reason -> environment_failure(:unexpected_exception)
   end
 
-  def setup_environment(_runtime), do: {:error, :environment_setup_failed}
+  def setup_environment(_runtime), do: environment_failure(:invalid_command_runtime)
+
+  defp environment_failure(reason),
+    do:
+      {:error,
+       CommandDiagnostic.new!(:internal, :internal_error,
+         cause: CommandFailureCause.from_reason(reason)
+       )}
 
   @doc """
   Runs environment setup and classifies a named environment file that failed.

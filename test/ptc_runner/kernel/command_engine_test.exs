@@ -2536,17 +2536,18 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     end
   end
 
-  test "an embedding host's own setup failure stays undifferentiated" do
+  test "an embedding host's own setup failure retains only a closed cause" do
     # Only the dotenv attachment knows the operator named a file. A caller
     # supplying its own callback must not have an arbitrary failure relabelled
     # as a bad --env-file.
     assert {:ok, runtime} =
              CommandRuntime.new(environment_setup: fn -> {:error, :environment_file_invalid} end)
 
-    assert CommandRuntime.setup_environment(runtime) == {:error, :environment_setup_failed}
+    assert {:error, %CommandDiagnostic{code: :internal_error, cause: :unexpected_exception}} =
+             CommandRuntime.setup_environment(runtime)
 
     assert CommandRuntime.setup_environment_diagnostic(runtime) ==
-             {:error, :environment_setup_failed}
+             CommandRuntime.setup_environment(runtime)
   end
 
   test "invocation-scoped local-preflight codes assert no provider activity" do

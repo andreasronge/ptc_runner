@@ -462,7 +462,7 @@ defmodule PtcRunner.ViewerSnapshotStore do
   defp invoke_loader(loader, path) do
     case loader.(path) do
       {:ok, %ProjectConfig{}} = success -> success
-      {:error, :project_unavailable} = error -> error
+      {:error, {:project_unavailable, _reason}} -> {:error, :project_unavailable}
       {:error, :project_invalid} = error -> error
       {:error, {:schema_validation_unavailable, _reason}} = error -> error
       {:error, {:project_schema_invalid, _violation}} = error -> error

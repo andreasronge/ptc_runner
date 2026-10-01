@@ -419,6 +419,14 @@ When a `run` fails with a known pre-sink cause, stdout also receives the V5
 envelope as one JSON line, and stderr retains the human diagnostic. Project
 runs attempt to store that same envelope in the default ledger.
 
+Causes also survive append-lock contention, named-document read failures,
+project and host schema worker unavailability, installation and provider
+admission, environment setup, and doctor service or owner failures. A schema
+worker's time or memory limit is `resource_unavailable`; an append lock that
+expires is `lock_timeout`. An unknown environment callback failure keeps
+`internal_error` with a closed cause. Causes never include filesystem paths,
+callback payloads, exception names, messages, or stack traces.
+
 <!-- BEGIN GENERATED: command failure causes (mix ptc.gen_docs) -->
 
 The optional `error.cause` in a V5 envelope gives a closed, public reason

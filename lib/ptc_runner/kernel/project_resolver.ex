@@ -67,6 +67,9 @@ defmodule PtcRunner.Kernel.ProjectResolver do
       {:project, project} ->
         project_argv(command, rest, project, run_ref)
 
+      {:error, {:project_unavailable, _cause} = reason} ->
+        {:document_error, [command, path | rest], reason}
+
       # `classify/1` reads `kind` first and only rejects a document that names
       # itself a project, so its diagnostic has project-document authority. The
       # command line is parsed separately before that diagnostic is admitted.
@@ -80,6 +83,9 @@ defmodule PtcRunner.Kernel.ProjectResolver do
         {:error, CommandRejection.generic(command_atom(command), :invalid_arguments)}
     end
   end
+
+  defp document_error(argv, frontend, {:project_unavailable, _reason} = failure),
+    do: parse_document_error(argv, frontend, failure)
 
   defp document_error(["models", _project_path | rest], frontend, reason) do
     if switch?(rest, "--host-config") do

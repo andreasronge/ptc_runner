@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
   alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandDestination
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandFailureCause
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandPath
   alias PtcRunner.Kernel.CommandPreparation
@@ -82,7 +83,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
   def catalog(nil) do
     case InstallationCatalog.new() do
       {:ok, catalog} -> {:ok, nil, catalog}
-      {:error, _reason} -> {:error, diagnostic(:internal, :internal_error)}
+      {:error, reason} -> {:error, failure_diagnostic(:internal, :internal_error, reason)}
     end
   end
 
@@ -91,7 +92,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
       {:ok, host} ->
         case HostInstallation.catalog(host) do
           {:ok, catalog} -> {:ok, host, catalog}
-          {:error, _reason} -> {:error, diagnostic(:host, :host_invalid)}
+          {:error, reason} -> {:error, failure_diagnostic(:host, :host_invalid, reason)}
         end
 
       {:error, :host_unavailable} ->
@@ -113,8 +114,8 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
       {:error, {:host_schema_invalid, %SchemaViolation{} = violation}} ->
         {:error, host_schema_diagnostic(violation)}
 
-      {:error, {:schema_validation_unavailable, _cause}} ->
-        {:error, diagnostic(:host, :schema_validation_unavailable)}
+      {:error, {:schema_validation_unavailable, cause}} ->
+        {:error, failure_diagnostic(:host, :schema_validation_unavailable, cause)}
 
       {:error, {:installed_limit_invalid, segments}} ->
         {:error, host_path_diagnostic(:installed_limit_invalid, segments)}
@@ -132,6 +133,9 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
   end
 
   def catalog(_source), do: {:error, diagnostic(:host, :host_unavailable)}
+
+  defp failure_diagnostic(phase, code, reason),
+    do: diagnostic(phase, code, cause: CommandFailureCause.from_reason(reason))
 
   defp endpoint_diagnostic_code(:insecure_loopback_required),
     do: :installation_endpoint_insecure_loopback_required
@@ -187,8 +191,8 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
                 destinations
               )
 
-            {:error, _reason} ->
-              invalid_preparation(arguments, run_ref, prepared)
+            {:error, reason} ->
+              invalid_preparation(arguments, run_ref, prepared, reason)
           end
 
         {:error, %CommandDiagnostic{} = diagnostic} ->
@@ -236,7 +240,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
                destinations
              ) do
           {:ok, preparation} -> {:ok, preparation}
-          {:error, _reason} -> invalid_preparation(arguments, run_ref, prepared)
+          {:error, reason} -> invalid_preparation(arguments, run_ref, prepared, reason)
         end
     end
   rescue
@@ -447,9 +451,11 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
     end
   end
 
-  defp invalid_preparation(arguments, run_ref, prepared) do
+  defp invalid_preparation(arguments, run_ref, prepared, reason \\ :invalid_prepared_run) do
     PreparedRun.close(prepared)
-    {:error, arguments_outcome(arguments, run_ref, diagnostic(:internal, :internal_error))}
+
+    {:error,
+     arguments_outcome(arguments, run_ref, failure_diagnostic(:internal, :internal_error, reason))}
   end
 
   defp request_arguments(arguments, catalog, run_ref) do
@@ -555,8 +561,8 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
     )
   end
 
-  defp diagnostic(phase, code) do
+  defp diagnostic(phase, code, options \\ []) do
     source = if phase == :host, do: CommandSource.fixed(:host), else: nil
-    CommandDiagnostic.new!(phase, code, source: source)
+    CommandDiagnostic.new!(phase, code, Keyword.put(options, :source, source))
   end
 end

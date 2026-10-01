@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandFailureCause
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.ConnectivityProbe
   alias PtcRunner.Kernel.ConnectivityResult
@@ -1056,10 +1057,10 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     end
   end
 
-  defp acquisition_result({:error, _reason}, _session), do: {:error, internal_diagnostic()}
+  defp acquisition_result({:error, reason}, _session), do: {:error, internal_diagnostic(reason)}
 
   defp unregistered_diagnostic(%CommandDiagnostic{} = diagnostic), do: diagnostic
-  defp unregistered_diagnostic(_reason), do: internal_diagnostic()
+  defp unregistered_diagnostic(reason), do: internal_diagnostic(reason)
 
   # Evidence that arrives after the operation's own cutoff is not evidence the
   # operation may report. Registry setup can finish near the connectivity
@@ -1793,6 +1794,10 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   defp cleanup_diagnostic,
     do: CommandDiagnostic.new!(:result_cleanup, :provider_cleanup_failed, provider_activity: true)
 
-  defp internal_diagnostic,
-    do: CommandDiagnostic.new!(:internal, :internal_error, provider_activity: true)
+  defp internal_diagnostic(reason \\ :unexpected_exception),
+    do:
+      CommandDiagnostic.new!(:internal, :internal_error,
+        provider_activity: true,
+        cause: CommandFailureCause.from_reason(reason)
+      )
 end

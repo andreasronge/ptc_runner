@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
   @moduledoc false
 
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandFailureCause
   alias PtcRunner.Kernel.CommandPath
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.ComponentOverrideDiagnostic
@@ -30,9 +31,18 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
     CommandDiagnostic.new!(
       :application,
       code,
-      [source: source, path: command_path(source_role, path_value)] ++ message_option(reason)
+      [source: source, path: command_path(source_role, path_value)] ++
+        message_option(reason) ++ cause_option(reason)
     )
   end
+
+  defp cause_option({:manifest_path, _path, reason}), do: cause_option(reason)
+
+  defp cause_option({:schema_validation_unavailable, reason}),
+    do: [cause: CommandFailureCause.from_reason(reason)]
+
+  defp cause_option(:not_found), do: [cause: :filesystem_error]
+  defp cause_option(_reason), do: []
 
   # A rejected contract schema names its rule. A refused component override
   # names the descriptor field it broke. Every other reason keeps the catalog

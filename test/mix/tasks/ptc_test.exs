@@ -262,7 +262,6 @@ defmodule Mix.Tasks.PtcTest do
         ])
 
       assert presentation.exit_status == 3
-      assert presentation.stdout == ""
 
       assert presentation.stderr =~
                "error: application/application_not_found: " <>
@@ -273,6 +272,12 @@ defmodule Mix.Tasks.PtcTest do
       envelope = envelope_path |> File.read!() |> Jason.decode!()
       assert envelope["run_ref"] =~ "cmd-"
       assert envelope["error"]["code"] == "application_not_found"
+      assert envelope["error"]["cause"] == "filesystem_error"
+
+      if command == "run",
+        do: assert(Jason.decode!(presentation.stdout) == envelope),
+        else: assert(presentation.stdout == "")
+
       refute Jason.encode!(envelope) =~ missing_positional
     end
   end

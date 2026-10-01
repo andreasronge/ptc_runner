@@ -92,7 +92,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   lock_body='printf "READY\n"; IFS= read -r command; [ "$command" = X ]; printf "DONE\n"'
   case "$lock_kind" in
     lockf) exec "$lock_executable" -k -t 30 "$lock_file" "$shell" -c "$lock_body" ;;
-    flock) exec "$lock_executable" -w 30 "$lock_file" "$shell" -c "$lock_body" ;;
+    flock) exec "$lock_executable" -E 75 -w 30 "$lock_file" "$shell" -c "$lock_body" ;;
     *) exit 1 ;;
   esac
   """
@@ -787,7 +787,7 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   defp with_append_lock(path, callback, attempts \\ 3)
 
-  defp with_append_lock(_path, _callback, 0), do: {:error, :source_unavailable}
+  defp with_append_lock(_path, _callback, 0), do: {:error, :lock_timeout}
 
   defp with_append_lock(path, callback, attempts) do
     case append_path_lock_scope(path) do
@@ -837,7 +837,7 @@ defmodule PtcRunner.Kernel.TraceLog do
          :ok <- await_append_lock(port) do
       {:ok, port}
     else
-      _ -> {:error, :source_unavailable}
+      {:error, _reason} = error -> error
     end
   rescue
     _exception -> {:error, :source_unavailable}
@@ -861,11 +861,12 @@ defmodule PtcRunner.Kernel.TraceLog do
     receive do
       {^port, {:data, {:eol, "READY"}}} -> :ok
       {^port, {:data, _diagnostic}} -> await_append_lock(port)
-      {^port, {:exit_status, _status}} -> {:error, :source_unavailable}
+      {^port, {:exit_status, 75}} -> {:error, :lock_timeout}
+      {^port, {:exit_status, _status}} -> {:error, :subprocess_failed}
     after
       @append_lock_timeout_ms ->
         if Port.info(port), do: Port.close(port)
-        {:error, :source_unavailable}
+        {:error, :lock_timeout}
     end
   end
 
