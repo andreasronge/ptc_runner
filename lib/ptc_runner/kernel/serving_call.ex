@@ -262,7 +262,7 @@ defmodule PtcRunner.Kernel.ServingCall do
   defp run_execution(template, prepared, authority, lease, deadline, hooks) do
     case activate_execution(template, lease, prepared, authority, deadline) do
       {:ok, execution} ->
-        if hook = Map.get(hooks, :after_activation), do: hook.(execution)
+        run_after_activation(hooks, execution)
         collect(template, RunAdmission.await(execution), authority, hooks)
 
       {:error, :run_admission_unavailable} ->
@@ -272,6 +272,17 @@ defmodule PtcRunner.Kernel.ServingCall do
         failure(template, reason)
     end
   end
+
+  # A raising hook skips await, so release the execution's caller monitor.
+  defp run_after_activation(%{after_activation: hook}, execution) when is_function(hook, 1) do
+    hook.(execution)
+  catch
+    kind, reason ->
+      RunAdmission.release_monitor(execution)
+      :erlang.raise(kind, reason, __STACKTRACE__)
+  end
+
+  defp run_after_activation(_hooks, _execution), do: :ok
 
   defp settled_outcome(template, terminal, settlement, deadline) do
     case settlement do
