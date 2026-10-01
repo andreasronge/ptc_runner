@@ -249,7 +249,9 @@ defmodule PtcRunner.Kernel.HostConfig do
           required(:installation_revision) => binary(),
           required(:installation_config_digest) => binary(),
           required(:max_total_tokens_per_call) => pos_integer(),
-          required(:max_cost_microusd_per_call) => pos_integer(),
+          required(:max_cost_microusd_per_call) => non_neg_integer(),
+          optional(:backend) => :chat | :http,
+          optional(:endpoint) => binary(),
           optional(atom()) => term()
         }
 
@@ -481,6 +483,17 @@ defmodule PtcRunner.Kernel.HostConfig do
     if is_binary(endpoint) and is_boolean(insecure_loopback) and is_list(auth),
       do: installed_endpoint(endpoint, insecure_loopback, auth, oauth),
       else: :ok
+  end
+
+  defp endpoint_rejection(%{"source" => "decision", "backend" => "http"} = value) do
+    auth = if Map.has_key?(value, "credential"), do: [value["credential"]], else: []
+
+    installed_endpoint(
+      value["endpoint"],
+      Map.get(value, "allow_insecure_loopback", false),
+      auth,
+      nil
+    )
   end
 
   defp endpoint_rejection(_installation), do: :ok
@@ -849,6 +862,44 @@ defmodule PtcRunner.Kernel.HostConfig do
     end
   end
 
+  defp decision_installation(%{"backend" => "http"} = value, credentials, limits) do
+    with :ok <-
+           exact_keys(
+             value,
+             ~w(source backend endpoint model credential allow_insecure_loopback usage_guarantees installation_revision ceilings data_class accepts_data max_cost_per_call max_total_tokens_per_call),
+             ~w(source backend endpoint model usage_guarantees installation_revision max_cost_per_call max_total_tokens_per_call)
+           ),
+         true <- valid_string?(value["model"], 256),
+         true <-
+           not Map.has_key?(value, "credential") or Map.has_key?(credentials, value["credential"]),
+         :ok <- endpoint_rejection(value),
+         {:ok, guarantees} <- usage_guarantees(value["usage_guarantees"]),
+         :ok <- usage_guarantee_requirements(guarantees, limits),
+         {:ok, bounds} <- decision_bounds(value),
+         {:ok, revision} <- revision(value["installation_revision"]),
+         {:ok, ceilings} <- llm_ceilings(Map.get(value, "ceilings", %{}), limits),
+         {:ok, data_class} <- data_class(Map.get(value, "data_class", "normal")),
+         {:ok, accepts_data} <- accepts_data(Map.get(value, "accepts_data", ["normal"])) do
+      {:ok,
+       Map.merge(bounds, %{
+         source: :decision,
+         backend: :http,
+         endpoint: value["endpoint"],
+         model: value["model"],
+         credential: value["credential"],
+         usage_guarantees: guarantees,
+         reservation_tariff: nil,
+         allow_insecure_loopback: Map.get(value, "allow_insecure_loopback", false),
+         installation_revision: revision,
+         ceilings: ceilings,
+         data_class: data_class,
+         accepts_data: accepts_data
+       })}
+    else
+      _ -> {:error, :invalid_installation}
+    end
+  end
+
   defp decision_installation(value, credentials, limits) do
     allowed =
       ~w(source model credential routing usage_guarantees reservation_tariff installation_revision ceilings data_class accepts_data max_cost_per_call max_total_tokens_per_call)
@@ -918,7 +969,7 @@ defmodule PtcRunner.Kernel.HostConfig do
        when map_size(cost) == 2 and is_binary(amount) and is_integer(tokens) and tokens > 0 do
     with true <- tokens <= LLMUsage.maximum_integer(),
          true <- Regex.match?(~r/\A(?:0|[1-9][0-9]*)(?:\.[0-9]+)?\z/, amount),
-         {:ok, microunits} when microunits > 0 <-
+         {:ok, microunits} when microunits >= 0 <-
            LLMUsage.ceil_scaled_decimal(amount, 1_000_000, 1) do
       {:ok, %{max_cost_microusd_per_call: microunits, max_total_tokens_per_call: tokens}}
     else
@@ -1332,7 +1383,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   # travelling over a loopback socket are still plaintext.
   defp installed_endpoint(endpoint, insecure_loopback, auth, oauth)
        when auth != [] or not is_nil(oauth) do
-    if String.starts_with?(endpoint, "http://"),
+    if is_binary(endpoint) and String.starts_with?(endpoint, "http://"),
       do: {:error, :credentials_require_https},
       else: MCPEndpoint.diagnose(endpoint, insecure_loopback)
   end
@@ -1768,6 +1819,7 @@ defmodule PtcRunner.Kernel.HostConfig do
         llm_installation_schema(),
         decision_installation_schema(),
         chat_decision_installation_schema(),
+        http_decision_installation_schema(),
         decision_replay_installation_schema(),
         trace_snapshot_installation_schema("ptc_trace_snapshot"),
         trace_snapshot_installation_schema("ptc_private_trace_snapshot"),
@@ -1798,6 +1850,26 @@ defmodule PtcRunner.Kernel.HostConfig do
       properties,
       ~w(source model credential usage_guarantees installation_revision max_cost_per_call max_total_tokens_per_call)
     )
+  end
+
+  defp http_decision_installation_schema do
+    properties =
+      decision_installation_schema()["properties"]
+      |> Map.drop(~w(routing reservation_tariff))
+      |> Map.put("backend", %{"const" => "http"})
+      |> Map.put("endpoint", bounded_string(4_096))
+      |> Map.put("allow_insecure_loopback", %{"type" => "boolean", "default" => false})
+
+    loopback =
+      loopback_endpoint_schema()
+      |> Map.put("not", %{"required" => ["credential"]})
+      |> update_in(["properties"], &Map.delete(&1, "auth"))
+
+    required_object(
+      properties,
+      ~w(source backend endpoint model usage_guarantees installation_revision max_cost_per_call max_total_tokens_per_call)
+    )
+    |> Map.put("oneOf", [secure_endpoint_schema(), loopback])
   end
 
   defp chat_decision_installation_schema do

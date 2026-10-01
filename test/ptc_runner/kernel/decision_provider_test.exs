@@ -33,6 +33,43 @@ defmodule PtcRunner.Kernel.DecisionProviderTest do
     )
   end
 
+  test "zero cost settles reported usage and marks missing cost incomplete" do
+    for cost <- [0, nil, 0.000075] do
+      usage =
+        if is_nil(cost),
+          do: Map.delete(@response["usage"], "cost"),
+          else: Map.put(@response["usage"], "cost", cost)
+
+      response = Map.put(@response, "usage", usage)
+
+      {state, environment} =
+        runtime([decision(fn _, _ -> {:ok, response} end, 0, 40)],
+          llm_total_tokens: 100,
+          llm_cost_microusd: 500
+        )
+
+      result = dispatch(state, environment, "decision-request", @request)
+      assert result.status == if(cost == 0.000075, do: :error, else: :ok)
+
+      if cost == 0.000075 do
+        assert result.reason == :invalid_result
+        refute result.retryable?
+      end
+
+      budget = RunState.usage(state).llm_budget
+      assert budget["cost"]["charged_microusd"] == if(cost == 0.000075, do: 75, else: 0)
+
+      expected_state =
+        cond do
+          is_nil(cost) -> "incomplete"
+          cost > 0 -> "overrun"
+          true -> "available"
+        end
+
+      assert budget["cost"]["state"] == expected_state
+    end
+  end
+
   test "chat token errors still settle independently valid reported cost" do
     requester =
       ChatDecisions.requester(

@@ -167,7 +167,7 @@ defmodule PtcRunner.Kernel.Capability do
          %{source: source, total_tokens: tokens, cost_microusd: cost} = reservation
        )
        when source in ["decision", "decision_replay"] and map_size(reservation) == 7 and
-              is_integer(tokens) and tokens > 0 and is_integer(cost) and cost > 0,
+              is_integer(tokens) and tokens > 0 and is_integer(cost) and cost >= 0,
        do: :ok
 
   defp valid_llm_reservation(nil), do: :ok

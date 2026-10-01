@@ -6,53 +6,21 @@ defmodule PtcRunner.Kernel.OpenRouterDecisions do
   The closed host routing object passes through as OpenRouter's `provider`.
   Vendor wire types remain inside this adapter. HTTP retries are disabled.
   """
-  alias PtcRunner.Kernel.AdapterCancellationWitness
-  alias PtcRunner.Kernel.ProviderError
+  alias PtcRunner.Kernel.HTTPDecisions
   @endpoint "https://openrouter.ai/api/alpha/decisions"
 
   @doc "Builds a deadline-aware requester from a host-bound credential and routing policy."
   @spec requester(binary(), binary(), map(), pos_integer(), function()) :: function()
   def requester(model, credential, routing, timeout_ms, http_request \\ &Req.post/2) do
+    transport = HTTPDecisions.requester(@endpoint, model, credential, timeout_ms, http_request)
+
     fn request, context ->
-      body = request |> Map.put("model", model) |> Map.update!("questions", &encode_questions/1)
+      body = Map.update!(request, "questions", &encode_questions/1)
       body = if map_size(routing) == 0, do: body, else: Map.put(body, "provider", routing)
-      deadline = Map.get(context, :llm_request_deadline_ms)
 
-      timeout =
-        if is_integer(deadline),
-          do: min(timeout_ms, max(deadline - System.monotonic_time(:millisecond), 1)),
-          else: timeout_ms
-
-      result =
-        AdapterCancellationWitness.run(fn ->
-          http_request.(@endpoint,
-            json: body,
-            auth: {:bearer, credential},
-            retry: false,
-            receive_timeout: timeout
-          )
-        end)
-
-      case result do
-        {:ok, %{status: status, body: response}} when status in 200..299 and is_map(response) ->
-          {:ok, response |> Map.take(["model", "answers", "usage"]) |> normalize_response()}
-
-        {:ok, %{status: status}} when status in 200..299 ->
-          {:ok, %{}}
-
-        {:ok, %{status: status}} ->
-          {:error,
-           ProviderError.new(http_error_kind(status), "OpenRouter Decisions request failed",
-             retryable?: status in [408, 429, 500, 502, 503, 504, 529],
-             dispatch_provenance: :dispatched
-           )}
-
-        {:error, _} ->
-          {:error,
-           ProviderError.new(:transport_error, "OpenRouter Decisions transport failed",
-             retryable?: true,
-             dispatch_provenance: :possibly_dispatched
-           )}
+      case transport.(body, context) do
+        {:ok, response} -> {:ok, normalize_response(response)}
+        error -> error
       end
     end
   end
@@ -86,10 +54,4 @@ defmodule PtcRunner.Kernel.OpenRouterDecisions do
         answer
     end)
   end
-
-  defp http_error_kind(401), do: :authentication_failed
-  defp http_error_kind(402), do: :payment_required
-  defp http_error_kind(429), do: :rate_limited
-  defp http_error_kind(status) when status in 400..499, do: :invalid_request
-  defp http_error_kind(_status), do: :unavailable
 end

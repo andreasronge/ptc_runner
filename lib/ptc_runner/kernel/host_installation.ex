@@ -52,6 +52,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   alias PtcRunner.Kernel.ChatDecisions
   alias PtcRunner.Kernel.DecisionCapability
+  alias PtcRunner.Kernel.HTTPDecisions
   alias PtcRunner.Kernel.OpenRouterDecisions
 
   alias PtcRunner.Kernel.Attestation
@@ -422,7 +423,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   end
 
   def installation_credential_names(%{source: source, credential: credential})
-      when source in [:llm, :decision], do: [credential]
+      when source in [:llm, :decision] and is_binary(credential), do: [credential]
 
   def installation_credential_names(_installation), do: []
 
@@ -1886,6 +1887,27 @@ defmodule PtcRunner.Kernel.HostInstallation do
     else
       _ -> {:error, :invalid_llm_provider}
     end
+  end
+
+  defp decision_requester(
+         _host,
+         %{source: :decision, backend: :http} = installation,
+         _selected,
+         _context,
+         credentials
+       ) do
+    credential = Map.get(credentials, installation.credential)
+
+    requester =
+      HTTPDecisions.requester(
+        installation.endpoint,
+        installation.model,
+        credential,
+        installation.ceilings.request_timeout_ms
+      )
+
+    {:ok, requester, nil,
+     %{"source" => "decision", "backend" => "http", "model" => installation.model}, nil}
   end
 
   defp decision_requester(

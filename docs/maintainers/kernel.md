@@ -863,7 +863,9 @@ chat routing stay chat-only. Trace call counts and CLI progress distinguish
 `decision` from `llm` calls.
 
 `DecisionCapability` owns the public contract; `DecisionContract` validates the
-accepted question subset and measured distributions. `OpenRouterDecisions`
+accepted question subset and measured distributions. `HTTPDecisions` owns the
+deadline-aware, cancellation-witnessed HTTP transport
+with retries and redirects disabled. `OpenRouterDecisions`
 is the alpha backend adapter and contains vendor wire names. Host acquisition
 binds its credential and routing policy. `decision_replay` reuses `LLMReplay`
 without another cursor owner or fixture format. Decision reservation metadata

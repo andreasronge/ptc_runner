@@ -495,7 +495,7 @@ narrows these aliases.</li><li><a href="/guides/building-agents/">Building agent
 capabilities.</li><li><a href="/reference/cli/">Running and debugging</a> runs and inspects the
 application.</li><li><a href="/reference/mcp/">Connecting tools with MCP</a> installs external
 tools without putting transport authority in a manifest.</li><li><a href="/guides/evaluating-with-replay/">Evaluating with replay</a> fixes model responses for
-deterministic comparisons.</li></ul><h2 id="decision-model-installations">Decision model installations</h2><p><code class="inline">decision</code> installs the <strong>alpha</strong> <a href="https://openrouter.ai/typesafe/jev-1.13">OpenRouter Decisions backend</a>. Its vendor-neutral capability
+deterministic comparisons.</li></ul><h2 id="decision-model-installations">Decision model installations</h2><p><code class="inline">decision</code> installs a generic HTTP backend, a JSON-schema chat backend, or the <strong>alpha</strong> <a href="https://openrouter.ai/typesafe/jev-1.13">OpenRouter Decisions backend</a>. Its vendor-neutral capability
 is <code class="inline">decision-request</code>, exposed by the shipped <code class="inline">decision/request</code> prelude.
 Jev boolean answers contain measured probabilities; your workflow applies thresholds.
 An optional boolean <code class="inline">value</code> carries a discrete answer: <code class="inline">false</code> is an answer,
@@ -528,7 +528,7 @@ Optional <code class="inline">routing</code> accepts only boolean <code class="i
 <code class="inline">deny</code>), and boolean <code class="inline">allow_fallbacks</code>, sent as the backend's <code class="inline">provider</code> field.
 Optional <code class="inline">reservation_tariff</code> identifies a host policy; it does not compute a
 reservation. <code class="inline">ceilings</code>, <code class="inline">data_class</code>, and <code class="inline">accepts_data</code> use the same fields
-as live LLM installations. Decision sources belong in the workflow.</p><p><code class="inline">max_cost_per_call</code> is a positive USD decimal string. <code class="inline">0.01</code> USD is recommended
+as live LLM installations. Decision sources belong in the workflow.</p><p><code class="inline">max_cost_per_call</code> is a non-negative USD decimal string for every decision backend, including replay. <code class="inline">0.01</code> USD is recommended
 for this first backend. <code class="inline">max_total_tokens_per_call</code> is a positive integer;
 <code class="inline">8000</code> is recommended, and hosts sending large <code class="inline">state</code> inputs must raise it.
 When the corresponding ceiling is enabled, each call reserves exactly these
@@ -536,7 +536,49 @@ bounds against <code class="inline">llm_cost_microusd</code> and <code class="in
 calls. Validated reported cost and tokens settle after the response. An
 exceeded bound is still charged in full and fails permanently with
 <code class="inline">invalid_result</code>, without retry. Decision calls also count against
-<code class="inline">max_active_provider_calls</code>.</p><h3 id="json-schema-chat-backend">JSON-schema chat backend</h3><p>A <code class="inline">decision</code> installation with <code class="inline">backend: &quot;chat&quot;</code> names an existing <code class="inline">llm</code>
+<code class="inline">max_active_provider_calls</code>.</p><h3 id="http-backend">HTTP backend</h3><p>Use <code class="inline">backend: &quot;http&quot;</code> to send measured decisions to a host-owned endpoint.
+This closed variant requires <code class="inline">source</code>, <code class="inline">backend</code>, <code class="inline">endpoint</code>, <code class="inline">model</code>,
+<code class="inline">usage_guarantees</code>, <code class="inline">installation_revision</code>, and both per-call bounds.
+Optional fields are <code class="inline">credential</code>, <code class="inline">allow_insecure_loopback</code>, <code class="inline">ceilings</code>,
+<code class="inline">data_class</code>, and <code class="inline">accepts_data</code>. Unknown fields are refused.</p><pre><code class="json language-json">{
+  &quot;source&quot;: &quot;decision&quot;,
+  &quot;backend&quot;: &quot;http&quot;,
+  &quot;endpoint&quot;: &quot;http://127.0.0.1:8321/decisions&quot;,
+  &quot;allow_insecure_loopback&quot;: true,
+  &quot;model&quot;: &quot;anyjev/qwen3-8b@cal-2026-09&quot;,
+  &quot;usage_guarantees&quot;: {&quot;tokens&quot;: true, &quot;cost_currency&quot;: null},
+  &quot;max_cost_per_call&quot;: {&quot;currency&quot;: &quot;USD&quot;, &quot;amount&quot;: &quot;0&quot;},
+  &quot;max_total_tokens_per_call&quot;: 8000,
+  &quot;ceilings&quot;: {&quot;request_timeout_ms&quot;: 45000},
+  &quot;installation_revision&quot;: &quot;local-decisions-v1&quot;
+}</code></pre><p>HTTPS endpoints are allowed anywhere. Plain HTTP requires
+<code class="inline">allow_insecure_loopback: true</code> and a literal <code class="inline">127.0.0.1</code> or <code class="inline">::1</code> address;
+<code class="inline">localhost</code> is refused. HTTPS must omit the allowance or set it to false.
+Userinfo, fragments, whitespace and control characters are refused. Optional
+<code class="inline">credential</code> names a host credential binding and sends a Bearer header; it
+requires HTTPS. Workflow code cannot choose the endpoint.</p><p>The server receives a JSON POST with <code class="inline">model</code>, <code class="inline">state</code>, and <code class="inline">questions</code>:</p><pre><code class="json language-json">{&quot;model&quot;:&quot;local-v1&quot;,&quot;state&quot;:{&quot;number&quot;:2},&quot;questions&quot;:{&quot;positive&quot;:{&quot;type&quot;:&quot;boolean&quot;,&quot;instructions&quot;:&quot;Is the number positive?&quot;}}}</code></pre><p>A small offline fixture server can answer that request with:</p><pre><code class="json language-json">{&quot;model&quot;:&quot;local-v1@cal-1&quot;,&quot;answers&quot;:{&quot;positive&quot;:{&quot;type&quot;:&quot;boolean&quot;,&quot;probability&quot;:0.9,&quot;confidence&quot;:0.8}},&quot;usage&quot;:{&quot;input_tokens&quot;:20,&quot;output_tokens&quot;:10,&quot;cost&quot;:0}}</code></pre><p>Boolean wire types stay <code class="inline">boolean</code>. The response follows the public decision
+contract and can be saved as a <code class="inline">decision_replay</code> fixture response; request
+hashes use the same provider-neutral <code class="inline">state</code> and <code class="inline">questions</code>. The recording
+fixture in <code class="inline">test/support/decision_http_fixture.ex</code> demonstrates a minimal
+local server. Invalid answers fail permanently while valid usage and served
+model identity still settle. Served identifiers may differ from declared
+selectors; the mismatch is recorded without rejecting it. Acquisition identity
+contains the declared model and backend, excludes the endpoint, and changing
+the endpoint changes the installation configuration digest.</p><p>Automatic HTTP retries and redirects are disabled for both HTTP and
+OpenRouter decisions. Any 3xx response is a non-retryable protocol failure;
+request state is never sent to a redirect target. The receive timeout is the
+minimum of <code class="inline">ceilings.request_timeout_ms</code>, <code class="inline">limits.llm_request_timeout_ms</code>, and
+the remaining run deadline. Calls occupy the shared provider admission slot.</p><p>A zero cost bound is a host declaration. With the cost ledger enabled,
+<code class="inline">cost_currency: null</code> is refused at load; use <code class="inline">&quot;USD&quot;</code> and report cost. Reported
+<code class="inline">cost: 0</code> settles zero with complete accounting. Missing cost charges the
+reservation (zero) and marks the ledger incomplete; the recorded amount may
+be below real spend. Positive reported cost under a zero bound is preserved
+and charged, and the call fails permanently with <code class="inline">invalid_result</code> without
+retry. With the cost ledger disabled, the cost bound is unused. Token bounds
+remain positive.</p><p>The runtime constrains only the configured destination. A local server can
+forward data elsewhere; the runtime cannot establish the server's data-handling
+behavior. <code class="inline">doctor</code>, including <code class="inline">doctor --connect</code>, does not check connectivity
+for this backend. Data policy and workflow-only placement apply unchanged.</p><h3 id="json-schema-chat-backend">JSON-schema chat backend</h3><p>A <code class="inline">decision</code> installation with <code class="inline">backend: &quot;chat&quot;</code> names an existing <code class="inline">llm</code>
 installation through <code class="inline">llm</code>. Decode refuses missing aliases, other sources,
 and LLM modes other than <code class="inline">json_schema</code>.</p><pre><code class="json language-json">{
   &quot;source&quot;: &quot;decision&quot;,
