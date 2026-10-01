@@ -113,7 +113,9 @@ disconnect flag, and cleanup status.
 Health needs no bearer and returns no CORS headers. Responses use
 `application/json` and `Cache-Control: no-store`. Readiness uses the warm
 runtime's bounded snapshot, including captured credentials, pinned providers,
-run admission and provider-call admission. Saturation stays ready; required
+run admission and provider-call admission. Request and run saturation stay
+ready, including when clients withhold bodies and occupy every in-flight slot. Readiness describes the ability to serve work
+as capacity frees; use the MCP refusal reason below to identify overload. Required
 runtime loss or fencing makes readiness permanently false while liveness
 continues. Invalid static startup configuration prevents listener binding.
 
@@ -149,8 +151,19 @@ Every request has object `params._meta` fields
 must match the body. `Mcp-Name` is forbidden for these methods. Responses are
 deterministic JSON, at most 4 MiB, and use `Cache-Control: no-store`.
 Missing or malformed required metadata returns HTTP 400 JSON-RPC `-32602`.
-Admission saturation returns HTTP 429 `-31999`; an unavailable or fenced
-runtime returns HTTP 503 `-31998`.
+Admission saturation returns HTTP 429 JSON-RPC `-31999` (`Server busy`).
+The optional JSON-RPC `error.data` object carries a stable `reason`:
+
+- `request_capacity_exhausted`: the in-flight request bound is full; the
+  refusal occurs before body parsing and has no request ID.
+- `run_capacity_exhausted`: execution capacity is full; the refusal preserves
+  the validated call ID and occurs before committing the event stream. There
+  is no waiting queue for execution capacity.
+
+You can attribute refusals using `error.data.reason` while
+readiness remains green. Neither reason guarantees a recovery time, and no
+`Retry-After` duration is supplied. Ordinary error envelopes are unchanged; an
+unavailable or fenced runtime returns HTTP 503 `-31998`.
 
 Discovery advertises the fixed revision and static tool capability. Listing
 returns every configured tool in UTF-8 name-byte order with its configured

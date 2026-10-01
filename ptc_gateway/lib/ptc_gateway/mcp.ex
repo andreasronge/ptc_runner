@@ -77,7 +77,9 @@ defmodule PtcGateway.MCP do
         end
 
       :full ->
-        rpc_error(conn, 429, -31999, "Server busy", nil, nil)
+        rpc_error(conn, 429, -31999, "Server busy", nil, %{
+          "reason" => "request_capacity_exhausted"
+        })
 
       :unavailable ->
         rpc_error(conn, 503, -31998, "Server unavailable", nil, nil)
@@ -683,9 +685,9 @@ defmodule PtcGateway.MCP do
             heartbeat_ms = Keyword.get(opts, :heartbeat_ms, @heartbeat_ms)
             commit_sse(conn, id, owner, monitor, reservation, heartbeat_ms)
 
-          {:error, status, code, message} ->
+          {:error, status, code, message, data} ->
             send(owner, :close)
-            {:rpc, conn, status, code, message, id, nil}
+            {:rpc, conn, status, code, message, id, data}
         end
     after
       5_000 ->
@@ -738,9 +740,14 @@ defmodule PtcGateway.MCP do
 
   defp precommit_outcome(outcome) do
     case ServingOutcome.code(outcome) do
-      :busy -> {:error, 429, -31999, "Server busy"}
-      :invalid_input -> :reserved
-      _ -> {:error, 503, -31998, "Server unavailable"}
+      :busy ->
+        {:error, 429, -31999, "Server busy", %{"reason" => "run_capacity_exhausted"}}
+
+      :invalid_input ->
+        :reserved
+
+      _ ->
+        {:error, 503, -31998, "Server unavailable", nil}
     end
   end
 
