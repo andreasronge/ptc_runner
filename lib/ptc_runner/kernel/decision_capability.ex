@@ -29,9 +29,9 @@ defmodule PtcRunner.Kernel.DecisionCapability do
   Model calls use the shared chat spend, token, admission, deadline, replay,
   and inspection machinery. Host installations declare non-negative per-call cost
   and positive token bounds; they never estimate decision reservations from tokens.
-  Invalid answers and bound overruns are permanent `invalid_result` failures;
-  usage that is malformed or omits a promised value is a permanent
-  `usage_unavailable` provider failure.
+  Usage with no valid value, or without a valid value promised by the usage
+  guarantees, is a permanent `usage_unavailable` provider failure. Other
+  invalid responses and bound overruns are permanent `invalid_result` failures.
   """
   alias PtcRunner.Kernel.LLMUsage
 

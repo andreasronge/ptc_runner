@@ -678,10 +678,12 @@ When the corresponding ceiling is enabled, each call reserves exactly these
 bounds against `llm_cost_microusd` and `llm_total_tokens`, shared with chat
 calls. Validated reported cost and tokens settle after the response. An
 exceeded bound is still charged in full and fails permanently with
-`invalid_result`, without retry. Usage that is malformed or omits a value
-promised by `usage_guarantees` fails permanently with `usage_unavailable`,
-without retry; the call charges the full reservation, marks the affected
-ledger incomplete, and retains neither answers nor `served_model`. Decision
+`invalid_result`, without retry. Usage that reports no valid value, or lacks
+a valid value promised by `usage_guarantees`, fails permanently with
+`usage_unavailable`, without retry. The call charges the full reservation,
+marks the affected ledger incomplete, and retains neither answers nor
+`served_model`. Other invalid usage fails with `invalid_result` and settles
+the valid values. Decision
 calls also count against `max_active_provider_calls`.
 
 ### HTTP backend

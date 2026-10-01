@@ -535,10 +535,12 @@ When the corresponding ceiling is enabled, each call reserves exactly these
 bounds against <code class="inline">llm_cost_microusd</code> and <code class="inline">llm_total_tokens</code>, shared with chat
 calls. Validated reported cost and tokens settle after the response. An
 exceeded bound is still charged in full and fails permanently with
-<code class="inline">invalid_result</code>, without retry. Usage that is malformed or omits a value
-promised by <code class="inline">usage_guarantees</code> fails permanently with <code class="inline">usage_unavailable</code>,
-without retry; the call charges the full reservation, marks the affected
-ledger incomplete, and retains neither answers nor <code class="inline">served_model</code>. Decision
+<code class="inline">invalid_result</code>, without retry. Usage that reports no valid value, or lacks
+a valid value promised by <code class="inline">usage_guarantees</code>, fails permanently with
+<code class="inline">usage_unavailable</code>, without retry. The call charges the full reservation,
+marks the affected ledger incomplete, and retains neither answers nor
+<code class="inline">served_model</code>. Other invalid usage fails with <code class="inline">invalid_result</code> and settles
+the valid values. Decision
 calls also count against <code class="inline">max_active_provider_calls</code>.</p><h3 id="http-backend">HTTP backend</h3><p>Use <code class="inline">backend: &quot;http&quot;</code> to send measured decisions to a host-owned endpoint.
 This closed variant requires <code class="inline">source</code>, <code class="inline">backend</code>, <code class="inline">endpoint</code>, <code class="inline">model</code>,
 <code class="inline">usage_guarantees</code>, <code class="inline">installation_revision</code>, and both per-call bounds.
