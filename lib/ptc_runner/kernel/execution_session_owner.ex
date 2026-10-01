@@ -133,6 +133,16 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   end
 
   @doc false
+  @spec start_reserved(
+          pid(),
+          reference(),
+          term(),
+          PreparedRun.t(),
+          PublicationAuthority.t(),
+          pid(),
+          ProviderExecution.t() | ProviderExecution.Retained.t() | nil
+        ) ::
+          {:ok, t()} | {:error, term()}
   def start_reserved(host, ref, ticket, prepared, authority, caller, execution) do
     start_with_admission(
       host,

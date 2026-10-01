@@ -61,7 +61,7 @@ defmodule PtcRunner.Kernel.RunAdmission do
   @typedoc "Opaque single-use caller-owned capacity reservation."
   @opaque reservation :: {__MODULE__, pid(), reference()}
   @typedoc "Activated execution handle; only its caller may await it."
-  @opaque execution :: {__MODULE__, pid(), ExecutionSessionOwner.t()}
+  @opaque execution :: {__MODULE__, pid(), ExecutionSessionOwner.t(), reference()}
 
   @doc """
   Reserves capacity atomically for the calling process, without execution resources.
@@ -144,7 +144,7 @@ defmodule PtcRunner.Kernel.RunAdmission do
              execution
            ) do
         {:ok, owner} ->
-          {:ok, {__MODULE__, self(), owner}}
+          {:ok, {__MODULE__, self(), owner, monitor_owner(owner)}}
 
         {:error, _} = error ->
           cancel(reservation)
@@ -187,7 +187,9 @@ defmodule PtcRunner.Kernel.RunAdmission do
 
   @doc "Waits for the activated execution's sealed outcome and execution-owner cleanup."
   @spec await(execution()) :: {:ok, ExecutionOutcome.t()} | {:error, term()}
-  def await({__MODULE__, caller, owner}) when caller == self(), do: await_execution(owner)
+  def await({__MODULE__, caller, owner, ref}) when caller == self(),
+    do: await_execution(owner, ref)
+
   def await(_), do: {:error, :execution_session_unavailable}
 
   @doc false
@@ -269,14 +271,17 @@ defmodule PtcRunner.Kernel.RunAdmission do
   defp do_execute(host, prepared, authority, execution) when is_pid(host) do
     with {:ok, owner} <-
            ExecutionSessionOwner.start_admitted(host, prepared, authority, self(), execution) do
-      await_execution(owner)
+      await_execution(owner, monitor_owner(owner))
     end
   end
 
   defp do_execute(_, _, _, _), do: {:error, :invalid_run_admission}
 
-  defp await_execution(owner) do
-    ref = Process.monitor(ExecutionSessionOwner.pid(owner))
+  # Monitor before the owner can stop: a late monitor reports `:noproc` and
+  # loses the admission-death exit reason.
+  defp monitor_owner(owner), do: Process.monitor(ExecutionSessionOwner.pid(owner))
+
+  defp await_execution(owner, ref) do
     result = ExecutionSessionOwner.await(owner)
 
     receive do

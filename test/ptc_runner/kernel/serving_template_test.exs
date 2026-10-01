@@ -601,7 +601,7 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
     {:ok, reservation} = ServingTemplate.reserve(template, %{"answer" => 1}, host)
 
     hooks = %{
-      after_activation: fn {RunAdmission, _, session} ->
+      after_activation: fn {RunAdmission, _, session, _} ->
         owner = ExecutionSessionOwner.pid(session)
         state = :sys.get_state(owner)
         await_dispatch(state.opened_sinks.event_sink, System.monotonic_time(:millisecond) + 2000)
@@ -631,7 +631,7 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
           {:ok, reservation} = ServingTemplate.reserve(template, %{"answer" => 1}, host)
 
           hooks = %{
-            after_activation: fn {RunAdmission, _, session} ->
+            after_activation: fn {RunAdmission, _, session, _} ->
               owner = ExecutionSessionOwner.pid(session)
 
               case mode do
@@ -707,7 +707,7 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
         {:ok, reservation} = ServingTemplate.reserve(template, %{"answer" => 1}, host)
 
         hooks = %{
-          after_activation: fn {RunAdmission, _, session} ->
+          after_activation: fn {RunAdmission, _, session, _} ->
             owner = ExecutionSessionOwner.pid(session)
             state = :sys.get_state(owner)
             activity = state.prepared.provider_activity.owner

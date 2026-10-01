@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.RunAdmissionTest do
 
   alias PtcRunner.Kernel.{
     ExecutionOutcome,
+    ExecutionSessionOwner,
     PreparedRun,
     PublicationAuthority,
     RunAdmission,
@@ -420,6 +421,28 @@ defmodule PtcRunner.Kernel.RunAdmissionTest do
     for {pid, ref} <- refs, do: assert_receive({:DOWN, ^ref, :process, ^pid, _}, 5_000)
     assert {:error, :run_admission_unavailable} = RunAdmission.cancel(unused)
     assert {:error, :run_admission_unavailable} = RunAdmission.activate(unused, nil, nil)
+  end
+
+  test "await reports admission death after the execution owner already exited" do
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+    fixture = fixture(block: true)
+    {:ok, reservation} = RunAdmission.reserve(host, :infinity)
+
+    {:ok, execution} =
+      RunAdmission.activate(
+        reservation,
+        fixture.prepared,
+        fixture.authority,
+        fixture.catalog,
+        fixture.execution.services
+      )
+
+    assert_receive {:running, _provider}, 5_000
+    owner = execution |> elem(2) |> ExecutionSessionOwner.pid()
+    owner_ref = Process.monitor(owner)
+    Process.exit(host, :kill)
+    assert_receive {:DOWN, ^owner_ref, :process, ^owner, :run_admission_unavailable}, 5_000
+    assert {:error, :run_admission_unavailable} = RunAdmission.await(execution)
   end
 
   test "provider-free activation rejects foreign awaiting and completes its reservation once" do
