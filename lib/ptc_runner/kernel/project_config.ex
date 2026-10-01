@@ -15,6 +15,9 @@ defmodule PtcRunner.Kernel.ProjectConfig do
   the rule and a project-schema-authorized path without retaining rejected
   values or filesystem names. A schema worker that times out or exceeds its
   heap bound is reported as unavailable, never as a schema violation.
+  Read failures retain a bounded `ConfinedFile` reason instead of falling
+  through to application loading. Directory inputs still classify as
+  applications; a named document that cannot be read has no known kind.
   """
 
   alias PtcRunner.Kernel.ConfinedFile
@@ -78,8 +81,14 @@ defmodule PtcRunner.Kernel.ProjectConfig do
       {:ok, _canonical, _manifest_without_kind} ->
         :application
 
-      {:error, :project_unavailable} ->
+      {:error, {:project_unavailable, reason}} when reason in [:not_regular, :not_found] ->
+        # Existing application directories and absent application paths retain
+        # the normal acquisition order (host first). The application loader
+        # records the missing-file cause if acquisition reaches that point.
         :application
+
+      {:error, {:project_unavailable, _reason}} = error ->
+        error
 
       {:error, {:project_schema_invalid, %SchemaViolation{}} = reason, :project_document} ->
         {:error, reason}
@@ -103,7 +112,7 @@ defmodule PtcRunner.Kernel.ProjectConfig do
 
   @doc "Loads one project document without opening its references."
   @type failure ::
-          :project_unavailable
+          {:project_unavailable, ConfinedFile.error()}
           | :project_invalid
           | {:schema_validation_unavailable, SchemaViolation.unavailable_reason()}
           | {:project_schema_invalid, SchemaViolation.t()}
@@ -114,7 +123,7 @@ defmodule PtcRunner.Kernel.ProjectConfig do
       {:ok, canonical, decoded} ->
         load_decoded(canonical, decoded)
 
-      {:error, :project_unavailable} = error ->
+      {:error, {:project_unavailable, _reason}} = error ->
         error
 
       {:error, :project_invalid} = error ->
@@ -236,12 +245,8 @@ defmodule PtcRunner.Kernel.ProjectConfig do
       {:ok, canonical} ->
         {:ok, canonical}
 
-      {:error, reason}
-      when reason in [:not_found, :not_regular, :invalid_path, :symlink_escape] ->
-        {:error, :project_unavailable}
-
-      _invalid ->
-        {:error, :project_invalid}
+      {:error, reason} ->
+        {:error, {:project_unavailable, reason}}
     end
   end
 
@@ -256,12 +261,8 @@ defmodule PtcRunner.Kernel.ProjectConfig do
       {:ok, _prefix, :truncated} ->
         {:error, :project_invalid}
 
-      {:error, reason}
-      when reason in [:not_found, :not_regular, :invalid_path, :symlink_escape] ->
-        {:error, :project_unavailable}
-
-      {:error, _reason} ->
-        {:error, :project_invalid}
+      {:error, reason} ->
+        {:error, {:project_unavailable, reason}}
     end
   end
 
@@ -276,12 +277,8 @@ defmodule PtcRunner.Kernel.ProjectConfig do
       {:ok, prefix, :truncated} ->
         classify_discriminator_prefix(prefix)
 
-      {:error, reason}
-      when reason in [:not_found, :not_regular, :invalid_path, :symlink_escape] ->
-        {:error, :project_unavailable}
-
-      {:error, _reason} ->
-        {:error, :project_invalid}
+      {:error, reason} ->
+        {:error, {:project_unavailable, reason}}
     end
   end
 

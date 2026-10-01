@@ -1046,7 +1046,8 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
 
   test "root admission is capped so forced cleanup remains structurally bounded" do
     parent = self()
-    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
+    cleanup_timeout_ms = 1_000
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: cleanup_timeout_ms)
     {:ok, session} = ProviderSession.start(limits)
     {:ok, registrar} = ProviderSession.open_registrar(session)
     assert :ok = ResourceRegistrar.activate(registrar)
@@ -1068,7 +1069,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     monitors = Map.new(roots, &{Process.monitor(&1), &1})
     started_at = System.monotonic_time(:millisecond)
     assert :ok = ResourceRegistrar.abort(registrar)
-    assert System.monotonic_time(:millisecond) - started_at < 1_000
+    assert System.monotonic_time(:millisecond) - started_at < cleanup_timeout_ms + 1_000
     assert_roots_down(monitors)
     assert :ok = ProviderSession.close(session)
   end

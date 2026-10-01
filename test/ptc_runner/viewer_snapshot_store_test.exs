@@ -354,7 +354,7 @@ defmodule PtcRunner.ViewerSnapshotStoreTest do
     {:ok, project} = ProjectConfig.load(path)
 
     failures = [
-      :project_unavailable,
+      {:project_unavailable, :unreadable},
       :project_invalid,
       {:schema_validation_unavailable, :timeout},
       {:project_schema_invalid, SchemaViolation.new(:schema, [])}
