@@ -822,6 +822,7 @@ defmodule PtcRunner.Kernel.TraceLog do
                :use_stdio,
                :stderr_to_stdout,
                {:line, 64},
+               {:env, PtcRunner.ChildEnvironment.clear_environment(["PATH"])},
                args: [
                  "-c",
                  @append_lock_helper,
@@ -1369,6 +1370,7 @@ defmodule PtcRunner.Kernel.TraceLog do
                :use_stdio,
                :stderr_to_stdout,
                {:cd, parent},
+               {:env, PtcRunner.ChildEnvironment.clear_environment(["PATH"])},
                {:args,
                 [
                   "-c",
