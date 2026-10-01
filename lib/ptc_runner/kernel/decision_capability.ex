@@ -29,7 +29,9 @@ defmodule PtcRunner.Kernel.DecisionCapability do
   Model calls use the shared chat spend, token, admission, deadline, replay,
   and inspection machinery. Host installations declare non-negative per-call cost
   and positive token bounds; they never estimate decision reservations from tokens.
-  Invalid responses and bound overruns are permanent `invalid_result` failures.
+  Usage with no valid value, or without a valid value promised by the usage
+  guarantees, is a permanent `usage_unavailable` provider failure. Other
+  invalid responses and bound overruns are permanent `invalid_result` failures.
   """
   alias PtcRunner.Kernel.LLMUsage
 
@@ -113,14 +115,23 @@ defmodule PtcRunner.Kernel.DecisionCapability do
           {:ok, response} when is_map(response) ->
             bytes = RetainedSize.bytes_with_cap(response, max_response)
 
-            if JSONValue.map?(response) and is_integer(bytes) and bytes <= max_response and
-                 DecisionContract.valid_response?(response, request["questions"]) and
-                 valid_usage?(response, guarantees) do
-              {:ok, RetainedSize.detach_binaries(response)}
-            else
-              # Keep validated accounting for settlement; the missing answers
-              # fail the declared output schema before anything crosses into Lisp.
-              {:ok, Map.take(response, ["model", "usage"])}
+            cond do
+              not valid_usage?(response, guarantees) ->
+                {:error,
+                 ProviderError.new(
+                   :usage_unavailable,
+                   "Decision provider returned invalid or incomplete usage",
+                   dispatch_provenance: :dispatched
+                 )}
+
+              JSONValue.map?(response) and is_integer(bytes) and bytes <= max_response and
+                  DecisionContract.valid_response?(response, request["questions"]) ->
+                {:ok, RetainedSize.detach_binaries(response)}
+
+              true ->
+                # Keep validated accounting for settlement; the missing answers
+                # fail the declared output schema before anything crosses into Lisp.
+                {:ok, Map.take(response, ["model", "usage"])}
             end
 
           {:ok, _invalid} ->

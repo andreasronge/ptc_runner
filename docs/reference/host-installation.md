@@ -678,8 +678,13 @@ When the corresponding ceiling is enabled, each call reserves exactly these
 bounds against `llm_cost_microusd` and `llm_total_tokens`, shared with chat
 calls. Validated reported cost and tokens settle after the response. An
 exceeded bound is still charged in full and fails permanently with
-`invalid_result`, without retry. Decision calls also count against
-`max_active_provider_calls`.
+`invalid_result`, without retry. Usage that reports no valid value, or lacks
+a valid value promised by `usage_guarantees`, fails permanently with
+`usage_unavailable`, without retry. The call charges the full reservation,
+marks the affected ledger incomplete, and retains neither answers nor
+`served_model`. Other invalid usage fails with `invalid_result` and settles
+the valid values. Decision
+calls also count against `max_active_provider_calls`.
 
 ### HTTP backend
 
@@ -741,9 +746,9 @@ the remaining run deadline. Calls occupy the shared provider admission slot.
 
 A zero cost bound is a host declaration. With the cost ledger enabled,
 `cost_currency: null` is refused at load; use `"USD"` and report cost. Reported
-`cost: 0` settles zero with complete accounting. Missing cost charges the
-reservation (zero) and marks the ledger incomplete; the recorded amount may
-be below real spend. Positive reported cost under a zero bound is preserved
+`cost: 0` settles zero with complete accounting. A response without `cost`
+fails with `usage_unavailable`; it charges the zero reservation and marks the
+ledger incomplete, so the recorded amount may be below real spend. Positive reported cost under a zero bound is preserved
 and charged, and the call fails permanently with `invalid_result` without
 retry. With the cost ledger disabled, the cost bound is unused. Token bounds
 remain positive.

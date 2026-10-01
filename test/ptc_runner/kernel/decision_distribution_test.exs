@@ -37,7 +37,11 @@ defmodule PtcRunner.Kernel.DecisionDistributionTest do
     }
 
     {:ok, capability} =
-      DecisionCapability.new(requester: fn _, _ -> {:ok, response} end)
+      DecisionCapability.new(
+        requester: fn _, _ -> {:ok, response} end,
+        usage_guarantees:
+          Keyword.get(opts, :usage_guarantees, %{tokens: false, cost_currency: nil})
+      )
 
     {:ok, environment} = WorkflowEnvironment.new(capabilities: [capability])
     {:ok, limits} = Limits.new([])
@@ -152,8 +156,7 @@ defmodule PtcRunner.Kernel.DecisionDistributionTest do
       {"score weighted mean", put_in(answers, ["severity", "score"], 1.32), []},
       {"score finite confidence", put_in(answers, ["severity", "confidence"], 1.0e308), []},
       {"score inconsistent", put_in(answers, ["severity", "score"], 1.2), []},
-      {"boolean probability", put_in(answers, ["urgent", "probability"], -0.01), []},
-      {"provider usage", answers, [usage: %{"input_tokens" => -1, "output_tokens" => 2}]}
+      {"boolean probability", put_in(answers, ["urgent", "probability"], -0.01), []}
     ]
 
     for {name, candidate, opts} <- invalid do
@@ -161,6 +164,23 @@ defmodule PtcRunner.Kernel.DecisionDistributionTest do
                invoke_with_answers(candidate, opts),
              name
     end
+
+    for {usage, guarantees} <- [
+          {%{"input_tokens" => -1, "output_tokens" => 2}, %{tokens: false, cost_currency: nil}},
+          {%{"cost" => 0.01}, %{tokens: true, cost_currency: nil}},
+          {%{"input_tokens" => 2, "output_tokens" => 1, "cost" => -1},
+           %{tokens: true, cost_currency: "USD"}}
+        ] do
+      assert %{status: :error, kind: :provider_error, reason: :usage_unavailable} =
+               invoke_with_answers(answers, usage: usage, usage_guarantees: guarantees)
+    end
+
+    # An invalid value that was not promised fails the response contract instead.
+    assert %{status: :error, kind: :invalid_result, reason: :output_schema_mismatch} =
+             invoke_with_answers(answers,
+               usage: %{"input_tokens" => 2, "output_tokens" => 1, "cost" => -1},
+               usage_guarantees: %{tokens: true, cost_currency: nil}
+             )
 
     accepted = [
       answers,

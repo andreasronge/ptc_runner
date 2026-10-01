@@ -127,7 +127,9 @@ defmodule PtcRunner.TestSupport.PrePushFixture do
 
     File.chmod!(fake_mix, 0o755)
 
-    git!(repo, ["init", "--quiet"])
+    # Name the branch: host git may default to `main`, which pre-publication
+    # tests move independently to the job base.
+    git!(repo, ["init", "--quiet", "--initial-branch", "change"])
     git!(repo, ["config", "user.email", "pre-push@example.test"])
     git!(repo, ["config", "user.name", "Pre-push Test"])
 

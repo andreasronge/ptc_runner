@@ -535,8 +535,13 @@ When the corresponding ceiling is enabled, each call reserves exactly these
 bounds against <code class="inline">llm_cost_microusd</code> and <code class="inline">llm_total_tokens</code>, shared with chat
 calls. Validated reported cost and tokens settle after the response. An
 exceeded bound is still charged in full and fails permanently with
-<code class="inline">invalid_result</code>, without retry. Decision calls also count against
-<code class="inline">max_active_provider_calls</code>.</p><h3 id="http-backend">HTTP backend</h3><p>Use <code class="inline">backend: &quot;http&quot;</code> to send measured decisions to a host-owned endpoint.
+<code class="inline">invalid_result</code>, without retry. Usage that reports no valid value, or lacks
+a valid value promised by <code class="inline">usage_guarantees</code>, fails permanently with
+<code class="inline">usage_unavailable</code>, without retry. The call charges the full reservation,
+marks the affected ledger incomplete, and retains neither answers nor
+<code class="inline">served_model</code>. Other invalid usage fails with <code class="inline">invalid_result</code> and settles
+the valid values. Decision
+calls also count against <code class="inline">max_active_provider_calls</code>.</p><h3 id="http-backend">HTTP backend</h3><p>Use <code class="inline">backend: &quot;http&quot;</code> to send measured decisions to a host-owned endpoint.
 This closed variant requires <code class="inline">source</code>, <code class="inline">backend</code>, <code class="inline">endpoint</code>, <code class="inline">model</code>,
 <code class="inline">usage_guarantees</code>, <code class="inline">installation_revision</code>, and both per-call bounds.
 Optional fields are <code class="inline">credential</code>, <code class="inline">allow_insecure_loopback</code>, <code class="inline">ceilings</code>,
@@ -570,9 +575,9 @@ request state is never sent to a redirect target. The receive timeout is the
 minimum of <code class="inline">ceilings.request_timeout_ms</code>, <code class="inline">limits.llm_request_timeout_ms</code>, and
 the remaining run deadline. Calls occupy the shared provider admission slot.</p><p>A zero cost bound is a host declaration. With the cost ledger enabled,
 <code class="inline">cost_currency: null</code> is refused at load; use <code class="inline">&quot;USD&quot;</code> and report cost. Reported
-<code class="inline">cost: 0</code> settles zero with complete accounting. Missing cost charges the
-reservation (zero) and marks the ledger incomplete; the recorded amount may
-be below real spend. Positive reported cost under a zero bound is preserved
+<code class="inline">cost: 0</code> settles zero with complete accounting. A response without <code class="inline">cost</code>
+fails with <code class="inline">usage_unavailable</code>; it charges the zero reservation and marks the
+ledger incomplete, so the recorded amount may be below real spend. Positive reported cost under a zero bound is preserved
 and charged, and the call fails permanently with <code class="inline">invalid_result</code> without
 retry. With the cost ledger disabled, the cost bound is unused. Token bounds
 remain positive.</p><p>The runtime constrains only the configured destination. A local server can

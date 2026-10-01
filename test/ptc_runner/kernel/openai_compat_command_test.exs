@@ -85,10 +85,11 @@ defmodule PtcRunner.Kernel.OpenAICompatCommandTest do
       if unquote(route) == :llm do
         assert value["structured_output"] == %{"q" => false}
       else
-        # The decision answer contract requires observed token counts even when
-        # the linked LLM's usage guarantee is optional, as on the ReqLLM route.
+        # A decision response must report some valid usage even when the linked
+        # LLM's usage guarantee is optional, as on the ReqLLM route.
         assert value["status"] == "error"
-        assert value["kind"] == "invalid_result"
+        assert value["kind"] == "provider_error"
+        assert value["reason"] == "usage_unavailable"
       end
 
       assert_receive {:wire, _}
