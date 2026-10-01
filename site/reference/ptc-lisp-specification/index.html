@@ -556,7 +556,11 @@ language-level failure outcome. A Kernel host uses that outcome to abort and
 roll back a multi-turn run. Direct <code class="inline">PtcRunner.Lisp.run/2</code> reports it as a
 successful evaluation whose <code class="inline">Result.return</code> is <code class="inline">{:__ptc_fail__, value}</code>; this
 is distinct from an evaluator error returned under the outer <code class="inline">:error</code> tag.</p><p><strong>Syntax:</strong></p><pre><code class="clojure language-clojure">(fail error)</code></pre><p><strong>Semantics:</strong></p><ul><li>Immediately terminates the current program execution</li><li>The outer call to <code class="inline">PtcRunner.Lisp.run/2</code> succeeds and <code class="inline">Result.return</code> contains
-<code class="inline">{:__ptc_fail__, value}</code></li><li>Cannot be used inside <code class="inline">pmap</code> or <code class="inline">pcalls</code> (raises an error)</li></ul><p><strong>What a <code class="inline">ptc run</code> caller observes.</strong> A workflow entry that ends in <code class="inline">fail</code>
+<code class="inline">{:__ptc_fail__, value}</code></li><li>Inside <code class="inline">pmap</code> or <code class="inline">pcalls</code>, terminates the parallel call with an error.
+Only closed, payload-free failure metadata crosses the worker boundary;
+the original value, messages, and details maps are dropped. Taxonomy,
+provider classification, replay request hashes, and quota or aggregate
+budget refusal fields retain their existing closed vocabularies.</li></ul><p><strong>What a <code class="inline">ptc run</code> caller observes.</strong> A workflow entry that ends in <code class="inline">fail</code>
 exits 5 and reports <code class="inline">execution/explicit_failure</code>, whose message names where the
 failure value went:</p><pre><code class="console language-console">$ ptc run ptc-project.json
 error: execution/explicit_failure: the workflow signalled an explicit failure;

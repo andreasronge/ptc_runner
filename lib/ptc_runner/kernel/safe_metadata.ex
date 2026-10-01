@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   """
 
   alias PtcRunner.Kernel.LLMFailureCatalog
+  alias PtcRunner.Kernel.LLMReplayDiagnostic
 
   @label_keys ~w(name model provider tags)
   @tag_values %{
@@ -323,6 +324,49 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   """
   @spec capability_denial_map_limit() :: 2
   def capability_denial_map_limit, do: 2
+
+  @doc """
+  Projects a failure value into the closed public failure metadata vocabulary.
+
+  Parallel workers carry this projection instead of the original value. Each
+  projection is registered together with its validator in this module, so new
+  closed classes require no parallel-specific extraction or retention logic.
+  Messages, arbitrary details, and unrecognized fields are never transported.
+  This projection does not authenticate a refusal against runtime state.
+  """
+  @spec failure_metadata(term()) :: map()
+  def failure_metadata(value), do: project_failure_metadata(value, :extract)
+
+  @doc """
+  Revalidates a closed failure projection and drops all other fields.
+
+  Uses the same registered vocabulary as `failure_metadata/1`. This accepts
+  metadata only, never an original failure value or an arbitrary payload map.
+  """
+  @spec retain_failure_metadata(term()) :: map()
+  def retain_failure_metadata(metadata) when is_map(metadata) and not is_struct(metadata),
+    do: project_failure_metadata(metadata, :retain)
+
+  def retain_failure_metadata(_metadata), do: %{}
+
+  defp project_failure_metadata(value, mode) do
+    Enum.reduce(failure_projections(), %{}, fn {extract, retain}, metadata ->
+      projection = if mode == :extract, do: extract.(value), else: value
+      Map.merge(metadata, retain.(projection))
+    end)
+  end
+
+  # Keep extraction and validation paired: this is the single vocabulary for
+  # closed failure transport, independent of the evaluator boundary.
+  defp failure_projections do
+    [
+      {&failure_taxonomy/1, &retain_failure_taxonomy_fields/1},
+      {&llm_provider_failure/1, &retain_llm_provider_failure_fields/1},
+      {&named_quota_refusal_fields/1, &retain_named_quota_refusal_fields/1},
+      {&budget_refusal_fields/1, &retain_budget_refusal_fields/1},
+      {&LLMReplayDiagnostic.failure_metadata/1, &LLMReplayDiagnostic.retain_candidate_metadata/1}
+    ]
+  end
 
   @doc "Projects an agent LLM failure to one closed, payload-free provider class."
   @spec llm_provider_failure(term()) :: map()

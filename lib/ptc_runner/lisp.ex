@@ -49,8 +49,8 @@ defmodule PtcRunner.Lisp do
     SymbolCounter
   }
 
-  alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.Program
+  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Effects
   alias PtcRunner.Lisp.Eval.Helpers
@@ -1678,7 +1678,7 @@ defmodule PtcRunner.Lisp do
   defp error_details(_reason), do: %{}
 
   defp retain_parallel_failure_metadata(metadata) do
-    LLMReplayDiagnostic.retain_parallel_failure_metadata(metadata)
+    SafeMetadata.retain_failure_metadata(metadata)
   end
 
   @doc """

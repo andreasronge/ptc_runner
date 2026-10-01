@@ -191,6 +191,15 @@ defmodule PtcRunner.Kernel.RunAdmission do
   def await(_), do: {:error, :execution_session_unavailable}
 
   @doc false
+  @spec release_monitor(execution()) :: :ok
+  def release_monitor({__MODULE__, caller, owner}) when caller == self() do
+    if ref = ExecutionSessionOwner.monitor(owner), do: Process.demonitor(ref, [:flush])
+    :ok
+  end
+
+  def release_monitor(_execution), do: :ok
+
+  @doc false
   @spec reservation_snapshot(reservation()) :: {:ok, snapshot()} | {:error, atom()}
   def reservation_snapshot({__MODULE__, host, _}), do: snapshot(host)
 
@@ -275,8 +284,13 @@ defmodule PtcRunner.Kernel.RunAdmission do
 
   defp do_execute(_, _, _, _), do: {:error, :invalid_run_admission}
 
+  # The owner monitor is taken before activation, so its exit reason survives
+  # an owner that stops before `await/1`. Once that monitor has fired its
+  # `:DOWN` is queued or was consumed by an earlier await of this handle.
   defp await_execution(owner) do
-    ref = Process.monitor(ExecutionSessionOwner.pid(owner))
+    pid = ExecutionSessionOwner.pid(owner)
+    ref = ExecutionSessionOwner.monitor(owner)
+    timeout = if monitoring?(pid), do: :infinity, else: 0
     result = ExecutionSessionOwner.await(owner)
 
     receive do
@@ -288,7 +302,14 @@ defmodule PtcRunner.Kernel.RunAdmission do
 
       {:DOWN, ^ref, :process, _, _} ->
         {:error, :execution_session_unavailable}
+    after
+      timeout -> {:error, :execution_session_unavailable}
     end
+  end
+
+  defp monitoring?(pid) do
+    {:monitors, monitors} = Process.info(self(), :monitors)
+    {:process, pid} in monitors
   end
 
   @doc "Returns counts and readiness without exposing requests or provider configuration."
