@@ -75,6 +75,7 @@ initialize_worktree() {
     "$mise_bin" exec -- mix deps.get
     (cd ptc_viewer && "$mise_bin" exec -- mix deps.get)
     (cd ptc_runner_launcher && "$mise_bin" exec -- mix deps.get)
+    (cd ptc_gateway && "$mise_bin" exec -- mix deps.get)
     "$mise_bin" exec -- mix compile
   )
 
@@ -578,14 +579,14 @@ scripts/worktree.sh new [--no-init] <branch> [issue-number]
     a stale seed only costs a rebuild). With an issue number, verify it is
     open and unassigned, then assign it and post a claim comment. The branch
     name must contain the issue number. By default, install the shared Git
-    hooks, install the pinned mise toolchain, fetch root/Viewer/launcher
-    dependencies, and compile the root project. --no-init leaves those steps
+    hooks, install the pinned mise toolchain, fetch root/Viewer/launcher/
+    gateway dependencies, and compile the root project. --no-init leaves those steps
     for a later `scripts/worktree.sh init`.
 
 scripts/worktree.sh init [<dir>]
     Initialize an existing checkout (default: the current directory): install
     the clone-shared Git hooks, install the pinned mise toolchain, fetch all
-    three Mix projects' dependencies, and compile the root project. Safe to
+    four Mix projects' dependencies, and compile the root project. Safe to
     re-run. Finds mise on PATH, at $HOME/.local/bin/mise, or via MISE_BIN.
 
 scripts/worktree.sh seed [<dir>]
