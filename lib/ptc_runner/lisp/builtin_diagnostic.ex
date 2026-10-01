@@ -66,6 +66,8 @@ defmodule PtcRunner.Lisp.BuiltinDiagnostic do
 
   @doc false
   @spec arity?(term()) :: boolean()
+  def arity?(:even), do: true
+  def arity?({:callback, n}) when is_integer(n), do: arity?(n)
   def arity?(n) when is_integer(n), do: n in 0..1_000_000
   def arity?({:at_least, n}) when is_integer(n), do: arity?(n)
 

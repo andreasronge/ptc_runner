@@ -43,9 +43,7 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
 
   defp build_map(args, name) do
     if rem(length(args), 2) != 0 do
-      HostContext.error!(
-        {:arity_error, "#{name} requires an even number of arguments, got #{length(args)}"}
-      )
+      HostContext.error!({:arity_error, %{name: name, expected: :even, actual: length(args)}})
     end
 
     args
@@ -473,26 +471,8 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
       expected = :erlang.fun_info(e.function, :arity) |> elem(1)
       got = length(args)
 
-      msg =
-        "#{context}: function expects #{expected} argument(s) but was called with #{got}. " <>
-          arity_hint(expected, got, context)
-
-      HostContext.error!({:arity_error, msg})
+      HostContext.error!(
+        {:arity_error, %{name: context, expected: {:callback, expected}, actual: got}}
+      )
   end
-
-  defp arity_hint(expected, got, context) when got > expected do
-    extra = got - expected
-
-    case extra do
-      1 ->
-        "The extra argument may have been intended as a default value, " <>
-          "but #{context} passes extra args to the function. " <>
-          "Use (or current-val default) inside the function, or wrap with fnil."
-
-      _ ->
-        "Extra arguments are passed to the function, not used as defaults."
-    end
-  end
-
-  defp arity_hint(_, _, _), do: ""
 end

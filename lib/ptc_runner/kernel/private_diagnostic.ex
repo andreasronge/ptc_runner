@@ -35,7 +35,8 @@ defmodule PtcRunner.Kernel.PrivateDiagnostic do
 
   4. **Builtin argument diagnostics.** Exact structured type shapes admit only
      installed builtin names and a closed vocabulary of type labels. Arity
-     messages are rebuilt from installed builtin names and bounded counts.
+     messages, including minimum, even-count, and callback contracts, are
+     rebuilt from installed builtin names and bounded counts.
      Runtime prose and argument values are never forwarded. Private prelude
      type errors lose these selectors at their sanitization boundary.
 

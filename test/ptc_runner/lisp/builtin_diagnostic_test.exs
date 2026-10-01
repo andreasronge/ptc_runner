@@ -144,6 +144,19 @@ defmodule PtcRunner.Lisp.BuiltinDiagnosticTest do
     end
   end
 
+  test "unstructured arity prose and malformed count contracts remain withheld" do
+    for details <- [
+          %{message: "count expects sekrit-value arguments"},
+          %{name: "count", expected: "even", actual: 1},
+          %{name: "count", expected: {:callback, "sekrit-value"}, actual: 1},
+          %{name: "count", expected: :even, actual: "sekrit-value"},
+          %{name: "count", expected: {:at_least, 1}, actual: 1_000_001}
+        ] do
+      assert {PrivateDiagnostic.redacted_message(), true} ==
+               PrivateDiagnostic.project(:arity_error, details, "(count)")
+    end
+  end
+
   test "fallback type errors rebuild and private prelude sanitization removes their selector" do
     reason = Helpers.type_error_for_args(&PtcRunner.Lisp.Runtime.String.subs/3, [42, 0, 1])
     assert {:type_error, _message, {:safe_diagnostic, diagnostic}} = reason

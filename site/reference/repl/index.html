@@ -403,7 +403,9 @@ interactive terminal with those definitions available. <code class="inline">--ev
 stdin remain unattended input and require <code class="inline">--private-unattended</code> instead.</p><p>Private analysis releases builtin argument type and arity diagnostics rebuilt
 from installed builtin names, fixed type labels, and argument counts. For
 example, <code class="inline">(count 42)</code> reports <code class="inline">count: arg 1 expected seqable, got number</code>;
-argument values never enter this diagnostic. Other runtime type errors,
+argument values never enter this diagnostic. Minimum, even-count, and callback
+arity errors use the same structured policy; arbitrary string-only arity errors
+stay withheld. Other runtime type errors,
 including private prelude, explicit failure, and capability errors, remain
 withheld unless a separate diagnostic admission rule applies.</p><p>Repeat <code class="inline">--run RUN_ID</code> one through sixteen times to admit one exact, bounded
 cohort. Selection is available only with <code class="inline">private-run-analysis-v2</code>; a single
