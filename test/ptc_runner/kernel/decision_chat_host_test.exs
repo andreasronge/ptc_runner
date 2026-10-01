@@ -38,23 +38,21 @@ defmodule PtcRunner.Kernel.DecisionChatHostTest do
   } do
     File.cp_r!(@example, dir)
     File.rm_rf!(Path.join(dir, ".ptc"))
-    manifest_path = Path.join(dir, "ptc.json")
-    manifest = manifest_path |> File.read!() |> Jason.decode!()
 
-    manifest =
-      put_in(manifest, ["input", "value"], %{
-        "state" => %{},
-        "questions" => %{
-          "q" => %{"type" => "boolean", "instructions" => "Does the state meet the condition?"}
-        }
-      })
+    answers = %{
+      "T_1001" => true,
+      "T_1002" => false,
+      "T_1003" => false,
+      "T_1004" => true,
+      "T_1005" => false,
+      "T_1006" => false
+    }
 
-    File.write!(manifest_path, Jason.encode!(manifest))
-
-    File.write!(Path.join(dir, "workflow.clj"), """
-    (ns example.decision)
-    (defn run [request] (return (decision/request request)))
-    """)
+    Application.put_env(
+      :ptc_runner,
+      :host_llm_test_result,
+      {:ok, %{object: answers, tokens: %{input: 10, output: 2, total_cost: 0.0002}}}
+    )
 
     File.write!(
       Path.join(dir, "ptc-host.json"),
@@ -86,17 +84,20 @@ defmodule PtcRunner.Kernel.DecisionChatHostTest do
     assert {:ok, outcome} = CommandEngine.dispatch(["run", Path.join(dir, "ptc-project.json")])
     result = outcome.envelope["result"]["value"]
 
-    assert result["answers"]["q"] == %{
+    assert result["decisions"]["T_1002"] == %{
              "type" => "boolean",
              "value" => false,
              "probability" => nil,
              "confidence" => nil
            }
 
+    assert result["refund_ticket_ids"] == ["T-1001", "T-1004"]
+    assert result["decisions"]["T_1001"]["value"] == true
+    assert result["decisions"]["T_1001"]["probability"] == nil
     assert result["model"] == "fixture:chat"
     assert_receive {:host_llm_request, "fixture:chat", request}
     assert request.credential == "fixture-key"
-    assert request.schema["properties"]["q"] == %{"type" => "boolean"}
+    assert request.schema["properties"]["T_1002"] == %{"type" => "boolean"}
     assert is_integer(request.llm_request_deadline_ms)
     refute_receive {:host_llm_request, _, _}
     usage = outcome.envelope["execution"]["usage"]
