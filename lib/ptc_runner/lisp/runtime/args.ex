@@ -152,7 +152,14 @@ defmodule PtcRunner.Lisp.Runtime.Args do
         else
           HostContext.error!(
             {:type_error, "#{name}: arg #{index} expected #{expected(spec)}, got #{actual(arg)}",
-             args}
+             {:safe_diagnostic,
+              %{
+                kind: :builtin_argument,
+                name: name,
+                index: index,
+                expected: expected(spec),
+                actual: actual(arg)
+              }}}
           )
         end
 

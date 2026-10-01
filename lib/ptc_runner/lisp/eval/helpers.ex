@@ -61,6 +61,10 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
     "unknown"
   ]
 
+  @doc false
+  @spec safe_type_names() :: [String.t()]
+  def safe_type_names, do: @safe_type_names
+
   @doc """
   Generates a type error tuple for FunctionClauseError in builtins.
   """
@@ -162,7 +166,8 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
     type_descriptions = Enum.map(args, &describe_type/1)
 
     {:type_error, "#{fun_name}: invalid argument types: #{Enum.join(type_descriptions, ", ")}",
-     args}
+     {:safe_diagnostic,
+      %{kind: :builtin_types, name: to_string(fun_name), types: type_descriptions}}}
   end
 
   @doc """

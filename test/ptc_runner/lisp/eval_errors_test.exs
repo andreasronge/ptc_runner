@@ -267,13 +267,15 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
   end
 
   describe "arithmetic errors in variadic functions" do
-    test "higher-order arithmetic type errors retain their argument payload" do
+    test "higher-order arithmetic type errors retain only type evidence" do
       env = Env.initial()
 
       ast =
         {:call, {:var, :map}, [{:var, :+}, {:vector, [{:vector, [1, 2]}]}]}
 
-      assert {:error, {:type_error, msg, [[1, 2]]}} =
+      assert {:error,
+              {:type_error, msg,
+               {:safe_diagnostic, %{kind: :builtin_types, name: "add", types: ["list"]}}}} =
                Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
 
       assert msg =~ "invalid argument types"
@@ -368,7 +370,7 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
       env = Env.initial()
       call_ast = {:call, {:var, :/}, [10, nil]}
 
-      assert {:error, {:type_error, msg, [10, nil]}} =
+      assert {:error, {:type_error, msg, {:safe_diagnostic, _diagnostic}}} =
                Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
 
       assert msg =~ "nil"
@@ -379,7 +381,7 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
       env = Env.initial()
       call_ast = {:call, {:var, :+}, [1, nil]}
 
-      assert {:error, {:type_error, msg, [1, nil]}} =
+      assert {:error, {:type_error, msg, {:safe_diagnostic, _diagnostic}}} =
                Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
 
       assert msg =~ "nil"
@@ -390,7 +392,7 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
       env = Env.initial()
       call_ast = {:call, {:var, :-}, [nil]}
 
-      assert {:error, {:type_error, msg, [nil]}} =
+      assert {:error, {:type_error, msg, {:safe_diagnostic, _diagnostic}}} =
                Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
 
       assert msg =~ "invalid argument types"
@@ -402,7 +404,7 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
       env = Env.initial()
       call_ast = {:call, {:var, :*}, [5, nil]}
 
-      assert {:error, {:type_error, msg, [5, nil]}} =
+      assert {:error, {:type_error, msg, {:safe_diagnostic, _diagnostic}}} =
                Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
 
       assert msg =~ "nil"

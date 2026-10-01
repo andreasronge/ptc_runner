@@ -9,6 +9,7 @@ defmodule PtcRunner.ReplFrontendTest do
   import PtcRunner.TestSupport.ReplFrontendFixtures
 
   alias PtcRunner.Kernel.CommandEngine
+  alias PtcRunner.Kernel.PrivateDiagnostic
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.TestSupport.PrivateInspectionFixture
@@ -1239,6 +1240,49 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
+  test "private analysis rebuilds builtin type and arity diagnostics", %{
+    tmp_dir: root,
+    seeded: seeded
+  } do
+    fixture = PrivateInspectionFixture.copy!(seeded, root)
+
+    for {source, expected, redacted?} <- [
+          {"(count 42)", "count: arg 1 expected seqable, got number", false},
+          {"(do (analysis/runs {}) (count 42))", "count: arg 1 expected seqable, got number",
+           false},
+          {~S|(get-in "sekrit-value" ["a" 0])|, "get-in: arg 1 expected associative, got string",
+           false},
+          {"(count)", "count expects 1 argument(s), got 0", false},
+          {~S|(subs 42 0 1)|, "subs: invalid argument types: number, number, number", false},
+          {~S|(sort-by "sekrit-value" [1] >)|, PrivateDiagnostic.redacted_message(), true},
+          {~S|(fail "operator-failure")|, PrivateDiagnostic.redacted_message(), true}
+        ] do
+      output =
+        capture_io(fn ->
+          assert_raise Mix.Error, ~r|repl/profile_evaluation_failed|, fn ->
+            run_repl(private_profile_args(fixture) ++ ["--format", "jsonl", "-e", source])
+          end
+        end)
+
+      evaluation = output |> decode_jsonl() |> Enum.find(&(&1["type"] == "evaluation"))
+      error = evaluation["result"]["error"]
+      assert error["message_redacted"] == redacted?
+
+      assert error["message"]
+             |> String.replace_prefix("type_error: ", "")
+             |> String.replace_prefix("arity error: ", "") == expected
+
+      refute output =~ "sekrit-value"
+      paths = Path.wildcard(Path.join(fixture.output, "**/*")) |> Enum.filter(&File.regular?/1)
+      assert paths != []
+
+      for path <- paths do
+        refute File.read!(path) =~ "sekrit-value"
+      end
+    end
+  end
+
+  @tag :tmp_dir
   test "private analysis shows pre-execution invalid tool arguments", %{
     tmp_dir: root,
     seeded: seeded
@@ -1337,21 +1381,7 @@ defmodule PtcRunner.ReplFrontendTest do
     output =
       capture_io(fn ->
         assert_raise Mix.Error, ~r|repl/profile_evaluation_failed|, fn ->
-          run_repl([
-            "--profile",
-            "private-run-analysis-v2",
-            "--resource",
-            "traces=#{fixture.traces}",
-            "--resource",
-            "inspection=#{fixture.inspection}",
-            "--session-trace-dir",
-            fixture.output,
-            "--private-unattended",
-            "--format",
-            "jsonl",
-            "-e",
-            source
-          ])
+          run_repl(private_profile_args(fixture) ++ ["--format", "jsonl", "-e", source])
         end
       end)
 

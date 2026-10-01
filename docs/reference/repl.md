@@ -528,6 +528,13 @@ ptc repl \
 interactive terminal with those definitions available. `--eval`, scripts, and
 stdin remain unattended input and require `--private-unattended` instead.
 
+Private analysis releases builtin argument type and arity diagnostics rebuilt
+from installed builtin names, fixed type labels, and argument counts. For
+example, `(count 42)` reports `count: arg 1 expected seqable, got number`;
+argument values never enter this diagnostic. Other runtime type errors,
+including private prelude, explicit failure, and capability errors, remain
+withheld unless a separate diagnostic admission rule applies.
+
 Repeat `--run RUN_ID` one through sixteen times to admit one exact, bounded
 cohort. Selection is available only with `private-run-analysis-v2`; a single
 flag still uses the selected-set path, while no flags retain whole-directory

@@ -400,7 +400,12 @@ authorization:</p><pre><code class="console language-console">ptc repl \
   --load analysis.clj \
   --private-terminal</code></pre><p><code class="inline">--load</code> evaluates one bounded local setup file, then opens the authorized
 interactive terminal with those definitions available. <code class="inline">--eval</code>, scripts, and
-stdin remain unattended input and require <code class="inline">--private-unattended</code> instead.</p><p>Repeat <code class="inline">--run RUN_ID</code> one through sixteen times to admit one exact, bounded
+stdin remain unattended input and require <code class="inline">--private-unattended</code> instead.</p><p>Private analysis releases builtin argument type and arity diagnostics rebuilt
+from installed builtin names, fixed type labels, and argument counts. For
+example, <code class="inline">(count 42)</code> reports <code class="inline">count: arg 1 expected seqable, got number</code>;
+argument values never enter this diagnostic. Other runtime type errors,
+including private prelude, explicit failure, and capability errors, remain
+withheld unless a separate diagnostic admission rule applies.</p><p>Repeat <code class="inline">--run RUN_ID</code> one through sixteen times to admit one exact, bounded
 cohort. Selection is available only with <code class="inline">private-run-analysis-v2</code>; a single
 flag still uses the selected-set path, while no flags retain whole-directory
 capture. Values are validated as a complete list and then treated as an

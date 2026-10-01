@@ -122,8 +122,9 @@ defmodule PtcRunner.Lisp.Runtime.CallableTest do
           end)
         end
 
-      assert {:error, {:type_error, "merge: arg 2 expected map, got list", [%{}, [1, 2]]},
-              ^context} =
+      assert {:error,
+              {:type_error, "merge: arg 2 expected map, got list",
+               {:safe_diagnostic, _diagnostic}}, ^context} =
                error.outcome
     end
 

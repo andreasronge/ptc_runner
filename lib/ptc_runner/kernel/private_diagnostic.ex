@@ -9,7 +9,7 @@ defmodule PtcRunner.Kernel.PrivateDiagnostic do
   submitted source — or, for a narrower class, nothing private that this
   evaluation itself captured.
 
-  Three admission rules apply, all **rebuild-or-bound, never raw forward** of
+  Four admission rules apply, all **rebuild-or-bound, never raw forward** of
   untrusted evaluator prose outside their footing:
 
   1. **Source-derived structured detail** (today `:unbound_var`). A message is
@@ -32,6 +32,12 @@ defmodule PtcRunner.Kernel.PrivateDiagnostic do
      `analysis/counters` expects a named-argument map and uses `run_id` in its
      remediation example; arbitrary `:invalid_tool_args` messages never enter
      the kind allowlist above.
+
+  4. **Builtin argument diagnostics.** Exact structured type shapes admit only
+     installed builtin names and a closed vocabulary of type labels. Arity
+     messages are rebuilt from installed builtin names and bounded counts.
+     Runtime prose and argument values are never forwarded. Private prelude
+     type errors lose these selectors at their sanitization boundary.
 
   `details` is evaluator output and remains untrusted even when it contains a
   code-owned selector: it can only select among exact fixed shapes and never
@@ -61,7 +67,9 @@ defmodule PtcRunner.Kernel.PrivateDiagnostic do
     :unknown_namespace
   ]
 
+  alias PtcRunner.Lisp.BuiltinDiagnostic
   alias PtcRunner.Lisp.Eval.Helpers
+  alias PtcRunner.Lisp.EvaluatorError
   alias PtcRunner.Utf8
 
   @doc "The fixed message used whenever no source-derived message can be rebuilt."
@@ -101,6 +109,29 @@ defmodule PtcRunner.Kernel.PrivateDiagnostic do
       when map_size(diagnostic) == 3 do
     {~s(analysis/counters: expected one named argument map, for example {"run_id" value}; positional arguments are not accepted),
      false}
+  end
+
+  def project(:type_error, %{safe_diagnostic: diagnostic}, _source) do
+    case BuiltinDiagnostic.message(diagnostic) do
+      {:ok, message} -> {"type_error: " <> message, false}
+      :error -> {@redacted, true}
+    end
+  end
+
+  def project(:arity_error, %{name: name, expected: expected, actual: actual}, _source) do
+    with true <- BuiltinDiagnostic.builtin_name?(name),
+         true <- BuiltinDiagnostic.arity?(expected),
+         true <- is_integer(actual) and actual in 0..1_000_000,
+         {:ok, message} <-
+           EvaluatorError.lisp_message(:arity_error, %{
+             name: name,
+             expected: expected,
+             actual: actual
+           }) do
+      {message, false}
+    else
+      _ -> {@redacted, true}
+    end
   end
 
   def project(kind, details, _source)
