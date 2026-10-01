@@ -443,6 +443,17 @@ defmodule PtcRunner.Kernel.RunAdmissionTest do
     Process.exit(host, :kill)
     assert_receive {:DOWN, ^owner_ref, :process, ^owner, :run_admission_unavailable}, 5_000
     assert {:error, :run_admission_unavailable} = RunAdmission.await(execution)
+    assert {:error, :execution_session_unavailable} = RunAdmission.await(execution)
+  end
+
+  test "awaiting a completed execution again returns promptly" do
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+    fixture = fixture(provider_free: true)
+    {:ok, reservation} = RunAdmission.reserve(host, :infinity)
+    {:ok, execution} = RunAdmission.activate(reservation, fixture.prepared, fixture.authority)
+
+    assert {:ok, _outcome} = RunAdmission.await(execution)
+    assert {:error, :execution_session_unavailable} = RunAdmission.await(execution)
   end
 
   test "provider-free activation rejects foreign awaiting and completes its reservation once" do
