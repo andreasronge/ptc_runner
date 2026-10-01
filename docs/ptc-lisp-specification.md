@@ -1359,7 +1359,11 @@ is distinct from an evaluator error returned under the outer `:error` tag.
 - Immediately terminates the current program execution
 - The outer call to `PtcRunner.Lisp.run/2` succeeds and `Result.return` contains
   `{:__ptc_fail__, value}`
-- Cannot be used inside `pmap` or `pcalls` (raises an error)
+- Inside `pmap` or `pcalls`, terminates the parallel call with an error.
+  Only closed, payload-free failure metadata crosses the worker boundary;
+  the original value, messages, and details maps are dropped. Taxonomy,
+  provider classification, replay request hashes, and quota or aggregate
+  budget refusal fields retain their existing closed vocabularies.
 
 **What a `ptc run` caller observes.** A workflow entry that ends in `fail`
 exits 5 and reports `execution/explicit_failure`, whose message names where the

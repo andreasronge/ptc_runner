@@ -2345,6 +2345,89 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     end)
   end
 
+  test "closed failure metadata transport rejects payloads and retains budget projections" do
+    value = %{
+      status: :error,
+      kind: :limit_exceeded,
+      reason: :llm_total_tokens,
+      details: %{
+        limit: :llm_total_tokens,
+        limit_value: 10,
+        requested: 8,
+        remaining: 2,
+        message: "PRIVATE_BUDGET_PAYLOAD"
+      }
+    }
+
+    expected = %{
+      failure_kind_fingerprint: SafeMetadata.fingerprint("failure-kind:limit_exceeded"),
+      limit: :llm_total_tokens,
+      limit_value: 10,
+      requested: 8,
+      remaining: 2
+    }
+
+    assert SafeMetadata.failure_metadata(value) == expected
+    assert SafeMetadata.retain_failure_metadata(Map.put(expected, :details, value)) == expected
+
+    assert SafeMetadata.retain_failure_metadata(%{
+             limit: :llm_total_tokens,
+             limit_value: 10,
+             requested: 1,
+             remaining: 2,
+             message: "PRIVATE"
+           }) == %{}
+  end
+
+  test "parallel budget failures retain closed fields without leaking forged payloads" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+
+    for limit <- [:llm_total_tokens, :llm_cost_microusd],
+        parallel <- [:pmap, :pcalls],
+        valid? <- [true, false] do
+      {:ok, sink} =
+        EventSink.start(:normal, limits, run_id: "parallel-budget-#{limit}-#{parallel}-#{valid?}")
+
+      {:ok, config} =
+        RunConfig.new(
+          workflow_environment: workflow,
+          missions: %{"default" => mission},
+          input: %{},
+          limits: limits,
+          event_sink: sink
+        )
+
+      requested = if valid?, do: 8, else: 1
+
+      value =
+        "{:status \"error\" :kind :limit-exceeded :reason :#{limit} :details {:limit :#{limit} :limit_value 10 :requested #{requested} :remaining 2 :message \"PRIVATE_BUDGET_PAYLOAD\"} :replay_request_hash \"PRIVATE_HASH\"}"
+
+      source =
+        if parallel == :pmap,
+          do: "(pmap (fn [_] (fail #{value})) [1])",
+          else: "(pcalls #(fail #{value}))"
+
+      assert {:error, step} = PtcRunner.Lisp.run(source)
+      expected_reason = if(parallel == :pmap, do: :pmap_error, else: :pcalls_error)
+      assert step.fail.reason == expected_reason
+
+      if valid? do
+        assert %{limit: ^limit, limit_value: 10, requested: 8, remaining: 2} = step.fail.details
+      else
+        refute Map.has_key?(step.fail.details, :limit)
+      end
+
+      refute inspect(step.fail) =~ "PRIVATE"
+      assert {:error, error} = Kernel.run(source, config)
+      assert error.reason == expected_reason
+      refute Map.has_key?(error.details, :limit)
+      refute inspect(error) =~ "PRIVATE"
+      refute inspect(EventSink.events(sink)) =~ "PRIVATE"
+    end
+  end
+
   test "parallel fail retains only bounded safe taxonomy" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])

@@ -1,7 +1,6 @@
 defmodule PtcRunner.Kernel.LLMReplayDiagnostic do
   @moduledoc false
 
-  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
 
   @prefix "no replay fixture matches this request (request_hash: "
@@ -94,19 +93,6 @@ defmodule PtcRunner.Kernel.LLMReplayDiagnostic do
   end
 
   def retain_candidate_metadata(_metadata), do: %{}
-
-  @doc false
-  @spec retain_parallel_failure_metadata(term()) :: map()
-  def retain_parallel_failure_metadata(metadata) when is_map(metadata) do
-    metadata
-    |> SafeMetadata.retain_failure_taxonomy_fields()
-    |> Map.merge(retain_candidate_metadata(metadata))
-    |> Map.merge(SafeMetadata.retain_llm_provider_failure_fields(metadata))
-    |> Map.merge(SafeMetadata.retain_named_quota_refusal_fields(metadata))
-    |> Map.merge(SafeMetadata.retain_budget_refusal_fields(metadata))
-  end
-
-  def retain_parallel_failure_metadata(_metadata), do: %{}
 
   @doc false
   @spec valid_message?(term()) :: boolean()
