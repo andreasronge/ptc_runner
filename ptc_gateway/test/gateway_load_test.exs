@@ -97,6 +97,7 @@ defmodule PtcGatewayLoadTest do
 
       report("burst of #{@burst}, in-flight bound #{inflight}", %{
         "statuses" => inspect(statuses),
+        "refusal reasons" => inspect(GatewayLoad.by_refusal_reason(results)),
         "peak leases held (owner)" => "#{held.peak} of #{inflight}, #{held.samples} samples",
         "peak overlap (client)" => "#{observed} — waiting, not working",
         "latency ms" =>
@@ -113,11 +114,17 @@ defmodule PtcGatewayLoadTest do
       assert held.peak <= inflight
       assert held.peak >= 1, "the sampler observed no lease at all"
 
-      # That the bound was *reached* is proved by the refusals rather than by
-      # the sampler: run capacity is #{@burst} here, so nothing but a full lease
-      # table can produce a 429.
+      # The wire reason attributes refusals independently of the sampler.
       assert Map.get(statuses, 429, 0) > 0,
              "the burst never saturated, so the bound was not exercised"
+
+      for result <- results, result.status == 429 do
+        assert result.result["error"] == %{
+                 "code" => -31999,
+                 "message" => "Server busy",
+                 "data" => %{"reason" => "request_capacity_exhausted"}
+               }
+      end
 
       # Every admitted call produced its real result, not an empty stream and
       # not a contract error wearing an HTTP 200.
@@ -153,6 +160,7 @@ defmodule PtcGatewayLoadTest do
 
       report("burst of 16, run bound #{runs}", %{
         "statuses" => inspect(statuses),
+        "refusal reasons" => inspect(GatewayLoad.by_refusal_reason(results)),
         "peak concurrent runs (owner)" =>
           "#{capacity.peak} of #{runs}, #{capacity.samples} samples",
         "peak concurrent runs (client)" => client_peak,
@@ -167,11 +175,18 @@ defmodule PtcGatewayLoadTest do
       assert capacity.peak <= runs
       assert capacity.peak >= 1, "the sampler observed no reservation at all"
 
-      # With no waiting queue for execution capacity the overflow is refused
-      # rather than delayed, and in-flight capacity is 32 against a burst of 16,
-      # so every one of these refusals is run capacity and nothing else.
+      # With no waiting queue, execution overflow is refused. The wire
+      # reason identifies the exhausted bound.
       assert Map.get(statuses, 429, 0) > 0,
              "run capacity never filled, so the bound was not exercised"
+
+      for result <- results, result.status == 429 do
+        assert result.result["error"] == %{
+                 "code" => -31999,
+                 "message" => "Server busy",
+                 "data" => %{"reason" => "run_capacity_exhausted"}
+               }
+      end
 
       assert Map.get(statuses, 200, 0) >= 1
 
@@ -215,6 +230,7 @@ defmodule PtcGatewayLoadTest do
 
       report("write burst of #{@burst}, run bound #{runs}", %{
         "statuses" => inspect(statuses),
+        "refusal reasons" => inspect(GatewayLoad.by_refusal_reason(results)),
         "throughput" => "#{round(@burst * 1_000_000 / elapsed_us)} calls/s",
         "peak concurrent runs" => "#{peak.peak} of #{runs}",
         "audit mailbox" => inspect(depths[:audit]),
@@ -395,7 +411,16 @@ defmodule PtcGatewayLoadTest do
 
       # Every slot is now held by a client that has sent no body. The MCP
       # endpoint is starved.
-      assert %{status: 429} = GatewayLoad.call(config, arguments: @payload)
+      assert %{
+               status: 429,
+               result: %{
+                 "error" => %{
+                   "code" => -31999,
+                   "data" => %{"reason" => "request_capacity_exhausted"}
+                 }
+               }
+             } =
+               GatewayLoad.call(config, arguments: @payload)
 
       # Readiness reports on the warm runtime, not on request admission, so it
       # stays green throughout. An operator watching only this endpoint cannot

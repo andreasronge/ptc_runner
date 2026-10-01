@@ -81,7 +81,8 @@ try {
         overloaded = result.isError === true;
       } catch (error) {
         overloadDetail = String(error);
-        overloaded = error?.code === -31999 || String(error).includes("Server busy");
+        overloaded = error?.code === -31999 &&
+          error?.data?.reason === "run_capacity_exhausted";
       }
       if (!overloaded) throw new Error(`admission was released while disconnected-call cleanup was held: ${JSON.stringify(overloadDetail)}`);
       await writeFile(cleanupReleasePath, "release\n");
