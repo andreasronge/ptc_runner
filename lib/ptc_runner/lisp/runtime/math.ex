@@ -382,12 +382,12 @@ defmodule PtcRunner.Lisp.Runtime.Math do
 
   @spec arity_error(String.t()) :: no_return()
   defp arity_error(name) do
-    HostContext.error!({:arity_error, "#{name} requires at least 1 argument, got 0"})
+    HostContext.error!({:arity_error, %{name: name, expected: {:at_least, 1}, actual: 0}})
   end
 
   @spec binary_arity_error(String.t(), non_neg_integer()) :: no_return()
   defp binary_arity_error(name, got) do
-    HostContext.error!({:arity_error, "#{name} requires at least 2 arguments, got #{got}"})
+    HostContext.error!({:arity_error, %{name: name, expected: {:at_least, 2}, actual: got}})
   end
 
   # Comparison (for direct use, not inside where)

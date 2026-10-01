@@ -386,7 +386,21 @@ defmodule PtcRunner.Lisp.EvaluatorError do
 
   defp arity_lisp_sentence(name, {:at_least, n}, actual)
        when is_integer(n) and n >= 0,
-       do: {:ok, "#{name} requires at least #{n} argument, got #{actual}"}
+       do:
+         {:ok,
+          "#{name} requires at least #{n} #{if(n == 1, do: "argument", else: "arguments")}, got #{actual}"}
+
+  defp arity_lisp_sentence(name, :even, actual),
+    do: {:ok, "#{name} requires an even number of arguments, got #{actual}"}
+
+  defp arity_lisp_sentence(name, {:callback, expected}, actual)
+       when is_integer(expected) and expected >= 0 do
+    message =
+      "#{name}: function expects #{expected} argument(s) but was called with #{actual}. " <>
+        callback_arity_hint(expected, actual, name)
+
+    {:ok, message}
+  end
 
   defp arity_lisp_sentence(name, expected, actual)
        when is_integer(expected) and expected >= 0,
@@ -406,6 +420,24 @@ defmodule PtcRunner.Lisp.EvaluatorError do
   end
 
   defp arity_lisp_sentence(_name, _expected, _actual), do: :error
+
+  defp callback_arity_hint(expected, actual, name) when actual > expected do
+    if actual - expected == 1 do
+      "The extra argument may have been intended as a default value, " <>
+        "but #{name} passes extra args to the function. " <>
+        "Use (or current-val default) inside the function, or wrap with fnil."
+    else
+      "Extra arguments are passed to the function, not used as defaults."
+    end
+  end
+
+  defp callback_arity_hint(_expected, _actual, _name), do: ""
+
+  defp format_expected_arity(:even), do: {:ok, "an even number of arguments"}
+
+  defp format_expected_arity({:callback, n})
+       when is_integer(n) and n >= 0 and n <= 1_000_000,
+       do: {:ok, "a callback with #{n} argument(s)"}
 
   defp format_expected_arity(expected)
        when is_integer(expected) and expected >= 0 and expected <= 1_000_000,

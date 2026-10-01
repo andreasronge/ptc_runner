@@ -214,10 +214,10 @@ defmodule PtcRunner.Lisp.Eval.OutcomeTest do
     refute pcalls_step.fail.message =~ sentinel
   end
 
-  test "builtin validation preserves the direct Eval error shape" do
+  test "builtin validation returns structured type evidence" do
     ast = {:call, {:var, :merge}, [{:literal, %{}}, {:literal, [1, 2]}]}
 
-    assert {:error, {:type_error, message, [%{}, [1, 2]]}} =
+    assert {:error, {:type_error, message, {:safe_diagnostic, _diagnostic}}} =
              Eval.eval(ast, %{}, %{}, Env.initial(), fn _, _ -> nil end)
 
     assert message =~ "merge: arg 2 expected map"
@@ -294,7 +294,7 @@ defmodule PtcRunner.Lisp.Eval.OutcomeTest do
   test "ordinary closure errors restore the caller evaluation scope" do
     {ast, opts} = analyze!(~S|(let [outer "caller"] ((fn [x] (merge {} [x])) outer))|)
 
-    assert {:error, {:type_error, _message, [%{}, ["caller"]]}, final_context} =
+    assert {:error, {:type_error, _message, {:safe_diagnostic, _diagnostic}}, final_context} =
              Eval.eval_with_context(
                ast,
                %{},

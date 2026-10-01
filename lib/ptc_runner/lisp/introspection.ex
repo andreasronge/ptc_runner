@@ -172,9 +172,7 @@ defmodule PtcRunner.Lisp.Introspection do
     if length(args) in arities do
       {:error, {:type_error, "#{name} expects a string or symbol reference", args}}
     else
-      {:error,
-       {:arity_error,
-        "#{name} expects #{Enum.join(arities, " or ")} argument(s), got #{length(args)}"}}
+      {:error, {:arity_error, %{name: name, expected: arities, actual: length(args)}}}
     end
   end
 
