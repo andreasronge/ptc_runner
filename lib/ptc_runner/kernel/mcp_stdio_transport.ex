@@ -570,18 +570,12 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
       :exit_status,
       :use_stdio,
       :hide,
-      {:env, clear_environment()}
+      {:env, PtcRunner.ChildEnvironment.clear_environment()}
     ]
 
     {:ok, Port.open({:spawn_executable, String.to_charlist(launcher)}, options)}
   rescue
     ArgumentError -> {:error, :mcp_stdio_launcher_unavailable}
-  end
-
-  defp clear_environment do
-    System.get_env()
-    |> Map.keys()
-    |> Enum.map(&{String.to_charlist(&1), false})
   end
 
   defp start_launcher(port, payload, timeout_ms, owner_ref) do

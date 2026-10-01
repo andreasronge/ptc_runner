@@ -502,6 +502,12 @@ This section owns the parts that are implementation rather than contract.
 
 ### Canonical persistence
 
+The append-lock and identity-bound publication shell helpers clear the inherited
+BEAM environment except `PATH`, which locates their command-line utilities.
+Provider credentials and other host variables are not passed to these children.
+The MCP transport uses the same environment-clearing helper without retaining
+any variables for its launcher.
+
 Ordinary host-selected append takes an OS-released advisory lease before it
 validates the existing prefix and writes a batch. Existing files are keyed by
 device and inode, so hard-link aliases share the lease across BEAM processes and
