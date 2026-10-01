@@ -594,8 +594,9 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
   end
 
   @tag :tmp_dir
-  test "a raising activation hook leaves no execution monitor behind", %{tmp_dir: dir} do
-    assert {:ok, template} = build(fixture(dir, %{}, @source))
+  test "a raising activation hook cancels and reaps its execution", %{tmp_dir: dir} do
+    source = "(ns app) (defn run {:effect :write} [input] (loop [n 0] (recur (inc n))))"
+    assert {:ok, template} = build(fixture(dir, %{}, source))
     host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
     {:ok, reservation} = ServingTemplate.reserve(template, %{"answer" => 1}, host)
 
@@ -608,8 +609,11 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
 
     _result = ServingCall.activate(reservation, hooks)
     assert_receive {:owner, owner}
+    refute Process.alive?(owner)
+    refute_received {:DOWN, _, :process, ^owner, _}
     {:monitors, monitors} = Process.info(self(), :monitors)
     refute {:process, owner} in monitors
+    assert {:ok, %{in_use: 0}} = RunAdmission.snapshot(host)
   end
 
   @tag :tmp_dir
