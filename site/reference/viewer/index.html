@@ -153,7 +153,11 @@ The token protects Live ingestion and controls;
 it never authenticates the Runs trace browser, so exposing the Viewer can
 disclose trace and private inspection data.</p><p>For container binding and host-port rules, see
 <a href="/installation/docker/#open-the-viewer">Docker installation</a>.</p><h2 id="reporting-a-run">Reporting a run</h2><p>Set <code class="inline">PTC_VIEWER_URL</code> for <code class="inline">ptc run</code> to report progress to the Live tab. When the
-Viewer requires a token, set the same <code class="inline">PTC_VIEWER_TOKEN</code> for the run. Reporting
+Viewer requires a token, set the same <code class="inline">PTC_VIEWER_TOKEN</code> for the run. A token
+is sent only over HTTPS or HTTP to <code class="inline">localhost</code>, IPv4 loopback (<code class="inline">127.0.0.0/8</code>),
+or IPv6 loopback (<code class="inline">::1</code>). URLs must have a host and no userinfo, query, or
+fragment. Redirects are refused. Invalid or insecure targets fail delivery.
+Reporting
 is best-effort and never changes the run result. It sends the exact manifest
 label, or the manifest filename when no label exists, and workflow entry to the
 Viewer for display; trace metadata keeps its fingerprinted label.</p>

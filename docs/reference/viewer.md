@@ -82,7 +82,11 @@ For container binding and host-port rules, see
 ## Reporting a run
 
 Set `PTC_VIEWER_URL` for `ptc run` to report progress to the Live tab. When the
-Viewer requires a token, set the same `PTC_VIEWER_TOKEN` for the run. Reporting
+Viewer requires a token, set the same `PTC_VIEWER_TOKEN` for the run. A token
+is sent only over HTTPS or HTTP to `localhost`, IPv4 loopback (`127.0.0.0/8`),
+or IPv6 loopback (`::1`). URLs must have a host and no userinfo, query, or
+fragment. Redirects are refused. Invalid or insecure targets fail delivery.
+Reporting
 is best-effort and never changes the run result. It sends the exact manifest
 label, or the manifest filename when no label exists, and workflow entry to the
 Viewer for display; trace metadata keeps its fingerprinted label.

@@ -36,6 +36,7 @@ if Code.ensure_loaded?(ReqLLM) do
     alias PtcRunner.Kernel.AdapterCancellationWitness
     alias PtcRunner.Kernel.LLMUsage
     alias PtcRunner.Kernel.ProviderError
+    alias PtcRunner.LLM.CompatHTTP
     alias PtcRunner.LLM.Invocation
     alias PtcRunner.LLM.OutputLimit
     alias PtcRunner.LLM.ReqLLMPreparedModel
@@ -669,19 +670,16 @@ if Code.ensure_loaded?(ReqLLM) do
           receive_timeout: timeout
         ] ++ http_opts
 
-      request_opts =
-        case Keyword.get(opts, :api_key) do
-          key when is_binary(key) and byte_size(key) > 0 ->
-            Keyword.put(request_opts, :auth, {:bearer, key})
-
-          _absent ->
-            request_opts
-        end
-
-      case Req.post("#{base_url}/chat/completions", request_opts) do
-        {:ok, %{status: 200, body: body}} ->
-          text = get_in(body, ["choices", Access.at(0), "message", "content"]) || ""
-          usage = body["usage"] || %{}
+      case CompatHTTP.request(
+             :post,
+             base_url,
+             "/chat/completions",
+             request_opts,
+             Keyword.get(opts, :api_key)
+           ) do
+        {:ok,
+         %{status: 200, body: %{"choices" => [%{"message" => %{"content" => text}} | _]} = body}} ->
+          usage = if is_map(body["usage"]), do: body["usage"], else: %{}
 
           tokens =
             %{}
@@ -690,7 +688,10 @@ if Code.ensure_loaded?(ReqLLM) do
             |> maybe_put_usage_field(:total_cost, usage, "total_cost")
             |> add_cache_fields()
 
-          {:ok, %{content: text, tokens: tokens}}
+          {:ok, %{content: text || "", tokens: tokens}}
+
+        {:ok, %{status: 200}} ->
+          {:error, ProviderError.new(:invalid_result, "LLM provider returned an invalid result")}
 
         {:ok, %{status: status, body: body}} ->
           {:error, %{status: status, body: body}}
@@ -1079,9 +1080,13 @@ if Code.ensure_loaded?(ReqLLM) do
     defp call_openai_compat_embed(base_url, model, input, opts) do
       timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
 
-      case Req.post("#{base_url}/embeddings",
-             json: %{model: model, input: input},
-             receive_timeout: timeout
+      case CompatHTTP.request(
+             :post,
+             base_url,
+             "/embeddings",
+             [json: %{model: model, input: input}, receive_timeout: timeout] ++
+               Keyword.get(opts, :req_http_options, []),
+             Keyword.get(opts, :api_key)
            ) do
         {:ok, %{status: 200, body: %{"data" => [%{"embedding" => embedding}]}}}
         when is_binary(input) ->
@@ -1284,8 +1289,8 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp parse_provider("openai-compat:" <> rest) do
       case String.split(rest, "|", parts: 2) do
-        [base_url, model] -> {:openai_compat, base_url, model}
-        [base_url] -> {:openai_compat, base_url, "default"}
+        [base_url, model] -> {:openai_compat, PtcRunner.HTTPEndpoint.parse(base_url), model}
+        [base_url] -> {:openai_compat, PtcRunner.HTTPEndpoint.parse(base_url), "default"}
       end
     end
 
@@ -2826,7 +2831,7 @@ if Code.ensure_loaded?(ReqLLM) do
     end
 
     defp check_openai_compat_available(base_url) do
-      case Req.get("#{base_url}/models", receive_timeout: 2_000) do
+      case CompatHTTP.request(:get, base_url, "/models", receive_timeout: 2_000) do
         {:ok, %{status: 200}} -> true
         _ -> false
       end

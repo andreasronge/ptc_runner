@@ -12,6 +12,7 @@ defmodule PtcRunner.LLM.Invocation do
   @keys [:request, :credential, :cache, :llm_request_deadline_ms]
 
   @enforce_keys @keys
+  @derive {Inspect, except: [:credential]}
   defstruct @keys
 
   @type t :: %__MODULE__{
@@ -48,13 +49,15 @@ defmodule PtcRunner.LLM.Invocation do
 
   def valid?(_invocation), do: false
 
-  defp valid_credential?(nil), do: true
+  @doc false
+  @spec valid_credential?(term()) :: boolean()
+  def valid_credential?(nil), do: true
 
-  defp valid_credential?(credential)
-       when is_binary(credential) and byte_size(credential) in 1..@max_credential_bytes,
-       do: true
+  def valid_credential?(credential)
+      when is_binary(credential) and byte_size(credential) in 1..@max_credential_bytes,
+      do: true
 
-  defp valid_credential?(_credential), do: false
+  def valid_credential?(_credential), do: false
 
   defp valid_deadline?(nil), do: true
   defp valid_deadline?(deadline_ms) when is_integer(deadline_ms), do: true

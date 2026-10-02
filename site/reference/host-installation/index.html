@@ -298,6 +298,12 @@ or disable thinking. Valid reported usage is retained for budget settlement
 even when the content is rejected. To use Ollama schema output, select
 <code class="inline">openai-compat:http://localhost:11434/v1|&lt;model&gt;</code>.
 Configured credentials are sent as <code class="inline">Authorization: Bearer &lt;credential&gt;</code>.
+OpenAI-compatible base URLs must use HTTP or HTTPS and contain a host, with no
+userinfo, query, or fragment. Credentials require HTTPS except for <code class="inline">localhost</code>,
+IPv4 loopback addresses (<code class="inline">127.0.0.0/8</code>), and IPv6 loopback (<code class="inline">::1</code>). Keyless HTTP
+endpoints remain supported. Redirects are refused. Responses are limited to
+4 MiB while streaming; error bodies retain at most 4 KiB. Invalid successful
+responses return <code class="inline">invalid_result</code>.
 <code class="inline">unsupported</code> refuses a request <code class="inline">schema</code> before dispatch.
 Changing the mode requires a new <code class="inline">installation_revision</code>. A schema
 together with a non-empty <code class="inline">tools</code> list is invalid. Success is a

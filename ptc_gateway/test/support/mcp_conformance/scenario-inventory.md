@@ -37,3 +37,8 @@ All other frozen server scenarios exercise
 unsupported tools/call, prompts, resources, completion, sessions/streams,
 server requests, tasks, or subscriptions and are outside this tools-only
 discovery/list milestone.
+
+The official-client release journey also checks that a disconnected call keeps
+its admission slot while audit cleanup is held. The pinned client exposes the
+HTTP 429 response through `SdkHttpError.data.text`; the journey checks that
+JSON-RPC body for `-31999` and `run_capacity_exhausted` before releasing cleanup.

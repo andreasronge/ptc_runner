@@ -356,16 +356,9 @@ defmodule PtcRunner.LLM do
 
   defp validate_binding(%{credential: credential, cache: cache} = binding)
        when map_size(binding) == 2 and is_boolean(cache) do
-    cond do
-      is_nil(credential) ->
-        {:ok, credential, cache}
-
-      is_binary(credential) and byte_size(credential) in 1..65_536 ->
-        {:ok, credential, cache}
-
-      true ->
-        {:error, :invalid_llm_binding}
-    end
+    if Invocation.valid_credential?(credential),
+      do: {:ok, credential, cache},
+      else: {:error, :invalid_llm_binding}
   end
 
   defp validate_binding(_binding), do: {:error, :invalid_llm_binding}
