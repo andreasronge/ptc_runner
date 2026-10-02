@@ -862,6 +862,10 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     try do
       assert length(Enum.uniq(directories)) == length(directories)
       assert Enum.all?(directories, &File.dir?/1)
+
+      assert Enum.all?(directories, fn path ->
+               Bitwise.band(File.stat!(path).mode, 0o777) == 0o700
+             end)
     after
       Enum.each(directories, &File.rm_rf!/1)
     end

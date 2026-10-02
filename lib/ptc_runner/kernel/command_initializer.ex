@@ -232,7 +232,7 @@ defmodule PtcRunner.Kernel.CommandInitializer do
           {:error, _reason} -> {:error, :staging_unavailable}
         end
 
-      {:error, :private_directory_creation_failed} ->
+      {:error, :eexist} ->
         create_staging(target, attempts - 1)
 
       {:error, _reason} ->

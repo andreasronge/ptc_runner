@@ -1394,7 +1394,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     with true <- destination_available?.(),
          {:ok, %{type: :directory} = stat} <- File.lstat(path, time: :posix),
          {:ok, uid} <- PrivateDirectory.preflight_owner(path),
-         true <- stat.uid == uid and Bitwise.band(stat.mode, 0o777) == 0o700,
+         true <- PrivateDirectory.private_dir?(stat, uid),
          {:ok, identity} <- stat_identity(stat),
          true <- stale_reservation?(path, stat),
          {:ok, current} <- File.lstat(path, time: :posix),
@@ -1424,9 +1424,9 @@ defmodule PtcRunner.Kernel.PublicationHandle do
       {:ok, %File.Stat{type: :regular}} when mode == 0 ->
         PrivateDirectory.preflight_writable_file(path)
 
-      {:ok, %File.Stat{type: :regular, uid: owner, mode: file_mode}} ->
+      {:ok, %File.Stat{type: :regular} = stat} ->
         with {:ok, uid} <- PrivateDirectory.preflight_owner(path),
-             true <- owner in [0, uid] and Bitwise.band(file_mode, 0o777) == 0o600,
+             true <- PrivateDirectory.private_file?(stat, uid),
              :ok <- PrivateDirectory.preflight_writable_file(path) do
           :ok
         else

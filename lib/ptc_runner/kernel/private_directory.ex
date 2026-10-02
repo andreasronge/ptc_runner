@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
           | :private_directory_parent_unavailable
           | :private_directory_parent_unsafe
           | :private_directory_creation_failed
+          | :eexist
           | :eacces
           | :edquot
           | :enospc
@@ -322,6 +323,57 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
     end
   end
 
+  @doc """
+  Checks an lstat or open-descriptor stat for an owner-only directory.
+  Private artifacts must belong to the runtime uid, including when root owns
+  an ancestor. Symlinks and permissions other than 0700 are refused.
+  """
+  @spec private_dir?(File.Stat.t(), non_neg_integer()) :: boolean()
+  def private_dir?(%File.Stat{type: :directory, uid: uid, mode: mode}, uid),
+    do: Bitwise.band(mode, 0o777) == 0o700
+
+  def private_dir?(_stat, _uid), do: false
+
+  @doc """
+  Checks a stat for a regular file owned by the runtime uid with mode 0600.
+  Uses the same owner policy as `private_dir?/2`.
+  """
+  @spec private_file?(File.Stat.t(), non_neg_integer()) :: boolean()
+  def private_file?(%File.Stat{type: :regular, uid: uid, mode: mode}, uid),
+    do: Bitwise.band(mode, 0o777) == 0o600
+
+  def private_file?(_stat, _uid), do: false
+
+  @doc """
+  Creates an exclusive random temporary directory with mode 0700 at creation.
+  Uses the checked parent and uid policy of `create/1`; existing names are
+  retried without adopting or removing them. The caller owns cleanup.
+  """
+  @spec create_temp(binary(), pos_integer()) :: {:ok, binary()} | {:error, error()}
+  def create_temp(prefix, attempts \\ 10)
+
+  def create_temp(_prefix, 0), do: {:error, :private_directory_creation_failed}
+
+  def create_temp(prefix, attempts) when is_binary(prefix) and attempts > 0 do
+    if prefix != "" and Path.basename(prefix) == prefix do
+      path =
+        Path.join(
+          System.tmp_dir!(),
+          prefix <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
+        )
+
+      case create(path) do
+        :ok -> {:ok, path}
+        {:error, :eexist} -> create_temp(prefix, attempts - 1)
+        {:error, _reason} = error -> error
+      end
+    else
+      {:error, :private_directory_creation_failed}
+    end
+  rescue
+    _exception -> {:error, :private_directory_creation_failed}
+  end
+
   @spec create(binary()) :: :ok | {:error, error()}
   def create(path) when is_binary(path) do
     with {:ok, executables} <- creation_executables(),
@@ -471,6 +523,7 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
 
   defp creation_failure_reason(output) do
     cond do
+      String.contains?(output, "File exists") -> :eexist
       String.contains?(output, "Permission denied") -> :eacces
       String.contains?(output, "Disk quota exceeded") -> :edquot
       String.contains?(output, "No space left on device") -> :enospc
@@ -739,13 +792,11 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
   end
 
   defp verify_created_directory(path, uid) do
-    case File.lstat(path, time: :posix) do
-      {:ok, %File.Stat{type: :directory, uid: ^uid, mode: mode}}
-      when Bitwise.band(mode, 0o777) == 0o700 ->
-        :ok
-
-      _changed_or_invalid ->
-        {:error, :private_directory_creation_failed}
+    with {:ok, stat} <- File.lstat(path, time: :posix),
+         true <- private_dir?(stat, uid) do
+      :ok
+    else
+      _changed_or_invalid -> {:error, :private_directory_creation_failed}
     end
   end
 end

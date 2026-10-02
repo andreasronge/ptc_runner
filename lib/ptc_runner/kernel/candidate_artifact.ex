@@ -167,6 +167,9 @@ defmodule PtcRunner.Kernel.CandidateArtifact do
       :ok ->
         :ok
 
+      {:error, :eexist} ->
+        {:error, :candidate_destination_exists}
+
       {:error, :private_directory_creation_failed} ->
         existing_or_failed(directory)
 

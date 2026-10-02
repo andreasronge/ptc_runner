@@ -127,7 +127,10 @@ symlinked layout is refused. When a pre-existing directory fails the owner-only
 (0700) check, a run that publishes an envelope names the path and the
 `chmod 700` remedy rather than reporting a bare publication failure; the
 conditions for that are in the table below. Artifact files retain the normal
-no-replace and privacy rules.
+no-replace and privacy rules. Private directories (0700) and regular files
+(0600) must both be owned by the runtime user; root ownership is accepted
+only when the runtime itself runs as root. Temporary private directories
+receive mode 0700 at creation, before any artifacts are written.
 
 `artifacts.result` controls both the standalone result artifact and result-value
 retention in command envelopes. When it is `false` and no `--output` or

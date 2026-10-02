@@ -83,7 +83,7 @@ defmodule PtcRunner.Kernel.ArtifactPruneTransaction do
 
     case PrivateDirectory.create(stage) do
       :ok -> {:ok, stage}
-      {:error, :private_directory_creation_failed} -> create_stage(root, attempts - 1)
+      {:error, :eexist} -> create_stage(root, attempts - 1)
       _ -> {:error, :delete_failed}
     end
   end
