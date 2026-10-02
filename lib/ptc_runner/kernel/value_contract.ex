@@ -13,6 +13,10 @@ defmodule PtcRunner.Kernel.ValueContract do
   composition, general union types, and arbitrary `oneOf` remain unsupported.
   Non-root nodes may pair one supported non-null type with `null`. The
   normalized contract is limited to 64 KiB and compiled once with JSV.
+  Runtime predicates and rejection classification use caller-cancelled workers
+  with a 1,000 ms deadline and a 5,000,000-word heap ceiling, including shared
+  binaries. Predicates fail closed on worker unavailability; classification
+  returns an unknown kind with no evidence when its worker is unavailable.
   """
 
   alias PtcRunner.Kernel.Attestation
@@ -83,7 +87,7 @@ defmodule PtcRunner.Kernel.ValueContract do
 
   @spec valid?(t(), term()) :: boolean()
   def valid?(%__MODULE__{validator: validator} = contract, value) do
-    sealed?(contract) and JSONValue.value?(value) and JSONSchema.valid?(validator, value)
+    sealed?(contract) and JSONSchema.valid?(validator, value)
   end
 
   def valid?(_contract, _value), do: false
@@ -169,12 +173,20 @@ defmodule PtcRunner.Kernel.ValueContract do
   @spec classify_with_evidence(t(), term()) ::
           {map(), ValueContractClassification.t() | nil}
   @doc false
-  def classify_with_evidence(
-        %__MODULE__{schema: schema, validator: validator} = contract,
-        value
-      ) do
+  def classify_with_evidence(%__MODULE__{} = contract, value) do
     if not sealed?(contract), do: raise(ArgumentError, "invalid value contract")
 
+    case JSONSchema.run_bounded(fn -> classify_value(contract, value) end) do
+      {:ok, result} -> result
+      {:error, _cause} -> {%{value_kind: :unknown}, nil}
+    end
+  rescue
+    _exception -> {%{value_kind: :unknown}, nil}
+  end
+
+  def classify_with_evidence(_contract, _value), do: {%{value_kind: :unknown}, nil}
+
+  defp classify_value(%__MODULE__{schema: schema, validator: validator} = contract, value) do
     shape =
       case Map.fetch(schema, "oneOf") do
         {:ok, branches} -> classify_union(branches, value)
@@ -204,8 +216,6 @@ defmodule PtcRunner.Kernel.ValueContract do
   rescue
     _exception -> {%{value_kind: :unknown}, nil}
   end
-
-  def classify_with_evidence(_contract, _value), do: {%{value_kind: :unknown}, nil}
 
   @spec describe(t()) :: binary()
   @doc """
