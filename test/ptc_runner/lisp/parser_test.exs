@@ -3,6 +3,43 @@ defmodule PtcRunner.Lisp.ParserTest do
 
   alias PtcRunner.Lisp.Parser
 
+  test "rejects a pathological 1 MB unterminated string within one second" do
+    source = "\"" <> String.duplicate("\\\"", 524_287) <> "x"
+    assert byte_size(source) == 1_048_576
+    task = Task.async(fn -> Parser.parse(source) end)
+    result = Task.yield(task, 1_000) || Task.shutdown(task, :brutal_kill)
+    assert {:ok, {:error, {:parse_error, message}}} = result
+    assert message =~ "unclosed string"
+  end
+
+  test "unsupported reader syntax keeps its messages and reports token positions" do
+    cases = [
+      {"#_x", "reader discard syntax (#_) is not supported. Use ; for comments"},
+      {"@x", "deref syntax (@var) is not supported. Atoms and refs are not available"},
+      {"'(x)",
+       "quoted collections are not supported; only quoted symbols like 'github are allowed"},
+      {"'[x]",
+       "quoted collections are not supported; only quoted symbols like 'github are allowed"},
+      {"'{:x 1}",
+       "quoted collections are not supported; only quoted symbols like 'github are allowed"}
+    ]
+
+    for {syntax, message} <- cases, prefix <- ["", "(list ", "[", "{:x ", "; ignored\n  "] do
+      assert {:error, {:parse_error, ^message, position}} =
+               Parser.parse_with_position(prefix <> syntax)
+
+      assert position == byte_size(prefix)
+    end
+  end
+
+  test "reader syntax inside literals and comments is ordinary content" do
+    content = "#_ @x '( '[ '{"
+    assert {:ok, {:string, ^content}} = Parser.parse(~s("#{content}"))
+    assert {:ok, {:regex_literal, ^content}} = Parser.parse(~s(#"#{content}"))
+    assert {:ok, 42} = Parser.parse("; #{content} \"\n42")
+    assert {:ok, {:string, "@"}} = Parser.parse("\\@")
+  end
+
   describe "literals" do
     test "nil" do
       assert {:ok, nil} = Parser.parse("nil")
