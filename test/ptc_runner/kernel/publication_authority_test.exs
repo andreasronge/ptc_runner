@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.TraceLog
+  alias PtcRunner.TestSupport.TraceQuery
 
   @tag :tmp_dir
   test "occupied private recovery reports its specific cause before a sink exists", %{
@@ -121,10 +122,10 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
       assert File.ls!(traces) == [preparation.run_ref <> suffix]
 
       source = if policy == :private, do: {:private_directory, traces}, else: {:directory, traces}
-      assert {:ok, trace_log} = TraceLog.new(source: source)
+      assert {:ok, trace_log} = TraceQuery.new(source: source)
 
       assert {:ok, %{"items" => [%{"run_id" => run_ref}]}} =
-               TraceLog.query(trace_log, :list_runs, %{})
+               TraceQuery.query(trace_log, :list_runs, %{})
 
       assert run_ref == preparation.run_ref
       assert :ok = CommandPreparation.close(preparation)
