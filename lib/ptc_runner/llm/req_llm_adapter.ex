@@ -677,8 +677,8 @@ if Code.ensure_loaded?(ReqLLM) do
              request_opts,
              Keyword.get(opts, :api_key)
            ) do
-        {:ok,
-         %{status: 200, body: %{"choices" => [%{"message" => %{"content" => text}} | _]} = body}} ->
+        {:ok, %{status: 200, body: body}} when is_map(body) ->
+          content = openai_compat_content(body)
           usage = if is_map(body["usage"]), do: body["usage"], else: %{}
 
           tokens =
@@ -688,7 +688,7 @@ if Code.ensure_loaded?(ReqLLM) do
             |> maybe_put_usage_field(:total_cost, usage, "total_cost")
             |> add_cache_fields()
 
-          {:ok, %{content: text || "", tokens: tokens}}
+          {:ok, %{content: content, tokens: tokens}}
 
         {:ok, %{status: 200}} ->
           {:error, ProviderError.new(:invalid_result, "LLM provider returned an invalid result")}
@@ -700,6 +700,12 @@ if Code.ensure_loaded?(ReqLLM) do
           {:error, reason}
       end
     end
+
+    # Invalid map envelopes still carry usage through the result validator.
+    defp openai_compat_content(%{"choices" => [%{"message" => %{"content" => content}} | _]}),
+      do: content
+
+    defp openai_compat_content(_body), do: nil
 
     defp call_req_llm(%ReqLLMPreparedModel{selector: model, model: req_llm_model}, messages, opts) do
       http_opts = observed_usage_http_options(opts, req_llm_model)

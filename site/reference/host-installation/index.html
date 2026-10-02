@@ -295,7 +295,8 @@ A server that ignores <code class="inline">response_format</code> fails only whe
 match the schema. Content must be exactly one JSON object: reasoning prefixes
 such as <code class="inline">&lt;think&gt;</code> are rejected, so configure your server to separate reasoning
 or disable thinking. Valid reported usage is retained for budget settlement
-even when the content is rejected. To use Ollama schema output, select
+even when the content is rejected or missing, including empty or malformed
+choices. To use Ollama schema output, select
 <code class="inline">openai-compat:http://localhost:11434/v1|&lt;model&gt;</code>.
 Configured credentials are sent as <code class="inline">Authorization: Bearer &lt;credential&gt;</code>.
 OpenAI-compatible base URLs must use HTTP or HTTPS and contain a host, with no

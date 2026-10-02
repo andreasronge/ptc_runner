@@ -40,8 +40,8 @@ defmodule PtcRunner.LLM.CredentialSecurityTest do
              ReqLLMAdapter.call(target, invocation)
   end
 
-  test "malformed JSON success envelopes return invalid_result" do
-    for body <- [[], nil, %{"choices" => "invalid"}, %{"choices" => [%{"message" => "invalid"}]}] do
+  test "non-map JSON success bodies return invalid_result" do
+    for body <- [[], nil] do
       assert {:error, %ProviderError{kind: :invalid_result}} =
                ReqLLMAdapter.generate_text("openai-compat:https://example.com|model", [],
                  req_http_options: [plug: fn conn -> Req.Test.json(conn, body) end]

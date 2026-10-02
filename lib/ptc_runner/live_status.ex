@@ -19,6 +19,8 @@ defmodule PtcRunner.LiveStatus do
 
   @doc false
   @spec external_target(binary() | nil) :: Target.t() | nil
+  def external_target(""), do: external_target(nil)
+
   def external_target(label) do
     %{url: url, token: token} = Config.read()
 

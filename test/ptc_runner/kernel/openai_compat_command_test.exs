@@ -54,6 +54,11 @@ defmodule PtcRunner.Kernel.OpenAICompatCommandTest do
           {"reasoning", ~s(<think>reason</think>{"q":false}), 200},
           {"array", "[]", 200},
           {"non-string content", %{"q" => false}, 200},
+          {"missing content", {:envelope, %{"choices" => [%{"message" => %{}}]}}, 200},
+          {"empty choices", {:envelope, %{"choices" => []}}, 200},
+          {"missing choices", {:envelope, %{}}, 200},
+          {"malformed choices", {:envelope, %{"choices" => "invalid"}}, 200},
+          {"malformed message", {:envelope, %{"choices" => [%{"message" => "invalid"}]}}, 200},
           {"unauthorized", "denied", 401}
         ] do
       test "#{route} rejects #{name} as a provider error", %{tmp_dir: dir} do
@@ -121,7 +126,12 @@ defmodule PtcRunner.Kernel.OpenAICompatCommandTest do
     fixture =
       MCPHTTPFixture.start(fn wire ->
         send(parent, {:wire, wire})
-        body = %{"choices" => [%{"message" => %{"content" => content}}]}
+
+        body =
+          case content do
+            {:envelope, envelope} -> envelope
+            _content -> %{"choices" => [%{"message" => %{"content" => content}}]}
+          end
 
         body =
           if tokens?,
