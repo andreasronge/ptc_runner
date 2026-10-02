@@ -41,7 +41,9 @@ another service and reports the conflict. It runs in the foreground until
 The Viewer never searches for `.env`. Environment-backed credentials come from
 the inherited environment, the project's `host.env_file`, or the exact file
 passed with `--env-file FILE`; that option overrides `host.env_file` for work
-launched from the Live tab. Host-configured file and literal credential
+launched from the Live tab. Each launch reads its own file snapshot and restores
+the declared variables on exit. The foreground Viewer command keeps the file
+path for launches and does not load it while serving. Host-configured file and literal credential
 bindings remain available.
 
 The Viewer ships in the standalone release and container image. It is not part

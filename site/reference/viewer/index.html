@@ -128,7 +128,9 @@ another service and reports the conflict. It runs in the foreground until
 <code class="inline">Ctrl+C</code>.</p><p>The Viewer never searches for <code class="inline">.env</code>. Environment-backed credentials come from
 the inherited environment, the project's <code class="inline">host.env_file</code>, or the exact file
 passed with <code class="inline">--env-file FILE</code>; that option overrides <code class="inline">host.env_file</code> for work
-launched from the Live tab. Host-configured file and literal credential
+launched from the Live tab. Each launch reads its own file snapshot and restores
+the declared variables on exit. The foreground Viewer command keeps the file
+path for launches and does not load it while serving. Host-configured file and literal credential
 bindings remain available.</p><p>The Viewer ships in the standalone release and container image. It is not part
 of the published Hex package, where <code class="inline">ptc doctor</code> reports the optional Viewer as
 unavailable.</p><p>The <a href="/reference/project-files/#viewer">project reference</a> documents the <code class="inline">viewer</code> block.</p><h2 id="exposing-it">Exposing it</h2><p>The Viewer binds to <code class="inline">127.0.0.1</code> by default. <code class="inline">--listen 0.0.0.0</code> is the only
