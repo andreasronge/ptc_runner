@@ -90,15 +90,16 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
     # measurement towards passing precisely when the two-budget behaviour is
     # what is running. The task itself only exists so a close that never
     # returns fails at `Task.await` rather than hanging to the case timeout.
-    budget_ms = 400
+    budget_ms = 2_000
     started_at_ms = System.monotonic_time(:millisecond)
     closer = Task.async(fn -> Memory.close(memory, budget_ms) end)
     assert :ok = Task.await(closer, 10_000)
     elapsed_ms = System.monotonic_time(:millisecond) - started_at_ms
 
     # Halfway between one budget and two, so neither a slow scheduler nor an
-    # early spawn moves either behaviour across it.
-    assert elapsed_ms < 600
+    # early spawn moves either behaviour across it. The budget is large enough
+    # that the half-budget margin absorbs a loaded macOS runner (~350 ms seen).
+    assert elapsed_ms < 3_000
   end
 
   test "a store destroyed by its owner's death takes its registered managers with it" do
