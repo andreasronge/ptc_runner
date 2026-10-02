@@ -301,7 +301,8 @@ match the schema. Content must be exactly one JSON object: reasoning prefixes
 such as `<think>` are rejected, so configure your server to separate reasoning
 or disable thinking. Valid reported usage is retained for budget settlement
 even when the content is rejected or missing, including empty or malformed
-choices. To use Ollama schema output, select
+choices. Ordinary requests also reject missing or non-string text content;
+reported usage still settles their budget. To use Ollama schema output, select
 `openai-compat:http://localhost:11434/v1|<model>`.
 Configured credentials are sent as `Authorization: Bearer <credential>`.
 OpenAI-compatible base URLs must use HTTP or HTTPS and contain a host, with no
