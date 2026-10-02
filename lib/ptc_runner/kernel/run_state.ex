@@ -30,8 +30,9 @@ defmodule PtcRunner.Kernel.RunState do
   dispatching process dies mid-call (heap kill, timeout kill), the reservation
   is reclaimed only after the attached provider process has been killed and
   its `:DOWN` observed. Thus connector cleanup cannot begin while a callback
-  from that run remains live. Guardian cancellation uses a monitored worker;
-  if it fails, the run is fenced and the guardian is killed before the
+  from that run remains live. Guardian cancellation uses a monitored worker
+  waiting under the configured provider cleanup deadline; if it fails, the
+  run is fenced and the guardian is killed before the
   reservation is settled on its own `:DOWN`. Shutdown — owner death or explicit stop —
   likewise kills and drains every still-attached provider before state
   terminates. A process holds at most one reservation at a time: dispatch is

@@ -90,34 +90,13 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   end
 
   test "caller death retains a guardian reservation until cooperative cancellation drains" do
-    {:ok, state} = RunState.start(Limits.defaults())
-    parent = self()
+    assert_cooperative_guardian_drain(Limits.defaults(), nil)
+  end
 
-    {guardian, guardian_ref} =
-      spawn_monitor(fn ->
-        receive do
-          {:cancel_provider_call, tracker, ref, _deadline} ->
-            send(parent, :draining)
-            receive do: (:finish -> :ok)
-            send(tracker, {:provider_call_drained, ref, self(), :completed})
-        end
-      end)
-
-    on_exit(fn -> Process.exit(guardian, :kill) end)
-
-    {caller, caller_ref} = reserve_guardian(state, guardian)
-
-    assert_receive :attached
-    Process.exit(caller, :kill)
-    assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}
-    assert_receive :draining
-    assert :sys.get_state(state.pid).provider_tasks == 1
-    assert RunState.open?(state)
-    send(guardian, :finish)
-    assert_receive {:DOWN, ^guardian_ref, :process, ^guardian, :normal}
-    assert_eventually(fn -> :sys.get_state(state.pid).provider_tasks == 0 end)
-    assert RunState.open?(state)
-    RunState.stop(state)
+  @tag :nightly
+  test "guardian cancellation honors a cleanup deadline beyond five seconds" do
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 10_000)
+    assert_cooperative_guardian_drain(limits, 6_000)
   end
 
   test "environment constructors reject duplicate and mission-reserved capability names" do
@@ -4488,6 +4467,36 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       {:"$gen_call", _from, {_token, {:attach, provider}}} -> provider
       _message -> nil
     end)
+  end
+
+  defp assert_cooperative_guardian_drain(limits, finish_after_ms) do
+    {:ok, state} = RunState.start(limits)
+    parent = self()
+
+    {guardian, guardian_ref} =
+      spawn_monitor(fn ->
+        receive do
+          {:cancel_provider_call, tracker, ref, _deadline} ->
+            send(parent, :draining)
+            if finish_after_ms, do: Process.send_after(self(), :finish, finish_after_ms)
+            receive do: (:finish -> :ok)
+            send(tracker, {:provider_call_drained, ref, self(), :completed})
+        end
+      end)
+
+    on_exit(fn -> Process.exit(guardian, :kill) end)
+    {caller, caller_ref} = reserve_guardian(state, guardian)
+    assert_receive :attached
+    Process.exit(caller, :kill)
+    assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}
+    assert_receive :draining
+    assert :sys.get_state(state.pid).provider_tasks == 1
+    assert RunState.open?(state)
+    if is_nil(finish_after_ms), do: send(guardian, :finish)
+    assert_receive {:DOWN, ^guardian_ref, :process, ^guardian, :normal}, 7_500
+    assert_eventually(fn -> :sys.get_state(state.pid).provider_tasks == 0 end)
+    assert RunState.open?(state)
+    RunState.stop(state)
   end
 
   defp reserve_guardian(state, guardian) do
