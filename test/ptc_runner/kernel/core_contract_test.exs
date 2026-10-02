@@ -39,6 +39,87 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
   @input_schema %{"type" => "object", "additionalProperties" => true}
 
+  for failure <- [:tracker_death, :cancel_worker_death] do
+    @tag cancel_failure: failure
+    test "caller death with #{failure} settles the guardian reservation", %{
+      cancel_failure: failure
+    } do
+      {:ok, state} = RunState.start(Limits.defaults())
+      guardian = spawn(fn -> receive do: (:finish -> :ok) end)
+      guardian_ref = Process.monitor(guardian)
+      on_exit(fn -> Process.exit(guardian, :kill) end)
+
+      {caller, caller_ref} = reserve_guardian(state, guardian)
+
+      assert_receive :attached
+
+      case failure do
+        :tracker_death ->
+          tracker_ref = Process.monitor(state.provider_tracker.pid)
+          Process.exit(state.provider_tracker.pid, :kill)
+          assert_receive {:DOWN, ^tracker_ref, :process, _, :killed}
+
+        :cancel_worker_death ->
+          :ok = :sys.suspend(state.provider_tracker.pid)
+      end
+
+      Process.exit(caller, :kill)
+      assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}
+
+      if failure == :cancel_worker_death do
+        assert_eventually(fn ->
+          Enum.any?(:sys.get_state(state.pid).reservations, fn {_id, reservation} ->
+            is_pid(Map.get(reservation, :cancel_pid))
+          end)
+        end)
+
+        [{_id, reservation}] = Map.to_list(:sys.get_state(state.pid).reservations)
+        Process.exit(reservation.cancel_pid, :kill)
+      end
+
+      assert_receive {:DOWN, ^guardian_ref, :process, ^guardian, :killed}
+      assert_eventually(fn -> :sys.get_state(state.pid).provider_tasks == 0 end)
+      refute RunState.open?(state)
+
+      assert %{kind: :provider_cleanup_error, reason: :provider_cleanup_failed} =
+               RunState.terminal_failure(state)
+
+      if failure == :cancel_worker_death, do: :sys.resume(state.provider_tracker.pid)
+      RunState.stop(state)
+    end
+  end
+
+  test "caller death retains a guardian reservation until cooperative cancellation drains" do
+    {:ok, state} = RunState.start(Limits.defaults())
+    parent = self()
+
+    {guardian, guardian_ref} =
+      spawn_monitor(fn ->
+        receive do
+          {:cancel_provider_call, tracker, ref, _deadline} ->
+            send(parent, :draining)
+            receive do: (:finish -> :ok)
+            send(tracker, {:provider_call_drained, ref, self(), :completed})
+        end
+      end)
+
+    on_exit(fn -> Process.exit(guardian, :kill) end)
+
+    {caller, caller_ref} = reserve_guardian(state, guardian)
+
+    assert_receive :attached
+    Process.exit(caller, :kill)
+    assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}
+    assert_receive :draining
+    assert :sys.get_state(state.pid).provider_tasks == 1
+    assert RunState.open?(state)
+    send(guardian, :finish)
+    assert_receive {:DOWN, ^guardian_ref, :process, ^guardian, :normal}
+    assert_eventually(fn -> :sys.get_state(state.pid).provider_tasks == 0 end)
+    assert RunState.open?(state)
+    RunState.stop(state)
+  end
+
   test "environment constructors reject duplicate and mission-reserved capability names" do
     assert {:ok, capability} =
              Capability.new(
@@ -4406,6 +4487,17 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     Enum.find_value(messages, fn
       {:"$gen_call", _from, {_token, {:attach, provider}}} -> provider
       _message -> nil
+    end)
+  end
+
+  defp reserve_guardian(state, guardian) do
+    parent = self()
+
+    spawn_monitor(fn ->
+      {:ok, reservation} = RunState.reserve_capability(state, :workflow, "read")
+      :ok = RunState.attach_provider_guardian(state, reservation, guardian)
+      send(parent, :attached)
+      receive do: (:finish -> :ok)
     end)
   end
 end
