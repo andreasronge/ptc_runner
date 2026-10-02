@@ -30,7 +30,7 @@ defmodule PtcViewer.LiveRouterTest do
     frame = Jason.encode!(%{"seq" => 0, "phase" => "running"})
 
     unauthenticated =
-      conn(:post, "http://viewer.internal/api/live/runs/run-remote", frame)
+      conn(:post, "http://localhost/api/live/runs/run-remote", frame)
       |> Map.put(:remote_ip, {172, 18, 0, 4})
       |> Plug.Conn.put_req_header("content-type", "application/json")
       |> call_router(opts)
@@ -38,7 +38,7 @@ defmodule PtcViewer.LiveRouterTest do
     assert unauthenticated.status == 403
 
     authenticated =
-      conn(:post, "http://viewer.internal/api/live/runs/run-remote", frame)
+      conn(:post, "http://localhost/api/live/runs/run-remote", frame)
       |> Map.put(:remote_ip, {172, 18, 0, 4})
       |> Plug.Conn.put_req_header("content-type", "application/json")
       |> Plug.Conn.put_req_header("authorization", "Bearer " <> @live_token)
@@ -144,8 +144,37 @@ defmodule PtcViewer.LiveRouterTest do
       |> Map.put(:remote_ip, {172, 18, 0, 4})
       |> call_router(opts)
 
-    assert query_authenticated.status == 200
-    assert query_authenticated.resp_body =~ "run-secret"
+    assert query_authenticated.status == 403
+    refute query_authenticated.resp_body =~ "run-secret"
+  end
+
+  test "only page bootstrap and EventSource accept query credentials", %{opts: opts} do
+    opts =
+      opts
+      |> Keyword.delete(:live_store)
+      |> Keyword.put(:live_token_digest, PtcViewer.LiveSecurity.token_digest(@live_token))
+
+    for {query, status} <- [
+          {"live_token=#{@live_token}", 503},
+          {"live_token=wrong", 403},
+          {"live_token=#{@live_token}&live_token=#{@live_token}", 403}
+        ] do
+      response =
+        conn(:get, "http://localhost/api/live/stream?#{query}")
+        |> Map.put(:remote_ip, {172, 18, 0, 4})
+        |> call_router(opts)
+
+      assert response.status == status
+    end
+
+    response =
+      conn(:post, "http://localhost/api/live/launch?live_token=#{@live_token}", "{}")
+      |> Map.put(:remote_ip, {172, 18, 0, 4})
+      |> Plug.Conn.put_req_header("origin", "http://localhost")
+      |> Plug.Conn.put_req_header("x-ptc-viewer-live-nonce", @live_nonce)
+      |> call_router(opts)
+
+    assert response.status == 403
   end
 
   test "a percent-encoded token containing plus signs enables remote browser controls", %{
@@ -189,9 +218,8 @@ defmodule PtcViewer.LiveRouterTest do
     assert local["live_enabled"]
     assert local["live_mutation_nonce"] == @live_nonce
 
-    remote = conn(:get, "http://viewer.internal/") |> call_router(opts) |> entry_config()
-    refute remote["live_enabled"]
-    refute Map.has_key?(remote, "live_mutation_nonce")
+    remote = conn(:get, "http://viewer.internal/") |> call_router(opts)
+    assert remote.status == 403
   end
 
   test "frames posted by a run are exposed to the snapshot endpoint", %{opts: opts} do
@@ -485,7 +513,10 @@ defmodule PtcViewer.LiveRouterTest do
     assert Jason.decode!(without_expression.resp_body) == %{"error" => "invalid_input"}
   end
 
-  defp call_router(conn, opts), do: PtcViewer.Router.call(conn, PtcViewer.Router.init(opts))
+  defp call_router(conn, opts) do
+    conn = if conn.host == "www.example.com", do: %{conn | host: "localhost"}, else: conn
+    PtcViewer.Router.call(conn, PtcViewer.Router.init(Keyword.put_new(opts, :expected_port, 80)))
+  end
 
   defp browser_conn(method, path, body \\ nil),
     do: conn(method, "http://localhost" <> path, body)
