@@ -63,7 +63,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   def operations, do: @operations
 
   @spec empty_metrics() :: metrics()
-  def empty_metrics do
+  defp empty_metrics do
     %{
       postings_visited: 0,
       candidate_frames_verified: 0,

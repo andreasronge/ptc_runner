@@ -969,7 +969,9 @@ defmodule PtcRunner.Kernel.Runner do
          state
        )
        when reason in [:pmap_error, :pcalls_error] and is_map(details) do
-    case SafeMetadata.retain_named_quota_refusal_fields(details) do
+    case details
+         |> SafeMetadata.retain_failure_metadata()
+         |> Map.take([:limit, :alias, :name, :limit_value]) do
       %{limit: _limit} = quota ->
         if RunState.named_quota_refusal?(state, quota) do
           %Error{
@@ -990,7 +992,9 @@ defmodule PtcRunner.Kernel.Runner do
   defp maybe_promote_authenticated_limit_error(error, _details, _state), do: error
 
   defp maybe_promote_budget_error(%Error{usage: usage} = error, details, state) do
-    case SafeMetadata.retain_budget_refusal_fields(details) do
+    case details
+         |> SafeMetadata.retain_failure_metadata()
+         |> Map.take([:limit, :limit_value, :requested, :remaining]) do
       %{limit: limit} = budget ->
         if RunState.budget_refusal?(state, budget) do
           %Error{

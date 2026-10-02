@@ -717,10 +717,6 @@ defmodule PtcRunner.Kernel.RunState do
   def closed?(state), do: call(state, :closed?)
 
   @doc false
-  @spec owner?(t()) :: boolean()
-  def owner?(state), do: call(state, :owner?) == true
-
-  @doc false
   @spec repl_owner?(t(), EventSink.t(), InspectionSink.t() | nil, Limits.t()) :: boolean()
   def repl_owner?(state, event_sink, inspection_sink, limits),
     do: call(state, {:repl_owner?, event_sink, inspection_sink, limits}) == true
@@ -1571,9 +1567,6 @@ defmodule PtcRunner.Kernel.RunState do
 
   def handle_call({token, :closed?}, _from, %{token: token} = state),
     do: {:reply, state.closed?, state}
-
-  def handle_call({token, :owner?}, {caller, _tag}, %{token: token} = state),
-    do: {:reply, caller == state.owner, state}
 
   def handle_call(
         {token, {:repl_owner?, event_sink, inspection_sink, limits}},

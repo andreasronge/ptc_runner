@@ -219,14 +219,6 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
 
       %{status: :active, epoch: epoch} ->
         {:reply, {:ok, epoch}, state}
-
-      %{status: :retired} ->
-        {epoch, state} = next_id(state, :principal_epoch)
-        entry = %{status: :active, epoch: epoch}
-        {:reply, {:ok, epoch}, put_in(state.principals[identity], entry)}
-
-      %{status: :retiring} ->
-        {:reply, {:error, :principal_retiring}, state}
     end
   end
 
@@ -547,16 +539,6 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
     end
   end
 
-  def handle_call({:terminalize_flow, %GrantKey{} = key, flow_id}, _from, state) do
-    case Map.get(state.flows, key) do
-      %{id: ^flow_id} ->
-        {:reply, :ok, update_in(state.flows, &Map.delete(&1, key))}
-
-      _absent ->
-        {:reply, :ok, state}
-    end
-  end
-
   def handle_call(
         {:upsert_requirement, %GrantKey{} = key, generation, scopes, ttl_ms},
         _from,
@@ -617,41 +599,6 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
         state
       ) do
     complete_retirement(state, intent_id, coordinator, :authority)
-  end
-
-  def handle_call(
-        {:begin_principal_retirement, tenant_id, principal_id, expected_epoch, idempotency_key,
-         lease_ttl_ms},
-        _from,
-        state
-      ) do
-    begin_principal_retirement(
-      state,
-      tenant_id,
-      principal_id,
-      expected_epoch,
-      idempotency_key,
-      lease_ttl_ms
-    )
-  end
-
-  def handle_call(
-        {:complete_principal_retirement, intent_id, coordinator},
-        _from,
-        state
-      ) do
-    complete_retirement(state, intent_id, coordinator, :principal)
-  end
-
-  def handle_call({:inspect_retirements, tenant_id}, _from, state) do
-    intents =
-      state.retirements
-      |> Map.values()
-      |> Enum.filter(&(&1.tenant_id == tenant_id))
-      |> Enum.map(&Map.take(&1, [:id, :kind, :status, :installation_id, :action]))
-      |> Enum.sort_by(&inspect(&1.id))
-
-    {:reply, {:ok, intents}, state}
   end
 
   def handle_call(_operation, _from, state),
@@ -1312,56 +1259,6 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
     end
   end
 
-  defp begin_principal_retirement(
-         state,
-         tenant_id,
-         principal_id,
-         expected_epoch,
-         idempotency_key,
-         lease_ttl_ms
-       ) do
-    identity = {tenant_id, principal_id}
-
-    case Map.get(state.principals, identity) do
-      %{status: :active, epoch: ^expected_epoch} ->
-        {intent_id, state} = next_id(state, :retirement_intent)
-        {coordinator, state} = next_id(state, :coordinator)
-
-        intent = %{
-          id: intent_id,
-          kind: :principal,
-          status: :draining,
-          tenant_id: tenant_id,
-          principal_id: principal_id,
-          expected_epoch: expected_epoch,
-          idempotency_key: idempotency_key,
-          coordinator: coordinator,
-          coordinator_deadline_ms: now_ms() + lease_ttl_ms
-        }
-
-        state =
-          state
-          |> put_in([:principals, identity, :status], :retiring)
-          |> put_in([:principals, identity, :intent_id], intent_id)
-          |> put_in([:retirements, intent_id], intent)
-          |> cancel_pre_dispatch_for(&principal_key?(&1, tenant_id, principal_id))
-
-        {:reply, {:ok, %{intent_id: intent_id, coordinator: coordinator}}, state}
-
-      %{status: :retiring, intent_id: intent_id} ->
-        intent = Map.fetch!(state.retirements, intent_id)
-
-        if intent.idempotency_key == idempotency_key do
-          renew_retirement_coordinator(state, intent, lease_ttl_ms)
-        else
-          {:reply, {:error, :conflicting_retirement}, state}
-        end
-
-      _stale ->
-        {:reply, {:error, :stale_principal}, state}
-    end
-  end
-
   defp complete_retirement(state, intent_id, coordinator, kind) do
     with %{kind: ^kind, coordinator: ^coordinator, status: :draining} = intent <-
            Map.get(state.retirements, intent_id),
@@ -1426,20 +1323,6 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
     end
   end
 
-  defp finish_retirement(state, %{kind: :principal} = intent) do
-    matcher = &principal_key?(&1, intent.tenant_id, intent.principal_id)
-    state = delete_matching_state(state, matcher)
-    identity = {intent.tenant_id, intent.principal_id}
-    {epoch, state} = next_id(state, :principal_epoch)
-
-    state =
-      state
-      |> put_in([:principals, identity], %{status: :retired, epoch: epoch})
-      |> put_in([:retirements, intent.id, :status], :completed)
-
-    {epoch, state}
-  end
-
   defp cancel_pre_dispatch_for(state, matcher) do
     state.leases
     |> Enum.filter(fn {key, lease} ->
@@ -1490,24 +1373,14 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
   defp retirement_matches?(%{kind: :authority} = intent, key),
     do: authority_key?(key, intent.tenant_id, intent.installation_id)
 
-  defp retirement_matches?(%{kind: :principal} = intent, key),
-    do: principal_key?(key, intent.tenant_id, intent.principal_id)
-
   defp authority_key?(%GrantKey{} = key, tenant_id, installation_id),
     do: key.tenant_id == tenant_id and key.installation_id == installation_id
-
-  defp principal_key?(%GrantKey{} = key, tenant_id, principal_id),
-    do: key.tenant_id == tenant_id and key.principal_id == principal_id
 
   defp retiring_key?(state, key) do
     match?(
       %{status: :retiring},
-      Map.get(state.principals, {key.tenant_id, key.principal_id})
-    ) or
-      match?(
-        %{status: :retiring},
-        Map.get(state.authorities, {key.tenant_id, key.installation_id})
-      )
+      Map.get(state.authorities, {key.tenant_id, key.installation_id})
+    )
   end
 
   defp next_id(state, kind) do

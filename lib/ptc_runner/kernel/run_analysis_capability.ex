@@ -29,17 +29,6 @@ defmodule PtcRunner.Kernel.RunAnalysisCapability do
     end
   end
 
-  @spec from_analysis(RunAnalysis.t(), binary() | nil) ::
-          {:ok, [Capability.t()]} | {:error, :invalid_run_analysis_capability}
-  def from_analysis(analysis, provider \\ nil) do
-    with true <- is_nil(provider) or valid_provider?(provider),
-         {:ok, _probe} <- RunAnalysis.query(analysis, :runs, %{"limit" => 1}) do
-      assemble(analysis, provider)
-    else
-      _ -> {:error, :invalid_run_analysis_capability}
-    end
-  end
-
   defp assemble(analysis, provider) do
     Enum.reduce_while(@operations, {:ok, []}, fn operation, {:ok, capabilities} ->
       case capability(analysis, capability_name(provider, operation), operation) do
