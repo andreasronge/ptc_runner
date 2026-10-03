@@ -10,12 +10,21 @@ defmodule PtcRunner.Kernel.ModelContractDiagnostic do
   @max_message_bytes byte_size(@prefix) + @max_encoded_model_bytes + byte_size(@suffix)
   @json_string ~S'"(?:[\x20-\x21\x23-\x5b\x5d-\x7e]|\\["\\]){1,256}"'
 
+  @selected_model "the selected model"
+  @template [
+    {:literal, @prefix},
+    {:slot, :model, :text,
+     "(?:" <> DiagnosticPattern.escape(@selected_model) <> "|" <> @json_string <> ")"},
+    {:literal, @suffix}
+  ]
+
   @spec cost_reservation_pricing_message(binary() | nil) :: binary()
-  def cost_reservation_pricing_message(nil), do: @prefix <> "the selected model" <> @suffix
+  def cost_reservation_pricing_message(nil),
+    do: DiagnosticPattern.render(@template, %{model: @selected_model})
 
   def cost_reservation_pricing_message(model) when is_binary(model) do
     if publishable_model?(model),
-      do: @prefix <> Jason.encode!(model) <> @suffix,
+      do: DiagnosticPattern.render(@template, %{model: Jason.encode!(model)}),
       else: cost_reservation_pricing_message(nil)
   end
 
@@ -72,33 +81,15 @@ defmodule PtcRunner.Kernel.ModelContractDiagnostic do
     %{
       "oneOf" => [
         %{"const" => fallback},
-        %{
-          "type" => "string",
-          "minLength" => 1,
-          "maxLength" => @max_message_bytes,
-          "pattern" =>
-            DiagnosticPattern.exact(
-              DiagnosticPattern.escape(@prefix) <>
-                "(?:the selected model|" <>
-                @json_string <>
-                ")" <>
-                DiagnosticPattern.escape(@suffix)
-            )
-        }
+        DiagnosticPattern.exact_message_schema(@max_message_bytes, @template)
       ]
     }
   end
 
   defp valid_public_model_message?(message) do
-    with true <- String.starts_with?(message, @prefix <> "\""),
-         true <- String.ends_with?(message, "\"" <> @suffix),
-         encoded_model <-
-           message
-           |> String.trim_leading(@prefix)
-           |> String.trim_trailing(@suffix),
-         {:ok, model} when is_binary(model) <- Jason.decode(encoded_model) do
-      publishable_model?(model) and
-        message == cost_reservation_pricing_message(model)
+    with {:ok, %{model: encoded}} <- DiagnosticPattern.parse(@template, message),
+         {:ok, model} when is_binary(model) <- Jason.decode(encoded) do
+      publishable_model?(model) and message == cost_reservation_pricing_message(model)
     else
       _invalid -> false
     end

@@ -2,8 +2,64 @@ defmodule PtcRunner.Kernel.ProviderCleanupDiagnostic do
   @moduledoc false
 
   alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.DiagnosticPattern
 
-  @message ~r/\Aprovider cleanup failed for [a-z][a-z0-9._-]{0,127} over (stdio|streamable_http): (cleanup deadline expired|launcher reported (server_exit|close|owner_eof|launcher_signal|protocol_error|termination_timeout)|transport (close timed out|closed without a finish frame))( \(exit status -?[0-9]+\))? after [0-9]+ ms \(grace_ms [0-9]+; cleanup budget [0-9]+ ms\)(; stderr: [^\r\n]{1,1024})?(; stderr truncated)?(; increase limits\.provider_cleanup_timeout_ms)?\z/u
+  @deadline_message "cleanup deadline expired"
+  @finish_reasons [
+    :server_exit,
+    :close,
+    :owner_eof,
+    :launcher_signal,
+    :protocol_error,
+    :termination_timeout
+  ]
+  @launcher_template [
+    {:literal, "launcher reported "},
+    {:slot, :reason, :text, "(" <> Enum.map_join(@finish_reasons, "|", &Atom.to_string/1) <> ")"}
+  ]
+  @transport_prefix "transport "
+  @transport_phrases [
+    {:close_timeout, "close timed out"},
+    {:finish_missing, "closed without a finish frame"}
+  ]
+  @exit_template [
+    {:literal, " (exit status "},
+    {:slot, :status, :integer, "-?[0-9]+"},
+    {:literal, ")"}
+  ]
+  @stderr_template [{:literal, "; stderr: "}, {:slot, :stderr, :text, ~S'[^\r\n]{1,1024}'}]
+  @truncated_message "; stderr truncated"
+  @hint_message "; increase limits.provider_cleanup_timeout_ms"
+  @cause_pattern "(" <>
+                   DiagnosticPattern.escape(@deadline_message) <>
+                   "|" <>
+                   DiagnosticPattern.body(@launcher_template) <>
+                   "|" <>
+                   DiagnosticPattern.escape(@transport_prefix) <>
+                   "(" <>
+                   Enum.map_join(@transport_phrases, "|", fn {_reason, phrase} ->
+                     DiagnosticPattern.escape(phrase)
+                   end) <>
+                   "))(" <> DiagnosticPattern.body(@exit_template) <> ")?"
+  @template [
+    {:literal, "provider cleanup failed for "},
+    {:slot, :provider, :text, "[a-z][a-z0-9._-]{0,127}"},
+    {:literal, " over "},
+    {:slot, :transport, :text, "(stdio|streamable_http)"},
+    {:literal, ": "},
+    {:slot, :cause, :text, @cause_pattern},
+    {:literal, " after "},
+    {:slot, :duration, :integer, "[0-9]+"},
+    {:literal, " ms (grace_ms "},
+    {:slot, :grace, :integer, "[0-9]+"},
+    {:literal, "; cleanup budget "},
+    {:slot, :budget, :integer, "[0-9]+"},
+    {:literal, " ms)"},
+    {:slot, :stderr, :text, "(" <> DiagnosticPattern.body(@stderr_template) <> ")?"},
+    {:slot, :truncated, :text, "(" <> DiagnosticPattern.escape(@truncated_message) <> ")?"},
+    {:slot, :hint, :text, "(" <> DiagnosticPattern.escape(@hint_message) <> ")?"}
+  ]
+  @message Regex.compile!("\\A" <> DiagnosticPattern.body(@template) <> "\\z", "u")
 
   def fields(
         %{
@@ -22,9 +78,17 @@ defmodule PtcRunner.Kernel.ProviderCleanupDiagnostic do
     with {:ok, subject} <- CommandSubject.provider(provider, :cleanup),
          {:ok, cause} <- cause(reason, details) do
       message =
-        "provider cleanup failed for #{provider} over #{transport}: #{cause} after #{duration_ms} ms " <>
-          "(grace_ms #{grace_ms}; cleanup budget #{budget_ms} ms)" <>
-          stderr_suffix(details) <> truncation_suffix(details) <> hint_suffix(reason)
+        DiagnosticPattern.render(@template, %{
+          provider: provider,
+          transport: Atom.to_string(transport),
+          cause: cause,
+          duration: duration_ms,
+          grace: grace_ms,
+          budget: budget_ms,
+          stderr: stderr_suffix(details),
+          truncated: truncation_suffix(details),
+          hint: hint_suffix(reason)
+        })
 
       if valid_message?(message), do: {:ok, message, subject}, else: :error
     else
@@ -59,31 +123,28 @@ defmodule PtcRunner.Kernel.ProviderCleanupDiagnostic do
     |> String.replace("\\z", "$(?![\\s\\S])")
   end
 
-  defp cause(:cleanup_deadline_expired, _details), do: {:ok, "cleanup deadline expired"}
+  defp cause(:cleanup_deadline_expired, _details), do: {:ok, @deadline_message}
 
   defp cause(:transport_failed, %{finish_reason: finish_reason} = details)
-       when finish_reason in [
-              :server_exit,
-              :close,
-              :owner_eof,
-              :launcher_signal,
-              :protocol_error,
-              :termination_timeout
-            ] do
+       when finish_reason in @finish_reasons do
     suffix =
       case Map.get(details, :exit_status) do
-        status when is_integer(status) -> " (exit status #{status})"
-        _unknown -> ""
+        status when is_integer(status) ->
+          DiagnosticPattern.render(@exit_template, %{status: status})
+
+        _unknown ->
+          ""
       end
 
-    {:ok, "launcher reported #{finish_reason}" <> suffix}
+    {:ok,
+     DiagnosticPattern.render(@launcher_template, %{reason: Atom.to_string(finish_reason)}) <>
+       suffix}
   end
 
-  defp cause(:transport_failed, %{finish_reason: :close_timeout}),
-    do: {:ok, "transport close timed out"}
-
-  defp cause(:transport_failed, %{finish_reason: :finish_missing}),
-    do: {:ok, "transport closed without a finish frame"}
+  for {reason, phrase} <- @transport_phrases do
+    defp cause(:transport_failed, %{finish_reason: unquote(reason)}),
+      do: {:ok, @transport_prefix <> unquote(phrase)}
+  end
 
   defp cause(_reason, _details), do: :error
 
@@ -93,7 +154,7 @@ defmodule PtcRunner.Kernel.ProviderCleanupDiagnostic do
       |> String.replace(~r/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u, " ")
       |> utf8_tail(1_024)
 
-    if stderr == "", do: "", else: "; stderr: " <> stderr
+    if stderr == "", do: "", else: DiagnosticPattern.render(@stderr_template, %{stderr: stderr})
   end
 
   defp stderr_suffix(_details), do: ""
@@ -125,8 +186,8 @@ defmodule PtcRunner.Kernel.ProviderCleanupDiagnostic do
       else: valid_utf8_prefix(binary_part(value, 0, byte_size(value) - 1))
   end
 
-  defp truncation_suffix(%{stderr_truncated?: true}), do: "; stderr truncated"
+  defp truncation_suffix(%{stderr_truncated?: true}), do: @truncated_message
   defp truncation_suffix(_details), do: ""
-  defp hint_suffix(:cleanup_deadline_expired), do: "; increase limits.provider_cleanup_timeout_ms"
+  defp hint_suffix(:cleanup_deadline_expired), do: @hint_message
   defp hint_suffix(_reason), do: ""
 end

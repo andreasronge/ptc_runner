@@ -22,6 +22,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
   alias PtcRunner.TestSupport.ProviderSessionFixture
   alias PtcRunner.TestSupport.RunLifecycle
   alias PtcRunner.TestSupport.StreamingInspection
+  alias PtcRunner.TestSupport.TraceQuery
   alias ReqLLM.ToolCall
 
   @schema %{"type" => "object", "additionalProperties" => false}
@@ -867,7 +868,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
 
     trace_path = Path.join(dir, "cleanup-failure.jsonl")
     assert :ok = TraceLog.append_jsonl(trace_path, close_events)
-    assert {:ok, _trace} = TraceLog.new(source: {:file, trace_path})
+    assert {:ok, _trace} = TraceQuery.new(source: {:file, trace_path})
     assert File.read!(trace_path) =~ ~s("reason":"provider_cleanup_failed")
 
     assert_receive :cleanup_attempted

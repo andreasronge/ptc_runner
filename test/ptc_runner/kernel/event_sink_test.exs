@@ -4,8 +4,8 @@ defmodule PtcRunner.Kernel.EventSinkTest do
   alias PtcRunner.Kernel.EventBudget
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits
-  alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Lisp.RetainedSize
+  alias PtcRunner.TestSupport.TraceQuery
 
   test "default run identifiers have fixed entropy format and remain unique" do
     {:ok, limits} = Limits.new(normal_event_count: 4, normal_event_bytes: 10_000)
@@ -242,8 +242,8 @@ defmodule PtcRunner.Kernel.EventSinkTest do
     assert {:error, :event_sink_error} = EventSink.emit(sink, "Not Canonical", %{})
     assert EventSink.events(sink) == []
 
-    assert {:ok, trace_log} = TraceLog.new(source: {:private, sink})
-    assert {:ok, %{"items" => []}} = TraceLog.query(trace_log, :list_runs, %{})
+    assert {:ok, trace_log} = TraceQuery.new(source: {:private, sink})
+    assert {:ok, %{"items" => []}} = TraceQuery.query(trace_log, :list_runs, %{})
   end
 
   test "event limits account for the normalized JSON payload" do

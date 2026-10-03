@@ -151,12 +151,74 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
                                   end)
                                  |> Enum.max()
 
-  @doc false
-  @spec subordinate_evaluations_message(term()) :: {:ok, binary()} | :error
-  def subordinate_evaluations_message(limit) do
-    with {:ok, row} <- LimitCatalog.fetch(:subordinate_evaluations),
-         true <- LimitCatalog.valid_value?(row, limit) do
-      {:ok, @subordinate_prefix <> Integer.to_string(limit) <> @subordinate_suffix}
+  @subordinate_template [
+    {:literal, @subordinate_prefix},
+    {:slot, :value, :integer, @subordinate_limit_pattern},
+    {:literal, @subordinate_suffix}
+  ]
+
+  @heap_template [
+    {:literal, @heap_prefix},
+    {:slot, :value, :integer, @subordinate_limit_pattern},
+    {:literal, @heap_suffix}
+  ]
+
+  @protocol_errors_template [
+    {:literal, @protocol_errors_prefix},
+    {:slot, :value, :integer, @subordinate_limit_pattern},
+    {:literal, @protocol_errors_suffix}
+  ]
+
+  @result_limit_template [
+    {:literal, @result_limit_prefix},
+    {:slot, :value, :integer, @subordinate_limit_pattern},
+    {:literal, @result_limit_suffix}
+  ]
+
+  @transcript_template [
+    {:literal, @transcript_prefix},
+    {:slot, :value, :integer, @transcript_limit_pattern},
+    {:literal, @transcript_suffix}
+  ]
+
+  @simple_messages [
+    {:subordinate_evaluations_message, :subordinate_evaluations_message?,
+     :subordinate_message_branch, @subordinate_template, @subordinate_maximum_message_bytes,
+     :subordinate_evaluations},
+    {:heap_words_message, :heap_words_message?, :heap_message_branch, @heap_template,
+     @heap_maximum_message_bytes, :workflow_heap_words},
+    {:protocol_errors_message, :protocol_errors_message?, :protocol_errors_message_branch,
+     @protocol_errors_template, @protocol_errors_maximum_message_bytes, :protocol_errors},
+    {:result_limit_message, :result_limit_message?, :result_limit_message_branch,
+     @result_limit_template, @result_limit_maximum_message_bytes, :terminal_result_bytes}
+  ]
+
+  for {builder, validator, branch, template, maximum_bytes, field} <- @simple_messages do
+    @doc false
+    @spec unquote(builder)(term()) :: {:ok, binary()} | :error
+    def unquote(builder)(value),
+      do: catalog_message(unquote(field), value, unquote(Macro.escape(template)))
+
+    @doc false
+    @spec unquote(validator)(term()) :: boolean()
+    def unquote(validator)(message) do
+      DiagnosticPattern.valid_template?(unquote(Macro.escape(template)), message, fn values ->
+        unquote(builder)(values.value)
+      end)
+    end
+
+    defp unquote(branch)(),
+      do:
+        DiagnosticPattern.exact_message_schema(
+          unquote(maximum_bytes),
+          unquote(Macro.escape(template))
+        )
+  end
+
+  defp catalog_message(field, value, template) do
+    with {:ok, row} <- LimitCatalog.fetch(field),
+         true <- LimitCatalog.valid_value?(row, value) do
+      {:ok, DiagnosticPattern.render(template, %{value: value})}
     else
       _invalid -> :error
     end
@@ -164,14 +226,17 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
 
   @doc false
   @spec direct_subordinate_evaluations_message(term()) :: {:ok, binary()} | :error
-  def direct_subordinate_evaluations_message(limit) do
-    with {:ok, row} <- LimitCatalog.fetch(:subordinate_evaluations),
-         true <- LimitCatalog.valid_value?(row, limit) do
-      {:ok, @subordinate_prefix <> Integer.to_string(limit) <> @direct_subordinate_suffix}
-    else
-      _invalid -> :error
-    end
-  end
+  def direct_subordinate_evaluations_message(limit),
+    do:
+      catalog_message(
+        :subordinate_evaluations,
+        limit,
+        integer_template(
+          @subordinate_prefix,
+          @subordinate_limit_pattern,
+          @direct_subordinate_suffix
+        )
+      )
 
   @doc false
   @spec agent_turns_reasons() :: [atom()]
@@ -191,9 +256,9 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
 
   @doc false
   @spec agent_turns_message(term(), term()) :: {:ok, binary()} | :error
-  for {reason, prefix, suffix} <- @agent_reasons do
+  for {reason, _prefix, _suffix} <- @agent_reasons do
     def agent_turns_message(limit, unquote(reason)) when is_integer(limit) and limit in 1..128,
-      do: {:ok, unquote(prefix) <> Integer.to_string(limit) <> unquote(suffix)}
+      do: {:ok, DiagnosticPattern.render(agent_template(unquote(reason)), %{value: limit})}
   end
 
   def agent_turns_message(_limit, _reason), do: :error
@@ -201,7 +266,7 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   @doc false
   @spec transcript_chars_message(term()) :: {:ok, binary()} | :error
   def transcript_chars_message(limit) when is_integer(limit) and limit in 1..1_000_000,
-    do: {:ok, @transcript_prefix <> Integer.to_string(limit) <> @transcript_suffix}
+    do: {:ok, DiagnosticPattern.render(@transcript_template, %{value: limit})}
 
   def transcript_chars_message(_limit), do: :error
 
@@ -246,13 +311,11 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
              limit
            ) == limit_ms do
       {:ok,
-       timeout_prefix(limit) <>
-         Integer.to_string(limit_ms) <>
-         " ms was exceeded during #{phase}" <>
-         @workflow_clock_middle <>
-         Integer.to_string(run_duration_ms) <>
-         @workflow_clock_separator <>
-         Integer.to_string(workflow_timeout_ms) <> @workflow_clock_suffix}
+       DiagnosticPattern.render(clock_template(limit, phase), %{
+         value: limit_ms,
+         run: run_duration_ms,
+         workflow: workflow_timeout_ms
+       })}
     else
       _invalid -> :error
     end
@@ -268,9 +331,14 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
     with {:ok, row} <- LimitCatalog.fetch(limit),
          true <- LimitCatalog.valid_value?(row, limit_ms) do
       {:ok,
-       timeout_prefix(limit) <>
-         Integer.to_string(limit_ms) <>
-         " ms was exceeded during #{phase}; start a new REPL session"}
+       DiagnosticPattern.render(
+         integer_template(
+           timeout_prefix(limit),
+           @timeout_value_pattern,
+           " ms was exceeded during #{phase}; start a new REPL session"
+         ),
+         %{value: limit_ms}
+       )}
     else
       _invalid -> :error
     end
@@ -281,30 +349,6 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   # A heap kill is Kernel-observed runtime evidence, like a timeout. Raising the
   # ceiling still takes both documents: these remain `:manifest_narrowable` rows,
   # so a host-only edit leaves the run at the compiled default.
-  @doc false
-  @spec heap_words_message(term()) :: {:ok, binary()} | :error
-  def heap_words_message(limit) do
-    with {:ok, row} <- LimitCatalog.fetch(:workflow_heap_words),
-         true <- LimitCatalog.valid_value?(row, limit) do
-      {:ok, @heap_prefix <> Integer.to_string(limit) <> @heap_suffix}
-    else
-      _invalid -> :error
-    end
-  end
-
-  @doc false
-  @spec heap_words_message?(term()) :: boolean()
-  def heap_words_message?(message) when is_binary(message) do
-    DiagnosticPattern.valid_exact_integer_message?(
-      message,
-      @heap_prefix,
-      @heap_suffix,
-      @subordinate_maximum_digits,
-      &heap_words_message/1
-    )
-  end
-
-  def heap_words_message?(_message), do: false
 
   @doc false
   @spec max_calls_message(term(), term()) :: {:ok, binary()} | :error
@@ -312,9 +356,7 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
     with true <- is_binary(alias_name) and alias_name =~ @alias,
          {:ok, row} <- LimitCatalog.fetch(:workflow_capability_calls_per_name),
          true <- LimitCatalog.valid_value?(row, limit) do
-      {:ok,
-       @max_calls_prefix <>
-         Integer.to_string(limit) <> @max_calls_middle <> alias_name <> @max_calls_suffix}
+      {:ok, DiagnosticPattern.render(max_calls_template(), %{value: limit, alias: alias_name})}
     else
       _invalid -> :error
     end
@@ -322,33 +364,27 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
 
   @doc false
   @spec max_calls_message?(term()) :: boolean()
-  def max_calls_message?(message) when is_binary(message) do
-    with true <- String.starts_with?(message, @max_calls_prefix),
-         true <- String.ends_with?(message, @max_calls_suffix),
-         rest_bytes <-
-           byte_size(message) - byte_size(@max_calls_prefix) - byte_size(@max_calls_suffix),
-         true <- rest_bytes > 0,
-         rest <- binary_part(message, byte_size(@max_calls_prefix), rest_bytes),
-         [digits, alias_name] <- String.split(rest, @max_calls_middle, parts: 2),
-         {limit, ""} <- Integer.parse(digits),
-         true <- Integer.to_string(limit) == digits,
-         {:ok, expected} <- max_calls_message(alias_name, limit) do
-      message == expected
-    else
-      _invalid -> false
-    end
-  end
+  def max_calls_message?(message),
+    do:
+      DiagnosticPattern.valid_template?(max_calls_template(), message, fn values ->
+        max_calls_message(values.alias, values.value)
+      end)
 
-  def max_calls_message?(_message), do: false
+  defp max_calls_message_branch,
+    do:
+      DiagnosticPattern.exact_message_schema(
+        @max_calls_maximum_message_bytes,
+        max_calls_template()
+      )
 
-  defp max_calls_message_branch do
-    DiagnosticPattern.exact_message_schema(@max_calls_maximum_message_bytes, [
+  defp max_calls_template do
+    [
       {:literal, @max_calls_prefix},
-      {:pattern, @subordinate_limit_pattern},
+      {:slot, :value, :integer, @subordinate_limit_pattern},
       {:literal, @max_calls_middle},
-      {:pattern, @alias_schema_pattern},
+      {:slot, :alias, :text, @alias_schema_pattern},
       {:literal, @max_calls_suffix}
-    ])
+    ]
   end
 
   @doc false
@@ -358,13 +394,7 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
     with true <- name =~ @capability_name,
          {:ok, row} <- LimitCatalog.fetch(limit),
          true <- LimitCatalog.valid_value?(row, value) do
-      {:ok,
-       Atom.to_string(limit) <>
-         " limit " <>
-         Integer.to_string(value) <>
-         @quota_middle <>
-         name <>
-         "; raise limits." <> Atom.to_string(limit) <> @manifest_remedy}
+      {:ok, DiagnosticPattern.render(quota_template(limit), %{value: value, name: name})}
     else
       _invalid -> :error
     end
@@ -374,53 +404,13 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
 
   @doc false
   @spec capability_quota_message?(term()) :: boolean()
-  def capability_quota_message?(message) when is_binary(message) do
+  def capability_quota_message?(message) do
     Enum.any?(@quota_limits, fn limit ->
-      prefix = Atom.to_string(limit) <> " limit "
-      suffix = "; raise limits." <> Atom.to_string(limit) <> @manifest_remedy
-
-      with true <- String.starts_with?(message, prefix),
-           true <- String.ends_with?(message, suffix),
-           rest_bytes <- byte_size(message) - byte_size(prefix) - byte_size(suffix),
-           true <- rest_bytes > 0,
-           rest <- binary_part(message, byte_size(prefix), rest_bytes),
-           [digits, name] <- String.split(rest, @quota_middle, parts: 2),
-           {value, ""} <- Integer.parse(digits),
-           true <- Integer.to_string(value) == digits,
-           {:ok, expected} <- capability_quota_message(limit, name, value) do
-        message == expected
-      else
-        _invalid -> false
-      end
+      DiagnosticPattern.valid_template?(quota_template(limit), message, fn values ->
+        capability_quota_message(limit, values.name, values.value)
+      end)
     end)
   end
-
-  def capability_quota_message?(_message), do: false
-
-  @doc false
-  @spec protocol_errors_message(term()) :: {:ok, binary()} | :error
-  def protocol_errors_message(limit) do
-    with {:ok, row} <- LimitCatalog.fetch(:protocol_errors),
-         true <- LimitCatalog.valid_value?(row, limit) do
-      {:ok, @protocol_errors_prefix <> Integer.to_string(limit) <> @protocol_errors_suffix}
-    else
-      _invalid -> :error
-    end
-  end
-
-  @doc false
-  @spec protocol_errors_message?(term()) :: boolean()
-  def protocol_errors_message?(message) when is_binary(message) do
-    valid_exact_message?(
-      message,
-      @protocol_errors_prefix,
-      @protocol_errors_suffix,
-      @subordinate_maximum_digits,
-      &protocol_errors_message/1
-    )
-  end
-
-  def protocol_errors_message?(_message), do: false
 
   @budget_limits [:llm_total_tokens, :llm_cost_microusd]
   @safe_integer_maximum 9_007_199_254_740_991
@@ -467,20 +457,12 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
          true <- requested in 0..@safe_integer_maximum,
          true <- remaining in 0..limit_value,
          true <- requested > remaining do
-      name = Atom.to_string(limit)
-
       {:ok,
-       name <>
-         " limit " <>
-         Integer.to_string(limit_value) <>
-         Map.fetch!(@budget_units, limit) <>
-         @budget_would_be_exceeded <>
-         Integer.to_string(requested) <>
-         Map.fetch!(@budget_reservation_units, limit) <>
-         Integer.to_string(remaining) <>
-         @budget_remaining_suffix <>
-         name <>
-         @manifest_remedy}
+       DiagnosticPattern.render(budget_template(limit), %{
+         value: limit_value,
+         requested: requested,
+         remaining: remaining
+       })}
     else
       _invalid -> :error
     end
@@ -490,104 +472,53 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
 
   @doc false
   @spec budget_message?(term()) :: boolean()
-  def budget_message?(message) when is_binary(message) do
+  def budget_message?(message) do
     Enum.any?(@budget_limits, fn limit ->
-      prefix = Atom.to_string(limit) <> " limit "
-      unit = Map.fetch!(@budget_units, limit)
-      reservation_unit = Map.fetch!(@budget_reservation_units, limit)
-      suffix = @budget_remaining_suffix <> Atom.to_string(limit) <> @manifest_remedy
-
-      with true <- String.starts_with?(message, prefix),
-           true <- String.ends_with?(message, suffix),
-           rest_bytes <- byte_size(message) - byte_size(prefix) - byte_size(suffix),
-           true <- rest_bytes > 0,
-           rest <- binary_part(message, byte_size(prefix), rest_bytes),
-           [limit_digits, after_limit] <-
-             String.split(rest, unit <> @budget_would_be_exceeded, parts: 2),
-           [requested_digits, remaining_digits] <-
-             String.split(after_limit, reservation_unit, parts: 2),
-           {limit_value, ""} <- Integer.parse(limit_digits),
-           {requested, ""} <- Integer.parse(requested_digits),
-           {remaining, ""} <- Integer.parse(remaining_digits),
-           true <- Integer.to_string(limit_value) == limit_digits,
-           true <- Integer.to_string(requested) == requested_digits,
-           true <- Integer.to_string(remaining) == remaining_digits,
-           {:ok, expected} <- budget_message(limit, limit_value, requested, remaining) do
-        message == expected
-      else
-        _invalid -> false
-      end
+      DiagnosticPattern.valid_template?(budget_template(limit), message, fn values ->
+        budget_message(limit, values.value, values.requested, values.remaining)
+      end)
     end)
   end
 
-  def budget_message?(_message), do: false
-
   defp capability_quota_message_branches do
-    for limit <- @quota_limits do
-      name = Atom.to_string(limit)
-      prefix = name <> " limit "
-      suffix = "; raise limits." <> name <> @manifest_remedy
-
-      %{
-        "type" => "string",
-        "minLength" => 1,
-        "maxLength" => @quota_maximum_message_bytes,
-        "pattern" =>
-          DiagnosticPattern.exact(
-            DiagnosticPattern.escape(prefix) <>
-              @subordinate_limit_pattern <>
-              DiagnosticPattern.escape(@quota_middle) <>
-              @capability_name_schema_pattern <>
-              DiagnosticPattern.escape(suffix)
-          )
-      }
-    end
+    Enum.map(@quota_limits, fn limit ->
+      DiagnosticPattern.exact_message_schema(@quota_maximum_message_bytes, quota_template(limit))
+    end)
   end
 
-  defp protocol_errors_message_branch do
-    bounded_branch(
-      @protocol_errors_maximum_message_bytes,
-      @protocol_errors_prefix,
-      @subordinate_limit_pattern,
-      @protocol_errors_suffix
-    )
+  defp quota_template(limit) do
+    name = Atom.to_string(limit)
+
+    [
+      {:literal, name <> " limit "},
+      {:slot, :value, :integer, @subordinate_limit_pattern},
+      {:literal, @quota_middle},
+      {:slot, :name, :text, @capability_name_schema_pattern},
+      {:literal, "; raise limits." <> name <> @manifest_remedy}
+    ]
   end
 
   defp budget_message_branches do
-    for limit <- @budget_limits do
-      name = Atom.to_string(limit)
-      prefix = name <> " limit "
-      unit = Map.fetch!(@budget_units, limit)
-      reservation_unit = Map.fetch!(@budget_reservation_units, limit)
-      suffix = @budget_remaining_suffix <> name <> @manifest_remedy
-
-      %{
-        "type" => "string",
-        "minLength" => 1,
-        "maxLength" => @budget_maximum_message_bytes,
-        "pattern" =>
-          DiagnosticPattern.exact(
-            DiagnosticPattern.escape(prefix) <>
-              @safe_positive_integer_pattern <>
-              DiagnosticPattern.escape(unit <> @budget_would_be_exceeded) <>
-              @safe_integer_or_zero_pattern <>
-              DiagnosticPattern.escape(reservation_unit) <>
-              @safe_integer_or_zero_pattern <>
-              DiagnosticPattern.escape(suffix)
-          )
-      }
-    end
+    Enum.map(@budget_limits, fn limit ->
+      DiagnosticPattern.exact_message_schema(
+        @budget_maximum_message_bytes,
+        budget_template(limit)
+      )
+    end)
   end
 
-  @doc false
-  @spec result_limit_message(term()) :: {:ok, binary()} | :error
-  def result_limit_message(limit) do
-    with {:ok, row} <- LimitCatalog.fetch(:terminal_result_bytes),
-         true <- LimitCatalog.valid_value?(row, limit) do
-      {:ok, @result_limit_prefix <> Integer.to_string(limit) <> @result_limit_suffix}
-    else
-      _invalid -> :error
-    end
+  defp budget_template(limit) do
+    name = Atom.to_string(limit)
+
+    [
+      {:literal, name <> " limit "},
+      {:slot, :value, :integer, @safe_positive_integer_pattern},
+      {:literal, Map.fetch!(@budget_units, limit) <> @budget_would_be_exceeded},
+      {:slot, :requested, :integer, @safe_integer_or_zero_pattern},
+      {:literal, Map.fetch!(@budget_reservation_units, limit)},
+      {:slot, :remaining, :integer, @safe_integer_or_zero_pattern},
+      {:literal, @budget_remaining_suffix <> name <> @manifest_remedy}
+    ]
   end
 
   @doc false
@@ -595,15 +526,7 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   def event_capture_message(limit, value) when limit in @event_capture_limits do
     with {:ok, row} <- LimitCatalog.fetch(limit),
          true <- LimitCatalog.valid_value?(row, value) do
-      name = Atom.to_string(limit)
-
-      {:ok,
-       name <>
-         " limit " <>
-         Integer.to_string(value) <>
-         @event_capture_suffix <>
-         name <>
-         @event_capture_remedy}
+      {:ok, DiagnosticPattern.render(event_template(limit), %{value: value})}
     else
       _invalid -> :error
     end
@@ -613,21 +536,13 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
 
   @doc false
   @spec event_capture_message?(term()) :: boolean()
-  def event_capture_message?(message) when is_binary(message) do
+  def event_capture_message?(message) do
     Enum.any?(@event_capture_limits, fn limit ->
-      name = Atom.to_string(limit)
-
-      valid_exact_message?(
-        message,
-        name <> " limit ",
-        @event_capture_suffix <> name <> @event_capture_remedy,
-        @subordinate_maximum_digits,
-        &event_capture_message(limit, &1)
-      )
+      DiagnosticPattern.valid_template?(event_template(limit), message, fn values ->
+        event_capture_message(limit, values.value)
+      end)
     end)
   end
-
-  def event_capture_message?(_message), do: false
 
   # One lookup from a runtime error's details to the setting it breached and the
   # sentence describing it. The command boundary needs a diagnostic code and a
@@ -707,7 +622,6 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   # or which of the two documents to edit.
   @installed_ceiling_middle " exceeds the installed ceiling "
   @installed_ceiling_suffix "; lower the manifest value to at most the ceiling, or raise the ceiling in the host document"
-  @installed_ceiling_pattern ~r/^([a-z_]+) ([1-9][0-9]{0,9}) exceeds the installed ceiling ([1-9][0-9]{0,9}); lower the manifest value to at most the ceiling, or raise the ceiling in the host document$/
 
   @doc false
   @spec installed_ceiling_message(term(), term(), term()) :: {:ok, binary()} | :error
@@ -717,11 +631,10 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
          true <- LimitCatalog.valid_value?(row, ceiling),
          true <- requested > ceiling do
       {:ok,
-       row.name <>
-         " " <>
-         Integer.to_string(requested) <>
-         @installed_ceiling_middle <>
-         Integer.to_string(ceiling) <> @installed_ceiling_suffix}
+       DiagnosticPattern.render(ceiling_template(row.name), %{
+         requested: requested,
+         ceiling: ceiling
+       })}
     else
       _invalid -> :error
     end
@@ -729,47 +642,44 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
 
   @doc false
   @spec installed_ceiling_message?(term()) :: boolean()
-  def installed_ceiling_message?(message) when is_binary(message) do
-    case Regex.run(@installed_ceiling_pattern, message) do
-      [_all, name, requested, ceiling] ->
-        installed_ceiling_message(
-          name,
-          String.to_integer(requested),
-          String.to_integer(ceiling)
-        ) == {:ok, message}
-
-      _no_match ->
-        false
-    end
+  def installed_ceiling_message?(message) do
+    Enum.any?(LimitCatalog.rows(:manifest_narrowable), fn row ->
+      DiagnosticPattern.valid_template?(ceiling_template(row.name), message, fn values ->
+        installed_ceiling_message(row.name, values.requested, values.ceiling)
+      end)
+    end)
   end
-
-  def installed_ceiling_message?(_message), do: false
 
   @doc false
   @spec installed_ceiling_message_schema(binary()) :: map()
   def installed_ceiling_message_schema(fallback) when is_binary(fallback) do
     branches =
       for row <- LimitCatalog.rows(:manifest_narrowable) do
-        bounded_branch(
+        DiagnosticPattern.exact_message_schema(
           byte_size(row.name) + 1 + @subordinate_maximum_digits +
             byte_size(@installed_ceiling_middle) + @subordinate_maximum_digits +
             byte_size(@installed_ceiling_suffix),
-          row.name <> " ",
-          @subordinate_limit_pattern <>
-            DiagnosticPattern.escape(@installed_ceiling_middle) <> @subordinate_limit_pattern,
-          @installed_ceiling_suffix
+          ceiling_template(row.name)
         )
       end
 
     message_schema(fallback, branches)
   end
 
+  defp ceiling_template(name) do
+    [
+      {:literal, name <> " "},
+      {:slot, :requested, :integer, @subordinate_limit_pattern},
+      {:literal, @installed_ceiling_middle},
+      {:slot, :ceiling, :integer, @subordinate_limit_pattern},
+      {:literal, @installed_ceiling_suffix}
+    ]
+  end
+
   defp build_timeout_message(limit, limit_ms, phase) do
     with {:ok, row} <- LimitCatalog.fetch(limit),
          true <- LimitCatalog.valid_value?(row, limit_ms) do
-      {:ok,
-       timeout_prefix(limit) <>
-         Integer.to_string(limit_ms) <> timeout_suffix(limit, phase)}
+      {:ok, DiagnosticPattern.render(timeout_template(limit, phase), %{value: limit_ms})}
     else
       _invalid -> :error
     end
@@ -815,78 +725,36 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
 
   @doc false
   @spec agent_turns_message?(term()) :: boolean()
-  def agent_turns_message?(message) when is_binary(message) do
-    Enum.any?(@agent_reasons, fn {reason, prefix, suffix} ->
-      valid_exact_message?(
-        message,
-        prefix,
-        suffix,
-        @agent_maximum_digits,
-        &agent_turns_message(&1, reason)
-      )
+  def agent_turns_message?(message) do
+    Enum.any?(@agent_reason_atoms, fn reason ->
+      DiagnosticPattern.valid_template?(agent_template(reason), message, fn values ->
+        agent_turns_message(values.value, reason)
+      end)
     end)
   end
 
-  def agent_turns_message?(_message), do: false
-
   @doc false
   @spec transcript_chars_message?(term()) :: boolean()
-  def transcript_chars_message?(message) when is_binary(message) do
-    valid_exact_message?(
-      message,
-      @transcript_prefix,
-      @transcript_suffix,
-      @transcript_maximum_digits,
-      &transcript_chars_message/1
-    )
-  end
-
-  def transcript_chars_message?(_message), do: false
+  def transcript_chars_message?(message),
+    do:
+      DiagnosticPattern.valid_template?(@transcript_template, message, fn values ->
+        transcript_chars_message(values.value)
+      end)
 
   @doc false
   @spec run_duration_message?(term()) :: boolean()
   def run_duration_message?(message) when is_binary(message) do
     workflow_clock_message?(message, :run_duration_ms) or
       Enum.any?(@timeout_phases, fn phase ->
-        valid_exact_message?(
+        DiagnosticPattern.valid_template?(
+          timeout_template(:run_duration_ms, phase),
           message,
-          timeout_prefix(:run_duration_ms),
-          timeout_suffix(:run_duration_ms, phase),
-          @subordinate_maximum_digits,
-          &live_timeout_message(:run_duration_ms, &1, phase)
+          fn values -> live_timeout_message(:run_duration_ms, values.value, phase) end
         )
       end)
   end
 
   def run_duration_message?(_message), do: false
-
-  @doc false
-  @spec result_limit_message?(term()) :: boolean()
-  def result_limit_message?(message) when is_binary(message) do
-    valid_exact_message?(
-      message,
-      @result_limit_prefix,
-      @result_limit_suffix,
-      @subordinate_maximum_digits,
-      &result_limit_message/1
-    )
-  end
-
-  def result_limit_message?(_message), do: false
-
-  @doc false
-  @spec subordinate_evaluations_message?(term()) :: boolean()
-  def subordinate_evaluations_message?(message) when is_binary(message) do
-    valid_exact_message?(
-      message,
-      @subordinate_prefix,
-      @subordinate_suffix,
-      @subordinate_maximum_digits,
-      &subordinate_evaluations_message/1
-    )
-  end
-
-  def subordinate_evaluations_message?(_message), do: false
 
   @doc false
   @spec timeout_message?(term()) :: boolean()
@@ -969,12 +837,10 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
       Enum.map(@event_capture_limits, fn limit ->
         name = Atom.to_string(limit)
 
-        bounded_branch(
+        DiagnosticPattern.exact_message_schema(
           byte_size(name <> " limit ") + @subordinate_maximum_digits +
             byte_size(@event_capture_suffix <> name <> @event_capture_remedy),
-          name <> " limit ",
-          @subordinate_limit_pattern,
-          @event_capture_suffix <> name <> @event_capture_remedy
+          event_template(limit)
         )
       end)
 
@@ -987,54 +853,24 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
     }
   end
 
-  defp subordinate_message_branch do
-    bounded_branch(
-      @subordinate_maximum_message_bytes,
-      @subordinate_prefix,
-      @subordinate_limit_pattern,
-      @subordinate_suffix
-    )
-  end
-
-  defp result_limit_message_branch do
-    bounded_branch(
-      @result_limit_maximum_message_bytes,
-      @result_limit_prefix,
-      @subordinate_limit_pattern,
-      @result_limit_suffix
-    )
-  end
-
   defp agent_message_branches do
-    for {_reason, prefix, suffix} <- @agent_reasons do
-      %{
-        "type" => "string",
-        "minLength" => 1,
-        "maxLength" => byte_size(prefix) + @agent_maximum_digits + byte_size(suffix),
-        "pattern" =>
-          DiagnosticPattern.exact(
-            DiagnosticPattern.escape(prefix) <>
-              @agent_limit_pattern <> DiagnosticPattern.escape(suffix)
-          )
-      }
+    for {reason, prefix, suffix} <- @agent_reasons do
+      DiagnosticPattern.exact_message_schema(
+        byte_size(prefix) + @agent_maximum_digits + byte_size(suffix),
+        agent_template(reason)
+      )
     end
   end
 
-  defp heap_message_branch do
-    bounded_branch(
-      @heap_maximum_message_bytes,
-      @heap_prefix,
-      @subordinate_limit_pattern,
-      @heap_suffix
-    )
+  defp agent_template(reason) do
+    {^reason, prefix, suffix} = Enum.find(@agent_reasons, &(elem(&1, 0) == reason))
+    integer_template(prefix, @agent_limit_pattern, suffix)
   end
 
   defp transcript_message_branch do
-    bounded_branch(
+    DiagnosticPattern.exact_message_schema(
       @transcript_maximum_message_bytes,
-      @transcript_prefix,
-      @transcript_limit_pattern,
-      @transcript_suffix
+      @transcript_template
     )
   end
 
@@ -1043,100 +879,72 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   defp timeout_message_branches, do: timeout_branches(@timeout_limits)
 
   defp workflow_clock_message_branches(limits \\ @workflow_clock_limits) do
-    for limit <- limits,
-        phase <- @timeout_phases do
+    for limit <- limits, phase <- @timeout_phases do
       DiagnosticPattern.exact_message_schema(
         @workflow_clock_maximum_message_bytes,
-        [
-          {:literal, timeout_prefix(limit)},
-          {:pattern, @timeout_value_pattern},
-          {:literal, " ms was exceeded during #{phase}" <> @workflow_clock_middle},
-          {:pattern, @timeout_value_pattern},
-          {:literal, @workflow_clock_separator},
-          {:pattern, @timeout_value_pattern},
-          {:literal, @workflow_clock_suffix}
-        ]
+        clock_template(limit, phase)
       )
     end
+  end
+
+  defp clock_template(limit, phase) do
+    [
+      {:literal, timeout_prefix(limit)},
+      {:slot, :value, :integer, @timeout_value_pattern},
+      {:literal, " ms was exceeded during #{phase}" <> @workflow_clock_middle},
+      {:slot, :run, :integer, @timeout_value_pattern},
+      {:literal, @workflow_clock_separator},
+      {:slot, :workflow, :integer, @timeout_value_pattern},
+      {:literal, @workflow_clock_suffix}
+    ]
   end
 
   defp timeout_branches(limits) do
     for limit <- limits,
         phase <- @timeout_phases do
-      bounded_branch(
+      DiagnosticPattern.exact_message_schema(
         @timeout_maximum_message_bytes,
-        timeout_prefix(limit),
-        @timeout_value_pattern,
-        timeout_suffix(limit, phase)
+        timeout_template(limit, phase)
       )
     end
   end
 
-  # Every branch here is prose wrapped around one integer, and the prose now
-  # carries the dotted manifest key. `DiagnosticPattern` escapes only the
-  # ECMA-262 metacharacters, so the pattern keeps matching exactly the message
-  # its builder produces.
-  defp bounded_branch(maximum_bytes, prefix, value_pattern, suffix) do
-    DiagnosticPattern.exact_message_schema(maximum_bytes, [
-      {:literal, prefix},
-      {:pattern, value_pattern},
-      {:literal, suffix}
-    ])
+  defp integer_template(prefix, pattern, suffix) do
+    [{:literal, prefix}, {:slot, :value, :integer, pattern}, {:literal, suffix}]
   end
 
-  defp valid_exact_timeout_message?(message, limit, phase) do
-    valid_exact_message?(
-      message,
-      timeout_prefix(limit),
-      timeout_suffix(limit, phase),
-      @subordinate_maximum_digits,
-      &timeout_message(limit, &1, phase)
+  defp timeout_template(limit, phase),
+    do:
+      integer_template(
+        timeout_prefix(limit),
+        @timeout_value_pattern,
+        timeout_suffix(limit, phase)
+      )
+
+  defp event_template(limit) do
+    name = Atom.to_string(limit)
+
+    integer_template(
+      name <> " limit ",
+      @subordinate_limit_pattern,
+      @event_capture_suffix <> name <> @event_capture_remedy
     )
   end
 
-  defp workflow_clock_message?(message, limit, phase) do
-    prefix = timeout_prefix(limit)
-    phase_middle = " ms was exceeded during #{phase}" <> @workflow_clock_middle
+  defp valid_exact_timeout_message?(message, limit, phase) do
+    DiagnosticPattern.valid_template?(timeout_template(limit, phase), message, fn values ->
+      timeout_message(limit, values.value, phase)
+    end)
+  end
 
-    with true <- byte_size(message) <= @workflow_clock_maximum_message_bytes,
-         true <- String.starts_with?(message, prefix),
-         [limit_text, clocks_text] <-
-           String.split(String.trim_leading(message, prefix), phase_middle, parts: 2),
-         [run_text, workflow_text] <-
-           String.split(clocks_text, @workflow_clock_separator, parts: 2),
-         true <- String.ends_with?(workflow_text, @workflow_clock_suffix),
-         workflow_text <- String.trim_trailing(workflow_text, @workflow_clock_suffix),
-         true <- byte_size(limit_text) in 1..@subordinate_maximum_digits,
-         true <- byte_size(run_text) in 1..@subordinate_maximum_digits,
-         true <- byte_size(workflow_text) in 1..@subordinate_maximum_digits,
-         {limit_ms, ""} <- Integer.parse(limit_text),
-         {run_duration_ms, ""} <- Integer.parse(run_text),
-         {workflow_timeout_ms, ""} <- Integer.parse(workflow_text),
-         {:ok, expected} <-
-           workflow_clock_message(
-             limit,
-             limit_ms,
-             phase,
-             run_duration_ms,
-             workflow_timeout_ms
-           ) do
-      message == expected
-    else
-      _invalid -> false
-    end
+  defp workflow_clock_message?(message, limit, phase) do
+    byte_size(message) <= @workflow_clock_maximum_message_bytes and
+      DiagnosticPattern.valid_template?(clock_template(limit, phase), message, fn values ->
+        workflow_clock_message(limit, values.value, phase, values.run, values.workflow)
+      end)
   end
 
   defp workflow_clock_message?(message, limit) do
     Enum.any?(@timeout_phases, &workflow_clock_message?(message, limit, &1))
   end
-
-  defp valid_exact_message?(message, prefix, suffix, maximum_digits, builder),
-    do:
-      DiagnosticPattern.valid_exact_integer_message?(
-        message,
-        prefix,
-        suffix,
-        maximum_digits,
-        builder
-      )
 end

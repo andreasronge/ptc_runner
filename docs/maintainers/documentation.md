@@ -76,8 +76,8 @@ typespecs and links to retained normative references are unaffected.
 - Put exact API contracts in `@moduledoc`, `@doc`, `@typedoc`, types, and specs
   beside the implementation.
 - Reference modules by full name, such as `PtcRunner.Kernel.TraceLog`.
-- Reference functions by name and arity: `query/3` locally or
-  `PtcRunner.Kernel.TraceLog.query/3` across modules. Use
+- Reference functions by name and arity: `append_jsonl/3` locally or
+  `PtcRunner.Kernel.TraceLog.append_jsonl/3` across modules. Use
   `c:GenServer.handle_call/3` for a callback and
   `t:PtcRunner.Kernel.Result.t/0` for a type.
 - Start sections inside module and function documentation with `##`, commonly

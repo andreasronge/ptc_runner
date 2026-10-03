@@ -11,8 +11,8 @@ defmodule PtcRunner.ReplFrontendTest do
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.PrivateDiagnostic
   alias PtcRunner.Kernel.SafeMetadata
-  alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.TestSupport.PrivateInspectionFixture
+  alias PtcRunner.TestSupport.TraceQuery
 
   setup_all do
     PrivateInspectionFixture.seed_context(["private-run"])
@@ -482,7 +482,7 @@ defmodule PtcRunner.ReplFrontendTest do
   } do
     path = Path.join(directory, "repl.jsonl")
     assert "3\n" = capture_io(fn -> run_repl(["--trace", path, "-e", "(+ 1 2)"]) end)
-    {:ok, trace_log} = TraceLog.new(source: {:file, path})
+    {:ok, trace_log} = TraceQuery.new(source: {:file, path})
 
     assert {:ok,
             %{
@@ -490,7 +490,7 @@ defmodule PtcRunner.ReplFrontendTest do
                 %{"complete" => true, "name" => name}
               ]
             }} =
-             TraceLog.query(trace_log, :list_runs, %{})
+             TraceQuery.query(trace_log, :list_runs, %{})
 
     assert name == SafeMetadata.fingerprint("ptc.repl")
   end

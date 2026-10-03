@@ -12,8 +12,8 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
   @moduletag :operator
 
   alias PtcRunner.Examples.KernelInspectionLab
-  alias PtcRunner.Kernel.ViewerAdapter
   alias PtcRunner.MixCommandAdapter
+  alias PtcRunner.TestSupport.InspectionFixture
   alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
 
@@ -112,30 +112,32 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
              end)
 
       assert {:ok, inspection_source} =
-               ViewerAdapter.pin_inspection(journey.inspection, {:file, journey.trace})
+               InspectionFixture.pin_inspection(journey.inspection, {:file, journey.trace})
 
-      {:ok, inspection_store} = PtcViewer.InspectionStore.start(inspection_source)
+      {:ok, inspection_store} = PtcViewer.InspectionStore.start(inspection_source.inspection)
 
       viewer_opts = [
+        expected_port: 80,
         trace_dir: Path.dirname(journey.trace),
-        kernel_trace_adapter: ViewerAdapter,
+        trace_source: inspection_source.trace,
+        kernel_trace_adapter: PtcRunner.Kernel.ProjectViewerAdapter,
         inspection_store: inspection_store,
-        inspection_adapter: ViewerAdapter
+        inspection_adapter: PtcRunner.Kernel.ProjectViewerAdapter
       ]
 
       conversation =
-        Plug.Test.conn(:get, "/api/analysis/runs/#{journey.run_id}/conversation")
+        Plug.Test.conn(:get, "http://localhost/api/analysis/runs/#{journey.run_id}/conversation")
         |> PtcViewer.Router.call(PtcViewer.Router.init(viewer_opts))
 
       assert conversation.status == 200
       assert %{"streams" => [%{"turns" => [_ | _]}]} = Jason.decode!(conversation.resp_body)
 
       metadata =
-        Plug.Test.conn(:get, "/api/kernel/runs/#{journey.run_id}")
+        Plug.Test.conn(:get, "http://localhost/api/kernel/runs/#{journey.run_id}")
         |> PtcViewer.Router.call(PtcViewer.Router.init(viewer_opts))
 
       turns =
-        Plug.Test.conn(:get, "/api/kernel/runs/#{journey.run_id}/turns?limit=100")
+        Plug.Test.conn(:get, "http://localhost/api/kernel/runs/#{journey.run_id}/turns?limit=100")
         |> PtcViewer.Router.call(PtcViewer.Router.init(viewer_opts))
 
       assert metadata.status == 200

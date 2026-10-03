@@ -191,10 +191,6 @@ defmodule PtcRunner.Kernel.RunAdmission do
   def await(_), do: {:error, :execution_session_unavailable}
 
   @doc false
-  @spec reservation_snapshot(reservation()) :: {:ok, snapshot()} | {:error, atom()}
-  def reservation_snapshot({__MODULE__, host, _}), do: snapshot(host)
-
-  @doc false
   @spec retain_publication(reservation()) :: :ok | {:error, atom()}
   def retain_publication({__MODULE__, host, ref}), do: call(host, {:retain_publication, ref})
 

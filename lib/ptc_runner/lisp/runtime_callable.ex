@@ -83,10 +83,6 @@ defmodule PtcRunner.Lisp.RuntimeCallable do
     end)
   end
 
-  @spec serializable?(term()) :: boolean()
-  def serializable?(%__MODULE__{}), do: false
-  def serializable?(_), do: true
-
   defp core_call(%__MODULE__{namespace: :tool, name: name}, args) do
     {:ok, {:tool_call, name, literal_args(args)}}
   end

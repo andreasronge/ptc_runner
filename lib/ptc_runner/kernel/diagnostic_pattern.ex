@@ -1,6 +1,91 @@
 defmodule PtcRunner.Kernel.DiagnosticPattern do
   @moduledoc false
 
+  # A template is a list of literal segments and named typed slots:
+  # {:slot, name, :integer | :text, ecma262_pattern}. Rendered text, parser
+  # captures, and schema patterns all come from these same segments. Callers
+  # keep domain checks (relationships, canonical lists, and disclosure policy)
+  # in their builders and pass those builders to valid_template?/3.
+  @type segment ::
+          {:literal, binary()} | {:slot, atom(), :integer | :text, binary()}
+  @type template :: [segment()]
+
+  @doc "Renders trusted, already domain-validated values through a template."
+  @spec render(template(), map()) :: binary()
+  def render(parts, values) do
+    Enum.map_join(parts, fn
+      {:literal, text} -> text
+      {:slot, name, :integer, _pattern} -> Integer.to_string(Map.fetch!(values, name))
+      {:slot, name, :text, _pattern} -> Map.fetch!(values, name)
+    end)
+  end
+
+  @doc "Derives the unanchored ECMA-262 pattern from a template."
+  @spec body(template()) :: binary()
+  def body(parts) do
+    Enum.map_join(parts, fn
+      {:literal, text} -> escape(text)
+      {:slot, _name, _type, pattern} -> pattern
+    end)
+  end
+
+  @doc """
+  Parses bounded slot syntax, retaining canonical integer spelling.
+
+  Pass `"u"` for codecs whose pattern widths count Unicode codepoints.
+  The default retains byte-oriented parsing for ASCII diagnostic grammars.
+  """
+  @spec parse(template(), term(), binary()) :: {:ok, map()} | :error
+  def parse(parts, message, regex_options \\ "")
+
+  def parse(parts, message, regex_options) when is_binary(message) do
+    source =
+      Enum.map_join(parts, fn
+        {:literal, text} -> escape(text)
+        {:slot, name, _type, pattern} -> "(?<#{name}>#{pattern})"
+      end)
+
+    case Regex.named_captures(Regex.compile!(exact(source), regex_options), message) do
+      nil -> :error
+      captures -> decode_slots(parts, captures)
+    end
+  end
+
+  def parse(_parts, _message, _regex_options), do: :error
+
+  @doc "Validates syntax and canonical output using the domain builder."
+  @spec valid_template?(template(), term(), (map() -> {:ok, binary()} | :error)) :: boolean()
+  def valid_template?(parts, message, builder) do
+    case parse(parts, message) do
+      {:ok, values} -> builder.(values) == {:ok, message}
+      :error -> false
+    end
+  end
+
+  defp decode_slots(parts, captures) do
+    Enum.reduce_while(parts, {:ok, %{}}, fn
+      {:literal, _text}, result ->
+        {:cont, result}
+
+      {:slot, name, type, _pattern}, {:ok, values} ->
+        text = Map.fetch!(captures, Atom.to_string(name))
+
+        case decode_slot(type, text) do
+          {:ok, value} -> {:cont, {:ok, Map.put(values, name, value)}}
+          :error -> {:halt, :error}
+        end
+    end)
+  end
+
+  defp decode_slot(:text, text), do: {:ok, text}
+
+  defp decode_slot(:integer, text) do
+    case Integer.parse(text) do
+      {value, ""} -> if Integer.to_string(value) == text, do: {:ok, value}, else: :error
+      _invalid -> :error
+    end
+  end
+
   # JSON Schema `pattern` is ECMA-262, not PCRE. `Regex.escape/1` escapes every
   # non-word character — spaces included — which PCRE accepts and a strict
   # ECMA-262 engine rejects, so a message built from prose needs an escaper that
@@ -31,52 +116,18 @@ defmodule PtcRunner.Kernel.DiagnosticPattern do
   @doc """
   Publishes one bounded message as an exact JSON Schema string branch.
 
-  `parts` alternates literal prose and ECMA-262 value patterns. Only the
-  literals are escaped, so the published pattern admits exactly the text its
-  builder produces and nothing longer.
+  `parts` is the same typed template used by the renderer and parser.
+  Only literal segments are escaped. Slot patterns describe syntax; domain
+  relationships are enforced by the builder during admission.
   """
-  @spec exact_message_schema(pos_integer(), [{:literal | :pattern, binary()}]) :: map()
+  @spec exact_message_schema(pos_integer(), template()) :: map()
   def exact_message_schema(maximum_bytes, parts)
       when is_integer(maximum_bytes) and maximum_bytes > 0 and is_list(parts) do
-    body =
-      Enum.map_join(parts, fn
-        {:literal, text} when is_binary(text) -> escape(text)
-        {:pattern, pattern} when is_binary(pattern) -> pattern
-      end)
-
     %{
       "type" => "string",
       "minLength" => 1,
       "maxLength" => maximum_bytes,
-      "pattern" => exact(body)
+      "pattern" => exact(body(parts))
     }
   end
-
-  @doc false
-  @spec valid_exact_integer_message?(
-          binary(),
-          binary(),
-          binary(),
-          pos_integer(),
-          (integer() -> {:ok, binary()} | :error)
-        ) :: boolean()
-  def valid_exact_integer_message?(message, prefix, suffix, maximum_digits, builder)
-      when is_binary(message) and is_binary(prefix) and is_binary(suffix) and
-             is_integer(maximum_digits) and maximum_digits > 0 and is_function(builder, 1) do
-    with true <- String.starts_with?(message, prefix),
-         true <- String.ends_with?(message, suffix),
-         digits_bytes <- byte_size(message) - byte_size(prefix) - byte_size(suffix),
-         true <- digits_bytes in 1..maximum_digits,
-         digits <- binary_part(message, byte_size(prefix), digits_bytes),
-         {value, ""} <- Integer.parse(digits),
-         true <- Integer.to_string(value) == digits,
-         {:ok, expected} <- builder.(value) do
-      message == expected
-    else
-      _invalid -> false
-    end
-  end
-
-  def valid_exact_integer_message?(_message, _prefix, _suffix, _maximum_digits, _builder),
-    do: false
 end

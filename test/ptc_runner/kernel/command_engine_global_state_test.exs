@@ -983,7 +983,14 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
     preparation =
       Task.async(fn ->
         receive do
-          :prepare -> CommandEngine.prepare(["run", application, "--output", "result.json"])
+          :prepare ->
+            {:ok, prepared} =
+              CommandEngine.prepare(["run", application, "--output", "result.json"])
+
+            # The task owns the preparation; close it before owner exit can
+            # race the caller's assertions against lifecycle cleanup.
+            assert :ok = CommandPreparation.close(prepared)
+            {:ok, prepared}
         end
       end)
 
@@ -1003,7 +1010,6 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
            }
 
     assert preparation.artifact_destination_failures == []
-    assert :ok = CommandPreparation.close(preparation)
   end
 
   @tag :tmp_dir

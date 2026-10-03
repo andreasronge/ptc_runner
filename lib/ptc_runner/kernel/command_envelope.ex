@@ -61,12 +61,11 @@ defmodule PtcRunner.Kernel.CommandEnvelope do
     end
   end
 
-  @doc false
   @spec publish_all(CommandOutcome.t(), [destination()]) ::
           :ok
           | {:partial, [binary()], [{binary(), term()}]}
           | {:error, term()}
-  def publish_all(%CommandOutcome{} = outcome, paths) when is_list(paths) do
+  defp publish_all(%CommandOutcome{} = outcome, paths) when is_list(paths) do
     results =
       paths
       |> Enum.reject(&is_nil/1)
