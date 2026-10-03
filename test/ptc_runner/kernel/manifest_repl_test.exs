@@ -21,7 +21,7 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.ReplSessionOwner
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
-  alias PtcRunner.Kernel.TraceLog
+  alias PtcRunner.TestSupport.TraceQuery
 
   @tag :tmp_dir
   test "manifest preparation seals retain their exact struct domain", %{tmp_dir: directory} do
@@ -408,7 +408,7 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
     assert {:ok, _events} = ReplSession.close(session)
     assert {:ok, %File.Stat{mode: mode}} = File.stat(trace_path)
     assert Bitwise.band(mode, 0o777) == 0o600
-    assert {:ok, _trace} = TraceLog.new(source: {:private_file, trace_path})
+    assert {:ok, _trace} = TraceQuery.new(source: {:private_file, trace_path})
   end
 
   @tag :tmp_dir

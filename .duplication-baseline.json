@@ -103,24 +103,6 @@
       ],
       "type": "type_ii"
     },
-    "4867a1875b611e451b6ac2b0d81824c975062e0902ccea3d5c1a793c0516e38e": {
-      "describe": "type_i mass=41 test/ptc_runner/lisp/signature/coercion_test.exs:175 <-> test/ptc_runner/lisp/signature/coercion_test.exs:269",
-      "files": [
-        "test/ptc_runner/lisp/signature/coercion_test.exs"
-      ],
-      "mass": 41,
-      "occurrences": [
-        {
-          "file": "test/ptc_runner/lisp/signature/coercion_test.exs",
-          "snippet": "4906b7065e5e66f70810ccae09b360ce2697ce370ba620fc5f5d8d479548e0dd"
-        },
-        {
-          "file": "test/ptc_runner/lisp/signature/coercion_test.exs",
-          "snippet": "4906b7065e5e66f70810ccae09b360ce2697ce370ba620fc5f5d8d479548e0dd"
-        }
-      ],
-      "type": "type_i"
-    },
     "621a8fcdaa04246456265b2ed4cf9c7c8510c612d22b6e291352611505c044ed": {
       "describe": "type_i mass=32 lib/ptc_runner/kernel/session_trace.ex:394 <-> lib/ptc_runner/kernel/session_trace.ex:44",
       "files": [
@@ -417,24 +399,6 @@
         {
           "file": "lib/ptc_runner/lisp/runtime/callable.ex",
           "snippet": "b63dd3091059d05cd324f3b990d10b17b5ba7d665d5f917b46d400c4ed17287b"
-        }
-      ],
-      "type": "type_i"
-    },
-    "e88d700823005b5a71c4c23f0d9d9bedf77b737a29b641e125a377ed04edad99": {
-      "describe": "type_i mass=32 lib/ptc_runner/lisp/core_to_source.ex:1323 <-> lib/ptc_runner/lisp/core_to_source.ex:1340",
-      "files": [
-        "lib/ptc_runner/lisp/core_to_source.ex"
-      ],
-      "mass": 32,
-      "occurrences": [
-        {
-          "file": "lib/ptc_runner/lisp/core_to_source.ex",
-          "snippet": "e44079925ac21107643241dec859490e7fb3bd44c06e7059d2d9c3fc2dabaaf7"
-        },
-        {
-          "file": "lib/ptc_runner/lisp/core_to_source.ex",
-          "snippet": "e44079925ac21107643241dec859490e7fb3bd44c06e7059d2d9c3fc2dabaaf7"
         }
       ],
       "type": "type_i"

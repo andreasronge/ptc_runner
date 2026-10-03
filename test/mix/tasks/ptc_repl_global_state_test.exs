@@ -11,9 +11,9 @@ defmodule PtcRunner.ReplFrontendGlobalStateTest do
   import PtcRunner.TestSupport.ReplFrontendFixtures
 
   alias PtcRunner.Kernel.SafeMetadata
-  alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Lisp.NamespaceDiagnostic
   alias PtcRunner.TestSupport.PrivateInspectionFixture
+  alias PtcRunner.TestSupport.TraceQuery
 
   @stdio_root Path.expand("../../..", __DIR__)
   @stdio_fixture Path.expand("../../support/mcp_stdio_source_fixture.sh", __DIR__)
@@ -197,10 +197,10 @@ defmodule PtcRunner.ReplFrontendGlobalStateTest do
     assert log_analysis_session_pids() == before_sessions
 
     trace_path = Path.join(output_directory, trace_name)
-    assert {:ok, trace} = TraceLog.new(source: {:file, trace_path})
+    assert {:ok, trace} = TraceQuery.new(source: {:file, trace_path})
 
     assert {:ok, %{"items" => [%{"name" => name, "session_profile" => profile}]}} =
-             TraceLog.query(trace, :list_runs, %{})
+             TraceQuery.query(trace, :list_runs, %{})
 
     assert name == SafeMetadata.fingerprint("ptc.run-analysis.repl")
     assert profile["id"] == "run-analysis-v1"

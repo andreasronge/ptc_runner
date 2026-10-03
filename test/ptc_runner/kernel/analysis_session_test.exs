@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.SessionTrace
   alias PtcRunner.Kernel.TraceLog
+  alias PtcRunner.TestSupport.TraceQuery
 
   @lifecycle_timeout_ms 30_000
 
@@ -790,10 +791,10 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     assert File.regular?(path)
     refute File.read!(path) =~ "private-source-sentinel"
     refute File.read!(path) =~ secret_source
-    assert {:ok, trace} = TraceLog.new(source: {:file, path})
+    assert {:ok, trace} = TraceQuery.new(source: {:file, path})
 
     assert {:ok, %{"run_id" => run_id, "status" => "ok"} = run} =
-             TraceLog.query(trace, :get_run, %{"run_id" => info.session_id})
+             TraceQuery.query(trace, :get_run, %{"run_id" => info.session_id})
 
     assert run_id == info.session_id
 
@@ -803,7 +804,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
            }
 
     assert {:ok, %{"items" => turns}} =
-             TraceLog.query(trace, :list_turns, %{"run_id" => info.session_id})
+             TraceQuery.query(trace, :list_turns, %{"run_id" => info.session_id})
 
     assert Enum.count(turns, &(&1["type"] == "run-stopped")) == 1
   end
@@ -899,10 +900,10 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     assert {:ok, %{lifecycle: :closed}} = AnalysisSession.close(session)
 
     assert {:ok, trace} =
-             TraceLog.new(source: {:file, Path.join(directory, info.session_id <> ".jsonl")})
+             TraceQuery.new(source: {:file, Path.join(directory, info.session_id <> ".jsonl")})
 
     assert {:ok, %{"status" => "error", "terminal_reason" => "subordinate_evaluations"}} =
-             TraceLog.query(trace, :get_run, %{"run_id" => info.session_id})
+             TraceQuery.query(trace, :get_run, %{"run_id" => info.session_id})
   end
 
   @tag :tmp_dir
@@ -947,10 +948,10 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
              AnalysisSession.info(session)
 
     path = Path.join(directory, info.session_id <> ".jsonl")
-    assert {:ok, trace} = TraceLog.new(source: {:file, path})
+    assert {:ok, trace} = TraceQuery.new(source: {:file, path})
 
     assert {:ok, %{"status" => "ok"}} =
-             TraceLog.query(trace, :get_run, %{"run_id" => info.session_id})
+             TraceQuery.query(trace, :get_run, %{"run_id" => info.session_id})
 
     AnalysisSession.stop(session)
   end
@@ -981,10 +982,10 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
       end
 
       path = Path.join(directory, info.session_id <> ".jsonl")
-      assert {:ok, trace} = TraceLog.new(source: {:file, path})
+      assert {:ok, trace} = TraceQuery.new(source: {:file, path})
 
       assert {:ok, %{"status" => "error", "terminal_reason" => "protocol_errors"}} =
-               TraceLog.query(trace, :get_run, %{"run_id" => info.session_id})
+               TraceQuery.query(trace, :get_run, %{"run_id" => info.session_id})
     end
   end
 
@@ -1021,10 +1022,10 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
 
     path = Path.join(directory, info.session_id <> ".jsonl")
     assert File.regular?(path)
-    assert {:ok, trace} = TraceLog.new(source: {:file, path})
+    assert {:ok, trace} = TraceQuery.new(source: {:file, path})
 
     assert {:ok, %{"status" => "error", "terminal_reason" => "protocol_errors"}} =
-             TraceLog.query(trace, :get_run, %{"run_id" => info.session_id})
+             TraceQuery.query(trace, :get_run, %{"run_id" => info.session_id})
   end
 
   @tag :tmp_dir
@@ -1475,10 +1476,10 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     assert List.last(events)["type"] == "run-stopped"
     assert length(events) == PublicRunAnalysisProfile.limits().normal_event_count
 
-    assert {:ok, trace} = TraceLog.new(source: {:file, path})
+    assert {:ok, trace} = TraceQuery.new(source: {:file, path})
 
     assert {:ok, %{"truncated" => true}} =
-             TraceLog.query(trace, :get_run, %{"run_id" => info.session_id})
+             TraceQuery.query(trace, :get_run, %{"run_id" => info.session_id})
   end
 
   @tag :tmp_dir
@@ -1498,10 +1499,10 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     assert_receive {:DOWN, ^trace_ref, :process, _pid, :normal}, @lifecycle_timeout_ms
 
     path = Path.join(directory, info.session_id <> ".jsonl")
-    assert {:ok, trace} = TraceLog.new(source: {:file, path})
+    assert {:ok, trace} = TraceQuery.new(source: {:file, path})
 
     assert {:ok, %{"status" => "error", "terminal_reason" => "session_owner_failed"}} =
-             TraceLog.query(trace, :get_run, %{"run_id" => info.session_id})
+             TraceQuery.query(trace, :get_run, %{"run_id" => info.session_id})
   end
 
   @tag :tmp_dir
@@ -1528,10 +1529,10 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     assert_receive {:DOWN, ^trace_ref, :process, _pid, :normal}, @lifecycle_timeout_ms
 
     path = Path.join(directory, info.session_id <> ".jsonl")
-    assert {:ok, trace} = TraceLog.new(source: {:file, path})
+    assert {:ok, trace} = TraceQuery.new(source: {:file, path})
 
     assert {:ok, %{"status" => "error", "terminal_reason" => "subordinate_evaluations"}} =
-             TraceLog.query(trace, :get_run, %{"run_id" => info.session_id})
+             TraceQuery.query(trace, :get_run, %{"run_id" => info.session_id})
   end
 
   @tag :tmp_dir
