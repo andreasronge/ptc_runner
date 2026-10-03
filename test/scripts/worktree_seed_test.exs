@@ -240,6 +240,7 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
              "mise|exec -- mix deps.get|#{worktree}|0022",
              "mise|exec -- mix deps.get|#{worktree}/ptc_viewer|0022",
              "mise|exec -- mix deps.get|#{worktree}/ptc_runner_launcher|0022",
+             "mise|exec -- mix deps.get|#{worktree}/ptc_gateway|0022",
              "mise|exec -- mix compile|#{worktree}|0022"
            ]
   end

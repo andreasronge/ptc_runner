@@ -10,6 +10,23 @@ defmodule PtcViewer.RouterTest do
     %{trace_dir: trace_dir, router_opts: [trace_dir: trace_dir, kernel_trace_adapter: nil]}
   end
 
+  test "foreign authorities are rejected before every route", %{router_opts: opts} do
+    opts = Keyword.put(opts, :expected_port, 80)
+
+    for {method, path} <- [
+          {:get, "/api/kernel/runs"},
+          {:get, "/api/analysis/runs/run-1/conversation"},
+          {:post, "/api/kernel/refresh"},
+          {:get, "/js/kernel-transcript.js"},
+          {:get, "/"},
+          {:get, "/unknown"}
+        ] do
+      response = conn(method, "http://evil.example" <> path) |> call_router(opts)
+      assert response.status == 403
+      assert response.resp_body =~ "forbidden_request"
+    end
+  end
+
   test "canonical transcript frontend asset is served", %{router_opts: router_opts} do
     conn = conn(:get, "/js/kernel-transcript.js") |> call_router(router_opts)
 
@@ -396,5 +413,8 @@ defmodule PtcViewer.RouterTest do
     assert missing.resp_body == "Trace refresh unavailable"
   end
 
-  defp call_router(conn, opts), do: PtcViewer.Router.call(conn, PtcViewer.Router.init(opts))
+  defp call_router(conn, opts) do
+    conn = if conn.host == "www.example.com", do: %{conn | host: "localhost"}, else: conn
+    PtcViewer.Router.call(conn, PtcViewer.Router.init(Keyword.put_new(opts, :expected_port, 80)))
+  end
 end

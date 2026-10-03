@@ -18,6 +18,7 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandPreparation
   alias PtcRunner.Kernel.CommandRenderer
+  alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.ModelContractDiagnostic
@@ -25,6 +26,129 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
   alias PtcRunner.StandaloneCLI
   alias PtcRunner.TestSupport.HTTPRequest
   alias PtcRunner.TestSupport.LLMSupport
+
+  @tag :tmp_dir
+  test "command uses the scoped snapshot, strips one quote pair, warns and restores on failure",
+       %{
+         tmp_dir: dir
+       } do
+    keys = [
+      "PTC_TEST_ABSENT_KEY",
+      "PTC_ENV_ADDED",
+      "HOME",
+      "LD_PTC_TEST",
+      "DYLD_PTC_TEST",
+      "PATH"
+    ]
+
+    previous = Map.new(keys, &{&1, System.get_env(&1)})
+
+    on_exit(fn ->
+      Enum.each(previous, fn
+        {key, nil} -> System.delete_env(key)
+        {key, value} -> System.put_env(key, value)
+      end)
+    end)
+
+    System.delete_env("PTC_TEST_ABSENT_KEY")
+    System.delete_env("PTC_ENV_ADDED")
+
+    host =
+      write_host_config(dir, "snapshot-env", short_acquisition_stdio_host("PTC_TEST_ABSENT_KEY"))
+
+    application = doctor_application(dir, "snapshot-env", mission: ["workspace"])
+    path = Path.join(dir, "snapshot.env")
+
+    for sensitive <- ["HOME", "PATH", "LD_PTC_TEST", "DYLD_PTC_TEST"] do
+      File.write!(path, "PTC_TEST_ABSENT_KEY=\"\"secret\"\"\n#{sensitive}=private-override\n")
+
+      warning =
+        ExUnit.CaptureIO.capture_io(:stderr, fn ->
+          PtcRunner.Dotenv.with_file_scope(path, fn ->
+            File.write!(path, "PTC_ENV_ADDED=must-not-load\n")
+
+            {:ok, runtime} =
+              CommandRuntime.new(
+                environment_setup: fn ->
+                  assert System.get_env("PTC_TEST_ABSENT_KEY") == "\"secret\""
+                  assert System.get_env("PTC_ENV_ADDED") == nil
+                  assert System.get_env(sensitive) == "private-override"
+                  send(self(), :snapshot_observed)
+                  {:error, :scope_test_failure}
+                end
+              )
+
+            assert {:error, outcome} =
+                     CommandEngine.dispatch(
+                       [
+                         "run",
+                         application,
+                         "--host-config",
+                         host,
+                         "--env-file",
+                         path
+                       ],
+                       runtime
+                     )
+
+            assert outcome.exit_status == 70
+            assert outcome.envelope["error"]["provider_activity"] == false
+            assert_received :snapshot_observed
+            assert System.get_env("PTC_TEST_ABSENT_KEY") == nil
+            assert System.get_env("PTC_ENV_ADDED") == nil
+            assert System.get_env(sensitive) == previous[sensitive]
+          end)
+        end)
+
+      assert warning =~ "warning: environment file overrides"
+      refute warning =~ "private-override"
+      refute warning =~ "secret"
+      assert System.get_env("PTC_TEST_ABSENT_KEY") == nil
+      assert System.get_env("PTC_ENV_ADDED") == nil
+      assert System.get_env(sensitive) == previous[sensitive]
+    end
+  end
+
+  @tag :tmp_dir
+  test "env-file rejects malformed assignments before changing any environment", %{tmp_dir: dir} do
+    key = "PTC_STRICT_ENV_BOUNDARY"
+    previous = System.get_env(key)
+
+    on_exit(fn ->
+      if previous, do: System.put_env(key, previous), else: System.delete_env(key)
+    end)
+
+    System.put_env(key, "inherited")
+    host = write_host_config(dir, "strict-env", env_credential_host())
+    application = doctor_application(dir, "strict-env", workflow: ["model"])
+    path = Path.join(dir, "strict.env")
+
+    for invalid <- [
+          "export FOO=x",
+          "A B=x",
+          "=x",
+          "1KEY=x",
+          "NO_ASSIGNMENT",
+          "FOO=\"mismatch'",
+          "FOO='unclosed",
+          "FOO=x\0y"
+        ] do
+      File.write!(path, "#{key}=changed\n#{invalid}\n")
+
+      for command <- ["run", "doctor"] do
+        extra = if command == "doctor", do: ["--connect"], else: []
+
+        presentation =
+          StandaloneCLI.execute(
+            [command, application, "--host-config", host, "--env-file", path] ++ extra
+          )
+
+        assert presentation.exit_status == 4, inspect(presentation.outcome.envelope)
+        assert presentation.outcome.envelope["error"]["code"] == "environment_file_invalid"
+        assert System.get_env(key) == "inherited"
+      end
+    end
+  end
 
   @tag :tmp_dir
   test "plain doctor locally refuses uncataloged cost reservation pricing", %{

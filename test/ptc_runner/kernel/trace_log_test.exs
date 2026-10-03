@@ -408,27 +408,32 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     assert {:ok, ^sigma_identity} = TraceLog.append_lock_identity(final_sigma)
   end
 
+  # Every append spawns lock helpers, which cost tens of milliseconds on macOS,
+  # so the bound is proven by the lock-name space rather than by brute force:
+  # three hex digits admit exactly 4,096 names, and a per-path name fails.
   @tag :tmp_dir
   @tag :slow
-  @tag timeout: 300_000
-  test "ten thousand append destinations use a bounded lock namespace", %{tmp_dir: directory} do
+  @tag timeout: 120_000
+  test "append destinations share a bounded lock namespace", %{tmp_dir: directory} do
     executable = System.find_executable("elixir") || flunk("elixir is required")
     code_paths = Enum.flat_map(:code.get_path(), fn path -> ["-pa", List.to_string(path)] end)
 
     code = """
     root = #{inspect(directory)}
-    1..10_000
+    1..1_000
     |> Task.async_stream(fn index ->
       path = Path.join(root, "trace-\#{index}.jsonl")
       PtcRunner.Kernel.TraceLog.append_jsonl(path, [])
     end, max_concurrency: 16, timeout: 30_000)
     |> Enum.each(fn {:ok, :ok} -> :ok end)
     [lock_root] = Path.wildcard(Path.join(root, "ptc-runner-trace-append-locks-*"))
-    IO.puts(length(File.ls!(lock_root)))
+    IO.puts(Enum.join(File.ls!(lock_root), "\n"))
     """
 
     {output, 0} = System.cmd(executable, code_paths ++ ["-e", code], env: [{"TMPDIR", directory}])
-    assert String.to_integer(String.trim(output)) <= 4_096
+    names = String.split(output, "\n", trim: true)
+    assert names != []
+    assert Enum.all?(names, &Regex.match?(~r/\Abucket-[0-9a-f]{3}\.lock\z/, &1))
   end
 
   @tag :tmp_dir

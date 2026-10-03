@@ -19,13 +19,14 @@ mise install
 mix deps.get
 (cd ptc_viewer && mix deps.get)
 (cd ptc_runner_launcher && mix deps.get)
+(cd ptc_gateway && mix deps.get)
 mix compile
 ```
 
-The nested projects are listed because `mix test` inside `ptc_viewer/` or
-`ptc_runner_launcher/` needs them; no gate depends on your having run them.
-`mix precommit` opens with `scripts/ci/preflight.sh`, which fetches both, and
-each gate fetches the project it compiles — running
+The nested projects are listed because `mix test` inside `ptc_viewer/`,
+`ptc_runner_launcher/`, or `ptc_gateway/` needs them; no gate depends on your
+having run them. `mix precommit` opens with `scripts/ci/preflight.sh`, which
+fetches all three, and each gate fetches the project it compiles — running
 `mix deps.get --check-locked`, the command GitHub runs once per job.
 
 ### PtcLlmHttp compatibility coverage
@@ -49,7 +50,7 @@ The focused tests use only a loopback raw HTTP fixture and no credentials.
 `deps/`, `_build/`, and `priv/plts/` (root, Viewer, launcher, and gateway),
 then runs `scripts/worktree.sh init` so the checkout is ready for tests. Initialization
 installs the shared Git hooks, installs the pinned toolchain through `mise`,
-fetches root/Viewer/launcher dependencies, compiles the root project, and
+fetches root/Viewer/launcher/gateway dependencies, compiles the root project, and
 removes group-write permissions under a `0022` umask so Linux cloud agents do
 not create directory trees that fail private-destination safety tests. Pass
 `new --no-init` only when deliberately deferring that work, then run

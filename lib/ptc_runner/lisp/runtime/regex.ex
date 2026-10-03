@@ -1,7 +1,10 @@
 defmodule PtcRunner.Lisp.Runtime.Regex do
   @moduledoc """
   Minimal, safe Regex support for PTC-Lisp.
-  Uses Erlang's :re directly with match limits for ReDoS protection.
+  Uses Erlang's :re with uniform match and recursion limits for ReDoS protection.
+  Inputs must be valid UTF-8 and are truncated to a complete codepoint within
+  32,768 bytes. Invalid inputs and limit failures raise exceptions that the
+  interpreter converts to recoverable signals.
   """
 
   alias PtcRunner.Lisp.Runtime.String, as: RuntimeString
@@ -15,25 +18,23 @@ defmodule PtcRunner.Lisp.Runtime.Regex do
   Compile a string into a regex.
   Returns opaque {:re_mp, mp, anchored_mp, source} tuple.
   Both normal and anchored versions are pre-compiled for performance and safety.
+  Source patterns are limited to 256 bytes and use Unicode character classes.
+  Additional compile options support case-insensitive grep matching.
   """
-  def re_pattern(s) when is_binary(s) do
+  def re_pattern(s, options \\ []) when is_binary(s) do
     if byte_size(s) > @max_pattern_bytes do
       raise ArgumentError, "Regex pattern exceeds maximum length of #{@max_pattern_bytes} bytes"
     end
 
-    case :re.compile(s, [:unicode, :ucp]) do
+    mp = compile!(s, options)
+    anchored_mp = compile!("\\A(?:#{s})\\z", options)
+    {:re_mp, mp, anchored_mp, s}
+  end
+
+  defp compile!(source, options) do
+    case :re.compile(source, [:unicode, :ucp | options]) do
       {:ok, mp} ->
-        # Pre-compile anchored version for re-matches to avoid runtime overhead and limit bypass
-        anchored_source = "\\A(?:#{s})\\z"
-
-        case :re.compile(anchored_source, [:unicode, :ucp]) do
-          {:ok, anchored_mp} ->
-            {:re_mp, mp, anchored_mp, s}
-
-          {:error, {reason, _}} ->
-            # This should rarely happen if 's' is valid
-            raise ArgumentError, "Failed to anchor regex: #{List.to_string(reason)}"
-        end
+        mp
 
       {:error, {reason, pos}} ->
         raise ArgumentError, "Invalid regex at position #{pos}: #{List.to_string(reason)}"
@@ -45,35 +46,27 @@ defmodule PtcRunner.Lisp.Runtime.Regex do
   Returns string if no groups, or vector of [full match, group1, ...] if groups.
   """
   def re_find({:re_mp, mp, _, _}, s) when is_binary(s) do
-    s
-    |> truncate_input()
-    |> run_safe(mp)
+    run_safe(s, mp, [], fn _input, result -> first_match(result) end)
   end
 
   @doc """
-  Returns match if regex matches the entire string.
+  Returns match if regex matches the entire truncated string.
   """
   def re_matches({:re_mp, _, anchored_mp, _}, s) when is_binary(s) do
-    s
-    |> truncate_input()
-    |> run_safe(anchored_mp)
+    run_safe(s, anchored_mp, [], fn _input, result -> first_match(result) end)
   end
 
-  defp run_safe(input, mp) do
-    opts = [
-      :report_errors,
-      {:match_limit, @match_limit},
-      {:match_limit_recursion, @recursion_limit},
-      {:capture, :all, :binary}
-    ]
+  @run_limits [match_limit: @match_limit, match_limit_recursion: @recursion_limit]
 
-    case :re.run(input, mp, opts) do
-      {:match, matches} ->
-        unwrap(matches)
+  # split/replace reject :report_errors. Preflight the same global scan before
+  # invoking them, and keep the limits on their second scan as well.
+  defp run_safe(s, mp, options, finish) do
+    input = truncate_input(s)
 
-      :nomatch ->
-        nil
+    result =
+      :re.run(input, mp, [:report_errors, {:capture, :all, :binary}] ++ options ++ @run_limits)
 
+    case result do
       {:error, :match_limit} ->
         raise RuntimeError, "Regex complexity limit exceeded (ReDoS protection)"
 
@@ -82,75 +75,69 @@ defmodule PtcRunner.Lisp.Runtime.Regex do
 
       {:error, reason} ->
         raise RuntimeError, "Regex execution error: #{inspect(reason)}"
+
+      result ->
+        finish.(input, result)
     end
   end
 
   defp truncate_input(s) do
+    unless String.valid?(s) do
+      raise ArgumentError, "Regex input must be valid UTF-8"
+    end
+
     if byte_size(s) > @max_input_bytes do
-      binary_part(s, 0, @max_input_bytes)
+      binary_part(s, 0, codepoint_boundary(s, @max_input_bytes))
     else
       s
     end
   end
 
+  # The original string is valid, so a continuation byte at the cut means
+  # the preceding codepoint is incomplete. Back off at most three bytes.
+  defp codepoint_boundary(s, offset) do
+    if :binary.at(s, offset) in 0x80..0xBF do
+      codepoint_boundary(s, offset - 1)
+    else
+      offset
+    end
+  end
+
+  defp first_match(:nomatch), do: nil
+  defp first_match({:match, matches}), do: unwrap(matches)
   defp unwrap([full]), do: full
   defp unwrap(matches) when is_list(matches), do: matches
 
   @doc """
-  Split string by regex pattern.
-  Returns list of substrings.
-
-  ## Examples
-      (re-split (re-pattern "\\s+") "a  b   c") => ["a" "b" "c"]
-      (re-split (re-pattern ",") "a,b,c") => ["a" "b" "c"]
+  Split the bounded UTF-8 input by regex pattern, reporting limit failures.
+  Returns list of substrings, including captured delimiters.
   """
   def re_split({:re_mp, mp, _, _}, s) when is_binary(s) do
-    input = truncate_input(s)
+    run_safe(s, mp, [:global], fn input, _result ->
+      :re.split(input, mp, @run_limits)
+    end)
+  end
 
-    opts = [
-      {:match_limit, @match_limit},
-      {:match_limit_recursion, @recursion_limit}
-    ]
-
-    # Unlike :re.run/3, :re.split/3 doesn't return error tuples - it always returns a list
-    :re.split(input, mp, opts)
+  @doc """
+  Replace all matches in the bounded UTF-8 input, reporting limit failures.
+  Replacement syntax follows Erlang's `:re.replace/4`.
+  """
+  def re_replace({:re_mp, mp, _, _}, s, replacement)
+      when is_binary(s) and is_binary(replacement) do
+    run_safe(s, mp, [:global], fn input, _result ->
+      :re.replace(input, mp, replacement, [:global, {:return, :binary} | @run_limits])
+    end)
   end
 
   @doc """
   Find all matches of regex in string.
   Returns list of matches (empty list if no matches).
-
-  ## Examples
-      (re-seq (re-pattern "\\d+") "a1b2c3") => ["1" "2" "3"]
-      (re-seq (re-pattern "(\\d)(\\w)") "1a2b") => [["1a" "1" "a"] ["2b" "2" "b"]]
   """
   def re_seq({:re_mp, mp, _, _}, s) when is_binary(s) do
-    input = truncate_input(s)
-
-    opts = [
-      :global,
-      :report_errors,
-      {:match_limit, @match_limit},
-      {:match_limit_recursion, @recursion_limit},
-      {:capture, :all, :binary}
-    ]
-
-    case :re.run(input, mp, opts) do
-      {:match, matches} ->
-        Enum.map(matches, &unwrap/1)
-
-      :nomatch ->
-        []
-
-      {:error, :match_limit} ->
-        raise RuntimeError, "Regex complexity limit exceeded (ReDoS protection)"
-
-      {:error, :match_limit_recursion} ->
-        raise RuntimeError, "Regex recursion limit exceeded"
-
-      {:error, reason} ->
-        raise RuntimeError, "Regex execution error: #{inspect(reason)}"
-    end
+    run_safe(s, mp, [:global], fn
+      _input, :nomatch -> []
+      _input, {:match, matches} -> Enum.map(matches, &unwrap/1)
+    end)
   end
 
   # ============================================================

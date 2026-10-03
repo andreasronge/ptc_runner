@@ -2,42 +2,6 @@ defmodule PtcRunner.Lisp.Runtime.RegexTest do
   use ExUnit.Case, async: true
   alias PtcRunner.Lisp.Runtime.Regex
 
-  # Define a local version of Regex with low limits to verify error handling logic
-  defmodule LowLimitRegex do
-    @match_limit 1
-    @recursion_limit 1_000
-
-    def re_find({:re_mp, mp, _, _}, s) do
-      run_safe(s, mp)
-    end
-
-    defp run_safe(input, mp) do
-      opts = [
-        :report_errors,
-        {:match_limit, @match_limit},
-        {:match_limit_recursion, @recursion_limit},
-        {:capture, :all, :binary}
-      ]
-
-      case :re.run(input, mp, opts) do
-        {:match, [full]} ->
-          full
-
-        {:match, matches} ->
-          matches
-
-        :nomatch ->
-          nil
-
-        {:error, :match_limit} ->
-          raise RuntimeError, "Regex complexity limit exceeded (ReDoS protection)"
-
-        {:error, reason} ->
-          raise RuntimeError, "Regex execution error: #{inspect(reason)}"
-      end
-    end
-  end
-
   describe "re_pattern/1" do
     test "compiles valid regex" do
       assert {:re_mp, _mp, _anchored, "abc"} = Regex.re_pattern("abc")
@@ -105,17 +69,6 @@ defmodule PtcRunner.Lisp.Runtime.RegexTest do
   end
 
   describe "Safety Mechanisms" do
-    test "LowLimitRegex aborts on match limit" do
-      # Use the exact pattern and input that worked in re_test.exs
-      re = Regex.re_pattern("a+b")
-      input = "aaab"
-
-      # With match_limit 1, "a+b" on "aaab" should hit the limit
-      assert_raise RuntimeError, "Regex complexity limit exceeded (ReDoS protection)", fn ->
-        LowLimitRegex.re_find(re, input)
-      end
-    end
-
     test "truncates long input by bytes" do
       re = Regex.re_pattern("last")
       # Max input is 32KB (32_768 bytes).

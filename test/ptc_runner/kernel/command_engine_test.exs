@@ -8954,20 +8954,27 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
-  test "compile diagnostics retain fixed fallbacks when structured position is unavailable", %{
+  test "unsupported reader syntax retains public messages and carries token positions", %{
     tmp_dir: directory
   } do
-    source = "(ns app) #_ (defn run [input] input)"
+    for {name, syntax} <- [{"discard", "#_"}, {"deref", "@x"}, {"quote", "'(x)"}] do
+      prefix = "(ns app) "
+      source = prefix <> syntax <> " (defn run [input] input)"
 
-    path =
-      write_application(directory, "unlocated-syntax", valid_manifest(), %{
-        "main.clj" => source
-      })
+      path =
+        write_application(directory, "unsupported-#{name}", valid_manifest(), %{
+          "main.clj" => source
+        })
 
-    diagnostic = assert_error(["validate", path], "bundle", "syntax_invalid").envelope["error"]
+      diagnostic = assert_error(["validate", path], "bundle", "syntax_invalid").envelope["error"]
 
-    assert diagnostic["message"] == "the component source is not valid PTC-Lisp"
-    assert diagnostic["span"] == nil
+      assert diagnostic["message"] == "the component source is not valid PTC-Lisp"
+
+      assert diagnostic["span"] == %{
+               "start_byte" => byte_size(prefix),
+               "end_byte" => byte_size(prefix)
+             }
+    end
   end
 
   @tag :tmp_dir

@@ -5,6 +5,7 @@ defmodule PtcViewer.Router do
   alias PtcViewer.LiveProject
   alias PtcViewer.LiveSecurity
   alias PtcViewer.LiveStore
+  alias PtcViewer.RequestSecurity
   alias PtcViewer.ReplError
   alias PtcViewer.ReplStore
 
@@ -12,6 +13,8 @@ defmodule PtcViewer.Router do
   @repl_paths ["/api/repl", "/api/repl/evaluations", "/api/repl/templates", "/api/repl/reset"]
   @body_limit 70_000
   @live_launch_body_limit 2_000_010
+
+  plug(:validate_host)
 
   plug(Plug.Static,
     at: "/",
@@ -31,7 +34,6 @@ defmodule PtcViewer.Router do
 
   get "/api/repl" do
     with {:ok, store} <- repl_store(conn),
-         :ok <- valid_host(conn),
          :ok <- valid_bootstrap_security(conn),
          {:ok, body} <- ReplStore.bootstrap(store) do
       send_repl_success(conn, body)
@@ -270,15 +272,9 @@ defmodule PtcViewer.Router do
     if conn.request_path in @repl_paths do
       case repl_store(conn) do
         {:ok, _store} ->
-          case valid_host(conn) do
-            :ok ->
-              conn
-              |> put_resp_header("allow", allowed_methods(conn.request_path))
-              |> send_repl_error(:method_not_allowed)
-
-            {:error, reason} ->
-              send_repl_error(conn, reason)
-          end
+          conn
+          |> put_resp_header("allow", allowed_methods(conn.request_path))
+          |> send_repl_error(:method_not_allowed)
 
         {:error, reason} ->
           send_repl_error(conn, reason)
@@ -458,8 +454,7 @@ defmodule PtcViewer.Router do
   end
 
   defp valid_mutation_security(conn) do
-    with :ok <- valid_host(conn),
-         :ok <- valid_origin(conn),
+    with true <- RequestSecurity.valid_origin?(conn),
          nonce when is_binary(nonce) <- exact_header(conn, "x-ptc-viewer-nonce"),
          {:ok, store} <- repl_store(conn),
          true <- valid_id?(nonce),
@@ -470,35 +465,12 @@ defmodule PtcViewer.Router do
     end
   end
 
-  defp valid_host(conn) do
-    expected_port = expected_port(conn)
-
-    if conn.host in ["localhost", "127.0.0.1"] and conn.port == expected_port,
-      do: :ok,
-      else: {:error, :forbidden_request}
-  end
-
-  defp valid_origin(conn) do
-    with origin when is_binary(origin) <- exact_header(conn, "origin"),
-         %URI{scheme: "http", host: host} = uri <- URI.parse(origin),
-         true <-
-           host == conn.host and origin_port(uri) == conn.port and uri.path in [nil, ""] and
-             is_nil(uri.query) and is_nil(uri.fragment) do
-      :ok
+  defp validate_host(conn, _opts) do
+    if RequestSecurity.valid_host?(conn) do
+      conn
     else
-      _invalid -> {:error, :forbidden_request}
+      conn |> send_repl_error(:forbidden_request) |> halt()
     end
-  end
-
-  defp expected_port(conn) do
-    config = viewer_config(conn)
-
-    case Keyword.get(config, :expected_port) do
-      port when is_integer(port) -> port
-      _none -> PtcViewer.Server.expected_port(Keyword.fetch!(config, :viewer_server))
-    end
-  catch
-    :exit, _reason -> -1
   end
 
   defp session_precondition(conn) do
@@ -570,10 +542,6 @@ defmodule PtcViewer.Router do
       _invalid -> nil
     end
   end
-
-  defp origin_port(%URI{port: port}) when is_integer(port), do: port
-  defp origin_port(%URI{scheme: "http"}), do: 80
-  defp origin_port(_uri), do: -1
 
   defp valid_id?(id), do: is_binary(id) and Regex.match?(@id_pattern, id)
 

@@ -180,6 +180,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "the named environment file cannot be read safely"},
     {:local_preflight, :environment_file_too_large, 4, false,
      "the named environment file exceeds the 1 MB limit"},
+    {:local_preflight, :environment_file_invalid, 4, false,
+     "the named environment file contains an invalid assignment"},
     {:local_preflight, :environment_file_invalid_utf8, 4, false,
      "the named environment file is not valid UTF-8"},
     {:local_preflight, :authorization_target_unknown, 4, false,
@@ -815,7 +817,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
              :environment_file_not_regular,
              :environment_file_unreadable,
              :environment_file_too_large,
-             :environment_file_invalid_utf8
+             :environment_file_invalid_utf8,
+             :environment_file_invalid
            ],
       do: :forbidden
 
@@ -1061,6 +1064,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
              :environment_file_unreadable,
              :environment_file_too_large,
              :environment_file_invalid_utf8,
+             :environment_file_invalid,
              :authorization_target_unknown,
              :authorization_not_applicable
            ],

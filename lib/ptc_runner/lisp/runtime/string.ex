@@ -259,9 +259,9 @@ defmodule PtcRunner.Lisp.Runtime.String do
   - (replace "hello" "l" "L") returns "heLLo"
   - (replace "aaa" "a" "b") returns "bbb"
   """
-  def replace(s, {:re_mp, mp, _, _}, replacement)
+  def replace(s, {:re_mp, _, _, _} = re, replacement)
       when is_binary(s) and is_binary(replacement) do
-    :re.replace(s, mp, replacement, [:global, {:return, :binary}])
+    PtcRunner.Lisp.Runtime.Regex.re_replace(re, s, replacement)
   end
 
   def replace(s, pattern, replacement)
@@ -326,10 +326,6 @@ defmodule PtcRunner.Lisp.Runtime.String do
   - (grep "error\\|warn" text) returns lines matching error or warn (any case)
   - (grep "" "a\\nb") returns ["a", "b"] (empty pattern matches all)
   """
-  def grep("", text) when is_binary(text) do
-    split_lines(text)
-  end
-
   def grep(pattern, text) when is_binary(pattern) and is_binary(text) do
     grep(compile_grep_pattern(pattern), text)
   end
@@ -353,17 +349,6 @@ defmodule PtcRunner.Lisp.Runtime.String do
   - (grep-n "error" text 2) includes 2 lines of context around each match
   """
   def grep_n(pattern, text, context \\ 0)
-
-  def grep_n("", text, context) when is_binary(text) and is_integer(context) do
-    lines = split_lines(text)
-
-    results =
-      lines
-      |> Enum.with_index(1)
-      |> Enum.map(fn {line, idx} -> %{line: idx, text: line, match: true} end)
-
-    maybe_truncate(results, length(lines))
-  end
 
   def grep_n(pattern, text, context)
       when is_binary(pattern) and is_binary(text) and is_integer(context) do
@@ -439,15 +424,7 @@ defmodule PtcRunner.Lisp.Runtime.String do
   # LLMs often write \| for alternation (BRE style) but PCRE treats \| as literal pipe.
   # Case-insensitive by default since grep is used for document search where case shouldn't matter.
   defp compile_grep_pattern(pattern) do
-    pcre = bre_to_pcre(pattern)
-
-    case :re.compile(pcre, [:unicode, :ucp, :caseless]) do
-      {:ok, mp} ->
-        {:re_mp, mp, nil, pcre}
-
-      {:error, {reason, pos}} ->
-        raise ArgumentError, "Invalid regex at position #{pos}: #{List.to_string(reason)}"
-    end
+    PtcRunner.Lisp.Runtime.Regex.re_pattern(bre_to_pcre(pattern), [:caseless])
   end
 
   # Convert common BRE escape sequences to PCRE equivalents.
