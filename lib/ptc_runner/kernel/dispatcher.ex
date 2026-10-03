@@ -2145,6 +2145,21 @@ defmodule PtcRunner.Kernel.Dispatcher do
     end
   end
 
+  defp normalize_structured_output(
+         %CapabilityInvocation{capability: %Capability{name: name}, arguments: arguments},
+         value,
+         _validation
+       )
+       when is_map(value) do
+    # Tool requests retain incomplete turns for the agent's protocol recovery.
+    if ModelCapabilities.chat?(name) and not match?([_ | _], arguments["tools"]) and
+         Map.has_key?(value, "content") and
+         not is_binary(value["content"]) and
+         not match?([_ | _], value["tool_calls"]),
+       do: {:error, :output_schema_mismatch},
+       else: {:ok, value}
+  end
+
   defp normalize_structured_output(_invocation, value, _validation), do: {:ok, value}
 
   defp structured_provider_object(invocation, value, validation) do

@@ -54,6 +54,11 @@ defmodule PtcRunner.Kernel.OpenAICompatCommandTest do
           {"reasoning", ~s(<think>reason</think>{"q":false}), 200},
           {"array", "[]", 200},
           {"non-string content", %{"q" => false}, 200},
+          {"missing content", {:envelope, %{"choices" => [%{"message" => %{}}]}}, 200},
+          {"empty choices", {:envelope, %{"choices" => []}}, 200},
+          {"missing choices", {:envelope, %{}}, 200},
+          {"malformed choices", {:envelope, %{"choices" => "invalid"}}, 200},
+          {"malformed message", {:envelope, %{"choices" => [%{"message" => "invalid"}]}}, 200},
           {"unauthorized", "denied", 401}
         ] do
       test "#{route} rejects #{name} as a provider error", %{tmp_dir: dir} do
@@ -96,6 +101,41 @@ defmodule PtcRunner.Kernel.OpenAICompatCommandTest do
     end
   end
 
+  for {name, content} <- [
+        {"missing content", {:envelope, %{"choices" => [%{"message" => %{}}]}}},
+        {"empty choices", {:envelope, %{"choices" => []}}},
+        {"missing choices", {:envelope, %{}}},
+        {"malformed choices", {:envelope, %{"choices" => "invalid"}}},
+        {"malformed message", {:envelope, %{"choices" => [%{"message" => "invalid"}]}}},
+        {"non-string content", %{"q" => false}}
+      ] do
+    test "ordinary llm rejects #{name} and retains reported usage", %{tmp_dir: dir} do
+      project = project(dir, :ordinary, unquote(Macro.escape(content)), 200, true)
+
+      assert {:ok, outcome} = CommandEngine.dispatch(["run", project])
+
+      assert %{"status" => "error", "kind" => "invalid_result"} =
+               outcome.envelope["result"]["value"]
+
+      assert_receive {:wire, wire}
+      refute Map.has_key?(wire.body, "response_format")
+      usage = outcome.envelope["execution"]["usage"]
+      assert usage["llm_budget"]["total_tokens"]["charged"] == 12
+
+      assert [%{"usage" => %{"input" => 10, "output" => 2}, "missing_usage_calls" => 0}] =
+               usage["llm_usage"]
+    end
+  end
+
+  test "ordinary llm accepts text without a request schema", %{tmp_dir: dir} do
+    project = project(dir, :ordinary, "answer", 200, true)
+    assert {:ok, outcome} = CommandEngine.dispatch(["run", project])
+    assert outcome.envelope["result"]["value"]["content"] == "answer"
+    assert_receive {:wire, wire}
+    refute Map.has_key?(wire.body, "response_format")
+    assert outcome.envelope["execution"]["usage"]["llm_budget"]["total_tokens"]["charged"] == 12
+  end
+
   test "cost budget is refused before dispatch", %{tmp_dir: dir} do
     project = project(dir, :llm, ~s({"q":false}), 200, true)
     path = Path.join(dir, "ptc-host.json")
@@ -121,7 +161,12 @@ defmodule PtcRunner.Kernel.OpenAICompatCommandTest do
     fixture =
       MCPHTTPFixture.start(fn wire ->
         send(parent, {:wire, wire})
-        body = %{"choices" => [%{"message" => %{"content" => content}}]}
+
+        body =
+          case content do
+            {:envelope, envelope} -> envelope
+            _content -> %{"choices" => [%{"message" => %{"content" => content}}]}
+          end
 
         body =
           if tokens?,
@@ -136,8 +181,8 @@ defmodule PtcRunner.Kernel.OpenAICompatCommandTest do
     File.rm_rf!(Path.join(dir, ".ptc"))
     manifest_path = Path.join(dir, "ptc.json")
     manifest = manifest_path |> File.read!() |> Jason.decode!()
-    library = if route == :llm, do: "llm", else: "decision"
-    provider = if route == :llm, do: "local", else: "frozen-decisions"
+    library = if route in [:llm, :ordinary], do: "llm", else: "decision"
+    provider = if route in [:llm, :ordinary], do: "local", else: "frozen-decisions"
 
     manifest =
       put_in(manifest, ["workflow", "components"], [
@@ -148,14 +193,24 @@ defmodule PtcRunner.Kernel.OpenAICompatCommandTest do
     manifest = put_in(manifest, ["providers", "workflow"], [%{"name" => provider}])
 
     input =
-      if route == :llm,
-        do: %{"messages" => [%{"role" => "user", "content" => "Decide"}], "schema" => @schema},
-        else: %{
-          "state" => %{},
-          "questions" => %{
-            "q" => %{"type" => "boolean", "instructions" => "Does the state meet the condition?"}
+      case route do
+        :llm ->
+          %{"messages" => [%{"role" => "user", "content" => "Decide"}], "schema" => @schema}
+
+        :ordinary ->
+          %{"messages" => [%{"role" => "user", "content" => "Decide"}]}
+
+        :decision ->
+          %{
+            "state" => %{},
+            "questions" => %{
+              "q" => %{
+                "type" => "boolean",
+                "instructions" => "Does the state meet the condition?"
+              }
+            }
           }
-        }
+      end
 
     manifest = put_in(manifest, ["input", "value"], input)
     File.write!(manifest_path, Jason.encode!(manifest))

@@ -12,17 +12,20 @@ defmodule PtcRunner.LiveStatus do
   """
 
   alias PtcRunner.Kernel.ApplicationPackage
+  alias PtcRunner.LiveStatus.Config
   alias PtcRunner.LiveStatus.Reporter
   alias PtcRunner.LiveStatus.Target
   alias PtcRunner.Utf8
 
   @doc false
   @spec external_target(binary() | nil) :: Target.t() | nil
-  def external_target(label) do
-    case System.get_env("PTC_VIEWER_URL") do
-      url when is_binary(url) and url != "" ->
-        token = System.get_env("PTC_VIEWER_TOKEN")
+  def external_target(""), do: external_target(nil)
 
+  def external_target(label) do
+    %{url: url, token: token} = Config.read()
+
+    case url do
+      url when is_binary(url) and url != "" ->
         case Target.new(
                fn run_id, frame -> Reporter.report_http(url, run_id, frame, token) end,
                label: label
@@ -82,15 +85,15 @@ defmodule PtcRunner.LiveStatus do
   end
 
   defp maybe_start_http(config, run_state) do
-    case System.get_env("PTC_VIEWER_URL") do
-      url when is_binary(url) and url != "" ->
-        case Reporter.start(url, config, run_state) do
+    case external_target(System.get_env("PTC_VIEWER_LABEL")) do
+      nil ->
+        nil
+
+      target ->
+        case Reporter.start(target, config, run_state) do
           {:ok, pid} -> pid
           _error -> nil
         end
-
-      _absent ->
-        nil
     end
   end
 

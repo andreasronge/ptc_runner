@@ -21,6 +21,7 @@ defmodule PtcRunner.LiveStatus.Reporter do
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Lisp.Eval.ParallelBudget
+  alias PtcRunner.LiveStatus.Config
   alias PtcRunner.LiveStatus.Target
 
   @tick_ms 300
@@ -368,14 +369,15 @@ defmodule PtcRunner.LiveStatus.Reporter do
   @doc false
   def report_http(viewer_url, run_id, frame, viewer_token)
       when is_binary(viewer_url) and is_binary(run_id) and is_map(frame) do
-    viewer_url = String.trim_trailing(viewer_url, "/")
+    {:ok, endpoint} = PtcRunner.HTTPEndpoint.validate(viewer_url, viewer_token)
     encoded_run_id = URI.encode(run_id, &URI.char_unreserved?/1)
-    url = viewer_url <> "/api/live/runs/" <> encoded_run_id
+    url = PtcRunner.HTTPEndpoint.append_path(endpoint, "/api/live/runs/" <> encoded_run_id)
 
     case Req.post(url,
            json: frame,
            headers: authorization_headers(viewer_token),
            retry: false,
+           redirect: false,
            connect_options: [timeout: 500],
            receive_timeout: 1_000
          ) do
@@ -395,7 +397,7 @@ defmodule PtcRunner.LiveStatus.Reporter do
   defp normalize_target(viewer_url), do: String.trim_trailing(viewer_url, "/")
 
   defp viewer_token(%Target{}), do: nil
-  defp viewer_token(_viewer_url), do: System.get_env("PTC_VIEWER_TOKEN")
+  defp viewer_token(_viewer_url), do: Config.read().token
 
   defp format_reason(nil), do: nil
   defp format_reason(reason) when is_binary(reason), do: reason
