@@ -62,17 +62,18 @@ defmodule PtcRunner.Kernel.RunState do
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMReplayDiagnostic
-  alias PtcRunner.Kernel.LLMUsage
   alias PtcRunner.Kernel.LLMUsageSummary
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ProviderTaskTracker
+  alias PtcRunner.Kernel.RunState.Admission
+  alias PtcRunner.Kernel.RunState.LlmBudget
+  alias PtcRunner.Kernel.RunState.Providers
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.RetainedSize
 
   @history_depth 3
-  @maximum_integer 9_007_199_254_740_991
   # Outcome proofs are Kernel bookkeeping, independent of evaluator-history
   # retention. The byte cap exceeds the largest admitted application document,
   # so one canonical proof always fits, while the count cap matches the shipped
@@ -460,7 +461,7 @@ defmodule PtcRunner.Kernel.RunState do
 
   @doc false
   def reserve_workflow_evaluation(state),
-    do: reserve_evaluation(state, @workflow_continuation, :fail_fast)
+    do: reserve_evaluation(state, @workflow_continuation, mode: :fail_fast)
 
   @doc false
   @spec yield_workflow_evaluation(t(), reference()) :: {:ok, non_neg_integer()} | {:error, atom()}
@@ -480,39 +481,28 @@ defmodule PtcRunner.Kernel.RunState do
   lease (or its provider reservations are still draining). `:block` parks the
   caller in a FIFO admission queue instead; the reply arrives when the lease
   frees, or as `{:error, :admission_timeout}` /
-  `{:error, :deadline_expired}` when the bounded wait ends first. The wait is
+  `{:error, :deadline_expired}` when the bounded wait ends first.
+
+  Pass `mode: :fail_fast | :block` and optional `proof?: true` to obtain a
+  caller-bound one-shot proof on an evaluation-limit refusal. The wait is
   bounded server-side by `evaluation_admission_timeout_ms` and the run
   deadline, so the blocking call itself uses an infinite client timeout.
   """
-  @spec reserve_evaluation(t(), binary(), :fail_fast | :block) ::
-          {:ok, map(), [term()], reference()} | {:error, atom()}
-  def reserve_evaluation(state, mission_name, :fail_fast) when is_binary(mission_name),
-    do: call(state, {:reserve_evaluation, mission_name})
-
-  # The admission wait is bounded from the moment the caller asks, not the
-  # moment the owner processes the request — time in the owner's mailbox
-  # counts against the bound.
-  def reserve_evaluation(state, mission_name, :block) when is_binary(mission_name) do
-    requested_at = System.monotonic_time(:millisecond)
-    call_blocking(state, {:reserve_evaluation, mission_name, :block, requested_at})
-  end
-
-  @doc false
-  @spec reserve_evaluation_with_limit_proof(t(), binary(), :fail_fast | :block) ::
-          {:ok, map(), [term()], reference()}
-          | {:error, atom() | {:limit_exceeded, binary()}}
-  def reserve_evaluation_with_limit_proof(state, mission_name, :fail_fast)
-      when is_binary(mission_name),
-      do: call(state, {:reserve_evaluation, mission_name, :with_limit_proof})
-
-  def reserve_evaluation_with_limit_proof(state, mission_name, :block)
-      when is_binary(mission_name) do
+  @spec reserve_evaluation(t(), binary(), keyword()) ::
+          {:ok, map(), [term()], reference()} | {:error, atom() | {:limit_exceeded, binary()}}
+  def reserve_evaluation(state, mission_name, opts) when is_binary(mission_name) do
+    mode = Keyword.fetch!(opts, :mode)
+    proof? = Keyword.get(opts, :proof?, false)
     requested_at = System.monotonic_time(:millisecond)
 
-    call_blocking(
-      state,
-      {:reserve_evaluation, mission_name, :block, requested_at, :with_limit_proof}
-    )
+    request =
+      {:reserve_evaluation, mission_name,
+       %{mode: mode, proof?: proof?, requested_at: requested_at}}
+
+    case mode do
+      :fail_fast -> call(state, request)
+      :block -> call_blocking(state, request)
+    end
   end
 
   @doc false
@@ -797,8 +787,8 @@ defmodule PtcRunner.Kernel.RunState do
        capability_refusals: %{},
        capability_denials: %{},
        llm_budget: %{
-         total_tokens: new_ledger(limits.llm_total_tokens),
-         cost: new_ledger(limits.llm_cost_microusd)
+         total_tokens: LlmBudget.new_ledger(limits.llm_total_tokens),
+         cost: LlmBudget.new_ledger(limits.llm_cost_microusd)
        },
        llm_usage: %{},
        replay_misses: MapSet.new(),
@@ -916,15 +906,17 @@ defmodule PtcRunner.Kernel.RunState do
       {:reply, {:error, :closed}, settle_reservation(state, reservation_id, :cleanup) |> elem(1)}
     else
       case state.reservations do
-        %{^reservation_id => %{caller: ^caller} = reservation} ->
-          reservation =
-            reservation
-            |> Map.put(:provider, provider)
-            |> Map.put(:provider_ref, Process.monitor(provider))
-            |> Map.put(:provider_kind, provider_kind)
+        %{^reservation_id => %{caller: ^caller}} ->
+          next =
+            Providers.attach(
+              state,
+              reservation_id,
+              provider,
+              Process.monitor(provider),
+              provider_kind
+            )
 
-          reservations = Map.put(state.reservations, reservation_id, reservation)
-          {:reply, :ok, %{state | reservations: reservations}}
+          {:reply, :ok, next}
 
         _ ->
           Process.exit(provider, :kill)
@@ -939,22 +931,13 @@ defmodule PtcRunner.Kernel.RunState do
         %{token: token} = state
       )
       when is_reference(gate) do
-    cond do
-      unavailable?(state) ->
-        {:reply, {:error, :run_closed}, state}
-
-      not Map.has_key?(state.reservations, reservation_id) ->
-        {:reply, {:error, :unknown_reservation}, state}
-
-      get_in(state.reservations, [reservation_id, :provider]) != provider ->
-        {:reply, {:error, :provider_mismatch}, state}
-
-      get_in(state.reservations, [reservation_id, :dispatched?]) ->
-        {:reply, {:error, :already_dispatched}, state}
-
-      true ->
+    case Providers.gate_status(state, reservation_id, provider, unavailable?(state)) do
+      :ok ->
         send(provider, gate)
-        {:reply, :ok, put_in(state.reservations[reservation_id].dispatched?, true)}
+        {:reply, :ok, Providers.mark_dispatched(state, reservation_id)}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
     end
   end
 
@@ -1136,34 +1119,14 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   def handle_call(
-        {token, {:reserve_evaluation, mission}},
-        from,
-        %{token: token} = state
-      ),
-      do: reserve_evaluation_now(state, mission, from, false)
-
-  def handle_call(
-        {token, {:reserve_evaluation, mission, :with_limit_proof}},
-        from,
-        %{token: token} = state
-      ),
-      do: reserve_evaluation_now(state, mission, from, true)
-
-  def handle_call(
-        {token, {:reserve_evaluation, mission, :block, requested_at}},
+        {token,
+         {:reserve_evaluation, mission, %{mode: mode, proof?: proof?, requested_at: requested_at}}},
         from,
         %{token: token} = state
       )
-      when is_integer(requested_at),
-      do: reserve_evaluation_blocking(state, mission, requested_at, from, false)
-
-  def handle_call(
-        {token, {:reserve_evaluation, mission, :block, requested_at, :with_limit_proof}},
-        from,
-        %{token: token} = state
-      )
-      when is_integer(requested_at),
-      do: reserve_evaluation_blocking(state, mission, requested_at, from, true)
+      when mode in [:fail_fast, :block] and is_boolean(proof?) and is_integer(requested_at) do
+    reserve_evaluation_request(state, mission, mode, requested_at, from, proof?)
+  end
 
   def handle_call(
         {token, {:yield_workflow_evaluation, lease}},
@@ -1173,7 +1136,7 @@ defmodule PtcRunner.Kernel.RunState do
     case {state.evaluation_lease, state.evaluation_mission} do
       {{^lease, ^caller, monitor_ref}, @workflow_continuation} ->
         Process.demonitor(monitor_ref, [:flush])
-        revision = continuation(state, @workflow_continuation).revision
+        revision = Admission.continuation(state, @workflow_continuation).revision
         {:reply, {:ok, revision}, clear_evaluation(state)}
 
       _other ->
@@ -1193,24 +1156,17 @@ defmodule PtcRunner.Kernel.RunState do
       deadline_expired?(state) ->
         {:reply, {:error, :deadline_expired}, state}
 
-      not grantable?(state) or not :queue.is_empty(state.admission_queue) ->
+      not Admission.grantable?(state) or not :queue.is_empty(state.admission_queue) ->
         {:reply, {:error, :busy}, state}
 
-      continuation(state, @workflow_continuation).revision != revision ->
+      Admission.continuation(state, @workflow_continuation).revision != revision ->
         {:reply, {:error, :stale}, state}
 
       true ->
         lease = {make_ref(), caller, Process.monitor(caller)}
 
         {:reply, {:ok, elem(lease, 0)},
-         %{
-           state
-           | evaluation_lease: lease,
-             evaluation_mission: @workflow_continuation,
-             evaluation_release_waiter: nil,
-             evaluation_terminal_provider_failure?: false,
-             evaluation_terminal_host_failure?: false
-         }}
+         Admission.grant_lease(state, @workflow_continuation, lease)}
     end
   end
 
@@ -1237,14 +1193,14 @@ defmodule PtcRunner.Kernel.RunState do
       deadline_expired?(state) ->
         {:reply, {:error, :deadline_expired}, state}
 
-      not grantable?(state) or not :queue.is_empty(state.admission_queue) ->
+      not Admission.grantable?(state) or not :queue.is_empty(state.admission_queue) ->
         {:reply, {:error, :busy}, state}
 
       state.source_checks >= state.limits.subordinate_source_checks ->
         {:reply, {:error, :limit_exceeded}, state}
 
       true ->
-        continuation = continuation(state, mission)
+        continuation = Admission.continuation(state, mission)
 
         {:reply, {:ok, continuation.memory, continuation.revision},
          %{state | source_checks: state.source_checks + 1}}
@@ -1257,10 +1213,17 @@ defmodule PtcRunner.Kernel.RunState do
         %{token: token} = state
       ) do
     cond do
-      state.closed? -> {:reply, {:error, :run_closed}, state}
-      deadline_expired?(state) -> {:reply, {:error, :deadline_expired}, state}
-      continuation(state, mission).revision != revision -> {:reply, {:error, :stale}, state}
-      true -> {:reply, :ok, state}
+      state.closed? ->
+        {:reply, {:error, :run_closed}, state}
+
+      deadline_expired?(state) ->
+        {:reply, {:error, :deadline_expired}, state}
+
+      Admission.continuation(state, mission).revision != revision ->
+        {:reply, {:error, :stale}, state}
+
+      true ->
+        {:reply, :ok, state}
     end
   end
 
@@ -1335,7 +1298,7 @@ defmodule PtcRunner.Kernel.RunState do
             {:reply, {:error, :history_exceeded}, clear_evaluation(state)}
 
           true ->
-            previous = continuation(state, mission)
+            previous = Admission.continuation(state, mission)
 
             committed = %{
               memory: RetainedSize.detach_binaries(memory),
@@ -1614,7 +1577,8 @@ defmodule PtcRunner.Kernel.RunState do
       ),
       # Workflow REPL memory is held in its own continuation, outside missions.
       do:
-        {:reply, Lisp.externalize_memory(continuation(state, @workflow_continuation).memory),
+        {:reply,
+         Lisp.externalize_memory(Admission.continuation(state, @workflow_continuation).memory),
          state}
 
   def handle_call(
@@ -1691,8 +1655,7 @@ defmodule PtcRunner.Kernel.RunState do
            Map.get(reservation, :cancel_ref) == ref
          end) do
       {reservation_id, reservation} ->
-        reservation = Map.drop(reservation, [:cancel_pid, :cancel_ref])
-        state = put_in(state.reservations[reservation_id], reservation)
+        state = Providers.cancellation_complete(state, reservation_id)
 
         if reason == :normal do
           {:noreply, state}
@@ -1709,7 +1672,7 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   def handle_info({:admission_deadline, monitor_ref}, state) do
-    case take_admission_waiter(state, monitor_ref) do
+    case Admission.take_admission_waiter(state, monitor_ref) do
       {nil, state} ->
         {:noreply, state}
 
@@ -1729,7 +1692,7 @@ defmodule PtcRunner.Kernel.RunState do
   def handle_info(_message, state), do: {:noreply, state}
 
   defp handle_reservation_down(ref, pid, reason, state) do
-    case reservation_by_caller_ref(state.reservations, ref) do
+    case Providers.reservation_by_caller_ref(state.reservations, ref) do
       {reservation_id, %{caller: ^pid, provider: provider} = reservation} ->
         cond do
           is_pid(provider) and Map.get(reservation, :provider_kind) == :guardian ->
@@ -1739,25 +1702,12 @@ defmodule PtcRunner.Kernel.RunState do
             {cancel_pid, cancel_ref} =
               start_guardian_cancel(state.provider_tracker, provider, deadline)
 
-            reservations =
-              Map.put(
-                state.reservations,
-                reservation_id,
-                reservation
-                |> Map.put(:caller_ref, nil)
-                |> Map.put(:cancel_pid, cancel_pid)
-                |> Map.put(:cancel_ref, cancel_ref)
-              )
-
-            {:noreply, %{state | reservations: reservations}}
+            {:noreply, Providers.cancel_started(state, reservation_id, cancel_pid, cancel_ref)}
 
           is_pid(provider) ->
             Process.exit(provider, :kill)
 
-            reservations =
-              Map.put(state.reservations, reservation_id, %{reservation | caller_ref: nil})
-
-            {:noreply, %{state | reservations: reservations}}
+            {:noreply, Providers.caller_down(state, reservation_id)}
 
           true ->
             {_reply, state} = settle_reservation(state, reservation_id, :cleanup)
@@ -1765,18 +1715,15 @@ defmodule PtcRunner.Kernel.RunState do
         end
 
       nil ->
-        case reservation_by_provider_ref(state.reservations, ref) do
+        case Providers.reservation_by_provider_ref(state.reservations, ref) do
           {reservation_id, %{caller_ref: nil} = reservation} ->
             state = maybe_mark_guardian_down(state, reservation, reason)
             {_reply, state} = settle_reservation(state, reservation_id, :cleanup)
             {:noreply, state}
 
           {reservation_id, reservation} ->
-            reservation = %{reservation | provider: nil, provider_ref: nil}
-
             state = maybe_mark_guardian_down(state, reservation, reason)
-
-            {:noreply, put_in(state.reservations[reservation_id], reservation)}
+            {:noreply, Providers.provider_down(state, reservation_id)}
 
           nil ->
             state =
@@ -1799,19 +1746,14 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   defp maybe_mark_guardian_down(state, reservation, reason) do
-    if Map.get(reservation, :provider_kind) == :guardian and reason != :normal do
-      failure =
-        state.terminal_failure ||
-          %{kind: :provider_cleanup_error, reason: :provider_cleanup_failed}
-
-      admit_from_queue(%{state | closed?: true, terminal_failure: failure})
-    else
-      state
+    case Providers.guardian_down(state, reservation, reason) do
+      {next, true} -> admit_from_queue(next)
+      {next, false} -> next
     end
   end
 
   defp drop_dead_admission_waiter(state, monitor_ref) do
-    case take_admission_waiter(state, monitor_ref) do
+    case Admission.take_admission_waiter(state, monitor_ref) do
       {nil, state} ->
         state
 
@@ -1911,18 +1853,18 @@ defmodule PtcRunner.Kernel.RunState do
       route_spent?(state, environment, route_reservation) ->
         {:error, :route_call_limit, record_route_refusal(state, route_reservation)}
 
-      reservation_for_caller?(state.reservations, caller) ->
+      Providers.reservation_for_caller?(state.reservations, caller) ->
         {:error, :reservation_held, state}
 
-      llm_output_exceeded?(state, route) ->
+      LlmBudget.llm_output_exceeded?(state, route) ->
         {:error, :llm_output_limit, state}
 
-      llm_ledger_unavailable?(state, route, :total_tokens) ->
-        {details, state} = refuse_budget(state, route, :total_tokens)
+      LlmBudget.llm_ledger_unavailable?(state, route, :total_tokens) ->
+        {details, state} = LlmBudget.refuse_budget(state, route, :total_tokens)
         {:error, :llm_total_tokens_limit, details, state}
 
-      llm_ledger_unavailable?(state, route, :cost) ->
-        {details, state} = refuse_budget(state, route, :cost)
+      LlmBudget.llm_ledger_unavailable?(state, route, :cost) ->
+        {details, state} = LlmBudget.refuse_budget(state, route, :cost)
         {:error, :llm_cost_limit, details, state}
 
       true ->
@@ -1939,7 +1881,7 @@ defmodule PtcRunner.Kernel.RunState do
           provider_ref: nil,
           provider_kind: nil,
           dispatched?: false,
-          llm: llm_reservation(state, route)
+          llm: LlmBudget.llm_reservation(state, route)
         }
 
         state =
@@ -1947,7 +1889,7 @@ defmodule PtcRunner.Kernel.RunState do
           |> update_in([:calls, environment], &Map.put(&1, name, count + 1))
           |> increment_route_calls(environment, route_reservation)
           |> update_in([:totals, environment], &(&1 + 1))
-          |> reserve_llm_ledgers(reservation.llm)
+          |> LlmBudget.reserve_llm_ledgers(reservation.llm)
 
         {:ok, reservation_id,
          %{
@@ -1964,110 +1906,6 @@ defmodule PtcRunner.Kernel.RunState do
        do: %{key: {name, route_key}, max_calls: max_calls}
 
   defp route_reservation(_name, _route, _limit_name), do: nil
-
-  defp reservation_for_caller?(reservations, caller) do
-    Enum.any?(reservations, fn {_id, reservation} -> reservation.caller == caller end)
-  end
-
-  defp llm_output_exceeded?(_state, %{source: "llm", output_tokens: output_tokens})
-       when not is_integer(output_tokens),
-       do: true
-
-  defp llm_output_exceeded?(state, %{source: "llm", output_tokens: output_tokens}),
-    do: output_tokens <= 0 or output_tokens > state.limits.llm_request_output_tokens
-
-  defp llm_output_exceeded?(_state, _route), do: false
-
-  defp llm_ledger_unavailable?(state, route, key) do
-    case {Map.fetch!(state.llm_budget, key), llm_bound(route, key)} do
-      {nil, _bound} -> false
-      {%{state: :overrun}, _bound} -> true
-      {_ledger, nil} -> live_llm_route?(route)
-      {ledger, bound} -> bound > ledger_remaining(ledger)
-    end
-  end
-
-  defp llm_bound(%{source: source, total_tokens: bound}, :total_tokens)
-       when source in ["llm", "decision", "decision_replay"] and is_integer(bound) and
-              bound in 0..@maximum_integer,
-       do: bound
-
-  defp llm_bound(%{source: source, cost_microusd: bound}, :cost)
-       when source in ["llm", "decision", "decision_replay"] and is_integer(bound) and
-              bound in 0..@maximum_integer,
-       do: bound
-
-  defp llm_bound(_route, _key), do: nil
-
-  defp live_llm_route?(%{source: source}) when source in ["llm", "decision", "decision_replay"],
-    do: true
-
-  defp live_llm_route?(_route), do: false
-
-  defp llm_reservation(state, route) do
-    if live_llm_route?(route) do
-      %{
-        total_tokens: enabled_bound(state.llm_budget.total_tokens, route, :total_tokens),
-        cost: enabled_bound(state.llm_budget.cost, route, :cost)
-      }
-    end
-  end
-
-  defp enabled_bound(nil, _route, _key), do: nil
-  defp enabled_bound(_ledger, route, key), do: llm_bound(route, key)
-
-  defp reserve_llm_ledgers(state, nil), do: state
-
-  defp reserve_llm_ledgers(state, reservation) do
-    llm_budget =
-      Enum.reduce([:total_tokens, :cost], state.llm_budget, fn key, budget ->
-        case {Map.fetch!(budget, key), Map.fetch!(reservation, key)} do
-          {nil, _amount} -> budget
-          {_ledger, nil} -> budget
-          {ledger, amount} -> Map.put(budget, key, %{ledger | reserved: ledger.reserved + amount})
-        end
-      end)
-
-    %{state | llm_budget: llm_budget}
-  end
-
-  defp refuse_ledger(state, key) do
-    update_in(state.llm_budget[key], fn
-      nil -> nil
-      ledger -> %{ledger | refused: min(ledger.refused + 1, @maximum_integer)}
-    end)
-  end
-
-  defp refuse_budget(state, route, key) do
-    ledger = Map.fetch!(state.llm_budget, key)
-    remaining = ledger_remaining(ledger)
-    limit = budget_limit_field(key)
-    requested = llm_bound(route, key)
-
-    details =
-      %{limit: limit, limit_value: ledger.limit, remaining: remaining}
-      |> maybe_put_requested(requested)
-
-    state =
-      state
-      |> refuse_ledger(key)
-      |> record_budget_refusal(details)
-
-    {details, state}
-  end
-
-  defp budget_limit_field(:total_tokens), do: :llm_total_tokens
-  defp budget_limit_field(:cost), do: :llm_cost_microusd
-
-  defp maybe_put_requested(details, requested) when is_integer(requested) and requested >= 0,
-    do: Map.put(details, :requested, requested)
-
-  defp maybe_put_requested(details, _requested), do: details
-
-  defp ledger_remaining(%{state: :overrun}), do: 0
-
-  defp ledger_remaining(ledger),
-    do: max(ledger.limit - ledger.charged - ledger.reserved, 0)
 
   defp route_spent?(_state, _environment, nil), do: false
 
@@ -2104,22 +1942,6 @@ defmodule PtcRunner.Kernel.RunState do
   defp record_quota_refusal(state, %{limit: limit, name: name, limit_value: value}) do
     %{state | quota_refusals: MapSet.put(state.quota_refusals, {limit, name, value})}
   end
-
-  defp record_budget_refusal(
-         state,
-         %{limit: limit, limit_value: limit_value, requested: requested, remaining: remaining}
-       )
-       when limit in @budget_limits and is_integer(limit_value) and limit_value > 0 and
-              is_integer(requested) and requested > remaining and is_integer(remaining) and
-              remaining >= 0 and remaining <= limit_value do
-    %{
-      state
-      | budget_refusals:
-          MapSet.put(state.budget_refusals, {limit, limit_value, requested, remaining})
-    }
-  end
-
-  defp record_budget_refusal(state, _details), do: state
 
   defp quota_details_map(state, environment, name) do
     {limit_total, limit_name} = capability_limits(state.limits, environment)
@@ -2159,14 +1981,9 @@ defmodule PtcRunner.Kernel.RunState do
         demonitor_reservation(reservation)
 
         {llm_budget, overruns} =
-          settle_llm_budget(state.llm_budget, reservation, evidence)
+          LlmBudget.settle_llm_budget(state.llm_budget, reservation, evidence)
 
-        next = %{
-          state
-          | provider_tasks: max(state.provider_tasks - 1, 0),
-            reservations: reservations,
-            llm_budget: llm_budget
-        }
+        next = Providers.settled(state, reservations, llm_budget)
 
         reply =
           case overruns do
@@ -2194,153 +2011,6 @@ defmodule PtcRunner.Kernel.RunState do
     if is_reference(reservation.provider_ref),
       do: Process.demonitor(reservation.provider_ref, [:flush])
   end
-
-  defp settle_llm_budget(budget, %{llm: nil}, _evidence), do: {budget, []}
-
-  defp settle_llm_budget(budget, %{dispatched?: false, llm: reservation}, _evidence) do
-    {release_llm_reservations(budget, reservation), []}
-  end
-
-  defp settle_llm_budget(budget, %{dispatched?: true, llm: reservation}, :cleanup) do
-    {full_charge_llm_reservations(budget, reservation), []}
-  end
-
-  defp settle_llm_budget(
-         budget,
-         %{dispatched?: true, llm: reservation},
-         {:adapter_error, :not_dispatched}
-       ) do
-    {release_llm_reservations(budget, reservation), []}
-  end
-
-  defp settle_llm_budget(
-         budget,
-         %{dispatched?: true, llm: reservation},
-         {:adapter_error, _reason}
-       ) do
-    {full_charge_llm_reservations(budget, reservation), []}
-  end
-
-  defp settle_llm_budget(
-         budget,
-         %{dispatched?: true, llm: reservation},
-         {:adapter_success, usage_evidence}
-       ) do
-    actuals = settlement_actuals(usage_evidence)
-
-    Enum.reduce([:total_tokens, :cost], {budget, []}, fn key, {ledgers, overruns} ->
-      case Map.fetch!(reservation, key) do
-        nil ->
-          {ledgers, overruns}
-
-        reserved ->
-          {ledger, overrun?} =
-            settle_ledger(Map.fetch!(ledgers, key), reserved, Map.get(actuals, key))
-
-          overruns = if overrun?, do: overruns ++ [key], else: overruns
-          {Map.put(ledgers, key, ledger), overruns}
-      end
-    end)
-  end
-
-  defp settlement_actuals({:valid, usage}) do
-    case canonical_usage(usage) do
-      {:ok, canonical} ->
-        %{
-          total_tokens: actual_total_tokens(canonical),
-          cost: actual_cost(canonical)
-        }
-
-      :error ->
-        %{}
-    end
-  end
-
-  defp settlement_actuals(_missing_or_invalid), do: %{}
-
-  defp actual_total_tokens(%{"input" => input, "output" => output})
-       when is_integer(input) and is_integer(output) do
-    if input <= @maximum_integer - output, do: input + output, else: :overflow
-  end
-
-  defp actual_total_tokens(_usage), do: nil
-
-  defp actual_cost(%{
-         "total_cost" => %{"currency" => "USD", "microunits" => microunits}
-       }),
-       do: microunits
-
-  defp actual_cost(_usage), do: nil
-
-  defp canonical_usage(usage) when is_map(usage) and not is_struct(usage) do
-    case LLMUsage.normalize(usage) do
-      {:ok, canonical} -> if canonical == usage, do: {:ok, canonical}, else: :error
-      {:error, :invalid_llm_usage} -> :error
-    end
-  end
-
-  defp canonical_usage(_usage), do: :error
-
-  defp settle_ledger(ledger, reserved, nil) do
-    ledger = release_from_ledger(ledger, reserved)
-
-    {%{
-       ledger
-       | charged: bounded_add(ledger.charged, reserved),
-         state: if(ledger.state == :overrun, do: :overrun, else: :incomplete)
-     }, false}
-  end
-
-  defp settle_ledger(ledger, reserved, :overflow) do
-    ledger = release_from_ledger(ledger, reserved)
-    {%{ledger | charged: @maximum_integer, state: :overrun}, true}
-  end
-
-  defp settle_ledger(ledger, reserved, actual) when is_integer(actual) and actual <= reserved do
-    ledger = release_from_ledger(ledger, reserved)
-    {%{ledger | charged: bounded_add(ledger.charged, actual)}, false}
-  end
-
-  defp settle_ledger(ledger, reserved, actual) when is_integer(actual) do
-    ledger = release_from_ledger(ledger, reserved)
-    {%{ledger | charged: bounded_add(ledger.charged, actual), state: :overrun}, true}
-  end
-
-  defp release_llm_reservations(budget, reservation) do
-    Enum.reduce([:total_tokens, :cost], budget, fn key, ledgers ->
-      case {Map.fetch!(ledgers, key), Map.fetch!(reservation, key)} do
-        {nil, _amount} -> ledgers
-        {_ledger, nil} -> ledgers
-        {ledger, amount} -> Map.put(ledgers, key, release_from_ledger(ledger, amount))
-      end
-    end)
-  end
-
-  defp full_charge_llm_reservations(budget, reservation) do
-    Enum.reduce([:total_tokens, :cost], budget, fn key, ledgers ->
-      case {Map.fetch!(ledgers, key), Map.fetch!(reservation, key)} do
-        {nil, _amount} ->
-          ledgers
-
-        {_ledger, nil} ->
-          ledgers
-
-        {ledger, amount} ->
-          ledger = release_from_ledger(ledger, amount)
-
-          Map.put(ledgers, key, %{
-            ledger
-            | charged: bounded_add(ledger.charged, amount),
-              state: if(ledger.state == :overrun, do: :overrun, else: :incomplete)
-          })
-      end
-    end)
-  end
-
-  defp release_from_ledger(ledger, amount),
-    do: %{ledger | reserved: max(ledger.reserved - amount, 0)}
-
-  defp bounded_add(left, right), do: min(left + right, @maximum_integer)
 
   defp active_evaluation_lease(state, :mission) do
     case state.evaluation_lease do
@@ -2418,113 +2088,40 @@ defmodule PtcRunner.Kernel.RunState do
   # evaluation's lease: the lease-owner :DOWN path frees the lease while that
   # evaluation's provider tasks may still be live, and granting before their
   # reservations drain would overlap two evaluations' external effects.
-  defp grantable?(state) do
-    state.evaluation_lease == nil and not stale_lease_reservations?(state)
-  end
-
-  defp stale_lease_reservations?(state) do
-    Enum.any?(state.reservations, fn
-      {_caller, %{evaluation_lease: lease}} -> is_reference(lease)
-      _reservation -> false
-    end)
-  end
-
-  defp reserve_evaluation_now(state, mission, {caller, _tag}, with_limit_proof?) do
-    cond do
-      state.closed? ->
-        {:reply, {:error, :run_closed}, state}
-
-      deadline_expired?(state) ->
-        {:reply, {:error, :deadline_expired}, state}
-
-      not grantable?(state) or not :queue.is_empty(state.admission_queue) ->
-        {:reply, {:error, :busy}, state}
-
-      state.evaluations >= state.limits.subordinate_evaluations ->
-        evaluation_limit_reply(state, caller, with_limit_proof?)
-
-      true ->
-        lease = {make_ref(), caller, Process.monitor(caller)}
-        continuation = continuation(state, mission)
-
-        {:reply, {:ok, continuation.memory, continuation.history, elem(lease, 0)},
-         %{
-           record_evaluation(state, mission)
-           | evaluation_lease: lease,
-             evaluation_mission: mission,
-             evaluation_release_waiter: nil,
-             evaluation_terminal_provider_failure?: false,
-             evaluation_terminal_host_failure?: false
-         }}
-    end
-  end
-
-  defp reserve_evaluation_blocking(
+  defp reserve_evaluation_request(
          state,
          mission,
+         mode,
          requested_at,
          {caller, _tag} = from,
-         with_limit_proof?
+         proof?
        ) do
-    admission_deadline = admission_deadline(state, requested_at)
+    admission_deadline = Admission.admission_deadline(state, requested_at)
 
-    cond do
-      state.closed? ->
-        {:reply, {:error, :run_closed}, state}
+    case Admission.decision(state, mode, admission_deadline, System.monotonic_time(:millisecond)) do
+      {:error, :limit_exceeded} ->
+        evaluation_limit_reply(state, caller, proof?)
 
-      deadline_expired?(state) ->
-        {:reply, {:error, :deadline_expired}, state}
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
 
-      # The bound counts from the caller's request, so a message that sat in
-      # the owner's mailbox past its whole admission window is refused even
-      # when the lease happens to be free.
-      System.monotonic_time(:millisecond) >= admission_deadline ->
-        {:reply, {:error, :admission_timeout}, state}
-
-      state.evaluations >= state.limits.subordinate_evaluations ->
-        evaluation_limit_reply(state, caller, with_limit_proof?)
-
-      grantable?(state) and :queue.is_empty(state.admission_queue) ->
+      :grant ->
         lease = {make_ref(), caller, Process.monitor(caller)}
-        continuation = continuation(state, mission)
+        continuation = Admission.continuation(state, mission)
+        next = Admission.grant_lease(Admission.record_evaluation(state, mission), mission, lease)
+        {:reply, {:ok, continuation.memory, continuation.history, elem(lease, 0)}, next}
 
-        {:reply, {:ok, continuation.memory, continuation.history, elem(lease, 0)},
-         %{
-           record_evaluation(state, mission)
-           | evaluation_lease: lease,
-             evaluation_mission: mission,
-             evaluation_release_waiter: nil,
-             evaluation_terminal_provider_failure?: false,
-             evaluation_terminal_host_failure?: false
-         }}
-
-      true ->
-        # admit_from_queue self-heals the (unreachable by invariant) state of
-        # a grantable lease behind a non-empty queue: the FIFO head is
-        # admitted, which may be this caller.
+      :enqueue ->
+        # Admit the FIFO head if a free lease is ever observed behind a queue.
         {:noreply,
-         admit_from_queue(
-           enqueue_admission_waiter(
-             state,
-             from,
-             caller,
-             mission,
-             admission_deadline,
-             with_limit_proof?
-           )
-         )}
+         state
+         |> enqueue_admission_waiter(from, caller, mission, admission_deadline, proof?)
+         |> admit_from_queue()}
     end
   end
 
   # The admission bound counts from the caller's request time and is capped
   # by the run deadline.
-  defp admission_deadline(state, requested_at) do
-    min(
-      requested_at + state.limits.evaluation_admission_timeout_ms,
-      state.deadline_ms
-    )
-  end
-
   defp enqueue_admission_waiter(
          state,
          from,
@@ -2550,7 +2147,7 @@ defmodule PtcRunner.Kernel.RunState do
       with_limit_proof?: with_limit_proof?
     }
 
-    %{state | admission_queue: :queue.in(waiter, state.admission_queue)}
+    Admission.enqueue(state, waiter)
   end
 
   # The single admission point. Pops waiters until it grants one or runs out:
@@ -2562,20 +2159,12 @@ defmodule PtcRunner.Kernel.RunState do
         state
 
       {{:value, waiter}, rest} ->
-        cond do
-          state.closed? ->
-            resolve_admission_waiter(waiter, {:error, :run_closed})
+        case Admission.queued_decision(state, waiter, System.monotonic_time(:millisecond)) do
+          {:error, reason} when reason != :limit_exceeded ->
+            resolve_admission_waiter(waiter, {:error, reason})
             admit_from_queue(%{state | admission_queue: rest})
 
-          deadline_expired?(state) ->
-            resolve_admission_waiter(waiter, {:error, :deadline_expired})
-            admit_from_queue(%{state | admission_queue: rest})
-
-          System.monotonic_time(:millisecond) >= waiter.deadline_mono ->
-            resolve_admission_waiter(waiter, {:error, :admission_timeout})
-            admit_from_queue(%{state | admission_queue: rest})
-
-          state.evaluations >= state.limits.subordinate_evaluations ->
+          {:error, :limit_exceeded} ->
             state = %{state | admission_queue: rest}
 
             state =
@@ -2597,10 +2186,10 @@ defmodule PtcRunner.Kernel.RunState do
 
             admit_from_queue(state)
 
-          not grantable?(state) ->
+          :wait ->
             state
 
-          true ->
+          :grant ->
             grant_admission(%{state | admission_queue: rest}, waiter)
         end
     end
@@ -2612,21 +2201,18 @@ defmodule PtcRunner.Kernel.RunState do
   defp grant_admission(state, waiter) do
     Process.cancel_timer(waiter.timer_ref)
     lease = {make_ref(), waiter.caller, waiter.monitor_ref}
-    continuation = continuation(state, waiter.mission_name)
+    continuation = Admission.continuation(state, waiter.mission_name)
 
     GenServer.reply(
       waiter.from,
       {:ok, continuation.memory, continuation.history, elem(lease, 0)}
     )
 
-    %{
-      record_evaluation(state, waiter.mission_name)
-      | evaluation_lease: lease,
-        evaluation_mission: waiter.mission_name,
-        evaluation_release_waiter: nil,
-        evaluation_terminal_provider_failure?: false,
-        evaluation_terminal_host_failure?: false
-    }
+    Admission.grant_lease(
+      Admission.record_evaluation(state, waiter.mission_name),
+      waiter.mission_name,
+      lease
+    )
   end
 
   defp resolve_admission_waiter(waiter, reply, opts \\ []) do
@@ -2681,42 +2267,6 @@ defmodule PtcRunner.Kernel.RunState do
       {caller, _proof} -> drop_evaluation_limit_proof(state, caller)
       nil -> state
     end
-  end
-
-  defp take_admission_waiter(state, monitor_ref) do
-    waiters = :queue.to_list(state.admission_queue)
-
-    case Enum.split_with(waiters, &(&1.monitor_ref == monitor_ref)) do
-      {[waiter], rest} -> {waiter, %{state | admission_queue: :queue.from_list(rest)}}
-      {[], _waiters} -> {nil, state}
-    end
-  end
-
-  defp reservation_by_provider_ref(reservations, ref) do
-    Enum.find_value(reservations, fn {reservation_id, reservation} ->
-      if reservation.provider_ref == ref, do: {reservation_id, reservation}
-    end)
-  end
-
-  defp reservation_by_caller_ref(reservations, ref) do
-    Enum.find_value(reservations, fn {reservation_id, reservation} ->
-      if reservation.caller_ref == ref, do: {reservation_id, reservation}
-    end)
-  end
-
-  defp continuation(state, mission_name),
-    do: Map.get(state.continuations, mission_name, %{memory: %{}, history: [], revision: 0})
-
-  defp record_evaluation(state, @workflow_continuation),
-    do: %{state | evaluations: state.evaluations + 1}
-
-  defp record_evaluation(state, mission_name) do
-    %{
-      state
-      | evaluations: state.evaluations + 1,
-        evaluations_by_mission:
-          Map.update(state.evaluations_by_mission, mission_name, 1, &(&1 + 1))
-    }
   end
 
   defp mission_and_total_bytes(continuations, mission_name, key, candidate, limit) do
@@ -2802,7 +2352,7 @@ defmodule PtcRunner.Kernel.RunState do
       agent_protocol_errors: state.agent_protocol_errors,
       capability_refusals: state.capability_refusals,
       capability_denials: state.capability_denials,
-      llm_budget: llm_budget_projection(state.llm_budget),
+      llm_budget: LlmBudget.llm_budget_projection(state.llm_budget),
       llm_spend: LLMUsageSummary.spend(state.llm_usage),
       evaluation_memory_bytes:
         continuations_total(state.continuations, :memory, state.limits.evaluation_memory_bytes),
@@ -2815,46 +2365,6 @@ defmodule PtcRunner.Kernel.RunState do
         |> Enum.reject(&(&1 == @workflow_continuation))
         |> Enum.sort(),
       evaluation_busy?: not is_nil(state.evaluation_lease)
-    }
-  end
-
-  defp new_ledger(nil), do: nil
-
-  defp new_ledger(limit) when is_integer(limit) and limit in 1..@maximum_integer do
-    %{limit: limit, reserved: 0, charged: 0, refused: 0, state: :available}
-  end
-
-  defp llm_budget_projection(budget) do
-    %{
-      "total_tokens" => total_tokens_projection(budget.total_tokens),
-      "cost" => cost_projection(budget.cost)
-    }
-  end
-
-  defp total_tokens_projection(nil), do: nil
-
-  defp total_tokens_projection(ledger) do
-    %{
-      "state" => Atom.to_string(ledger.state),
-      "limit" => ledger.limit,
-      "reserved" => ledger.reserved,
-      "charged" => ledger.charged,
-      "remaining" => ledger_remaining(ledger),
-      "refused" => ledger.refused
-    }
-  end
-
-  defp cost_projection(nil), do: nil
-
-  defp cost_projection(ledger) do
-    %{
-      "state" => Atom.to_string(ledger.state),
-      "currency" => "USD",
-      "limit_microusd" => ledger.limit,
-      "reserved_microusd" => ledger.reserved,
-      "charged_microusd" => ledger.charged,
-      "remaining_microusd" => ledger_remaining(ledger),
-      "refused" => ledger.refused
     }
   end
 

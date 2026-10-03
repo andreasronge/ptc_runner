@@ -185,7 +185,7 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
 
     {:ok, environment} = MissionEnvironment.new(capabilities: [checked])
     {:ok, state} = RunState.start(Limits.defaults())
-    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", mode: :fail_fast)
 
     grant =
       ToolGrant.capability_callbacks(

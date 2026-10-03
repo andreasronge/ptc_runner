@@ -116,6 +116,7 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
 
       {:ok, inspection_store} = PtcViewer.InspectionStore.start(inspection_source.inspection)
 
+      # Direct router probes must use the same local authority as a real listener.
       viewer_opts = [
         expected_port: 80,
         trace_dir: Path.dirname(journey.trace),
