@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.MCPLauncherStaging do
 
   use GenServer
 
+  alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.ResourceRegistrar
 
   @enforce_keys [:pid, :path]
@@ -80,33 +81,11 @@ defmodule PtcRunner.Kernel.MCPLauncherStaging do
 
   def handle_info(_message, state), do: {:noreply, state}
 
-  defp create_directory(0), do: {:error, :mcp_stdio_launcher_unavailable}
-
   defp create_directory(attempts) do
-    name =
-      "ptc-runner-launcher-" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false)
-
-    directory = Path.join(System.tmp_dir!(), name)
-
-    case File.mkdir(directory) do
-      :ok ->
-        case File.chmod(directory, 0o700) do
-          :ok ->
-            {:ok, directory}
-
-          {:error, _reason} ->
-            _ = File.rmdir(directory)
-            {:error, :mcp_stdio_launcher_unavailable}
-        end
-
-      {:error, :eexist} ->
-        create_directory(attempts - 1)
-
-      {:error, _reason} ->
-        {:error, :mcp_stdio_launcher_unavailable}
+    case PrivateDirectory.create_temp("ptc-runner-launcher-", attempts) do
+      {:ok, directory} -> {:ok, directory}
+      {:error, _reason} -> {:error, :mcp_stdio_launcher_unavailable}
     end
-  rescue
-    _exception -> {:error, :mcp_stdio_launcher_unavailable}
   end
 
   defp cleanup(state) do

@@ -72,7 +72,8 @@ defmodule PtcRunner.Kernel.ProjectArtifactRoot do
         {:error, _reason} -> cleanup(staging)
       end
     else
-      {:error, :private_directory_creation_failed} -> create(root, attempts - 1)
+      {:error, :eexist} -> create(root, attempts - 1)
+      {:error, :private_directory_creation_failed} -> creation_refused(root)
       {:error, _reason} -> parent_failure(root)
     end
   end

@@ -839,14 +839,23 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
 
     [pending] = Map.values(:sys.get_state(session.pid).pending_registrations)
     assert pending.response_deadline_ms > pending.mutation_deadline_ms
-    assert true = :erlang.suspend_process(session.pid)
+    assert :ok = :sys.suspend(session.pid)
     assert true = :erlang.resume_process(registrar.scope_controller)
     assert_message_queue_at_least(session.pid, 1)
 
-    delay_ms = max(pending.mutation_deadline_ms + 1 - System.monotonic_time(:millisecond), 0)
-    Process.send_after(self(), :resume_registration_session, delay_ms)
-    assert_receive :resume_registration_session, 600
-    assert true = :erlang.resume_process(session.pid)
+    # The scope has accepted the mutation. Expire its cutoff in the suspended
+    # session's state without spending all but 50 ms of the caller's reply
+    # budget on a wall-clock wait. System messages remain serviceable while
+    # suspended, so the result stays queued until this transition is complete.
+    :sys.replace_state(session.pid, fn state ->
+      update_in(state.pending_registrations, fn registrations ->
+        Map.new(registrations, fn {ref, registration} ->
+          {ref, %{registration | mutation_deadline_ms: System.monotonic_time(:millisecond) - 1}}
+        end)
+      end)
+    end)
+
+    assert :ok = :sys.resume(session.pid)
 
     assert_receive {:reserved_registration_response, :ok}
     assert_receive {:DOWN, ^root_monitor, :process, ^root, :normal}

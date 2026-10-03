@@ -68,6 +68,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.LLMReplay
   alias PtcRunner.Kernel.LLMUsage
+  alias PtcRunner.Kernel.MCPLauncher
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.ManagerCleanup
   alias PtcRunner.Kernel.MCPOAuth.TokenManager
@@ -86,11 +87,9 @@ defmodule PtcRunner.Kernel.HostInstallation do
   alias PtcRunner.LLM.Requirements
 
   @inherited_compatibility_environment ~w(HOME LOGNAME PATH SHELL TERM USER)
-  @stdio_locale_environment %{"LC_ALL" => "C.UTF-8"}
   @max_credential_bytes 65_536
   @max_executable_bytes 268_435_456
   @max_launcher_bytes 16_777_216
-  @launcher_protocol_version 2
 
   @doc """
   Builds the inert declaration catalog installed by a loaded host document.
@@ -905,7 +904,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
     with :ok <- placement(installation, context.destination),
          {:ok, selected} <- trace_snapshot_selection(installation, selection, context),
          {:ok, directory} <-
-           canonical_snapshot_directory(host.directory, installation.directory) do
+           canonical_snapshot_directory(
+             host.directory,
+             installation.directory,
+             :invalid_trace_snapshot_directory
+           ) do
       {:ok,
        {:private_preflight,
         fn %{} -> acquire_trace_snapshot(directory, installation, selected, context) end}}
@@ -922,7 +925,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
     with :ok <- placement(installation, context.destination),
          {:ok, selected} <- inspection_snapshot_selection(installation, selection, context),
          {:ok, directory} <-
-           canonical_inspection_snapshot_directory(host.directory, installation.directory) do
+           canonical_snapshot_directory(
+             host.directory,
+             installation.directory,
+             :invalid_inspection_snapshot_directory
+           ) do
       {:ok,
        {:private_preflight,
         fn %{}, %{canonical_trace_snapshot: trace_snapshot} ->
@@ -2189,12 +2196,12 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end)
   end
 
-  defp compatibility_environment(false), do: {:ok, @stdio_locale_environment}
+  defp compatibility_environment(false), do: {:ok, MCPLauncher.locale_environment()}
 
   defp compatibility_environment(true) do
     Enum.reduce_while(
       @inherited_compatibility_environment,
-      {:ok, @stdio_locale_environment},
+      {:ok, MCPLauncher.locale_environment()},
       fn name, {:ok, environment} ->
         case System.get_env(name) do
           nil ->
@@ -2225,25 +2232,14 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  defp canonical_snapshot_directory(base, path) do
+  defp canonical_snapshot_directory(base, path, error) do
     candidate = if Path.type(path) == :absolute, do: path, else: Path.expand(path, base)
 
     with {:ok, canonical} <- ConfinedFile.resolve_absolute(candidate),
          {:ok, %{type: :directory}} <- File.stat(canonical) do
       {:ok, canonical}
     else
-      _reason -> {:error, :invalid_trace_snapshot_directory}
-    end
-  end
-
-  defp canonical_inspection_snapshot_directory(base, path) do
-    candidate = if Path.type(path) == :absolute, do: path, else: Path.expand(path, base)
-
-    with {:ok, canonical} <- ConfinedFile.resolve_absolute(candidate),
-         {:ok, %{type: :directory}} <- File.stat(canonical) do
-      {:ok, canonical}
-    else
-      _reason -> {:error, :invalid_inspection_snapshot_directory}
+      _reason -> {:error, error}
     end
   end
 
@@ -2298,28 +2294,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   end
 
   defp resolve_launcher(nil) do
-    launcher_module = Module.concat(["PtcRunnerLauncher"])
-
-    if Code.ensure_loaded?(launcher_module) and
-         function_exported?(launcher_module, :protocol_version, 0) and
-         function_exported?(launcher_module, :executable_path, 0) and
-         launcher_module.protocol_version() == @launcher_protocol_version do
-      case launcher_module.executable_path() do
-        {:ok, path} ->
-          case canonical_executable(path, @max_launcher_bytes, :mcp_stdio_launcher_unavailable) do
-            {:ok, canonical, digest} -> {:ok, canonical, digest}
-            {:error, _reason} = error -> error
-          end
-
-        {:error, :unsupported_platform} ->
-          {:error, :unsupported_mcp_stdio_platform}
-
-        {:error, _reason} ->
-          {:error, :mcp_stdio_launcher_unavailable}
-      end
-    else
-      {:error, :mcp_stdio_launcher_unavailable}
-    end
+    with {:ok, path} <- MCPLauncher.companion(), do: resolve_launcher(path)
   end
 
   defp resolve_launcher(path) do

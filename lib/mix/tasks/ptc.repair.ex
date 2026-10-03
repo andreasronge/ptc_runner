@@ -628,7 +628,7 @@ defmodule Mix.Tasks.Ptc.Repair do
   end
 
   defp create_private_child(path) do
-    with :ok <- File.mkdir(path), do: File.chmod(path, 0o700)
+    PrivateDirectory.create(path)
   end
 
   defp write_private_json(path, value) do

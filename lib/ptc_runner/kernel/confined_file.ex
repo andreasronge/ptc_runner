@@ -125,15 +125,21 @@ defmodule PtcRunner.Kernel.ConfinedFile do
 
   @doc """
   Resolves an absolute path, following only symbolic links that stay within the
-  filesystem root, and returns the canonical absolute path.
+  filesystem root, and returns the canonical absolute path. Parent segments
+  are processed after preceding symlinks, including inside link targets;
+  relative paths are rejected.
   """
   @spec resolve_absolute(binary()) :: {:ok, binary()} | {:error, error()}
   def resolve_absolute(path) when is_binary(path) do
-    relative = Path.relative_to(path, "/")
+    case Path.split(path) do
+      ["/" | segments] ->
+        case resolve_segments("/", segments, 0) do
+          {:ok, resolved} -> {:ok, Path.join("/", resolved)}
+          {:error, reason} -> {:error, normalize(reason)}
+        end
 
-    case resolve_segments("/", Path.split(relative), 0) do
-      {:ok, resolved} -> {:ok, Path.join("/", resolved)}
-      {:error, reason} -> {:error, normalize(reason)}
+      _relative ->
+        {:error, :invalid_path}
     end
   end
 
@@ -171,20 +177,26 @@ defmodule PtcRunner.Kernel.ConfinedFile do
     |> Enum.reduce_while({:ok, {root, []}}, fn segment, {:ok, {parent, consumed}} ->
       candidate = Path.join(parent, segment)
 
-      case File.lstat(candidate) do
+      result =
+        if within_root?(root, Path.expand(candidate)),
+          do: File.lstat(candidate),
+          else: {:error, :symlink_escape}
+
+      case result do
         {:ok, %{type: :symlink}} ->
           with {:ok, target} <- File.read_link(candidate),
-               target = Path.expand(target, parent),
-               true <- within_root?(root, target) do
+               target = absolute_link_target(target, parent),
+               true <- within_root?(root, target),
+               true <- within_root?(root, Path.expand(target)) do
             remaining = Enum.drop(segments, length(consumed) + 1)
-            target_segments = target |> Path.relative_to(root) |> Path.split()
+            target_segments = Enum.drop(Path.split(target), length(Path.split(root)))
             {:halt, resolve_segments(root, target_segments ++ remaining, depth + 1)}
           else
             _reason -> {:halt, {:error, :symlink_escape}}
           end
 
         {:ok, _stat} ->
-          {:cont, {:ok, {candidate, consumed ++ [segment]}}}
+          {:cont, {:ok, {Path.expand(candidate), consumed ++ [segment]}}}
 
         {:error, reason} ->
           {:halt, {:error, reason}}
@@ -194,6 +206,14 @@ defmodule PtcRunner.Kernel.ConfinedFile do
       {:ok, {resolved, _consumed}} -> {:ok, Path.relative_to(resolved, root)}
       {:ok, resolved} when is_binary(resolved) -> {:ok, resolved}
       error -> error
+    end
+  end
+
+  # Preserve dot segments until their preceding symlinks have been followed.
+  defp absolute_link_target(target, parent) do
+    case Path.type(target) do
+      :absolute -> target
+      _relative -> Path.join(parent, target)
     end
   end
 
