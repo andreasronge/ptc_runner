@@ -203,7 +203,9 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
     assert_receive {:DOWN, ^caller_ref, :process, ^caller, :normal}
     assert_receive {:detached_release, first_worker, 0}
     refute first_worker == caller
-    assert_receive {:detached_release, second_worker, 1}, 1_000
+    # The retry is scheduled 500 ms after the first failure; leave headroom
+    # for a loaded runner rather than racing that delay.
+    assert_receive {:detached_release, second_worker, 1}, 5_000
     refute second_worker == caller
     assert :ok = MCPRequestContext.close(context)
   end

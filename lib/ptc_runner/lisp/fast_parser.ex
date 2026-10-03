@@ -84,6 +84,21 @@ defmodule PtcRunner.Lisp.FastParser do
       {<<?#, ?{, rest::binary>>, offset, line, column} ->
         parse_sequence({rest, offset + 2, line, column + 2}, ?}, :set, [], depth)
 
+      {"#_" <> _rest, _offset, _line, _column} ->
+        parse_error(cursor, "reader discard syntax (#_) is not supported. Use ; for comments")
+
+      {<<?@, c, _rest::binary>>, _offset, _line, _column} when c in ?a..?z or c in ?A..?Z ->
+        parse_error(
+          cursor,
+          "deref syntax (@var) is not supported. Atoms and refs are not available"
+        )
+
+      {<<?', c, _rest::binary>>, _offset, _line, _column} when c in [?(, ?[, ?{] ->
+        parse_error(
+          cursor,
+          "quoted collections are not supported; only quoted symbols like 'github are allowed"
+        )
+
       {"#(" <> rest, offset, line, column} ->
         parse_sequence({rest, offset + 2, line, column + 2}, ?), :short_fn, [], depth)
 
@@ -298,12 +313,6 @@ defmodule PtcRunner.Lisp.FastParser do
       {<<c, _rest::binary>>, _offset, _line, _column} when is_symbol_first(c) ->
         {name, cursor} = take_symbol(cursor)
         {:ok, {:quoted_symbol, name}, cursor}
-
-      {<<c, _rest::binary>>, _offset, line, column} when c in [?(, ?[, ?{] ->
-        parse_error(
-          cursor,
-          "quoted collections are not supported; only quoted symbols like 'github are allowed at line #{line}, column #{column}"
-        )
 
       {_rest, _offset, line, column} ->
         parse_error(

@@ -59,8 +59,10 @@ defmodule PtcRunner.Kernel.ProviderTaskTracker do
 
   @spec cancel_guardian(t(), pid(), integer()) :: :ok | {:error, :provider_cleanup_failed}
   def cancel_guardian(%__MODULE__{} = tracker, guardian, deadline)
-      when is_pid(guardian) and is_integer(deadline),
-      do: safe_call(tracker, {:cancel_guardian, guardian, deadline})
+      when is_pid(guardian) and is_integer(deadline) do
+    timeout_ms = max(deadline - System.monotonic_time(:millisecond), 0)
+    safe_call(tracker, {:cancel_guardian, guardian, deadline}, timeout_ms)
+  end
 
   # Kills and reaps every attached task and then ends the tracker, so terminal
   # cleanup can prove the run's callbacks are gone. Sealing is the point:
@@ -236,11 +238,10 @@ defmodule PtcRunner.Kernel.ProviderTaskTracker do
     end
   end
 
-  defp call(%__MODULE__{pid: pid, token: token}, request),
-    do: GenServer.call(pid, {token, request})
+  defp safe_call(tracker, request, timeout_ms \\ 5_000)
 
-  defp safe_call(tracker, request) do
-    call(tracker, request)
+  defp safe_call(%__MODULE__{pid: pid, token: token}, request, timeout_ms) do
+    GenServer.call(pid, {token, request}, timeout_ms)
   catch
     :exit, _reason -> {:error, :closed}
   end

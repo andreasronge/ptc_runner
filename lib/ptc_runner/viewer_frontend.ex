@@ -25,7 +25,10 @@ defmodule PtcRunner.ViewerFrontend do
   reports `viewer_unavailable` rather than failing obscurely.
 
   The command runs in the foreground until the Viewer stops or the process is
-  signalled; `SIGINT` and `SIGTERM` both end it cleanly.
+  signalled; `SIGINT` and `SIGTERM` both end it cleanly. An explicit environment
+  file is forwarded to individual launches, each of which reads its own
+  snapshot and restores the declared variables; serving does not hold an
+  environment scope.
 
   The Runs list and private inspection grant are a captured snapshot.
   Revoking `viewer.private` takes effect on the next request and drops held

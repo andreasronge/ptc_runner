@@ -163,9 +163,6 @@ defmodule PtcRunner.Kernel.CommandDoctor do
 
       {:error, %CommandDiagnostic{} = diagnostic} ->
         {:error, arguments_outcome(arguments, run_ref, diagnostic)}
-
-      {:error, reason} ->
-        {:error, arguments_outcome(arguments, run_ref, operation_diagnostic(reason))}
     end
   end
 
