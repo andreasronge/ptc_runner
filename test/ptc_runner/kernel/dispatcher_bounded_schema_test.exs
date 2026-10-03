@@ -234,7 +234,9 @@ defmodule PtcRunner.Kernel.DispatcherBoundedSchemaTest do
     {:ok, environment} = MissionEnvironment.new(capabilities: [capability])
     {:ok, limits} = Limits.new()
     {:ok, state} = RunState.start(limits)
-    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, "reader", :fail_fast)
+
+    {:ok, _memory, _history, lease} =
+      RunState.reserve_evaluation(state, "reader", mode: :fail_fast)
 
     result =
       Dispatcher.dispatch(

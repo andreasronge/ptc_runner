@@ -219,10 +219,13 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   test "only one evaluation lease is granted and failed candidates preserve memory" do
     {:ok, limits} = Limits.new(subordinate_evaluations: 2, evaluation_memory_bytes: 1_000)
     {:ok, state} = RunState.start(limits)
-    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
-    assert {:error, :busy} = RunState.reserve_evaluation(state, "default", :fail_fast)
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", mode: :fail_fast)
+    assert {:error, :busy} = RunState.reserve_evaluation(state, "default", mode: :fail_fast)
     assert :ok = RunState.release_evaluation(state, lease)
-    assert {:ok, %{}, [], next_lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+
+    assert {:ok, %{}, [], next_lease} =
+             RunState.reserve_evaluation(state, "default", mode: :fail_fast)
+
     assert :ok = RunState.commit_evaluation(state, next_lease, %{"x" => 42}, [41])
     assert %{evaluation_memory_bytes: memory_bytes} = RunState.usage(state)
     assert memory_bytes > 0
@@ -331,7 +334,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert :ok = RunState.finish_source_check(state, "default", revision)
 
     assert {:ok, %{}, stale_revision} = RunState.reserve_source_check(state, "default")
-    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", mode: :fail_fast)
     assert :ok = RunState.commit_evaluation(state, lease, %{"retained" => 42}, [])
     assert {:error, :stale} = RunState.finish_source_check(state, "default", stale_revision)
     assert {:error, :limit_exceeded} = RunState.reserve_source_check(state, "default")
@@ -341,7 +344,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
   test "source checks refuse an active evaluation lease without consuming quota" do
     {:ok, state} = RunState.start(Limits.defaults())
-    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", mode: :fail_fast)
     assert {:error, :busy} = RunState.reserve_source_check(state, "default")
     assert %{subordinate_source_checks: 0} = RunState.usage(state)
     assert :ok = RunState.release_evaluation(state, lease)
@@ -353,7 +356,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     evaluation_owner =
       spawn_link(fn ->
-        {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+        {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", mode: :fail_fast)
         send(parent, {:evaluation_ready, self(), lease})
 
         receive do
@@ -416,7 +419,8 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                        terminal_host_failure?: false
                      }}}
 
-    assert {:ok, %{}, [], next_lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+    assert {:ok, %{}, [], next_lease} =
+             RunState.reserve_evaluation(state, "default", mode: :fail_fast)
 
     assert {:ok,
             %{
@@ -428,7 +432,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
   test "evaluation host-failure status is scoped to the exact active lease" do
     {:ok, state} = RunState.start(Limits.defaults())
-    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", mode: :fail_fast)
 
     assert :ok = RunState.mark_evaluation_terminal_host_failure(state, make_ref())
 
@@ -438,7 +442,9 @@ defmodule PtcRunner.Kernel.CoreContractTest do
               terminal_host_failure?: false
             }} = RunState.release_evaluation_status(state, lease)
 
-    assert {:ok, %{}, [], next_lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+    assert {:ok, %{}, [], next_lease} =
+             RunState.reserve_evaluation(state, "default", mode: :fail_fast)
+
     assert :ok = RunState.mark_evaluation_terminal_host_failure(state, next_lease)
 
     assert {:ok,
@@ -462,11 +468,14 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       )
 
     {:ok, state} = RunState.start(limits)
-    assert {:ok, %{}, [], first_lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+
+    assert {:ok, %{}, [], first_lease} =
+             RunState.reserve_evaluation(state, "default", mode: :fail_fast)
+
     assert :ok = RunState.commit_evaluation(state, first_lease, memory, [])
 
     assert {:ok, ^memory, [], history_lease} =
-             RunState.reserve_evaluation(state, "default", :fail_fast)
+             RunState.reserve_evaluation(state, "default", mode: :fail_fast)
 
     assert :ok = RunState.commit_evaluation(state, history_lease, memory, [history_value])
 
@@ -479,7 +488,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert combined_bytes > memory_limit
 
     assert {:ok, ^memory, [^history_value], rejected_lease} =
-             RunState.reserve_evaluation(state, "default", :fail_fast)
+             RunState.reserve_evaluation(state, "default", mode: :fail_fast)
 
     assert {:error, :history_exceeded} =
              RunState.commit_evaluation(
@@ -490,7 +499,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
              )
 
     assert {:ok, ^memory, [^history_value], release_lease} =
-             RunState.reserve_evaluation(state, "default", :fail_fast)
+             RunState.reserve_evaluation(state, "default", mode: :fail_fast)
 
     assert :ok = RunState.release_evaluation(state, release_lease)
   end
@@ -507,11 +516,11 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       )
 
     {:ok, state} = RunState.start(limits)
-    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", mode: :fail_fast)
     assert :ok = RunState.commit_evaluation(state, lease, %{"slice" => slice}, [slice])
 
     assert {:ok, %{"slice" => retained}, [history], next_lease} =
-             RunState.reserve_evaluation(state, "default", :fail_fast)
+             RunState.reserve_evaluation(state, "default", mode: :fail_fast)
 
     assert :binary.referenced_byte_size(retained) == 1_000
     assert :binary.referenced_byte_size(history) == 1_000
@@ -684,7 +693,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, state} = RunState.start(limits)
 
     {:ok, _memory, _history, lease} =
-      RunState.reserve_evaluation(state, "default", :fail_fast)
+      RunState.reserve_evaluation(state, "default", mode: :fail_fast)
 
     assert %{
              status: :error,
@@ -4035,7 +4044,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       end)
 
     assert_receive :source_compiled
-    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", mode: :fail_fast)
     assert :ok = RunState.commit_evaluation(state, lease, %{"changed" => true}, [])
     send(checking.pid, :finish_source_check)
 
