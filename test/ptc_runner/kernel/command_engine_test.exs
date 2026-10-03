@@ -17,6 +17,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.CommandPreparation
   alias PtcRunner.Kernel.CommandRejection
   alias PtcRunner.Kernel.CommandRenderer
+  alias PtcRunner.Kernel.CommandResults
   alias PtcRunner.Kernel.CommandRunOutcome
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.CommandRuntime
@@ -53,6 +54,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.ValueContractClassification
   alias PtcRunner.Lisp.TrustedError
   alias PtcRunner.StandaloneCLI
+  alias PtcRunner.TestSupport.CommandContractSchema
   alias PtcRunner.TestSupport.MCPHTTPFixture
   alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
@@ -205,7 +207,9 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       assert rendered =~ expected_guidance
     end
 
-    viewer_notice = CommandContract.help_result(:viewer)["notices"] |> List.first()
+    viewer_notice =
+      CommandResults.help_result(:viewer)["notices"] |> List.first()
+
     assert viewer_notice =~ "when it is loopback"
     assert viewer_notice =~ "otherwise use an address that reaches the Viewer"
   end
@@ -4356,7 +4360,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   test "Mix help and rejections include the declared frontend-only authorization switch" do
     assert {:ok, arguments} = CommandParser.parse(["help", "run"], :mix)
 
-    result = CommandContract.help_result(arguments.options.topic, arguments.frontend)
+    result =
+      CommandResults.help_result(arguments.options.topic, arguments.frontend)
 
     assert Enum.any?(result["options"], fn option ->
              option["switches"] == ["--authorize-mcp NAME"]
@@ -4377,7 +4382,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   test "every catalog row renders with its generated schema constants" do
     assert {:ok, root} =
              JSV.build(
-               CommandContract.catalog_diagnostic_schema(),
+               CommandContractSchema.catalog_diagnostic_schema(),
                atoms: false,
                warnings: :silent
              )
@@ -4395,7 +4400,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   test "published envelopes accept every catalog row, source kind, and subject variant" do
-    assert {:ok, internal_root} = CommandContract.envelope_schema_root()
+    assert {:ok, internal_root} =
+             CommandContractSchema.envelope_schema_root()
 
     assert {:ok, published_root} =
              JSV.build(CommandContract.published_schema(), atoms: false, warnings: :silent)
@@ -4677,7 +4683,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       )
 
     assert {:ok, root} =
-             JSV.build(CommandContract.catalog_diagnostic_schema(),
+             JSV.build(CommandContractSchema.catalog_diagnostic_schema(),
                atoms: false,
                warnings: :silent
              )

@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
   alias PtcRunner.Kernel.CommandParser
   alias PtcRunner.Kernel.CommandRejection
   alias PtcRunner.Kernel.CommandRenderer
+  alias PtcRunner.Kernel.CommandResults
   alias PtcRunner.Kernel.DocumentationLibrary
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
 
@@ -296,8 +297,15 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
   end
 
   test "a page renders verbatim while the listing renders one row per page" do
-    listing = CommandOutcome.success(:docs, @run_ref, CommandContract.docs_result(nil))
-    page = CommandOutcome.success(:docs, @run_ref, CommandContract.docs_result("limits"))
+    listing =
+      CommandOutcome.success(:docs, @run_ref, CommandResults.docs_result(nil))
+
+    page =
+      CommandOutcome.success(
+        :docs,
+        @run_ref,
+        CommandResults.docs_result("limits")
+      )
 
     assert {:stdout, listing_text} = CommandRenderer.render(listing)
     assert {:stdout, page_text} = CommandRenderer.render(page)

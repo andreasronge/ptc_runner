@@ -1,11 +1,11 @@
 defmodule PtcRunner.Kernel.MissionCapabilityDiagnosticTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.MissionCapabilityDiagnostic
+  alias PtcRunner.TestSupport.CommandContractSchema
 
   test "singular, plural, and fallback forms satisfy the command schema" do
     assert {:ok, singular} = MissionCapabilityDiagnostic.message("draft", ["vault.read"])
@@ -29,7 +29,7 @@ defmodule PtcRunner.Kernel.MissionCapabilityDiagnosticTest do
              )
 
     assert {:ok, schema} =
-             JSV.build(CommandContract.catalog_diagnostic_schema(),
+             JSV.build(CommandContractSchema.catalog_diagnostic_schema(),
                atoms: false,
                warnings: :silent
              )

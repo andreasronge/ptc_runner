@@ -23,7 +23,6 @@ defmodule PtcRunner.Kernel.CommandEngine do
   alias PtcRunner.Kernel.CommandAcquisition
   alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandCatalog
-  alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandDestination
   alias PtcRunner.Kernel.CommandDiagnostic
@@ -35,6 +34,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandPreparation
   alias PtcRunner.Kernel.CommandRejection
+  alias PtcRunner.Kernel.CommandResults
   alias PtcRunner.Kernel.CommandRunDispatch
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.CommandRuntime
@@ -123,22 +123,13 @@ defmodule PtcRunner.Kernel.CommandEngine do
   @spec dispatch_entry(CommandEntry.t(), CommandRuntime.t()) ::
           {:ok, CommandOutcome.t()} | {:error, CommandOutcome.t()}
   def dispatch_entry(%CommandEntry{} = entry, %CommandRuntime{} = runtime) do
-    {status, outcome, _rejection} = dispatch_entry_context(entry, runtime, false)
+    {status, outcome, _rejection, _named_env_file?} =
+      dispatch_entry_context(entry, runtime, false)
+
     {status, outcome}
   end
 
   def dispatch_entry(%CommandEntry{} = entry, _runtime), do: startup_failure(entry)
-
-  @doc false
-  @spec dispatch_frontend_entry(CommandEntry.t(), CommandRuntime.t()) ::
-          {:ok, CommandOutcome.t(), nil}
-          | {:error, CommandOutcome.t(), CommandRejection.t() | nil}
-  def dispatch_frontend_entry(%CommandEntry{} = entry, %CommandRuntime{} = runtime) do
-    {status, outcome, rejection, _named_env_file?} =
-      dispatch_frontend_entry_with_context(entry, runtime)
-
-    {status, outcome, rejection}
-  end
 
   @doc false
   @spec dispatch_frontend_entry_with_context(CommandEntry.t(), CommandRuntime.t()) ::
@@ -148,13 +139,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
         %CommandEntry{} = entry,
         %CommandRuntime{} = runtime
       ) do
-    case dispatch_entry_context(entry, runtime, true) do
-      {status, outcome, rejection, named_env_file?} ->
-        {status, outcome, rejection, named_env_file?}
-
-      {status, outcome, rejection} ->
-        {status, outcome, rejection, false}
-    end
+    dispatch_entry_context(entry, runtime, true)
   end
 
   defp dispatch_entry_context(
@@ -165,7 +150,10 @@ defmodule PtcRunner.Kernel.CommandEngine do
          _runtime,
          _presentation?
        ),
-       do: with_rejection({:error, arguments_outcome(arguments, entry.run_ref, diagnostic)})
+       do:
+         with_rejection(
+           {:error, CommandOutcome.for_arguments(arguments, entry.run_ref, diagnostic)}
+         )
 
   defp dispatch_entry_context(
          %CommandEntry{arguments: %CommandArguments{command: command}} = entry,
@@ -245,7 +233,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
   end
 
   defp with_rejection({status, %CommandOutcome{} = outcome}) when status in [:ok, :error],
-    do: {status, outcome, nil}
+    do: {status, outcome, nil, false}
 
   @doc false
   @spec entry_failure(CommandEntry.t()) :: {:error, CommandOutcome.t()}
@@ -254,7 +242,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
         diagnostic: %CommandDiagnostic{} = diagnostic,
         run_ref: run_ref
       }),
-      do: {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+      do: {:error, CommandOutcome.for_arguments(arguments, run_ref, diagnostic)}
 
   def entry_failure(
         %CommandEntry{rejection: %CommandRejection{command: command} = rejection} = entry
@@ -326,7 +314,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
 
       {:document_error, %CommandArguments{frontend_options: []} = arguments,
        %CommandDiagnostic{} = diagnostic} ->
-        {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+        {:error, CommandOutcome.for_arguments(arguments, run_ref, diagnostic)}
 
       {:document_error, %CommandArguments{} = arguments, %CommandDiagnostic{}} ->
         {:error, arguments_outcome(arguments, run_ref, :arguments, :invalid_arguments)}
@@ -389,11 +377,11 @@ defmodule PtcRunner.Kernel.CommandEngine do
          CommandOutcome.success(
            :help,
            run_ref,
-           CommandContract.help_result(arguments.options.topic, arguments.frontend)
+           CommandResults.help_result(arguments.options.topic, arguments.frontend)
          )}
 
       :version ->
-        {:ok, CommandOutcome.success(:version, run_ref, CommandContract.version_result())}
+        {:ok, CommandOutcome.success(:version, run_ref, CommandResults.version_result())}
 
       :docs ->
         docs_request =
@@ -406,7 +394,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
          CommandOutcome.success(
            :docs,
            run_ref,
-           CommandContract.docs_result(docs_request)
+           CommandResults.docs_result(docs_request)
          )}
 
       :doctor ->
@@ -446,7 +434,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
            {:ok, CommandOutcome.success(:models, run_ref, %{"installations" => installations})}
          end) do
       {:error, %CommandDiagnostic{} = diagnostic} ->
-        {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+        {:error, CommandOutcome.for_arguments(arguments, run_ref, diagnostic)}
 
       result ->
         result
@@ -461,31 +449,13 @@ defmodule PtcRunner.Kernel.CommandEngine do
   end
 
   defp outcome(command, run_ref, phase, code),
-    do: CommandOutcome.error(command, run_ref, diagnostic(phase, code))
+    do: CommandOutcome.error(command, run_ref, CommandDiagnostic.new!(phase, code))
 
   defp arguments_outcome(arguments, run_ref, phase, code),
-    do: arguments_outcome(arguments, run_ref, diagnostic(phase, code))
-
-  defp arguments_outcome(%CommandArguments{command: :run, options: options}, run_ref, diagnostic) do
-    CommandOutcome.run_error(
-      run_ref,
-      diagnostic,
-      CommandDestination.requested_artifact_state(options)
-    )
-  end
-
-  defp arguments_outcome(%CommandArguments{} = arguments, run_ref, diagnostic),
-    do: CommandOutcome.error(command_mode(arguments), run_ref, diagnostic)
-
-  defp command_mode(%CommandArguments{command: :doctor, options: %{connect: true}}),
-    do: {:doctor, :connect}
-
-  defp command_mode(%CommandArguments{command: command}), do: command
+    do: CommandOutcome.for_arguments(arguments, run_ref, CommandDiagnostic.new!(phase, code))
 
   defp project_envelope?(%CommandArguments{project: %{derived_options: derived}}),
     do: MapSet.member?(derived, :envelope)
 
   defp project_envelope?(_arguments), do: false
-
-  defp diagnostic(phase, code), do: CommandDiagnostic.new!(phase, code)
 end

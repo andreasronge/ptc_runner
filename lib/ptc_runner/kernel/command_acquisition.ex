@@ -4,7 +4,6 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandApplicationDiagnostic
   alias PtcRunner.Kernel.CommandArguments
-  alias PtcRunner.Kernel.CommandDestination
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandFailureCause
   alias PtcRunner.Kernel.CommandOutcome
@@ -54,7 +53,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
         prepare_with_catalog(arguments, run_ref, destinations, runtime, host, catalog)
 
       {:error, %CommandDiagnostic{} = diagnostic} ->
-        {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+        {:error, CommandOutcome.for_arguments(arguments, run_ref, diagnostic)}
     end
   end
 
@@ -196,7 +195,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
           end
 
         {:error, %CommandDiagnostic{} = diagnostic} ->
-          {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+          {:error, CommandOutcome.for_arguments(arguments, run_ref, diagnostic)}
       end
 
     if match?({:error, _outcome}, result), do: InstallationCatalog.close(catalog)
@@ -423,7 +422,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
 
       {:error, %CommandDiagnostic{} = diagnostic} ->
         PreparedRun.close(prepared)
-        {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+        {:error, CommandOutcome.for_arguments(arguments, run_ref, diagnostic)}
     end
   end
 
@@ -438,7 +437,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
         {:ok, subject} = CommandSubject.provider(name, :selection, occurrence)
 
         {:error,
-         arguments_outcome(
+         CommandOutcome.for_arguments(
            arguments,
            run_ref,
            CommandDiagnostic.new!(:provider_declaration, :selection_unverifiable,
@@ -455,7 +454,11 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
     PreparedRun.close(prepared)
 
     {:error,
-     arguments_outcome(arguments, run_ref, failure_diagnostic(:internal, :internal_error, reason))}
+     CommandOutcome.for_arguments(
+       arguments,
+       run_ref,
+       failure_diagnostic(:internal, :internal_error, reason)
+     )}
   end
 
   defp request_arguments(arguments, catalog, run_ref) do
@@ -505,17 +508,6 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
       path -> Keyword.put(options, :component_override_descriptor, path)
     end
   end
-
-  defp arguments_outcome(%CommandArguments{command: :run, options: options}, run_ref, diagnostic) do
-    CommandOutcome.run_error(
-      run_ref,
-      diagnostic,
-      CommandDestination.requested_artifact_state(options)
-    )
-  end
-
-  defp arguments_outcome(%CommandArguments{} = arguments, run_ref, diagnostic),
-    do: CommandOutcome.error(arguments.command, run_ref, diagnostic)
 
   defp optional_budget_prerequisite_path(:usage_tokens),
     do: [

@@ -4,9 +4,7 @@ defmodule PtcRunner.MixCommandAdapter do
   alias PtcRunner.CLILogger
   alias PtcRunner.Kernel.CommandPresentation
   alias PtcRunner.Kernel.CommandRouter
-  alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.MixCommandRuntime
-  alias PtcRunner.OneShotFrontend
 
   @doc false
   @spec execute([binary()]) :: CommandPresentation.t()
@@ -14,26 +12,10 @@ defmodule PtcRunner.MixCommandAdapter do
 
   @doc false
   @spec execute([binary()], keyword()) :: CommandPresentation.t()
-  def execute(args, frontend_opts) when is_list(args) and is_list(frontend_opts),
-    do:
-      CommandRouter.execute(
-        args,
-        :mix,
-        fn arguments -> bootstrap(arguments, frontend_opts) end,
-        fn arguments, runtime ->
-          OneShotFrontend.run(arguments, runtime, repl_frontend_opts(frontend_opts))
-        end,
-        frontend_opts
-      )
+  def execute(argv, frontend_opts) when is_list(argv) and is_list(frontend_opts),
+    do: CommandRouter.execute(argv, :mix, MixCommandRuntime, frontend_opts)
 
   def execute(_args, _frontend_opts), do: execute([], [])
-
-  defp bootstrap(arguments, frontend_opts) do
-    with {:ok, runtime} <- MixCommandRuntime.bootstrap(arguments),
-         do: CommandRuntime.attach_live_status(runtime, frontend_opts)
-  end
-
-  defp repl_frontend_opts(opts), do: Keyword.delete(opts, :live_status)
 
   @doc false
   @spec run_task([binary()]) :: CommandPresentation.t() | no_return()

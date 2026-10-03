@@ -561,8 +561,17 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     assert before.code == :placement_denied
     refute before.provider_activity
 
-    refute CommandContract.unclassified_diagnostic_phase?(:local_preflight)
-    assert CommandContract.unclassified_diagnostic_phase?(:provider_declaration)
+    refute CommandContract.diagnostic_allowed?(
+             :run_unclassified,
+             :local_preflight,
+             :local_check_timeout
+           )
+
+    assert CommandContract.diagnostic_allowed?(
+             :run_unclassified,
+             :provider_declaration,
+             :placement_denied
+           )
 
     after_marker = refuse_unverified(:provider_destination_denied)
     assert after_marker.phase == :active_preflight

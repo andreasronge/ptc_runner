@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
   alias PtcRunner.Kernel.CommandFrontend
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandRenderer
+  alias PtcRunner.Kernel.CommandResults
   alias PtcRunner.Kernel.CommandRouter
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.CommandSource
@@ -46,7 +47,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
 
   test "init help lists every embedded example for both frontends" do
     for frontend <- [:standalone, :mix] do
-      help = CommandContract.help_result(:init, frontend)
+      help = CommandResults.help_result(:init, frontend)
       description = get_in(help, ["options", Access.at(0), "description"])
 
       assert description =~ "examples: " <> Enum.join(ExampleLibrary.names(), ", ")
@@ -1281,10 +1282,20 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
         CommandOutcome.success(:init, @run_ref, %{
           "created" => ["AGENTS.md", ".gitignore", "main.clj", "ptc.json", "ptc-project.json"]
         }),
-      "docs_listing" => CommandOutcome.success(:docs, @run_ref, CommandContract.docs_result(nil)),
-      "help_root" => CommandOutcome.success(:help, @run_ref, CommandContract.help_result(:root)),
-      "help_init" => CommandOutcome.success(:help, @run_ref, CommandContract.help_result(:init)),
-      "help_run" => CommandOutcome.success(:help, @run_ref, CommandContract.help_result(:run))
+      "docs_listing" => CommandOutcome.success(:docs, @run_ref, CommandResults.docs_result(nil)),
+      "help_root" =>
+        CommandOutcome.success(
+          :help,
+          @run_ref,
+          CommandResults.help_result(:root)
+        ),
+      "help_init" =>
+        CommandOutcome.success(
+          :help,
+          @run_ref,
+          CommandResults.help_result(:init)
+        ),
+      "help_run" => CommandOutcome.success(:help, @run_ref, CommandResults.help_result(:run))
     }
 
     for {name, outcome} <- rows do
@@ -1293,7 +1304,9 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
 
     identity = PtcRunner.BuildIdentity.current()
     state = if identity.source_dirty, do: "dirty", else: "clean"
-    version = CommandOutcome.success(:version, @run_ref, CommandContract.version_result())
+
+    version =
+      CommandOutcome.success(:version, @run_ref, CommandResults.version_result())
 
     assert CommandRenderer.render(version) ==
              {:stdout,

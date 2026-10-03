@@ -9,7 +9,9 @@ defmodule PtcRunner.Kernel.CommandOutcome do
   """
 
   alias PtcRunner.Kernel.Attestation
+  alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandContract
+  alias PtcRunner.Kernel.CommandDestination
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.CommandSubject
@@ -97,6 +99,21 @@ defmodule PtcRunner.Kernel.CommandOutcome do
           exit_status: 0 | 2 | 3 | 4 | 5 | 6 | 7 | 70,
           attestation: binary()
         }
+
+  @doc false
+  @spec for_arguments(CommandArguments.t(), binary(), CommandDiagnostic.t()) :: t()
+  def for_arguments(%CommandArguments{command: :run, options: options}, run_ref, diagnostic),
+    do: run_error(run_ref, diagnostic, CommandDestination.requested_artifact_state(options))
+
+  def for_arguments(
+        %CommandArguments{command: :doctor, options: %{connect: true}},
+        run_ref,
+        diagnostic
+      ),
+      do: error({:doctor, :connect}, run_ref, diagnostic)
+
+  def for_arguments(%CommandArguments{command: command}, run_ref, diagnostic),
+    do: error(command, run_ref, diagnostic)
 
   @spec error(command_mode(), binary(), CommandDiagnostic.t(), [CommandDiagnostic.t()]) :: t()
   def error(command, run_ref, diagnostic, secondary \\ [])
