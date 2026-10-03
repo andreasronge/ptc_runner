@@ -212,6 +212,23 @@ envelopes and diagnostic rows are owned by `CommandOutcome`,
 `CommandContract`, and `DiagnosticCatalog`; `mix ptc.gen_docs` projects their
 schemas.
 
+Dynamic diagnostic prose is declared as literal segments and named typed
+slots in `DiagnosticPattern` templates. Rendering, parsing, and schema patterns
+use that same declaration. Integer slots recover only canonical decimal text;
+text slots retain their bounded ECMA-262 grammar. Builders still own semantic
+checks such as required capacity exceeding the refused limit, budget reservation
+exceeding the remaining allowance, sorted capability lists, and safe public
+identities. Admission parses the template and calls the builder again, so syntax
+alone cannot authorize a message. Fixed literal catalogs and projection adapters
+already have a single owner and need no dynamic template. Provider cleanup keeps
+its historical syntax-only validation and Unicode regex option; model output
+keeps its existing factored schema alternatives and anchors. Unicode MCP tool
+names use character-oriented parsing to preserve their declared name bound.
+
+Synthetic Viewer router requests must use a loopback URL and supply
+`expected_port` explicitly; Plug's default example host is refused by the
+same authority check used for real requests.
+
 Manifest REPL startup follows the same acquisition, preparation, local-check,
 sink, and active-provider prefix as a one-shot run. It then transfers the
 opening and run state to `ReplSessionOwner`. `ReplSession` is process-affine;

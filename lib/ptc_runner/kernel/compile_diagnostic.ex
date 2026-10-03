@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.CompileDiagnostic do
   """
 
   alias PtcRunner.Kernel.CapabilityRequirementDiagnostic
+  alias PtcRunner.Kernel.DiagnosticPattern
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Format.SymbolRef
   alias PtcRunner.Lisp.NamespaceDiagnostic
@@ -26,6 +27,22 @@ defmodule PtcRunner.Kernel.CompileDiagnostic do
   @unqualified_symbol_first "[A-Za-z+*<>=?!_%.&-]"
   @unqualified_symbol_rest "[A-Za-z0-9+*<>=?!_%.&'-]"
   @unqualified_symbol_pattern @unqualified_symbol_first <> @unqualified_symbol_rest <> "{0,127}"
+
+  @unbound_templates [
+    [{:literal, "Undefined variable: "}, {:slot, :names, :text, @symbol_pattern}],
+    [
+      {:literal, "Undefined variables: "},
+      {:slot, :names, :text, @symbol_pattern <> "(, #{@symbol_pattern}){1,7}"}
+    ]
+  ]
+  @duplicate_template [
+    {:literal, "Duplicate definition: "},
+    {:slot, :namespace, :text, @unqualified_symbol_pattern},
+    {:literal, "/"},
+    {:slot, :name, :text, @unqualified_symbol_pattern}
+  ]
+  @requirement_singular "Missing capability requirement: "
+  @requirement_plural "Missing capability requirements: "
 
   @doc false
   @spec bounded_details(term(), term()) :: {:ok, map()} | :error
@@ -85,7 +102,7 @@ defmodule PtcRunner.Kernel.CompileDiagnostic do
            bounded_details(:duplicate_ref, details),
          true <- String.contains?(source, namespace),
          true <- String.contains?(source, name) do
-      {:ok, "Duplicate definition: #{namespace}/#{name}"}
+      {:ok, DiagnosticPattern.render(@duplicate_template, %{namespace: namespace, name: name})}
     else
       _invalid -> :error
     end
@@ -113,8 +130,8 @@ defmodule PtcRunner.Kernel.CompileDiagnostic do
   def capability_requirement_message(names) do
     CapabilityRequirementDiagnostic.message(
       names,
-      "Missing capability requirement: ",
-      "Missing capability requirements: "
+      @requirement_singular,
+      @requirement_plural
     )
   end
 
@@ -124,13 +141,13 @@ defmodule PtcRunner.Kernel.CompileDiagnostic do
     byte_size(message) <= @max_message_bytes and valid_unbound_message?(message)
   end
 
-  def valid_message?(:duplicate_definition, "Duplicate definition: " <> ref) do
-    case String.split(ref, "/") do
-      [namespace, name] ->
+  def valid_message?(:duplicate_definition, message) do
+    case DiagnosticPattern.parse(@duplicate_template, message) do
+      {:ok, %{namespace: namespace, name: name}} ->
         valid_unqualified_name?(namespace) and valid_unqualified_name?(name) and
-          CoreAST.valid_prelude_ref?(ref)
+          CoreAST.valid_prelude_ref?(namespace <> "/" <> name)
 
-      _invalid ->
+      :error ->
         false
     end
   end
@@ -147,8 +164,8 @@ defmodule PtcRunner.Kernel.CompileDiagnostic do
   def valid_message?(:capability_requirement_missing, message) when is_binary(message) do
     CapabilityRequirementDiagnostic.valid_message?(
       message,
-      "Missing capability requirement: ",
-      "Missing capability requirements: "
+      @requirement_singular,
+      @requirement_plural
     )
   end
 
@@ -156,52 +173,29 @@ defmodule PtcRunner.Kernel.CompileDiagnostic do
 
   @doc false
   @spec message_schema(atom(), binary()) :: map()
-  def message_schema(:undefined_variable, fallback) do
-    %{
+  def message_schema(:undefined_variable, fallback),
+    do: %{
       "oneOf" => [
-        %{"const" => fallback},
-        dynamic_message_schema("^Undefined variable: #{@symbol_pattern}$(?![\\s\\S])"),
-        dynamic_message_schema(
-          "^Undefined variables: #{@symbol_pattern}(, #{@symbol_pattern}){1,7}$(?![\\s\\S])"
-        )
+        %{"const" => fallback} | Enum.map(@unbound_templates, &dynamic_message_schema/1)
       ]
     }
-  end
 
-  def message_schema(:duplicate_definition, fallback) do
-    %{
+  def message_schema(:duplicate_definition, fallback),
+    do: %{"oneOf" => [%{"const" => fallback}, dynamic_message_schema(@duplicate_template)]}
+
+  def message_schema(:unknown_namespace, fallback),
+    do: %{
       "oneOf" => [
         %{"const" => fallback},
-        dynamic_message_schema(
-          "^Duplicate definition: #{@unqualified_symbol_pattern}/#{@unqualified_symbol_pattern}$(?![\\s\\S])"
-        )
+        dynamic_message_schema(NamespaceDiagnostic.template(@unqualified_symbol_pattern))
       ]
     }
-  end
-
-  def message_schema(:unknown_namespace, fallback) do
-    available_pattern =
-      NamespaceDiagnostic.available_namespaces()
-      |> Enum.map_join(", ", &String.replace(&1, ".", "\\."))
-
-    %{
-      "oneOf" => [
-        %{"const" => fallback},
-        dynamic_message_schema(
-          "^unknown namespace #{@unqualified_symbol_pattern}/\\. " <>
-            "Available namespaces: #{available_pattern}\\. " <>
-            "For JSON parsing use json/parse-string " <>
-            "\\(not cheshire\\.core/\\.\\.\\.\\)\\.$(?![\\s\\S])"
-        )
-      ]
-    }
-  end
 
   def message_schema(:capability_requirement_missing, fallback) do
     CapabilityRequirementDiagnostic.message_schema(
       fallback,
-      "Missing capability requirement: ",
-      "Missing capability requirements: "
+      @requirement_singular,
+      @requirement_plural
     )
   end
 
@@ -225,26 +219,24 @@ defmodule PtcRunner.Kernel.CompileDiagnostic do
   defp valid_unqualified_name?(name),
     do: valid_name?(name) and not String.contains?(name, "/")
 
-  defp unbound_message([name]), do: "Undefined variable: #{name}"
-  defp unbound_message(names), do: "Undefined variables: #{Enum.join(names, ", ")}"
+  defp unbound_message(names) do
+    template =
+      if length(names) == 1, do: hd(@unbound_templates), else: List.last(@unbound_templates)
 
-  defp valid_unbound_message?("Undefined variable: " <> name), do: valid_name?(name)
-
-  defp valid_unbound_message?("Undefined variables: " <> joined) do
-    case String.split(joined, ", ") do
-      [_one] -> false
-      names -> match?({:ok, _bounded}, bounded_names(names, @max_names, []))
-    end
+    DiagnosticPattern.render(template, %{names: Enum.join(names, ", ")})
   end
 
-  defp valid_unbound_message?(_message), do: false
-
-  defp dynamic_message_schema(pattern) do
-    %{
-      "type" => "string",
-      "minLength" => 1,
-      "maxLength" => @max_message_bytes,
-      "pattern" => pattern
-    }
+  defp valid_unbound_message?(message) do
+    Enum.any?(@unbound_templates, fn template ->
+      with {:ok, %{names: joined}} <- DiagnosticPattern.parse(template, message),
+           {:ok, names} <- bounded_names(String.split(joined, ", "), @max_names, []) do
+        unbound_message(names) == message
+      else
+        :error -> false
+      end
+    end)
   end
+
+  defp dynamic_message_schema(template),
+    do: DiagnosticPattern.exact_message_schema(@max_message_bytes, template)
 end

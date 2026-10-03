@@ -54,6 +54,14 @@ defmodule PtcRunner.Kernel.LLMReplayFixtureDiagnostic do
                              )
                          )
 
+  @line_template [
+    {:literal, @line_prefix},
+    {:slot, :line, :integer, @line_pattern},
+    {:literal, " "},
+    {:slot, :body, :text,
+     "(?:" <> Enum.map_join(@line_bodies, "|", &DiagnosticPattern.escape/1) <> ")"}
+  ]
+
   @type reason :: atom() | {atom(), pos_integer()}
 
   @doc "Renders the bounded public message for one fixture-load reason."
@@ -64,7 +72,7 @@ defmodule PtcRunner.Kernel.LLMReplayFixtureDiagnostic do
 
   for {reason, body} <- @line_reasons do
     def message({unquote(reason), line}) when is_integer(line) and line in 1..@maximum_line,
-      do: {:ok, @line_prefix <> Integer.to_string(line) <> " " <> unquote(body)}
+      do: {:ok, DiagnosticPattern.render(@line_template, %{line: line, body: unquote(body)})}
   end
 
   def message(_reason), do: :error
@@ -76,21 +84,8 @@ defmodule PtcRunner.Kernel.LLMReplayFixtureDiagnostic do
 
   def valid_message?(_message), do: false
 
-  defp valid_line_message?(@line_prefix <> rest) do
-    case :binary.split(rest, " ") do
-      [digits, body] -> valid_line?(digits) and body in @line_bodies
-      _no_body -> false
-    end
-  end
-
-  defp valid_line_message?(_message), do: false
-
-  defp valid_line?(digits) do
-    case Integer.parse(digits) do
-      {line, ""} -> Integer.to_string(line) == digits and line in 1..@maximum_line
-      _invalid -> false
-    end
-  end
+  defp valid_line_message?(message),
+    do: match?({:ok, _values}, DiagnosticPattern.parse(@line_template, message))
 
   @doc false
   @spec message_schema(binary()) :: map()
@@ -100,18 +95,7 @@ defmodule PtcRunner.Kernel.LLMReplayFixtureDiagnostic do
         [%{"const" => fallback}] ++
           Enum.map(@file_messages, &%{"const" => &1}) ++
           [
-            %{
-              "type" => "string",
-              "minLength" => 1,
-              "maxLength" => @maximum_message_bytes,
-              "pattern" =>
-                DiagnosticPattern.exact(
-                  DiagnosticPattern.escape(@line_prefix) <>
-                    @line_pattern <>
-                    " (?:" <>
-                    Enum.map_join(@line_bodies, "|", &DiagnosticPattern.escape/1) <> ")"
-                )
-            }
+            DiagnosticPattern.exact_message_schema(@maximum_message_bytes, @line_template)
           ]
     }
   end
