@@ -6,9 +6,9 @@ defmodule PtcRunner.Kernel.ArtifactIdentity do
   @spec owner_directory(binary(), non_neg_integer()) :: {:ok, File.Stat.t()} | {:error, atom()}
   def owner_directory(path, uid) do
     with :ok <- PrivateDirectory.preflight_owner(path) |> owner_matches(uid),
-         {:ok, %File.Stat{type: :directory, uid: ^uid, mode: mode} = stat} <-
+         {:ok, stat} <-
            File.lstat(path, time: :posix),
-         true <- Bitwise.band(mode, 0o777) == 0o700 do
+         true <- PrivateDirectory.private_dir?(stat, uid) do
       {:ok, stat}
     else
       _ -> {:error, :unsafe_directory}

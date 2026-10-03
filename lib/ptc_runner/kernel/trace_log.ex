@@ -492,7 +492,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   @doc """
   Appends canonical events to one admin-selected JSONL file under a total byte
   cap. `private: true` requires safe parent ancestry and a mode-`0600` file,
-  owned by the current process authority or root, creating a missing file
+  owned by the current process authority, creating a missing file
   privately before publication. The permission-checked descriptor is retained
   through validation and append so pathname replacement cannot redirect private
   bytes. One OS-released advisory lease keyed by the parent-directory/name
@@ -829,9 +829,8 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   defp validate_append_lock_root(root, uid) do
     case File.lstat(root, time: :posix) do
-      {:ok, %File.Stat{type: :directory, uid: ^uid, mode: mode}}
-      when Bitwise.band(mode, 0o777) == 0o700 ->
-        :ok
+      {:ok, stat} ->
+        if PrivateDirectory.private_dir?(stat, uid), do: :ok, else: {:error, :source_unavailable}
 
       {:error, :enoent} ->
         {:error, :enoent}
@@ -1648,9 +1647,9 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
-  defp preflight_private_trace(path, %File.Stat{mode: mode, uid: owner}) do
+  defp preflight_private_trace(path, stat) do
     with {:ok, uid} <- PrivateDirectory.preflight_owner(path),
-         true <- owner in [0, uid] and Bitwise.band(mode, 0o777) == 0o600,
+         true <- PrivateDirectory.private_file?(stat, uid),
          :ok <- PrivateDirectory.preflight_writable_file(path) do
       :ok
     else
@@ -1693,12 +1692,8 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   defp ensure_private_trace_file(path, uid, append_hook) do
     case File.lstat(path) do
-      {:ok, %File.Stat{type: :regular, mode: mode, uid: owner}}
-      when owner in [0, uid] and Bitwise.band(mode, 0o777) == 0o600 ->
-        :ok
-
-      {:ok, %File.Stat{}} ->
-        {:error, :source_unavailable}
+      {:ok, stat} ->
+        if PrivateDirectory.private_file?(stat, uid), do: :ok, else: {:error, :source_unavailable}
 
       {:error, :enoent} ->
         publish_empty_private_trace(path, uid, append_hook)
@@ -1772,12 +1767,10 @@ defmodule PtcRunner.Kernel.TraceLog do
          opened = File.Stat.from_record(file_info),
          :ok <- same_file(locked_stat, opened),
          true <-
-           opened.type == :regular and opened.uid in [0, uid] and
-             Bitwise.band(opened.mode, 0o777) == 0o600,
+           PrivateDirectory.private_file?(opened, uid),
          {:ok, current} <- File.lstat(path, time: :posix),
          true <-
-           current.type == :regular and current.uid in [0, uid] and
-             Bitwise.band(current.mode, 0o777) == 0o600,
+           PrivateDirectory.private_file?(current, uid),
          :ok <- same_file(opened, current) do
       :ok
     else

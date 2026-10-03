@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   use GenServer
   use PtcRunner.Kernel.OwnerStatusRedaction
 
+  alias PtcRunner.Kernel.MCPLauncher
   alias PtcRunner.Kernel.MCPProtocol
   alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Utf8
@@ -13,13 +14,12 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
 
   @type t :: %__MODULE__{pid: pid(), outcome: map()}
 
-  @protocol_version 2
+  @protocol_version MCPLauncher.protocol_version()
   @protocol_metadata %{"io.modelcontextprotocol/protocolVersion" => "2026-07-28"}
   @max_frame_bytes 1_048_576
   @max_response_bytes 2_097_152
   @max_arguments 256
   @max_environment 256
-  @stdio_locale_environment {"LC_ALL", "C.UTF-8"}
   @max_config_string 131_072
   @max_start_timeout_ms 60_000
   @max_request_timeout_ms 300_000
@@ -477,7 +477,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
          env when is_map(env) and not is_struct(env) <-
            Keyword.get(opts, :env, %{}),
          env =
-           Map.put(env, elem(@stdio_locale_environment, 0), elem(@stdio_locale_environment, 1)),
+           Map.merge(env, MCPLauncher.locale_environment()),
          true <- map_size(env) <= @max_environment,
          true <- valid_environment?(env),
          grace_ms when is_integer(grace_ms) and grace_ms in 1..5_000 <-

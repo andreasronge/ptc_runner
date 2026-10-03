@@ -50,11 +50,13 @@ defmodule PtcRunner.Kernel.MCPSource do
   """
 
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.ConfinedFile
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.JSONSchema
   alias PtcRunner.Kernel.MCPEndpoint
   alias PtcRunner.Kernel.MCPHTTPAdapter
+  alias PtcRunner.Kernel.MCPLauncher
   alias PtcRunner.Kernel.MCPLauncherStaging
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.NetworkPolicy
@@ -81,8 +83,6 @@ defmodule PtcRunner.Kernel.MCPSource do
   @max_outbound_headers 64
   @max_outbound_header_bytes 32_768
   @max_launcher_bytes 16_777_216
-  @max_launcher_symlinks 40
-  @launcher_protocol_version 2
   @header_token ~r/\A[!#$%&'*+\-.^_`|~0-9A-Za-z]+\z/
   @sha256 ~r/\Asha256:[0-9a-f]{64}\z/
   @name ~r/\A[a-z][a-z0-9._-]{0,127}\z/
@@ -394,7 +394,7 @@ defmodule PtcRunner.Kernel.MCPSource do
          validation_options =
            opts
            |> Keyword.put_new(:launcher, "/ptc-runner-launcher")
-           |> Keyword.put(:launcher_protocol_version, @launcher_protocol_version),
+           |> Keyword.put(:launcher_protocol_version, MCPLauncher.protocol_version()),
          {:ok, _config} <- MCPStdioTransport.validate_options(validation_options) do
       {:ok, %{type: :stdio, options: opts}}
     else
@@ -648,7 +648,7 @@ defmodule PtcRunner.Kernel.MCPSource do
          options =
            options
            |> Keyword.put(:launcher, staged.path)
-           |> Keyword.put(:launcher_protocol_version, @launcher_protocol_version)
+           |> Keyword.put(:launcher_protocol_version, MCPLauncher.protocol_version())
            |> Keyword.update(
              :start_timeout_ms,
              min(5_000, remaining_ms),
@@ -661,7 +661,7 @@ defmodule PtcRunner.Kernel.MCPSource do
          type: :stdio,
          handle: handle,
          timeout_ms: selected.timeout_ms,
-         launcher_protocol_version: @launcher_protocol_version,
+         launcher_protocol_version: MCPLauncher.protocol_version(),
          launcher_sha256: Base.encode16(staged.digest, case: :lower),
          server_executable_sha256:
            options
@@ -713,24 +713,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   defp configured_stdio_launcher(options) do
     case Keyword.fetch(options, :launcher) do
       {:ok, launcher} -> {:ok, launcher}
-      :error -> companion_launcher()
-    end
-  end
-
-  defp companion_launcher do
-    launcher_module = Module.concat(["PtcRunnerLauncher"])
-
-    if Code.ensure_loaded?(launcher_module) and
-         function_exported?(launcher_module, :protocol_version, 0) and
-         function_exported?(launcher_module, :executable_path, 0) and
-         launcher_module.protocol_version() == @launcher_protocol_version do
-      case launcher_module.executable_path() do
-        {:ok, launcher} -> {:ok, launcher}
-        {:error, :unsupported_platform} -> {:error, :unsupported_mcp_stdio_platform}
-        {:error, _reason} -> {:error, :mcp_stdio_launcher_unavailable}
-      end
-    else
-      {:error, :mcp_stdio_launcher_unavailable}
+      :error -> MCPLauncher.companion()
     end
   end
 
@@ -842,55 +825,16 @@ defmodule PtcRunner.Kernel.MCPSource do
       do: {:error, reason}
 
   defp canonical_executable_path(path) when is_binary(path) do
-    case Path.split(path) do
-      ["/" | components] -> resolve_path_components("/", components, 0)
-      _relative_or_invalid -> {:error, :mcp_stdio_launcher_unavailable}
+    with :absolute <- Path.type(path),
+         {:ok, canonical} <- ConfinedFile.resolve_absolute(path),
+         {:ok, %File.Stat{type: :regular}} <- File.lstat(canonical) do
+      {:ok, canonical}
+    else
+      _invalid -> {:error, :mcp_stdio_launcher_unavailable}
     end
   end
 
   defp canonical_executable_path(_path), do: {:error, :mcp_stdio_launcher_unavailable}
-
-  defp resolve_path_components(_current, [], _symlinks),
-    do: {:error, :mcp_stdio_launcher_unavailable}
-
-  defp resolve_path_components(current, ["." | remaining], symlinks),
-    do: resolve_path_components(current, remaining, symlinks)
-
-  defp resolve_path_components(current, [".." | remaining], symlinks),
-    do: resolve_path_components(Path.dirname(current), remaining, symlinks)
-
-  defp resolve_path_components(current, [component | remaining], symlinks) do
-    candidate = Path.join(current, component)
-
-    case File.lstat(candidate) do
-      {:ok, %File.Stat{type: :directory}} when remaining != [] ->
-        resolve_path_components(candidate, remaining, symlinks)
-
-      {:ok, %File.Stat{type: :regular}} when remaining == [] ->
-        {:ok, candidate}
-
-      {:ok, %File.Stat{type: :symlink}} ->
-        resolve_symlink(current, candidate, remaining, symlinks)
-
-      _missing_or_invalid ->
-        {:error, :mcp_stdio_launcher_unavailable}
-    end
-  end
-
-  defp resolve_symlink(current, candidate, remaining, symlinks) do
-    with true <- symlinks < @max_launcher_symlinks,
-         {:ok, target} <- File.read_link(candidate) do
-      case Path.split(target) do
-        ["/" | target_components] ->
-          resolve_path_components("/", target_components ++ remaining, symlinks + 1)
-
-        target_components ->
-          resolve_path_components(current, target_components ++ remaining, symlinks + 1)
-      end
-    else
-      _missing_or_exceeded -> {:error, :mcp_stdio_launcher_unavailable}
-    end
-  end
 
   defp selection(installed, selection, context) do
     with true <- is_map(selection) and not is_struct(selection),

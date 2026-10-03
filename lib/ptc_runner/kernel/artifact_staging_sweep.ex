@@ -121,9 +121,10 @@ defmodule PtcRunner.Kernel.ArtifactStagingSweep do
 
   defp directory(path, uid) do
     case File.lstat(path, time: :posix) do
-      {:ok, %{type: :directory, uid: ^uid, mode: mode} = stat}
-      when Bitwise.band(mode, 0o777) == 0o700 ->
-        {:ok, stat}
+      {:ok, stat} ->
+        if PrivateDirectory.private_dir?(stat, uid),
+          do: {:ok, stat},
+          else: {:error, :unsafe_directory}
 
       _unsafe ->
         {:error, :unsafe_directory}
