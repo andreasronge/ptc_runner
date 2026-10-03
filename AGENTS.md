@@ -117,6 +117,8 @@ experiment issue also carries the `experiment` label and follows the shape in
   `mix ptc run` downstream path, example operator walks, Mix-process CLI
   wrappers, or the benchmark task. Never add `--trace` or `--slowest` to a
   suite you want to finish quickly: they pin `--max-cases` to 1.
+  `mix nightly` keeps its own `--trace` on purpose to lift the per-test
+  timeout; do not copy it to other suites.
 - Test tags: `:e2e`, `:scheduled_e2e`, `:nightly`, `:soak`, and `:clojure` are
   excluded from `mix test` (`:clojure` needs Babashka). `:nightly` means an
   operator-path Mix/OS subprocess or an intentional multi-second wait, not an
@@ -134,7 +136,9 @@ Work in an isolated worktree, using the prepared worktree when the task
 provides one. Otherwise, create a worktree before the first edit, even for a
 plan-only document. `scripts/worktree.sh new <branch> [issue]` branches from
 `origin/main`, claims the issue when given (assign, comment, refuse one
-already taken), and seeds and initializes the worktree. `scripts/worktree.sh
+already taken), and seeds and initializes the worktree. With an issue number,
+the branch name must carry it, e.g. `fix/issue-2142-short-slug`, or the script
+refuses. `scripts/worktree.sh
 gc` removes worktrees merged into `origin/main` that are clean and a day idle
 and keeps their branches; run it before creating a new one. Fresh-clone
 setup, seeding, hooks, the Dialyzer PLT, the MCP E2E server, and headless
