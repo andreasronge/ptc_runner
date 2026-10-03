@@ -47,6 +47,7 @@ defmodule PtcRunner.ViewerFrontend do
   alias PtcRunner.Kernel.ViewerBinding
   alias PtcRunner.Kernel.ViewerProjectAdapter
   alias PtcRunner.LiveStatus
+  alias PtcRunner.LiveStatus.Config
   alias PtcRunner.ViewerLaunchAdapter
   alias PtcRunner.ViewerSnapshotStore
 
@@ -445,7 +446,7 @@ defmodule PtcRunner.ViewerFrontend do
           do: PtcRunner.Kernel.ProjectViewerAdapter
         ),
       inspection_absence: inspection_absence(project, inspection?),
-      live_token: System.get_env("PTC_VIEWER_TOKEN"),
+      live_token: Config.read().token,
       live_trace_refresh: fn
         nil -> ViewerSnapshotStore.refresh(snapshots)
         run_id -> ViewerSnapshotStore.refresh(snapshots, run_id)

@@ -597,18 +597,12 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
         TraceSnapshot.start({:directory, directory},
           owner: owner,
           capture_deadline_ms: System.monotonic_time(:millisecond) + 60_000,
-          capture_hook: fn ->
-            send(test, {:capture_paused, self()})
-
-            receive do
-              :continue_capture -> :ok
-            end
-          end
+          capture_hook: fn -> pause_until_monitored(test, :capture_paused) end
         )
       end)
 
     assert_receive {:capture_paused, capture_pid}, 5_000
-    capture_ref = Process.monitor(capture_pid)
+    capture_ref = monitor_paused_worker(capture_pid)
     Process.exit(owner, :kill)
 
     assert {:error, :snapshot_unavailable} = Task.await(starter)
@@ -645,18 +639,12 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
       Task.async(fn ->
         TraceSnapshot.start({:directory, directory},
           owner: owner,
-          listing_hook: fn ->
-            send(test, {:listing_paused, self()})
-
-            receive do
-              :continue_listing -> :ok
-            end
-          end
+          listing_hook: fn -> pause_until_monitored(test, :listing_paused) end
         )
       end)
 
     assert_receive {:listing_paused, listing_pid}, 5_000
-    listing_ref = Process.monitor(listing_pid)
+    listing_ref = monitor_paused_worker(listing_pid)
     Process.exit(owner, :kill)
 
     assert {:error, :snapshot_unavailable} = Task.await(starter)
@@ -707,6 +695,28 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
     assert RetainedSize.bytes(page) <= max_result_bytes
 
     collect_runs(snapshot, page["next_cursor"], items ++ page["items"], max_result_bytes)
+  end
+
+  # A monitor and this acknowledgement are signals from the same sender.
+  # Wait for both to reach the paused worker before another process kills it;
+  # otherwise the test can observe :noproc instead of the worker's exit reason.
+  defp monitor_paused_worker(pid) do
+    ref = Process.monitor(pid)
+    send(pid, {:monitor_installed, ref})
+    assert_receive {:monitor_installed, ^ref}, 5_000
+    ref
+  end
+
+  defp pause_until_monitored(test, phase) do
+    send(test, {phase, self()})
+
+    receive do
+      {:monitor_installed, ref} -> send(test, {:monitor_installed, ref})
+    end
+
+    receive do
+      :continue -> :ok
+    end
   end
 
   defp event(run_id, sequence, type) do
