@@ -35,7 +35,11 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
   defp worker_loop(state, parent, reservation_id) do
     receive do
       {:reserve, mode} ->
-        send(parent, {:reserved, self(), RunState.reserve_evaluation(state, "default", mode)})
+        send(
+          parent,
+          {:reserved, self(), RunState.reserve_evaluation(state, "default", mode: mode)}
+        )
+
         worker_loop(state, parent, reservation_id)
 
       {:release, lease} ->
@@ -105,16 +109,41 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     end
   end
 
+  test "workflow resume preserves evaluation charging and clears failure flags" do
+    state = start_state(subordinate_evaluations: 1)
+    assert {:ok, %{}, [], lease} = RunState.reserve_workflow_evaluation(state)
+    assert :ok = RunState.mark_evaluation_terminal_host_failure(state, lease)
+    assert %{evaluation_terminal_host_failure?: true} = :sys.get_state(state.pid)
+    assert {:ok, revision} = RunState.yield_workflow_evaluation(state, lease)
+    assert {:ok, resumed} = RunState.resume_workflow_evaluation(state, revision)
+    assert RunState.usage(state).subordinate_evaluations == 1
+
+    assert {:ok, %{terminal_provider_failure?: false, terminal_host_failure?: false}} =
+             RunState.release_evaluation_status(state, resumed)
+  end
+
+  test "busy and evaluation-limit precedence differs by admission mode" do
+    state = start_state(subordinate_evaluations: 1)
+    assert {:ok, %{}, [], lease} = RunState.reserve_workflow_evaluation(state)
+    assert {:error, :busy} = RunState.reserve_evaluation(state, "default", mode: :fail_fast)
+
+    assert {:error, {:limit_exceeded, proof}} =
+             RunState.reserve_evaluation(state, "default", mode: :block, proof?: true)
+
+    assert :ok = RunState.consume_evaluation_limit_proof(state, proof)
+    assert :ok = RunState.release_evaluation(state, lease)
+  end
+
   test "an actual limit refusal issues a caller-bound one-shot proof" do
     state = start_state(subordinate_evaluations: 1)
 
     assert {:ok, %{}, [], lease} =
-             RunState.reserve_evaluation_with_limit_proof(state, "default", :fail_fast)
+             RunState.reserve_evaluation(state, "default", mode: :fail_fast, proof?: true)
 
     assert :ok = RunState.release_evaluation(state, lease)
 
     assert {:error, {:limit_exceeded, proof}} =
-             RunState.reserve_evaluation_with_limit_proof(state, "default", :fail_fast)
+             RunState.reserve_evaluation(state, "default", mode: :fail_fast, proof?: true)
 
     assert is_binary(proof)
 
@@ -266,6 +295,7 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
 
     release!(holder, lease)
     assert {:ok, _memory, _history, w1_lease} = await_reserved(w1)
+    assert %{evaluation_lease: {^w1_lease, ^w1, ^w1_ref}} = :sys.get_state(state.pid)
 
     send(state.pid, {:admission_deadline, w1_ref})
 
@@ -544,7 +574,9 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     send(
       state.pid,
       {:"$gen_call", {self(), reply_ref},
-       {state.token, {:reserve_evaluation, "default", :block, stale_request}}}
+       {state.token,
+        {:reserve_evaluation, "default",
+         %{mode: :block, proof?: false, requested_at: stale_request}}}}
     )
 
     assert_receive {^reply_ref, {:error, :admission_timeout}}, 1_000
@@ -657,7 +689,7 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     holder =
       spawn(fn ->
         {:ok, _memory, _history, lease} =
-          RunState.reserve_evaluation(state, "default", :fail_fast)
+          RunState.reserve_evaluation(state, "default", mode: :fail_fast)
 
         send(parent, {:leased, self(), lease})
 
@@ -713,7 +745,7 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     holder =
       spawn(fn ->
         {:ok, _memory, _history, lease} =
-          RunState.reserve_evaluation(state, "default", :fail_fast)
+          RunState.reserve_evaluation(state, "default", mode: :fail_fast)
 
         send(parent, {:leased, self(), lease})
 
@@ -889,7 +921,8 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
       state.pid,
       {:"$gen_call", {self(), reply_ref},
        {state.token,
-        {:reserve_evaluation, "default", :block, System.monotonic_time(:millisecond)}}}
+        {:reserve_evaluation, "default",
+         %{mode: :block, proof?: false, requested_at: System.monotonic_time(:millisecond)}}}}
     )
 
     await_queued(state, 1)
@@ -913,7 +946,8 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
       state.pid,
       {:"$gen_call", {self(), reply_ref},
        {state.token,
-        {:reserve_evaluation, "default", :block, System.monotonic_time(:millisecond)}}}
+        {:reserve_evaluation, "default",
+         %{mode: :block, proof?: false, requested_at: System.monotonic_time(:millisecond)}}}}
     )
 
     await_queued(state, 1)

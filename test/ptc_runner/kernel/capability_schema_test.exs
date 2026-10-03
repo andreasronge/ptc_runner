@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.CapabilitySchemaTest do
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Dispatcher
+  alias PtcRunner.Kernel.JSONSchema
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
@@ -80,6 +81,85 @@ defmodule PtcRunner.Kernel.CapabilitySchemaTest do
              output_schema: Map.put(output_schema, "additionalProperties", false),
              effect: :read
            }
+  end
+
+  test "named map schemas normalize and enforce values at the dispatch boundary" do
+    schema = %{
+      "type" => "object",
+      "additionalProperties" => %{
+        "type" => "object",
+        "properties" => %{"value" => %{"type" => ["boolean", "null"]}}
+      }
+    }
+
+    {:ok, capability} =
+      Capability.new(
+        name: "named",
+        input_schema: schema,
+        output_schema: schema,
+        callback: fn arguments -> {:ok, arguments} end
+      )
+
+    assert capability.input_schema["additionalProperties"]["additionalProperties"] == false
+    {:ok, environment} = WorkflowEnvironment.new(capabilities: [capability])
+    {:ok, state} = RunState.start(Limits.defaults())
+
+    for value <- [true, false, nil] do
+      arguments = %{"q" => %{"value" => value}}
+
+      assert %{status: :ok, value: ^arguments} =
+               Dispatcher.dispatch(
+                 state,
+                 :workflow,
+                 environment,
+                 "named",
+                 arguments,
+                 TestHelpers.dispatch_context(state, :workflow, 5000),
+                 nil,
+                 nil
+               )
+    end
+
+    for arguments <- [%{"q" => %{"value" => 1}}, %{"q" => %{"extra" => true}}] do
+      assert %{status: :error, reason: :invalid_arguments} =
+               Dispatcher.dispatch(
+                 state,
+                 :workflow,
+                 environment,
+                 "named",
+                 arguments,
+                 TestHelpers.dispatch_context(state, :workflow, 5000),
+                 nil,
+                 nil
+               )
+    end
+
+    assert {:error, :invalid_capability} =
+             capability_with_schema(%{
+               "type" => "object",
+               "additionalProperties" => %{
+                 "type" => "object",
+                 "properties" => %{"user-id" => %{"type" => "integer"}}
+               }
+             })
+
+    too_deep =
+      Enum.reduce(1..16, %{"type" => "string"}, fn _, child ->
+        %{"type" => "object", "additionalProperties" => child}
+      end)
+
+    assert {:error, :invalid_capability} = capability_with_schema(too_deep)
+
+    assert {:error,
+            {:invalid_schema,
+             %{segments: [{:property, "additionalProperties"}, {:property, "oneOf"}]}}} =
+             JSONSchema.compile(%{
+               "type" => "object",
+               "additionalProperties" => %{
+                 "type" => "string",
+                 "oneOf" => []
+               }
+             })
   end
 
   test "requires an input schema and rejects effects outside the closed vocabulary" do

@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.ArtifactPublisher
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandFailureCause
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
@@ -150,8 +151,13 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
       when execution_state in [:not_started, :incomplete] do
     diagnostic =
       case reason do
-        %CommandDiagnostic{} = diagnostic -> diagnostic
-        _other -> diagnostic(:internal, :internal_error, provider_activity)
+        %CommandDiagnostic{} = diagnostic ->
+          diagnostic
+
+        other ->
+          diagnostic(:internal, :internal_error, provider_activity,
+            cause: CommandFailureCause.from_reason(other)
+          )
       end
 
     execution = failure_execution(execution_state)

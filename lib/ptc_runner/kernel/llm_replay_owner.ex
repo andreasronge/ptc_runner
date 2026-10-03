@@ -1,8 +1,14 @@
 defmodule PtcRunner.Kernel.LLMReplayOwner do
   @moduledoc false
 
-  # Holds the remaining replay responses for one installed `llm_replay`
-  # provider and dies with the run that opened it.
+  # Holds immutable replay responses and atomic remaining-list cursors. A retained
+  # installation gives each run its own cursor, reclaimed when that run exits.
+  #
+  # Each cursor references a tail of the immutable source list in this process.
+  # Taking its head is constant work; no list traversal or per-run fixture copy
+  # is needed. Empty tails remain recorded so exhaustion cannot restart a key.
+  # The source stays retained until installation shutdown, even after all runs
+  # consume it. Nil scope is the installation's cursor and needs no monitor.
   #
   # This is a GenServer rather than an Agent for two reasons. It monitors the
   # owning process so a run that fails between acquisition and cleanup cannot
@@ -21,10 +27,11 @@ defmodule PtcRunner.Kernel.LLMReplayOwner do
     GenServer.start(__MODULE__, {entries, owner, registrar})
   end
 
-  @spec take(pid(), binary()) ::
+  @spec take(pid(), binary(), pid() | nil) ::
           {:ok, map()} | {:error, :exhausted | :unmatched | :unavailable}
-  def take(pid, key) when is_pid(pid) and is_binary(key) do
-    GenServer.call(pid, {:take, key})
+  def take(pid, key, scope \\ nil)
+      when is_pid(pid) and is_binary(key) and (is_pid(scope) or is_nil(scope)) do
+    GenServer.call(pid, {:take, key, scope})
   catch
     :exit, _reason -> {:error, :unavailable}
   end
@@ -42,21 +49,33 @@ defmodule PtcRunner.Kernel.LLMReplayOwner do
     owner_ref = Process.monitor(owner)
 
     case ResourceRegistrar.register_root(registrar) do
-      :ok -> {:ok, %{entries: entries, owner_ref: owner_ref}}
+      :ok -> {:ok, %{entries: entries, owner_ref: owner_ref, cursors: %{}}}
       {:error, reason} -> {:stop, reason}
     end
   end
 
   @impl GenServer
-  def handle_call({:take, key}, _from, %{entries: entries} = state) do
-    case Map.get(entries, key) do
-      [response | rest] ->
-        {:reply, {:ok, response}, %{state | entries: Map.put(entries, key, rest)}}
+  def handle_call({:take, key, scope}, _from, %{entries: entries} = state) do
+    case Map.fetch(entries, key) do
+      {:ok, responses} ->
+        cursor =
+          Map.get_lazy(state.cursors, scope, fn ->
+            %{monitor: if(is_pid(scope), do: Process.monitor(scope)), remaining: %{}}
+          end)
 
-      [] ->
-        {:reply, {:error, :exhausted}, state}
+        remaining = Map.get(cursor.remaining, key, responses)
+        state = %{state | cursors: Map.put(state.cursors, scope, cursor)}
 
-      nil ->
+        case remaining do
+          [response | tail] ->
+            cursor = %{cursor | remaining: Map.put(cursor.remaining, key, tail)}
+            {:reply, {:ok, response}, %{state | cursors: Map.put(state.cursors, scope, cursor)}}
+
+          [] ->
+            {:reply, {:error, :exhausted}, state}
+        end
+
+      :error ->
         {:reply, {:error, :unmatched}, state}
     end
   end
@@ -64,6 +83,13 @@ defmodule PtcRunner.Kernel.LLMReplayOwner do
   @impl GenServer
   def handle_info({:DOWN, owner_ref, :process, _owner, _reason}, %{owner_ref: owner_ref} = state) do
     {:stop, :normal, state}
+  end
+
+  def handle_info({:DOWN, ref, :process, scope, _reason}, state) do
+    case Map.get(state.cursors, scope) do
+      %{monitor: ^ref} -> {:noreply, %{state | cursors: Map.delete(state.cursors, scope)}}
+      _ -> {:noreply, state}
+    end
   end
 
   def handle_info(_message, state), do: {:noreply, state}

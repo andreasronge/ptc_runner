@@ -115,6 +115,82 @@ defmodule PtcRunner.DotenvTest do
     end
   end
 
+  @tag :tmp_dir
+  test "scope loads its original snapshot even when the file changes", %{tmp_dir: dir} do
+    track_env(["PTC_SNAPSHOT_OLD", "PTC_SNAPSHOT_NEW"])
+    System.delete_env("PTC_SNAPSHOT_OLD")
+    System.delete_env("PTC_SNAPSHOT_NEW")
+    path = Path.join(dir, ".env")
+    File.write!(path, "PTC_SNAPSHOT_OLD=original\n")
+
+    Dotenv.with_file_scope(path, fn ->
+      File.write!(path, "PTC_SNAPSHOT_NEW=replacement\n")
+      assert :ok = Dotenv.load_file(path)
+      assert System.get_env("PTC_SNAPSHOT_OLD") == "original"
+      assert System.get_env("PTC_SNAPSHOT_NEW") == nil
+    end)
+
+    assert System.get_env("PTC_SNAPSHOT_OLD") == nil
+    assert System.get_env("PTC_SNAPSHOT_NEW") == nil
+  end
+
+  test "loaded scopes restore on exceptions and serialize concurrent commands", %{tmp_dir: dir} do
+    key = "PTC_SCOPED_CONCURRENT"
+    track_env([key])
+    System.put_env(key, "inherited")
+    first = Path.join(dir, "first.env")
+    second = Path.join(dir, "second.env")
+    File.write!(first, "#{key}=first\n")
+    File.write!(second, "#{key}=second\n")
+    parent = self()
+
+    owner =
+      Task.async(fn ->
+        Dotenv.with_loaded_file(first, fn ->
+          Dotenv.with_file_scope(first, fn -> :ok end)
+          send(parent, :first_loaded)
+
+          receive do
+            :release -> assert System.get_env(key) == "first"
+          end
+        end)
+      end)
+
+    assert_receive :first_loaded
+
+    contender =
+      Task.async(fn ->
+        send(parent, :second_started)
+        Dotenv.with_loaded_file(second, fn -> System.get_env(key) end)
+      end)
+
+    assert_receive :second_started
+    assert Task.yield(contender, 100) == nil
+    send(owner.pid, :release)
+    Task.await(owner)
+    assert Task.await(contender) == "second"
+    assert System.get_env(key) == "inherited"
+
+    assert_raise RuntimeError, "scope failure", fn ->
+      Dotenv.with_loaded_file(first, fn -> raise "scope failure" end)
+    end
+
+    assert System.get_env(key) == "inherited"
+  end
+
+  test "failed snapshot stays closed when a file appears during the scope", %{tmp_dir: dir} do
+    key = "PTC_SCOPED_LATE_FILE"
+    track_env([key])
+    path = Path.join(dir, "late.env")
+
+    Dotenv.with_file_scope(path, fn ->
+      File.write!(path, "#{key}=late\n")
+      assert Dotenv.load_file(path) == {:error, :environment_file_not_found}
+    end)
+
+    assert true == Dotenv.with_loaded_file(path, fn -> assert System.get_env(key) == "late" end)
+  end
+
   describe "with_file_scope/2" do
     test "restores declared values so a changed file is used by the next launch", %{tmp_dir: dir} do
       key = "PTC_DOTENV_SCOPED_ROTATION"

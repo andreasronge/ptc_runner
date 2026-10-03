@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.ResultContractDiagnostic do
   alias PtcRunner.Kernel.CommandContractAuthority
   alias PtcRunner.Kernel.CommandPath
   alias PtcRunner.Kernel.CommandSource
+  alias PtcRunner.Kernel.DiagnosticPattern
 
   @constraints [
     :additionalProperties,
@@ -28,6 +29,13 @@ defmodule PtcRunner.Kernel.ResultContractDiagnostic do
   @middle " turns; last candidate violated "
   @max_message_bytes byte_size(@prefix) + 3 + byte_size(@middle) +
                        (@constraint_names |> Enum.map(&byte_size/1) |> Enum.max())
+
+  @template [
+    {:literal, @prefix},
+    {:slot, :turns, :integer, @turn_pattern},
+    {:literal, @middle},
+    {:slot, :constraint, :text, @constraint_pattern}
+  ]
 
   @doc false
   @spec retain_details(term()) :: {:ok, map()} | :error
@@ -131,19 +139,20 @@ defmodule PtcRunner.Kernel.ResultContractDiagnostic do
   @doc false
   @spec message(term(), term()) :: {:ok, binary()} | :error
   def message(turns, constraint) when turns in 1..128 and constraint in @constraints,
-    do: {:ok, @prefix <> Integer.to_string(turns) <> @middle <> Atom.to_string(constraint)}
+    do:
+      {:ok,
+       DiagnosticPattern.render(@template, %{turns: turns, constraint: Atom.to_string(constraint)})}
 
   def message(_turns, _constraint), do: :error
 
   @doc false
   @spec valid_message?(term()) :: boolean()
-  def valid_message?(message) when is_binary(message) do
-    Enum.any?(1..128, fn turns ->
-      Enum.any?(@constraints, fn constraint -> message(turns, constraint) == {:ok, message} end)
+  def valid_message?(message) do
+    DiagnosticPattern.valid_template?(@template, message, fn values ->
+      constraint = Enum.find(@constraints, &(Atom.to_string(&1) == values.constraint))
+      message(values.turns, constraint)
     end)
   end
-
-  def valid_message?(_message), do: false
 
   @doc false
   @spec message_schema(binary()) :: map()
@@ -151,13 +160,7 @@ defmodule PtcRunner.Kernel.ResultContractDiagnostic do
     %{
       "oneOf" => [
         %{"const" => fallback},
-        %{
-          "type" => "string",
-          "minLength" => 1,
-          "maxLength" => @max_message_bytes,
-          "pattern" =>
-            "^agent could not satisfy the result contract within #{@turn_pattern} turns; last candidate violated #{@constraint_pattern}$(?![\\s\\S])"
-        }
+        DiagnosticPattern.exact_message_schema(@max_message_bytes, @template)
       ]
     }
   end

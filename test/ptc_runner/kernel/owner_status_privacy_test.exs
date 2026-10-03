@@ -149,7 +149,7 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
     {:ok, run_state} = RunState.start(Limits.defaults())
 
     {:ok, %{}, [], evaluation_lease} =
-      RunState.reserve_evaluation(run_state, "default", :fail_fast)
+      RunState.reserve_evaluation(run_state, "default", mode: :fail_fast)
 
     :ok =
       RunState.commit_evaluation(

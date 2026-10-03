@@ -12,7 +12,7 @@ defmodule PtcRunner.Kernel.RunAnalysis do
   before returning to Lisp.
 
   Run rows expose `call_counts_complete` beside their call counts. When true,
-  `llm_calls`, `workflow_capability_calls`, and `mission_capability_calls` are
+  `llm_calls`, `decision_calls`, `workflow_capability_calls`, and `mission_capability_calls` are
   authoritative terminal-usage totals. When false, they are observations from
   the retained event stream and may be lower than the run totals after event
   retention; `llm_calls` always counts workflow `llm-request` calls only.
@@ -317,7 +317,7 @@ defmodule PtcRunner.Kernel.RunAnalysis do
 
   defp run_view(_arguments), do: {:error, :invalid_query}
 
-  @summary_run_fields ~w(run_id status duration_ms llm_calls call_counts_complete evaluations terminal_reason terminal_limit terminal_limit_value complete truncated)
+  @summary_run_fields ~w(run_id status duration_ms llm_calls decision_calls call_counts_complete evaluations terminal_reason terminal_limit terminal_limit_value complete truncated)
 
   defp project_runs(items, :full) when is_list(items), do: items
 

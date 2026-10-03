@@ -2,7 +2,7 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   @moduledoc """
   Host-owned acquire-once runtime for a provider-bearing serving template.
 
-  Start with `template:`, `services:` and `pins:` only. Only LLM installations
+  Start with `template:`, `services:` and `pins:` only. Chat and decision installations
   are shareable (`:provider_runtime_unsupported` otherwise). Acquisition uses
   the active provider pipeline. Exact installation pins and destination/name
   snapshot pins are checked before readiness; failures close everything and
@@ -175,7 +175,11 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
 
   defp supported(retained) do
     if Enum.all?(retained.metadata.provider_declarations, fn declaration ->
-         retained.catalog.descriptors[declaration.name].source == :llm
+         retained.catalog.descriptors[declaration.name].source in [
+           :llm,
+           :decision,
+           :decision_replay
+         ]
        end), do: :ok, else: {:error, :provider_runtime_unsupported}
   end
 

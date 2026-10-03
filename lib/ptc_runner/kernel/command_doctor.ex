@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.CommandDoctor do
   alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandFailureCause
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.ConnectivityResult
@@ -109,8 +110,12 @@ defmodule PtcRunner.Kernel.CommandDoctor do
       end
     else
       {:error, %CommandDiagnostic{} = diagnostic} -> {:error, diagnostic}
-      {:error, _reason} -> {:error, diagnostic(:internal, :internal_error)}
+      {:error, reason} -> {:error, operation_diagnostic(reason)}
     end
+  rescue
+    _exception -> {:error, operation_diagnostic(:unexpected_exception)}
+  catch
+    _kind, _reason -> {:error, operation_diagnostic(:unexpected_exception)}
   end
 
   defp runtime_services(nil, runtime),
@@ -158,9 +163,6 @@ defmodule PtcRunner.Kernel.CommandDoctor do
 
       {:error, %CommandDiagnostic{} = diagnostic} ->
         {:error, arguments_outcome(arguments, run_ref, diagnostic)}
-
-      {:error, _reason} ->
-        {:error, arguments_outcome(arguments, run_ref, diagnostic(:internal, :internal_error))}
     end
   end
 
@@ -253,8 +255,8 @@ defmodule PtcRunner.Kernel.CommandDoctor do
 
       {:error, CommandOutcome.doctor_failure(mode, run_ref, result, diagnostic)}
     else
-      {:error, _reason} ->
-        {:error, arguments_outcome(arguments, run_ref, diagnostic(:internal, :internal_error))}
+      {:error, reason} ->
+        {:error, arguments_outcome(arguments, run_ref, operation_diagnostic(reason))}
     end
   rescue
     _exception ->
@@ -285,8 +287,8 @@ defmodule PtcRunner.Kernel.CommandDoctor do
       {:ok, rows} ->
         connect_operation(host, catalog, prepared, rows, environment, run_ref, runtime)
 
-      {:error, _reason} ->
-        {:error, diagnostic(:internal, :internal_error)}
+      {:error, reason} ->
+        {:error, operation_diagnostic(reason)}
     end
   end
 
@@ -313,8 +315,12 @@ defmodule PtcRunner.Kernel.CommandDoctor do
            ) do
       connect_settlement(rows, prepared, catalog, environment, execution, authority)
     else
-      {:error, _reason} -> {:error, diagnostic(:internal, :internal_error)}
+      {:error, reason} -> {:error, operation_diagnostic(reason)}
     end
+  rescue
+    _exception -> {:error, operation_diagnostic(:unexpected_exception)}
+  catch
+    _kind, _reason -> {:error, operation_diagnostic(:unexpected_exception)}
   end
 
   defp connect_settlement(rows, prepared, catalog, environment, execution, authority) do
@@ -328,8 +334,8 @@ defmodule PtcRunner.Kernel.CommandDoctor do
               probe_usage(ConnectivityResult.usage(result), catalog)
             )
 
-          {:error, _reason} ->
-            {:error, active_diagnostic(:internal, :internal_error)}
+          {:error, reason} ->
+            {:error, operation_diagnostic(reason, true)}
         end
 
       {:error, %CommandDiagnostic{} = diagnostic} ->
@@ -342,9 +348,9 @@ defmodule PtcRunner.Kernel.CommandDoctor do
         {:error, operation_diagnostic(reason)}
     end
   rescue
-    _exception -> {:error, active_diagnostic(:internal, :internal_error)}
+    _exception -> {:error, operation_diagnostic(:unexpected_exception, true)}
   catch
-    _kind, _reason -> {:error, active_diagnostic(:internal, :internal_error)}
+    _kind, _reason -> {:error, operation_diagnostic(:unexpected_exception, true)}
   after
     PublicationAuthority.close(authority)
   end
@@ -359,20 +365,28 @@ defmodule PtcRunner.Kernel.CommandDoctor do
     end
   end
 
-  defp operation_diagnostic(:execution_session_unavailable),
-    do: active_diagnostic(:internal, :internal_error)
+  defp operation_diagnostic(reason, provider_activity \\ false)
 
-  defp operation_diagnostic(_reason), do: diagnostic(:internal, :internal_error)
+  defp operation_diagnostic(:execution_session_unavailable, _provider_activity),
+    do: operation_diagnostic_with_activity(:execution_session_unavailable, true)
+
+  defp operation_diagnostic(reason, provider_activity),
+    do: operation_diagnostic_with_activity(reason, provider_activity)
+
+  defp operation_diagnostic_with_activity(reason, provider_activity),
+    do:
+      CommandDiagnostic.new!(:internal, :internal_error,
+        cause: CommandFailureCause.from_reason(reason),
+        provider_activity: provider_activity
+      )
 
   @doc false
   @spec connect_failure_diagnostic(term()) :: CommandDiagnostic.t()
   def connect_failure_diagnostic(failure) do
-    {_reason, provider_activity, _stage} =
-      OwnerFailure.evidence_or_unknown(failure, :internal_error, :incomplete)
+    {reason, provider_activity, _stage} =
+      OwnerFailure.evidence_or_unknown(failure, :unexpected_exception, :incomplete)
 
-    if provider_activity,
-      do: active_diagnostic(:internal, :internal_error),
-      else: diagnostic(:internal, :internal_error)
+    operation_diagnostic_with_activity(reason, provider_activity)
   end
 
   defp connect_projection(rows, provider_activity, usage) do

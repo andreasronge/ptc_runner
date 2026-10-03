@@ -1,6 +1,11 @@
 defmodule PtcRunner.Kernel.LLMReplay do
   @moduledoc """
-  Serves language-model responses from a frozen fixture file.
+  Serves model-call responses from a frozen fixture file.
+
+  Both chat and decision replay installations use this same fixture owner and
+  request hash. Decision fixtures carry vendor-neutral `model`, `answers`, and
+  `usage`; successful chat fixtures carry `tokens` for accounting. The calling
+  capability validates the response contract and shares the run budget ledgers.
 
   Evaluation needs a workflow LLM whose answers do not move between a baseline
   run and a candidate run, otherwise a behavioural difference cannot be
@@ -48,7 +53,14 @@ defmodule PtcRunner.Kernel.LLMReplay do
 
   The provider is owned. Its response cursor lives in a process that monitors
   the run that acquired it, so a run failing between acquisition and cleanup
-  cannot leave a replay owner behind.
+  cannot leave a replay owner behind. A warm decision installation retains
+  the immutable fixtures, with a separate atomic cursor for each run state.
+  Concurrent runs cannot consume each other's responses; each run's cursor
+  is reclaimed when its state owner exits. Repeated calls within one run
+  still consume the sequence in order and fail when it is exhausted. Cursors
+  reference remaining list tails inside the fixture owner, so advancement takes
+  constant lookup work and shares fixture storage across runs. The immutable
+  source remains available until the installation owner shuts down.
 
   Every failure is closed. An unknown hash, an exhausted sequence, a malformed
   or oversized response, a duplicate entry, or a fixture past its ceilings all
@@ -70,6 +82,7 @@ defmodule PtcRunner.Kernel.LLMReplay do
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.LLMReplayOwner
   alias PtcRunner.Kernel.ProviderError
+  alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.StrictJSON
   alias PtcRunner.Lisp.RetainedSize
 
@@ -182,8 +195,11 @@ defmodule PtcRunner.Kernel.LLMReplay do
           (map(), %{llm_request_deadline_ms: integer() | nil} ->
              {:ok, map()} | {:error, ProviderError.t()})
   def requester(%__MODULE__{} = replay) do
-    fn request, _context -> respond(replay, request) end
+    fn request, context -> respond(replay, request, replay_scope(context)) end
   end
+
+  defp replay_scope(%{provider_run_state: %RunState{pid: pid}}), do: pid
+  defp replay_scope(_context), do: nil
 
   @doc "Stops the owner. Safe to call more than once."
   @spec stop(t()) :: :ok
@@ -224,9 +240,9 @@ defmodule PtcRunner.Kernel.LLMReplay do
   # One atomic take: reading the remaining responses and advancing the cursor
   # must not be two operations, or two concurrent workflow calls could replay
   # the same element.
-  defp respond(%__MODULE__{} = replay, request) do
+  defp respond(%__MODULE__{} = replay, request, scope) do
     with {:ok, key} <- hash_request(request),
-         {:ok, response} <- take(replay, key) do
+         {:ok, response} <- take(replay, key, scope) do
       bounded(response, replay.max_result_bytes)
     end
   end
@@ -241,8 +257,8 @@ defmodule PtcRunner.Kernel.LLMReplay do
     end
   end
 
-  defp take(%__MODULE__{pid: pid}, key) do
-    case LLMReplayOwner.take(pid, key) do
+  defp take(%__MODULE__{pid: pid}, key, scope) do
+    case LLMReplayOwner.take(pid, key, scope) do
       {:ok, %{replay_error: error}} ->
         kind =
           Enum.find(LLMFailureCatalog.provider_kinds(), &(Atom.to_string(&1) == error["kind"]))

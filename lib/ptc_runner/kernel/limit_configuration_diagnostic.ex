@@ -12,9 +12,18 @@ defmodule PtcRunner.Kernel.LimitConfigurationDiagnostic do
   @suffix "; raise limits.normal_event_bytes, and its installed host ceiling if it is lower, or lower limits.event_payload_bytes"
   @limit_pattern "(?:[1-9][0-9]{0,8}|1[0-9]{9}|2[0-4][0-9]{8}|25[0-8][0-9]{7}|259[0-1][0-9]{6}|2592000000)"
   @required_pattern "[1-9][0-9]{0,9}"
-  @message_pattern ~r/^normal_event_bytes effective limit ([1-9][0-9]{0,9}) is below the required ([1-9][0-9]{0,9}) bytes for event_payload_bytes ([1-9][0-9]{0,9}); raise limits\.normal_event_bytes, and its installed host ceiling if it is lower, or lower limits\.event_payload_bytes$/
   @maximum_message_bytes byte_size(@prefix) + 10 + byte_size(@required_middle) + 10 +
                            byte_size(@payload_middle) + 10 + byte_size(@suffix)
+
+  @template [
+    {:literal, @prefix},
+    {:slot, :bytes, :integer, @limit_pattern},
+    {:literal, @required_middle},
+    {:slot, :required, :integer, @required_pattern},
+    {:literal, @payload_middle},
+    {:slot, :payload, :integer, @limit_pattern},
+    {:literal, @suffix}
+  ]
 
   @doc false
   @spec message(term(), term(), term()) :: {:ok, binary()} | :error
@@ -31,11 +40,7 @@ defmodule PtcRunner.Kernel.LimitConfigurationDiagnostic do
            ],
          true <- bytes < required do
       {:ok,
-       @prefix <>
-         Integer.to_string(bytes) <>
-         @required_middle <>
-         Integer.to_string(required) <>
-         @payload_middle <> Integer.to_string(payload) <> @suffix}
+       DiagnosticPattern.render(@template, %{bytes: bytes, required: required, payload: payload})}
     else
       _invalid -> :error
     end
@@ -43,32 +48,17 @@ defmodule PtcRunner.Kernel.LimitConfigurationDiagnostic do
 
   @doc false
   @spec valid_message?(term()) :: boolean()
-  def valid_message?(message) when is_binary(message) do
-    case Regex.run(@message_pattern, message) do
-      [_all, bytes, required, payload] ->
-        message(String.to_integer(bytes), String.to_integer(required), String.to_integer(payload)) ==
-          {:ok, message}
-
-      _no_match ->
-        false
-    end
-  end
-
-  def valid_message?(_message), do: false
+  def valid_message?(message),
+    do:
+      DiagnosticPattern.valid_template?(@template, message, fn values ->
+        message(values.bytes, values.required, values.payload)
+      end)
 
   @doc false
   @spec message_schema(binary()) :: map()
   def message_schema(fallback) when is_binary(fallback) do
     if not valid_message?(fallback), do: raise(ArgumentError, "invalid fallback message")
 
-    DiagnosticPattern.exact_message_schema(@maximum_message_bytes, [
-      {:literal, @prefix},
-      {:pattern, @limit_pattern},
-      {:literal, @required_middle},
-      {:pattern, @required_pattern},
-      {:literal, @payload_middle},
-      {:pattern, @limit_pattern},
-      {:literal, @suffix}
-    ])
+    DiagnosticPattern.exact_message_schema(@maximum_message_bytes, @template)
   end
 end

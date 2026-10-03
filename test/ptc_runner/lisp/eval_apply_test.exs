@@ -17,8 +17,9 @@ defmodule PtcRunner.Lisp.EvalApplyTest do
     test "apply with empty equality args raises arity error" do
       env = Env.initial()
       ast = {:call, {:var, :apply}, [{:var, :=}, {:vector, []}]}
-      assert {:error, {:arity_error, msg}} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
-      assert msg =~ "= requires at least 1 argument"
+
+      assert {:error, {:arity_error, %{name: "=", expected: {:at_least, 1}, actual: 0}}} =
+               Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
     end
 
     test "apply with builtin + and vector" do

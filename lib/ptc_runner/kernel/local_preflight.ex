@@ -158,7 +158,7 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   # A replay installation's fixture file is named by the declaration, so it is
   # checked by every command that verifies declarations, not only by those that
   # acquire providers.
-  @input_sources [:llm_replay]
+  @input_sources [:llm_replay, :decision_replay]
 
   @launcher_reasons [:mcp_stdio_launcher_unavailable, :unsupported_mcp_stdio_platform]
   @adapter_reasons [:invalid_llm_model]

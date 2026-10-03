@@ -57,7 +57,31 @@ defmodule PtcRunner.Kernel.LLMUsage do
     end
   end
 
+  def from_response(%{status: :ok, value: %{"usage" => usage}}), do: decision_usage(usage)
   def from_response(_result), do: nil
+
+  @doc false
+  @spec decision_usage(term()) :: map() | nil
+  def decision_usage(usage) when is_map(usage) do
+    tokens =
+      case normalize(%{"input" => usage["input_tokens"], "output" => usage["output_tokens"]}) do
+        {:ok, values} -> values
+        _ -> %{}
+      end
+
+    cost =
+      case normalize(%{"total_cost" => usage["cost"]}) do
+        {:ok, values} -> values
+        _ -> %{}
+      end
+
+    case Map.merge(tokens, cost) do
+      values when map_size(values) > 0 -> values
+      _ -> nil
+    end
+  end
+
+  def decision_usage(_), do: nil
 
   @doc false
   @spec ceil_scaled_decimal(term(), non_neg_integer(), pos_integer()) ::

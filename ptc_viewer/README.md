@@ -169,15 +169,17 @@ between polls.
 
 The standalone viewer deliberately has no dependency on the PtcRunner host.
 The host supplies a module or three-argument function implementing
-`PtcViewer.KernelTraceAdapter`:
+`PtcViewer.KernelTraceAdapter`. It first admits `trace_snapshot` and
+`inspection_snapshot` through its owner-bound snapshot APIs, then passes those
+grants to the viewer:
 
 ```elixir
 {:ok, pid} =
   PtcViewer.start(
-    trace_dir: "traces",
-    kernel_trace_adapter: PtcRunner.Kernel.ViewerAdapter,
-    inspection_file: "traces/run.ptcins",
-    inspection_adapter: PtcRunner.Kernel.ViewerAdapter,
+    trace_source: {:trace_snapshot, trace_snapshot},
+    kernel_trace_adapter: PtcRunner.Kernel.ProjectViewerAdapter,
+    inspection_source: {:inspection_snapshot, inspection_snapshot},
+    inspection_adapter: PtcRunner.Kernel.ProjectViewerAdapter,
     open: false
   )
 

@@ -278,6 +278,14 @@ defmodule PtcGateway.TestSupport.GatewayLoad do
   @spec by_status([call_result()]) :: %{(pos_integer() | nil) => pos_integer()}
   def by_status(results), do: Enum.frequencies_by(results, & &1.status)
 
+  @doc "Attribute HTTP 429 refusals by their wire reason."
+  @spec by_refusal_reason([call_result()]) :: %{(String.t() | nil) => pos_integer()}
+  def by_refusal_reason(results) do
+    results
+    |> Enum.filter(&(&1.status == 429))
+    |> Enum.frequencies_by(&get_in(&1.result, ["error", "data", "reason"]))
+  end
+
   # ---------------------------------------------------------------------------
   # Admission introspection
   # ---------------------------------------------------------------------------

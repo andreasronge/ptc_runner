@@ -108,23 +108,6 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Format do
 
   def decode_footer_versions(_other), do: {:error, :malformed_source}
 
-  @spec encode_frame(binary()) :: {:ok, binary()} | {:error, :invalid_frame}
-  def encode_frame(payload) when is_binary(payload) do
-    size = byte_size(payload)
-
-    if size <= 0xFFFF_FFFF_FFFF_FFFF do
-      {:ok, <<size::unsigned-big-64, payload::binary>>}
-    else
-      {:error, :invalid_frame}
-    end
-  end
-
-  def encode_frame(_payload), do: {:error, :invalid_frame}
-
-  @spec frame_payload_offset(non_neg_integer()) :: non_neg_integer()
-  def frame_payload_offset(frame_offset) when is_integer(frame_offset) and frame_offset >= 0,
-    do: frame_offset + 8
-
   @spec encode_footer(footer()) :: binary()
   def encode_footer(footer) when is_map(footer) do
     encode_footer_bytes(footer, footer.artifact_digest)

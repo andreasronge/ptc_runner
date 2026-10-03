@@ -212,6 +212,23 @@ envelopes and diagnostic rows are owned by `CommandOutcome`,
 `CommandContract`, and `DiagnosticCatalog`; `mix ptc.gen_docs` projects their
 schemas.
 
+Dynamic diagnostic prose is declared as literal segments and named typed
+slots in `DiagnosticPattern` templates. Rendering, parsing, and schema patterns
+use that same declaration. Integer slots recover only canonical decimal text;
+text slots retain their bounded ECMA-262 grammar. Builders still own semantic
+checks such as required capacity exceeding the refused limit, budget reservation
+exceeding the remaining allowance, sorted capability lists, and safe public
+identities. Admission parses the template and calls the builder again, so syntax
+alone cannot authorize a message. Fixed literal catalogs and projection adapters
+already have a single owner and need no dynamic template. Provider cleanup keeps
+its historical syntax-only validation and Unicode regex option; model output
+keeps its existing factored schema alternatives and anchors. Unicode MCP tool
+names use character-oriented parsing to preserve their declared name bound.
+
+Synthetic Viewer router requests must use a loopback URL and supply
+`expected_port` explicitly; Plug's default example host is refused by the
+same authority check used for real requests.
+
 Manifest REPL startup follows the same acquisition, preparation, local-check,
 sink, and active-provider prefix as a one-shot run. It then transfers the
 opening and run state to `ReplSessionOwner`. `ReplSession` is process-affine;
@@ -353,6 +370,22 @@ submitted values, undeclared property names, enum values, or opaque validator
 reasons. `RunState` opens the callback worker's one-shot gate in the same owner
 operation that records the dispatched reservation; an uncertain gate
 acknowledgement remains possibly dispatched and is charged fail-closed.
+
+The dispatcher delegates gated worker lifecycle to `Dispatcher.ProviderCall`,
+bounded result admission and failure envelopes to `Dispatcher.Result`, and
+structured-output decoding, usage evidence and LLM deadlines to
+`Dispatcher.LlmResult`. Invocation resolution, input preparation and event
+orchestration remain in `Dispatcher`.
+
+`RunState` remains the single mutable owner. Its `RunState.LlmBudget`,
+`RunState.Admission` and `RunState.Providers` modules calculate pure transitions;
+the owner performs monitors, timers, replies, guardian cancellation and gate
+sends in their original order. Evaluation reservation uses one request carrying
+`mode: :fail_fast | :block`, `proof?` and the caller's `requested_at` timestamp.
+Fail-fast admission checks busy before the evaluation limit; blocking admission
+checks its caller-time deadline and the limit before queueing. `grant_lease/3`
+accepts a prepared lease tuple: a queued waiter transfers its existing monitor,
+and workflow resume grants without charging a new evaluation.
 
 `LimitCatalog` is the authority for limit names, scope, defaults, ranges, and
 identity participation. Installed limits are ceilings; manifests may narrow
@@ -501,6 +534,12 @@ What a trace contains and how it may be queried is the
 This section owns the parts that are implementation rather than contract.
 
 ### Canonical persistence
+
+The append-lock and identity-bound publication shell helpers clear the inherited
+BEAM environment except `PATH`, which locates their command-line utilities.
+Provider credentials and other host variables are not passed to these children.
+The MCP transport uses the same environment-clearing helper without retaining
+any variables for its launcher.
 
 Ordinary host-selected append takes an OS-released advisory lease before it
 validates the existing prefix and writes a batch. Existing files are keyed by
@@ -853,3 +892,22 @@ with `FORCE_FULL_PRE_PUSH=1`. Invoke `mix prepush` directly only for static or
 Dialyzer diagnosis, or when hooks are unavailable. Secret-dependent and model-driven
 E2E tests require their documented credentials; deterministic tests remain the
 authority for containment, ownership, accounting, rollback, and cleanup.
+
+### Decision model calls
+
+`decision-request` is a reserved model-call name in `ModelCapabilities` and is
+not chat. It shares hashing, reservation settlement, spend, deadlines, provider
+admission, and the `:model` inspection class; conversation reconstruction and
+chat routing stay chat-only. Trace call counts and CLI progress distinguish
+`decision` from `llm` calls.
+
+`DecisionCapability` owns the public contract; `DecisionContract` validates the
+accepted question subset and measured distributions. `HTTPDecisions` owns the
+deadline-aware, cancellation-witnessed HTTP transport
+with retries and redirects disabled. `OpenRouterDecisions`
+is the alpha backend adapter and contains vendor wire names. Host acquisition
+binds its credential and routing policy. `decision_replay` reuses `LLMReplay`
+without another cursor owner or fixture format. Decision reservation metadata
+carries fixed host cost and token maxima directly, without a tariff estimate.
+`RunState` charges both kinds against its existing ledgers and settles reported
+usage even when output admission rejects an answer or a reservation is exceeded.

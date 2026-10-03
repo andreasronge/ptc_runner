@@ -782,9 +782,8 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     fn arguments -> project_kernel_eval_arguments(arguments, limits) end
   end
 
-  @doc false
   @spec kernel_check_source_ledger_arguments(map()) :: (map() -> map())
-  def kernel_check_source_ledger_arguments(limits) do
+  defp kernel_check_source_ledger_arguments(limits) do
     fn arguments -> project_kernel_check_source_arguments(arguments, limits) end
   end
 
@@ -818,7 +817,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
          %TrustedTool{
            function: callback,
            argument_projection: :raw,
-           ledger_arguments: &result_contract_failure_ledger_arguments/1,
+           ledger_arguments: &redacted_ledger_arguments/1,
            prelude_namespaces: ["agent.core"],
            visibility: :private
          }}
@@ -989,7 +988,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     |> maybe_put_params_identity(arguments, limits.capability_argument_bytes)
   end
 
-  defp project_kernel_eval_arguments(_arguments, _limits), do: %{"redacted" => true}
+  defp project_kernel_eval_arguments(arguments, _limits), do: redacted_ledger_arguments(arguments)
 
   defp project_kernel_check_source_arguments(arguments, limits) when is_map(arguments) do
     %{}
@@ -997,8 +996,8 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     |> maybe_put_source_requirement(arguments)
   end
 
-  defp project_kernel_check_source_arguments(_arguments, _limits),
-    do: %{"redacted" => true}
+  defp project_kernel_check_source_arguments(arguments, _limits),
+    do: redacted_ledger_arguments(arguments)
 
   defp maybe_put_source_requirement(projected, arguments) do
     if keyword_name(Map.get(arguments, "require")) == "terminal",
@@ -1309,8 +1308,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     }
   end
 
-  @doc false
-  def result_contract_failure_ledger_arguments(_arguments), do: %{"redacted" => true}
+  defp redacted_ledger_arguments(_arguments), do: %{"redacted" => true}
 
   @doc false
   @spec phase_return_contract_failure(map()) :: (map() -> term())

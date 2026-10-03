@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   """
 
   alias PtcRunner.Kernel.LLMFailureCatalog
+  alias PtcRunner.Kernel.LLMReplayDiagnostic
 
   @label_keys ~w(name model provider tags)
   @tag_values %{
@@ -324,6 +325,49 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   @spec capability_denial_map_limit() :: 2
   def capability_denial_map_limit, do: 2
 
+  @doc """
+  Projects a failure value into the closed public failure metadata vocabulary.
+
+  Parallel workers carry this projection instead of the original value. Each
+  projection is registered together with its validator in this module, so new
+  closed classes require no parallel-specific extraction or retention logic.
+  Messages, arbitrary details, and unrecognized fields are never transported.
+  This projection does not authenticate a refusal against runtime state.
+  """
+  @spec failure_metadata(term()) :: map()
+  def failure_metadata(value), do: project_failure_metadata(value, :extract)
+
+  @doc """
+  Revalidates a closed failure projection and drops all other fields.
+
+  Uses the same registered vocabulary as `failure_metadata/1`. This accepts
+  metadata only, never an original failure value or an arbitrary payload map.
+  """
+  @spec retain_failure_metadata(term()) :: map()
+  def retain_failure_metadata(metadata) when is_map(metadata) and not is_struct(metadata),
+    do: project_failure_metadata(metadata, :retain)
+
+  def retain_failure_metadata(_metadata), do: %{}
+
+  defp project_failure_metadata(value, mode) do
+    Enum.reduce(failure_projections(), %{}, fn {extract, retain}, metadata ->
+      projection = if mode == :extract, do: extract.(value), else: value
+      Map.merge(metadata, retain.(projection))
+    end)
+  end
+
+  # Keep extraction and validation paired: this is the single vocabulary for
+  # closed failure transport, independent of the evaluator boundary.
+  defp failure_projections do
+    [
+      {&failure_taxonomy/1, &retain_failure_taxonomy_fields/1},
+      {&llm_provider_failure/1, &retain_llm_provider_failure_fields/1},
+      {&named_quota_refusal_fields/1, &retain_named_quota_refusal_fields/1},
+      {&budget_refusal_fields/1, &retain_budget_refusal_fields/1},
+      {&LLMReplayDiagnostic.failure_metadata/1, &LLMReplayDiagnostic.retain_candidate_metadata/1}
+    ]
+  end
+
   @doc "Projects an agent LLM failure to one closed, payload-free provider class."
   @spec llm_provider_failure(term()) :: map()
   def llm_provider_failure(value) when is_map(value) and not is_struct(value) do
@@ -395,48 +439,38 @@ defmodule PtcRunner.Kernel.SafeMetadata do
     end
   end
 
-  @doc false
-  @spec max_calls_refusal_fields(term()) :: map()
-  def max_calls_refusal_fields(value), do: named_quota_refusal_fields(value)
-
-  @doc false
   @spec named_quota_refusal_fields(term()) :: map()
-  def named_quota_refusal_fields(value) do
+  defp named_quota_refusal_fields(value) do
     case named_quota_refusal(value) do
       {:ok, details} -> details
       :error -> %{}
     end
   end
 
-  @doc false
-  @spec retain_max_calls_refusal_fields(term()) :: map()
-  def retain_max_calls_refusal_fields(metadata), do: retain_named_quota_refusal_fields(metadata)
-
-  @doc false
   @spec retain_named_quota_refusal_fields(term()) :: map()
-  def retain_named_quota_refusal_fields(%{
-        limit: :max_calls,
-        alias: alias_name,
-        limit_value: limit
-      })
-      when is_binary(alias_name) and is_integer(limit) and limit > 0 do
+  defp retain_named_quota_refusal_fields(%{
+         limit: :max_calls,
+         alias: alias_name,
+         limit_value: limit
+       })
+       when is_binary(alias_name) and is_integer(limit) and limit > 0 do
     if alias_name =~ @alias,
       do: %{limit: :max_calls, alias: alias_name, limit_value: limit},
       else: %{}
   end
 
-  def retain_named_quota_refusal_fields(%{
-        limit: limit,
-        name: name,
-        limit_value: value
-      })
-      when limit in @public_quota_limits and is_binary(name) and is_integer(value) and value > 0 do
+  defp retain_named_quota_refusal_fields(%{
+         limit: limit,
+         name: name,
+         limit_value: value
+       })
+       when limit in @public_quota_limits and is_binary(name) and is_integer(value) and value > 0 do
     if name =~ @capability_name,
       do: %{limit: limit, name: name, limit_value: value},
       else: %{}
   end
 
-  def retain_named_quota_refusal_fields(_metadata), do: %{}
+  defp retain_named_quota_refusal_fields(_metadata), do: %{}
 
   @budget_limits [:llm_total_tokens, :llm_cost_microusd]
   @budget_limit_names %{
@@ -480,30 +514,28 @@ defmodule PtcRunner.Kernel.SafeMetadata do
 
   def budget_refusal(_value), do: :error
 
-  @doc false
   @spec budget_refusal_fields(term()) :: map()
-  def budget_refusal_fields(value) do
+  defp budget_refusal_fields(value) do
     case budget_refusal(value) do
       {:ok, details} -> details
       :error -> %{}
     end
   end
 
-  @doc false
   @spec retain_budget_refusal_fields(term()) :: map()
-  def retain_budget_refusal_fields(%{
-        limit: limit,
-        limit_value: limit_value,
-        requested: requested,
-        remaining: remaining
-      })
-      when limit in @budget_limits and is_integer(limit_value) and limit_value > 0 and
-             is_integer(requested) and is_integer(remaining) and remaining >= 0 and
-             remaining <= limit_value and requested > remaining do
+  defp retain_budget_refusal_fields(%{
+         limit: limit,
+         limit_value: limit_value,
+         requested: requested,
+         remaining: remaining
+       })
+       when limit in @budget_limits and is_integer(limit_value) and limit_value > 0 and
+              is_integer(requested) and is_integer(remaining) and remaining >= 0 and
+              remaining <= limit_value and requested > remaining do
     %{limit: limit, limit_value: limit_value, requested: requested, remaining: remaining}
   end
 
-  def retain_budget_refusal_fields(_metadata), do: %{}
+  defp retain_budget_refusal_fields(_metadata), do: %{}
 
   defp quota_limit_atom(name) when is_binary(name), do: Map.fetch(@quota_limit_names, name)
   defp quota_limit_atom(_name), do: :error

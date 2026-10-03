@@ -128,20 +128,36 @@ another service and reports the conflict. It runs in the foreground until
 <code class="inline">Ctrl+C</code>.</p><p>The Viewer never searches for <code class="inline">.env</code>. Environment-backed credentials come from
 the inherited environment, the project's <code class="inline">host.env_file</code>, or the exact file
 passed with <code class="inline">--env-file FILE</code>; that option overrides <code class="inline">host.env_file</code> for work
-launched from the Live tab. Host-configured file and literal credential
+launched from the Live tab. Each launch reads its own file snapshot and restores
+the declared variables on exit. The foreground Viewer command keeps the file
+path for launches and does not load it while serving. Host-configured file and literal credential
 bindings remain available.</p><p>The Viewer ships in the standalone release and container image. It is not part
 of the published Hex package, where <code class="inline">ptc doctor</code> reports the optional Viewer as
 unavailable.</p><p>The <a href="/reference/project-files/#viewer">project reference</a> documents the <code class="inline">viewer</code> block.</p><h2 id="exposing-it">Exposing it</h2><p>The Viewer binds to <code class="inline">127.0.0.1</code> by default. <code class="inline">--listen 0.0.0.0</code> is the only
 alternative; it accepts connections through every network interface and prints
-a warning. Set a fresh <code class="inline">PTC_VIEWER_TOKEN</code> of at least 32 bytes before allowing
+a warning. Every route, including static assets and Live ingestion, requires
+an HTTP authority of <code class="inline">localhost</code>, <code class="inline">127.0.0.1</code>, or <code class="inline">[::1]</code> with the actual
+listener port. Other hosts and ports receive <code class="inline">403 forbidden_request</code>, even
+with a valid Live token. Port forwards must preserve the listener port.
+Browser mutations require an HTTP Origin matching that same authority. Set a fresh <code class="inline">PTC_VIEWER_TOKEN</code> of at least 32 bytes before allowing
 any non-loopback peer; for example, generate one with <code class="inline">openssl rand -hex 32</code>.</p><p>For a browser arriving through a non-loopback peer, keep the page authority at
 <code class="inline">localhost</code>, <code class="inline">127.0.0.1</code>, or <code class="inline">::1</code> through a port forward, then open the Viewer
 once with <code class="inline">?live_token=THE_TOKEN</code> to bootstrap Live access. The page removes
-that query parameter after use. The token protects Live ingestion and controls;
+that query parameter after use. Query tokens are accepted only for the entry
+page and live event stream: the native EventSource client still needs URL
+authentication because it cannot set an Authorization header. Other Live
+requests use Bearer headers, and query tokens never authorize mutations.
+The initial URL and stream URL can expose the token in browser history or
+request logs; keep those private and rotate the token after exposure.
+The token protects Live ingestion and controls;
 it never authenticates the Runs trace browser, so exposing the Viewer can
 disclose trace and private inspection data.</p><p>For container binding and host-port rules, see
 <a href="/installation/docker/#open-the-viewer">Docker installation</a>.</p><h2 id="reporting-a-run">Reporting a run</h2><p>Set <code class="inline">PTC_VIEWER_URL</code> for <code class="inline">ptc run</code> to report progress to the Live tab. When the
-Viewer requires a token, set the same <code class="inline">PTC_VIEWER_TOKEN</code> for the run. Reporting
+Viewer requires a token, set the same <code class="inline">PTC_VIEWER_TOKEN</code> for the run. A token
+is sent only over HTTPS or HTTP to <code class="inline">localhost</code>, IPv4 loopback (<code class="inline">127.0.0.0/8</code>),
+or IPv6 loopback (<code class="inline">::1</code>). URLs must have a host and no userinfo, query, or
+fragment. Redirects are refused. Invalid or insecure targets fail delivery.
+Reporting
 is best-effort and never changes the run result. It sends the exact manifest
 label, or the manifest filename when no label exists, and workflow entry to the
 Viewer for display; trace metadata keeps its fingerprinted label.</p>

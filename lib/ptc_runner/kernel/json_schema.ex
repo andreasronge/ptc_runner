@@ -8,7 +8,8 @@ defmodule PtcRunner.Kernel.JSONSchema do
   `maximum`, `minLength`, `maxLength`, `minItems`, `maxItems`, `maxProperties`,
   and the single bounded `sha256` string format. General type unions are
   unsupported, roots are objects, and a missing `additionalProperties` on an
-  object is normalized to `false`. A non-root node may use one scalar type or
+  object is normalized to `false`. `additionalProperties` accepts a boolean
+  or a child schema compiled under the same depth and size bounds. A non-root node may use one scalar type or
   the bounded nullable form `[<non-null type>, "null"]`; source order is
   canonicalized and other type unions remain unsupported.
 
@@ -31,10 +32,11 @@ defmodule PtcRunner.Kernel.JSONSchema do
   compiled JSV root. Input rejection may retain a small explanation containing
   only schema-declared paths, keywords, and bounds; submitted values and
   undeclared property names never enter that explanation. Validation and
-  explanation projection run together in one bounded worker. `valid?/2` remains
-  a host-side predicate for construction, tests, and the MCP structured-result
-  check inside the already-bounded provider process. Dispatcher output
-  admission uses `validate/5`.
+  explanation projection run together in one bounded worker. `valid?/2` also
+  runs in a caller-cancelled worker, with a 1,000 ms deadline and 5,000,000-word
+  heap ceiling (including shared binaries). Invalidity or worker unavailability
+  returns `false`. Dispatcher admission uses `validate/5` with run-specific bounds
+  and distinguishes invalidity from validator unavailability.
 
   Rejection reports the first proven fault as a closed `rule` atom plus the
   segments locating it inside the submitted schema document. Every segment is
@@ -57,6 +59,8 @@ defmodule PtcRunner.Kernel.JSONSchema do
   @max_depth 16
   @max_properties 128
   @max_enum_members 256
+  @validation_timeout_ms 1_000
+  @validation_heap_words 5_000_000
   @max_violations 3
   @max_explanation_nodes 64
   @max_explanation_errors 64
@@ -204,11 +208,26 @@ defmodule PtcRunner.Kernel.JSONSchema do
     end
   end
 
+  @doc "Checks a runtime value in a bounded worker; failure or unavailability returns false."
   @spec valid?(compiled(), term()) :: boolean()
   def valid?(root, value) do
-    match?({:ok, _validated}, JSV.validate(value, root, cast: false))
-  rescue
-    _exception -> false
+    match?(
+      {:ok, true},
+      run_bounded(fn ->
+        JSONValue.value?(value) and
+          match?({:ok, _validated}, JSV.validate(value, root, cast: false))
+      end)
+    )
+  end
+
+  @doc false
+  @spec run_bounded((-> term())) :: {:ok, term()} | {:error, atom()}
+  def run_bounded(function) do
+    BoundedWorker.run(function,
+      timeout_ms: @validation_timeout_ms,
+      max_heap_words: @validation_heap_words,
+      cancel_with_caller: true
+    )
   end
 
   @doc "Validates a value and returns only bounded, schema-authored rejection facts."
@@ -461,7 +480,8 @@ defmodule PtcRunner.Kernel.JSONSchema do
          {:ok, items} <- normalize_items(schema, type, path, depth),
          {:ok, property_names} <- normalize_property_names(schema, type, path, depth),
          :ok <- validate_required(schema, type, properties),
-         :ok <- validate_additional_properties(schema, type),
+         {:ok, additional_properties} <-
+           normalize_additional_properties(schema, type, path, depth),
          :ok <- validate_max_properties(schema, type) do
       normalized =
         schema
@@ -469,7 +489,7 @@ defmodule PtcRunner.Kernel.JSONSchema do
         |> maybe_put("properties", properties)
         |> maybe_put("items", items)
         |> maybe_put("propertyNames", property_names)
-        |> normalize_additional_properties(type)
+        |> maybe_put("additionalProperties", additional_properties)
 
       {:ok, normalized}
     else
@@ -669,24 +689,21 @@ defmodule PtcRunner.Kernel.JSONSchema do
     end
   end
 
-  defp validate_additional_properties(schema, "object") do
+  defp normalize_additional_properties(schema, "object", path, depth) do
     case Map.get(schema, "additionalProperties", false) do
-      value when is_boolean(value) -> :ok
-      _value -> {:error, {:invalid_keyword_value, [{:property, "additionalProperties"}]}}
+      value when is_boolean(value) ->
+        {:ok, value}
+
+      child when is_map(child) ->
+        normalize(child, [{:property, "additionalProperties"} | path], depth + 1)
+
+      _ ->
+        {:error, {:invalid_keyword_value, [{:property, "additionalProperties"}]}}
     end
   end
 
-  defp validate_additional_properties(schema, _type) do
-    case not_applicable(schema, "additionalProperties") do
-      {:ok, nil} -> :ok
-      error -> error
-    end
-  end
-
-  defp normalize_additional_properties(schema, "object"),
-    do: Map.put_new(schema, "additionalProperties", false)
-
-  defp normalize_additional_properties(schema, _type), do: schema
+  defp normalize_additional_properties(schema, _type, _path, _depth),
+    do: not_applicable(schema, "additionalProperties")
 
   defp validate_text(schema, key) do
     case Map.fetch(schema, key) do

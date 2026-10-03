@@ -13,9 +13,10 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
   alias PtcRunner.Kernel.ResultArtifact
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.TraceLog
-  alias PtcRunner.Kernel.ViewerAdapter
+  alias PtcRunner.TestSupport.InspectionFixture
   alias PtcRunner.TestSupport.RunLifecycle
   alias PtcRunner.TestSupport.StreamingInspection
+  alias PtcRunner.TestSupport.TraceQuery
 
   @tag :tmp_dir
   test "an explicit failure whose inspection artifact never lands does not claim retention", %{
@@ -222,7 +223,7 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
     assert Map.drop(published_record, ["timestamp"]) ==
              records |> hd() |> Map.drop(["timestamp"])
 
-    assert {:ok, _source} = ViewerAdapter.pin_inspection(inspection, {:file, trace})
+    assert {:ok, _source} = InspectionFixture.pin_inspection(inspection, {:file, trace})
 
     trace_types =
       trace
@@ -546,8 +547,8 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
     assert report.artifact_state["trace"] == "written"
     assert_receive {:direct_append_task, task}, 1_000
     assert :ok = Task.await(task)
-    assert {:ok, trace_log} = TraceLog.new(source: {:file, trace})
-    assert {:ok, %{"items" => items}} = TraceLog.query(trace_log, :list_runs, %{})
+    assert {:ok, trace_log} = TraceQuery.new(source: {:file, trace})
+    assert {:ok, %{"items" => items}} = TraceQuery.query(trace_log, :list_runs, %{})
     assert Enum.map(items, & &1["run_id"]) |> Enum.sort() == ["direct", "serialized"]
 
     assert :ok = PublicationAuthority.close(built.publication_authority)

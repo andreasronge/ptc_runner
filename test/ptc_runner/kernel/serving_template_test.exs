@@ -594,6 +594,29 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
   end
 
   @tag :tmp_dir
+  test "a raising activation hook cancels and reaps its execution", %{tmp_dir: dir} do
+    source = "(ns app) (defn run {:effect :write} [input] (loop [n 0] (recur (inc n))))"
+    assert {:ok, template} = build(fixture(dir, %{}, source))
+    host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
+    {:ok, reservation} = ServingTemplate.reserve(template, %{"answer" => 1}, host)
+
+    hooks = %{
+      after_activation: fn {RunAdmission, _, session} ->
+        send(self(), {:owner, ExecutionSessionOwner.pid(session)})
+        raise "activation hook failed"
+      end
+    }
+
+    _result = ServingCall.activate(reservation, hooks)
+    assert_receive {:owner, owner}
+    refute Process.alive?(owner)
+    refute_received {:DOWN, _, :process, ^owner, _}
+    {:monitors, monitors} = Process.info(self(), :monitors)
+    refute {:process, owner} in monitors
+    assert {:ok, %{in_use: 0}} = RunAdmission.snapshot(host)
+  end
+
+  @tag :tmp_dir
   test "admission death after dispatch preserves write uncertainty", %{tmp_dir: dir} do
     source = "(ns app) (defn run {:effect :write} [input] (loop [n 0] (recur (inc n))))"
     assert {:ok, template} = build(fixture(dir, %{}, source))

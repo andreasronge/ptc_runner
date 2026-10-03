@@ -3,6 +3,102 @@ defmodule PtcRunner.Lisp.RegexIntegrationTest do
 
   alias PtcRunner.Lisp
 
+  describe "regex safety at the interpreter boundary" do
+    test "truncation preserves UTF-8 codepoints" do
+      input = String.duplicate("a", 32_767) <> "é"
+
+      assert {:ok, %{return: "a"}} =
+               Lisp.run(~S|(re-find #"a" data/input)|, context: %{input: input})
+    end
+
+    test "replace reports excessive regex complexity" do
+      input = String.duplicate("a", 30) <> "!"
+
+      assert {:error, %{fail: %{message: message}}} =
+               Lisp.run(~S|(replace data/input #"(a+)+$" "x")|, context: %{input: input})
+
+      assert message =~ "Regex complexity limit exceeded"
+    end
+  end
+
+  describe "uniform regex limits" do
+    test "all regex operations report malformed UTF-8" do
+      for source <- [
+            ~S|(re-find #"a" data/input)|,
+            ~S|(re-matches #"a" data/input)|,
+            ~S|(re-seq #"a" data/input)|,
+            ~S|(re-split #"a" data/input)|,
+            ~S|(split data/input #"a")|,
+            ~S|(replace data/input #"a" "b")|,
+            ~S|(extract "(a)" data/input)|,
+            ~S|(extract-int "(a)" data/input)|
+          ] do
+        assert {:error, %{fail: %{message: message}}} =
+                 Lisp.run(source, context: %{input: <<97, 255>>})
+
+        assert message =~ "valid UTF-8", source
+      end
+    end
+
+    test "global scans report complexity failures instead of partial results" do
+      for source <- [
+            ~S|(re-seq #"(a+)+$" data/input)|,
+            ~S|(re-split #"(a+)+$" data/input)|,
+            ~S|(split data/input #"(a+)+$")|
+          ] do
+        assert {:error, %{fail: %{message: message}}} =
+                 Lisp.run(source, context: %{input: String.duplicate("a", 30) <> "!"})
+
+        assert message =~ "Regex complexity limit exceeded", source
+      end
+    end
+
+    test "literal analysis and dynamic patterns enforce the pattern cap" do
+      pattern = String.duplicate("a", 257)
+
+      assert {:error, %{fail: %{reason: :invalid_form, message: message}}} =
+               Lisp.run("#\"#{pattern}\"")
+
+      assert message =~ "maximum length of 256 bytes"
+
+      assert {:error, %{fail: %{message: message}}} =
+               Lisp.run(~S|(re-pattern data/pattern)|, context: %{pattern: pattern})
+
+      assert message =~ "maximum length of 256 bytes"
+    end
+
+    test "split and replace truncate at complete codepoints for every UTF-8 width" do
+      for char <- ["é", "€", "😀"], cut <- 1..(byte_size(char) - 1) do
+        prefix = String.duplicate("a", 32_768 - cut)
+        input = prefix <> char <> "tail"
+
+        assert {:ok, %{return: [^prefix]}} =
+                 Lisp.run(~S|(re-split #"," data/input)|, context: %{input: input})
+
+        assert {:ok, %{return: ^prefix}} =
+                 Lisp.run(~S|(replace data/input #"tail" "x")|, context: %{input: input})
+
+        assert {:ok, %{return: nil}} =
+                 Lisp.run(~S|(re-find #"tail" data/input)|, context: %{input: input})
+      end
+    end
+
+    test "Unicode classes agree between literals and dynamic patterns" do
+      assert {:ok, %{return: ["é", "é"]}} =
+               Lisp.run(~S|[(re-find #"\w" "é") (re-find (re-pattern "\\w") "é")]|)
+    end
+
+    test "split captures and replacement backreferences keep Erlang semantics" do
+      assert {:ok, %{return: ["a", ",", "", ",", "b", ",", ""]}} =
+               Lisp.run(~S|(re-split #"(,)" "a,,b,")|)
+
+      assert {:ok, %{return: "[12:12]"}} =
+               Lisp.run(~S|(replace "12" #"(\d+)" "[\\1:&]")|)
+
+      assert {:ok, %{return: "xaxbx"}} = Lisp.run(~S|(replace "ab" #"" "x")|)
+    end
+  end
+
   describe "re-split via interpreter" do
     test "splits by simple regex pattern" do
       source = ~S|(re-split (re-pattern ",") "a,b,c")|

@@ -288,11 +288,37 @@ that provider's actual JSON-object control: OpenAI-style `response_format`
 `json_object` on OpenRouter, OpenAI, Groq, Fireworks, xAI, Azure OpenAI, and
 Vertex OpenAI-compatible MaaS. Anthropic, Bedrock, Google AI Studio, Vertex
 Claude/Gemini, and Azure Claude have no such control and stay `unsupported` or
-`json_schema`. Direct `ollama:` and `openai-compat:` selectors are refused for
-both structured modes. `unsupported` refuses a request `schema` before dispatch.
+`json_schema`. Direct `ollama:` selectors refuse both structured modes.
+Direct `openai-compat:` selectors support `json_schema` and refuse `json_object`.
+For `openai-compat:`, the mode is your declaration that the server supports
+OpenAI-style `response_format` with `type: "json_schema"`, a `json_schema` name
+of `ptc_response`, and `strict: true`. The request schema is sent unchanged;
+server support for strict schemas varies, and the adapter cannot verify that
+an arbitrary server enforces it. Returned objects are checked by the
+`llm/request` request validator and, separately, by the chat decision backend.
+A server that ignores `response_format` fails only when its answer does not
+match the schema. Content must be exactly one JSON object: reasoning prefixes
+such as `<think>` are rejected, so configure your server to separate reasoning
+or disable thinking. Valid reported usage is retained for budget settlement
+even when the content is rejected or missing, including empty or malformed
+choices. Ordinary requests also reject missing or non-string text content;
+reported usage still settles their budget. To use Ollama schema output, select
+`openai-compat:http://localhost:11434/v1|<model>`.
+Configured credentials are sent as `Authorization: Bearer <credential>`.
+OpenAI-compatible base URLs must use HTTP or HTTPS and contain a host, with no
+userinfo, query, or fragment. Credentials require HTTPS except for `localhost`,
+IPv4 loopback addresses (`127.0.0.0/8`), and IPv6 loopback (`::1`). Keyless HTTP
+endpoints remain supported. Redirects are refused. Responses are limited to
+4 MiB while streaming; error bodies retain at most 4 KiB. Invalid successful
+responses return `invalid_result`.
+`unsupported` refuses a request `schema` before dispatch.
 Changing the mode requires a new `installation_revision`. A schema
 together with a non-empty `tools` list is invalid. Success is a
 `structured_output` object; encoded `content` is not duplicated.
+
+Direct routes retain their budget rules: an `openai-compat:` installation can
+serve a token budget with `usage_guarantees.tokens: true`, but cannot serve a
+cost budget. Direct routes refuse every `reservation_tariff` at prepare.
 
 ### Usage guarantees
 
@@ -609,3 +635,193 @@ does not expose endpoints, commands, paths, credentials, or OAuth authority.
   tools without putting transport authority in a manifest.
 - [Evaluating with replay](../guides/evaluating-with-replay.md) fixes model responses for
   deterministic comparisons.
+
+## Decision model installations
+
+`decision` installs a generic HTTP backend, a JSON-schema chat backend, or the **alpha** [OpenRouter Decisions backend](https://openrouter.ai/typesafe/jev-1.13). Its vendor-neutral capability
+is `decision-request`, exposed by the shipped `decision/request` prelude.
+Jev boolean answers contain measured probabilities; your workflow applies thresholds.
+An optional boolean `value` carries a discrete answer: `false` is an answer,
+while missing or null means absent. Providers never threshold probabilities
+to invent this field.
+Measured probabilities, distributions, and confidence may be null for a
+backend that cannot measure them. The result records the served model ID.
+Trace events and inspection model exchanges retain a valid response model ID
+as `served_model` even when answer admission or a reservation overrun rejects
+the call. The final result remains a permanent failure; rejected answers are
+not published as successful results, and configured aliases are not substituted
+for missing or invalid response identity.
+
+```json
+{
+  "credentials": {"decisions_key": {"env": "OPENROUTER_API_KEY"}},
+  "install": {
+    "decisions": {
+      "source": "decision",
+      "model": "typesafe/jev-1.13",
+      "credential": "decisions_key",
+      "routing": {"zdr": true, "data_collection": "deny", "allow_fallbacks": false},
+      "usage_guarantees": {"tokens": true, "cost_currency": "USD"},
+      "max_cost_per_call": {"currency": "USD", "amount": "0.01"},
+      "max_total_tokens_per_call": 8000,
+      "installation_revision": "decisions-v1"
+    }
+  }
+}
+```
+
+The closed installation requires `model`, a `credential` binding name,
+`usage_guarantees`, `installation_revision`, and both per-call bounds.
+Credentials are resolved from `credentials`; literal keys are refused.
+Optional `routing` accepts only boolean `zdr`, `data_collection` (`allow` or
+`deny`), and boolean `allow_fallbacks`, sent as the backend's `provider` field.
+Optional `reservation_tariff` identifies a host policy; it does not compute a
+reservation. `ceilings`, `data_class`, and `accepts_data` use the same fields
+as live LLM installations. Decision sources belong in the workflow.
+
+`max_cost_per_call` is a non-negative USD decimal string for every decision backend, including replay. `0.01` USD is recommended
+for this first backend. `max_total_tokens_per_call` is a positive integer;
+`8000` is recommended, and hosts sending large `state` inputs must raise it.
+When the corresponding ceiling is enabled, each call reserves exactly these
+bounds against `llm_cost_microusd` and `llm_total_tokens`, shared with chat
+calls. Validated reported cost and tokens settle after the response. An
+exceeded bound is still charged in full and fails permanently with
+`invalid_result`, without retry. Usage that reports no valid value, or lacks
+a valid value promised by `usage_guarantees`, fails permanently with
+`usage_unavailable`, without retry. The call charges the full reservation,
+marks the affected ledger incomplete, and retains neither answers nor
+`served_model`. Other invalid usage fails with `invalid_result` and settles
+the valid values. Decision
+calls also count against `max_active_provider_calls`.
+
+### HTTP backend
+
+Use `backend: "http"` to send measured decisions to a host-owned endpoint.
+This closed variant requires `source`, `backend`, `endpoint`, `model`,
+`usage_guarantees`, `installation_revision`, and both per-call bounds.
+Optional fields are `credential`, `allow_insecure_loopback`, `ceilings`,
+`data_class`, and `accepts_data`. Unknown fields are refused.
+
+```json
+{
+  "source": "decision",
+  "backend": "http",
+  "endpoint": "http://127.0.0.1:8321/decisions",
+  "allow_insecure_loopback": true,
+  "model": "anyjev/qwen3-8b@cal-2026-09",
+  "usage_guarantees": {"tokens": true, "cost_currency": null},
+  "max_cost_per_call": {"currency": "USD", "amount": "0"},
+  "max_total_tokens_per_call": 8000,
+  "ceilings": {"request_timeout_ms": 45000},
+  "installation_revision": "local-decisions-v1"
+}
+```
+
+HTTPS endpoints are allowed anywhere. Plain HTTP requires
+`allow_insecure_loopback: true` and a literal `127.0.0.1` or `::1` address;
+`localhost` is refused. HTTPS must omit the allowance or set it to false.
+Userinfo, fragments, whitespace and control characters are refused. Optional
+`credential` names a host credential binding and sends a Bearer header; it
+requires HTTPS. Workflow code cannot choose the endpoint.
+
+The server receives a JSON POST with `model`, `state`, and `questions`:
+
+```json
+{"model":"local-v1","state":{"number":2},"questions":{"positive":{"type":"boolean","instructions":"Is the number positive?"}}}
+```
+
+A small offline fixture server can answer that request with:
+
+```json
+{"model":"local-v1@cal-1","answers":{"positive":{"type":"boolean","probability":0.9,"confidence":0.8}},"usage":{"input_tokens":20,"output_tokens":10,"cost":0}}
+```
+
+Boolean wire types stay `boolean`. The response follows the public decision
+contract and can be saved as a `decision_replay` fixture response; request
+hashes use the same provider-neutral `state` and `questions`. The recording
+fixture in `test/support/decision_http_fixture.ex` demonstrates a minimal
+local server. Invalid answers fail permanently while valid usage and served
+model identity still settle. Served identifiers may differ from declared
+selectors; the mismatch is recorded without rejecting it. Acquisition identity
+contains the declared model and backend, excludes the endpoint, and changing
+the endpoint changes the installation configuration digest.
+
+Automatic HTTP retries and redirects are disabled for both HTTP and
+OpenRouter decisions. Any 3xx response is a non-retryable protocol failure;
+request state is never sent to a redirect target. The receive timeout is the
+minimum of `ceilings.request_timeout_ms`, `limits.llm_request_timeout_ms`, and
+the remaining run deadline. Calls occupy the shared provider admission slot.
+
+A zero cost bound is a host declaration. With the cost ledger enabled,
+`cost_currency: null` is refused at load; use `"USD"` and report cost. Reported
+`cost: 0` settles zero with complete accounting. A response without `cost`
+fails with `usage_unavailable`; it charges the zero reservation and marks the
+ledger incomplete, so the recorded amount may be below real spend. Positive reported cost under a zero bound is preserved
+and charged, and the call fails permanently with `invalid_result` without
+retry. With the cost ledger disabled, the cost bound is unused. Token bounds
+remain positive.
+
+The runtime constrains only the configured destination. A local server can
+forward data elsewhere; the runtime cannot establish the server's data-handling
+behavior. `doctor`, including `doctor --connect`, does not check connectivity
+for this backend. Data policy and workflow-only placement apply unchanged.
+
+### JSON-schema chat backend
+
+A `decision` installation with `backend: "chat"` names an existing `llm`
+installation through `llm`. Decode refuses missing aliases, other sources,
+and LLM modes other than `json_schema`.
+
+```json
+{
+  "source": "decision",
+  "backend": "chat",
+  "llm": "structured-chat",
+  "installation_revision": "chat-decisions-v1",
+  "max_cost_per_call": {"currency": "USD", "amount": "0.01"},
+  "max_total_tokens_per_call": 8000
+}
+```
+
+This closed variant requires the six fields above and accepts `ceilings`,
+`data_class`, and `accepts_data`. The linked LLM owns its model, credential,
+cache, parameters and usage guarantees; do not repeat those on the decision
+installation. Data classes must match, and the decision's accepted data must
+be a subset of the linked LLM's. Configuration identity includes the linked
+LLM declaration. Only the decision alias needs selection in the manifest.
+
+The bounded chat schema supports up to 128 named questions.
+One request sends state and all question instructions and criteria with an
+object schema: booleans, option-name enums, and integer score-level enums.
+Boolean `value`, choice `choice`, and score `score` carry the discrete answers.
+All probabilities, distributions and confidence are null. The answer model
+identifies the adapter-attested public chat selector (`private` when hidden);
+served-model identity for chat remains the LLM adapter's existing contract.
+Usage keeps reported tokens and optional USD cost (normalized fixed-point
+`{"currency":"USD","microunits":200}` is accepted as well as numeric cost).
+
+Each call reserves and settles the decision bounds, occupies one shared
+admission slot, and records one decision model exchange. The underlying chat
+callback does not create another capability call, reservation or exchange.
+
+Choose policy explicitly: use a measured probability when present and a
+supplied `value` otherwise, or require measurement and abstain/escalate when
+it is null. Test absence with `nil?` so `false` remains a real answer.
+Unavailable measurement is not low confidence. Backend interchangeability
+promises the contract, not identical answers or measurements; a workflow
+requiring probabilities must handle their absence.
+
+`decision_replay` uses the same JSON Lines fixture format and request hashing
+as `llm_replay`, with vendor-neutral decision responses. It requires `fixtures`,
+`installation_revision`, `max_cost_per_call`, and `max_total_tokens_per_call`;
+no credential or model selector is needed. Its optional `ceilings` are the
+replay ceilings. Reservations and settlement use the same shared ledgers as
+live decisions. Optional `usage_guarantees` uses the live installation's shape
+and defaults to tokens and USD cost required. Set it to the corresponding live
+guarantee when replaying responses without cost; an enabled cost ceiling still
+requires USD usage. Replay calls use the host's `llm_request_timeout_ms` bound,
+including through warm serving runtimes and shared provider admission.
+Warm decision replay retains the fixture acquisition while each run has an
+independent response cursor; repeated calls inside one run consume its sequence.
+See `examples/decision-refund-triage/ptc-project.json` for a
+complete offline project.

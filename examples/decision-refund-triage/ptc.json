@@ -1,0 +1,94 @@
+{
+  "$schema": "https://ptc-runner.dev/schemas/ptc-application-manifest.schema.json",
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "library": "decision"
+      },
+      {
+        "library": "cap"
+      },
+      {
+        "id": "example.decision",
+        "path": "workflow.clj",
+        "dependencies": [
+          "cap",
+          "decision"
+        ]
+      }
+    ],
+    "entry": "example.decision/run"
+  },
+  "input": {
+    "value": {
+      "state": {
+        "tickets": [
+          {
+            "id": "T-1001",
+            "subject": "Refund for duplicate charge",
+            "body": "Charged twice for the March invoice, please refund one."
+          },
+          {
+            "id": "T-1002",
+            "subject": "Dashboard is down",
+            "body": "Our whole team gets a 502 on the dashboard since this morning."
+          },
+          {
+            "id": "T-1003",
+            "subject": "How do I export CSV?",
+            "body": "Looking for the export button described in the docs."
+          },
+          {
+            "id": "T-1004",
+            "subject": "Refund policy question",
+            "body": "Considering a downgrade; does the refund cover unused months?"
+          },
+          {
+            "id": "T-1005",
+            "subject": "API returns 500 on upload",
+            "body": "Uploads over 10 MB fail with a 500 since yesterday."
+          },
+          {
+            "id": "T-1006",
+            "subject": "Password reset loop",
+            "body": "Reset email link keeps sending me back to the login page."
+          }
+        ]
+      },
+      "questions": {
+        "T_1001": {
+          "type": "boolean",
+          "instructions": "Does ticket T-1001 ask about a refund?"
+        },
+        "T_1002": {
+          "type": "boolean",
+          "instructions": "Does ticket T-1002 ask about a refund?"
+        },
+        "T_1003": {
+          "type": "boolean",
+          "instructions": "Does ticket T-1003 ask about a refund?"
+        },
+        "T_1004": {
+          "type": "boolean",
+          "instructions": "Does ticket T-1004 ask about a refund?"
+        },
+        "T_1005": {
+          "type": "boolean",
+          "instructions": "Does ticket T-1005 ask about a refund?"
+        },
+        "T_1006": {
+          "type": "boolean",
+          "instructions": "Does ticket T-1006 ask about a refund?"
+        }
+      }
+    }
+  },
+  "providers": {
+    "workflow": [
+      {
+        "name": "frozen-decisions"
+      }
+    ]
+  }
+}

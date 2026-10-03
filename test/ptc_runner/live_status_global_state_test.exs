@@ -19,6 +19,7 @@ defmodule PtcRunner.LiveStatusGlobalStateTest do
   alias PtcRunner.LiveStatus.Target
   alias PtcRunner.MixCommandAdapter
   alias PtcRunner.TestSupport.HTTPRequest
+  alias PtcRunner.TestSupport.MCPHTTPFixture
 
   @tag :tmp_dir
   test "an externally attached CLI run carries the manifest application identity", %{tmp_dir: dir} do
@@ -115,6 +116,37 @@ defmodule PtcRunner.LiveStatusGlobalStateTest do
 
     assert :ok = Reporter.stop(reporter)
     assert :ok = RunState.stop(run_state)
+  end
+
+  test "an empty Viewer environment label falls back to the run configuration" do
+    parent = self()
+
+    server =
+      MCPHTTPFixture.start(fn request ->
+        send(parent, {:live_label, request.body["label"]})
+        {200, [], ""}
+      end)
+
+    on_exit(server.close)
+
+    previous = Map.new(["PTC_VIEWER_URL", "PTC_VIEWER_LABEL"], &{&1, System.get_env(&1)})
+    System.put_env("PTC_VIEWER_URL", server.endpoint)
+    System.put_env("PTC_VIEWER_LABEL", "")
+
+    on_exit(fn ->
+      Enum.each(previous, fn
+        {key, nil} -> System.delete_env(key)
+        {key, value} -> System.put_env(key, value)
+      end)
+    end)
+
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "empty-viewer-label")
+    {:ok, config} = run_config(limits, sink, %{})
+    config = %{config | labels: %{"name" => "configured-label"}}
+
+    assert {:ok, %{value: 42}} = Kernel.run("(return 42)", config)
+    assert_receive {:live_label, "configured-label"}, 2_000
   end
 
   test "a run succeeds unchanged when the configured viewer is unreachable" do

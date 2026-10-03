@@ -138,7 +138,9 @@ tool name, start/end times, closed outcome and dispatch state, write uncertainty
 disconnect flag, and cleanup status.</p><h2 id="health">Health</h2><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Request</th><th style="text-align: left;">Response</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">GET /health/live</code></td><td style="text-align: left;">200 <code class="inline">{&quot;status&quot;:&quot;live&quot;}</code> while listener and gateway owner remain alive.</td></tr><tr><td style="text-align: left;"><code class="inline">GET /health/ready</code></td><td style="text-align: left;">200 <code class="inline">{&quot;status&quot;:&quot;ready&quot;}</code> when the warm domain is ready; otherwise 503 <code class="inline">{&quot;status&quot;:&quot;not_ready&quot;}</code>.</td></tr><tr><td style="text-align: left;">Other method on either health path</td><td style="text-align: left;">405. <code class="inline">OPTIONS</code> is unsupported.</td></tr><tr><td style="text-align: left;">Other path</td><td style="text-align: left;">404.</td></tr><tr><td style="text-align: left;">Invalid authority, on any path</td><td style="text-align: left;">400 before routing.</td></tr></tbody></table></div><p>Health needs no bearer and returns no CORS headers. Responses use
 <code class="inline">application/json</code> and <code class="inline">Cache-Control: no-store</code>. Readiness uses the warm
 runtime's bounded snapshot, including captured credentials, pinned providers,
-run admission and provider-call admission. Saturation stays ready; required
+run admission and provider-call admission. Request and run saturation stay
+ready, including when clients withhold bodies and occupy every in-flight slot. Readiness describes the ability to serve work
+as capacity frees; use the MCP refusal reason below to identify overload. Required
 runtime loss or fencing makes readiness permanently false while liveness
 continues. Invalid static startup configuration prevents listener binding.</p><h2 id="mcp-discovery-listing-and-calls">MCP discovery, listing, and calls</h2><p><code class="inline">POST /mcp</code> accepts only MCP revision <code class="inline">2026-07-28</code> methods
 <code class="inline">server/discover</code>, <code class="inline">tools/list</code>, and <code class="inline">tools/call</code>. It is stateless: <code class="inline">Mcp-Session-Id</code> and
@@ -166,8 +168,14 @@ fails immediately and the connection ends.</p><p>Every request has object <code 
 must match the body. <code class="inline">Mcp-Name</code> is forbidden for these methods. Responses are
 deterministic JSON, at most 4 MiB, and use <code class="inline">Cache-Control: no-store</code>.
 Missing or malformed required metadata returns HTTP 400 JSON-RPC <code class="inline">-32602</code>.
-Admission saturation returns HTTP 429 <code class="inline">-31999</code>; an unavailable or fenced
-runtime returns HTTP 503 <code class="inline">-31998</code>.</p><p>Discovery advertises the fixed revision and static tool capability. Listing
+Admission saturation returns HTTP 429 JSON-RPC <code class="inline">-31999</code> (<code class="inline">Server busy</code>).
+The optional JSON-RPC <code class="inline">error.data</code> object carries a stable <code class="inline">reason</code>:</p><ul><li><code class="inline">request_capacity_exhausted</code>: the in-flight request bound is full; the
+refusal occurs before body parsing and has no request ID.</li><li><code class="inline">run_capacity_exhausted</code>: execution capacity is full; the refusal preserves
+the validated call ID and occurs before committing the event stream. There
+is no waiting queue for execution capacity.</li></ul><p>You can attribute refusals using <code class="inline">error.data.reason</code> while
+readiness remains green. Neither reason guarantees a recovery time, and no
+<code class="inline">Retry-After</code> duration is supplied. Ordinary error envelopes are unchanged; an
+unavailable or fenced runtime returns HTTP 503 <code class="inline">-31998</code>.</p><p>Discovery advertises the fixed revision and static tool capability. Listing
 returns every configured tool in UTF-8 name-byte order with its configured
 name, title and description, exact normalized input/output schemas, and only
 the compiler-derived <code class="inline">annotations.readOnlyHint</code>. A cursor, unknown parameter,

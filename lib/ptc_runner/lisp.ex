@@ -49,8 +49,8 @@ defmodule PtcRunner.Lisp do
     SymbolCounter
   }
 
-  alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.Program
+  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Effects
   alias PtcRunner.Lisp.Eval.Helpers
@@ -1625,6 +1625,10 @@ defmodule PtcRunner.Lisp do
 
   defp error_details({:arity_error, details}) when is_map(details), do: details
 
+  defp error_details({:type_error, _message, {:safe_diagnostic, diagnostic}})
+       when is_map(diagnostic),
+       do: %{safe_diagnostic: diagnostic}
+
   defp error_details({:invalid_tool_args, _message, {:safe_diagnostic, diagnostic}})
        when is_map(diagnostic),
        do: %{safe_diagnostic: diagnostic}
@@ -1678,7 +1682,7 @@ defmodule PtcRunner.Lisp do
   defp error_details(_reason), do: %{}
 
   defp retain_parallel_failure_metadata(metadata) do
-    LLMReplayDiagnostic.retain_parallel_failure_metadata(metadata)
+    SafeMetadata.retain_failure_metadata(metadata)
   end
 
   @doc """

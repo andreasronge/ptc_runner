@@ -162,6 +162,14 @@ defmodule PtcRunner.Kernel.Capability do
   defp valid_validator(nil), do: :ok
   defp valid_validator(validate) when is_function(validate, 1), do: :ok
   defp valid_validator(_validate), do: {:error, :invalid_capability}
+
+  defp valid_llm_reservation(
+         %{source: source, total_tokens: tokens, cost_microusd: cost} = reservation
+       )
+       when source in ["decision", "decision_replay"] and map_size(reservation) == 7 and
+              is_integer(tokens) and tokens > 0 and is_integer(cost) and cost >= 0,
+       do: :ok
+
   defp valid_llm_reservation(nil), do: :ok
 
   defp valid_llm_reservation(%{source: "llm_replay"} = reservation)
@@ -218,11 +226,9 @@ defmodule PtcRunner.Kernel.Capability do
   end
 
   defp callable_children_by_type({:ok, "object", _nullable?}, schema) do
-    schema
-    |> Map.get("properties", %{})
-    |> Enum.all?(fn {name, child} ->
+    Enum.all?(Map.get(schema, "properties", %{}), fn {name, child} ->
       KeyNormalizer.normalize_key(name) == name and callable_input_schema?(child)
-    end)
+    end) and callable_input_schema?(Map.get(schema, "additionalProperties"))
   end
 
   defp callable_children_by_type({:ok, "array", _nullable?}, %{"items" => items}),

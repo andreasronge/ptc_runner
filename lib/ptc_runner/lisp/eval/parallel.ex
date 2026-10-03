@@ -8,7 +8,6 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
   deadlines, cancellation, and monitor cleanup belong to `ParallelRunner`.
   """
 
-  alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Lisp.ChildResult
   alias PtcRunner.Lisp.Eval.Abort
@@ -325,14 +324,7 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
          %Abort{outcome: {:control, :fail, value, _context}},
          _stacktrace
        ),
-       do:
-         {:worker_control, :fail,
-          value
-          |> SafeMetadata.failure_taxonomy()
-          |> Map.merge(SafeMetadata.llm_provider_failure(value))
-          |> Map.merge(SafeMetadata.named_quota_refusal_fields(value))
-          |> Map.merge(SafeMetadata.budget_refusal_fields(value))
-          |> Map.merge(LLMReplayDiagnostic.failure_metadata(value))}
+       do: {:worker_control, :fail, SafeMetadata.failure_metadata(value)}
 
   defp captured_failure(
          :error,

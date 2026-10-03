@@ -30,6 +30,8 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
     :mcp,
     :llm,
     :llm_replay,
+    :decision,
+    :decision_replay,
     :ptc_trace_snapshot,
     :ptc_private_trace_snapshot,
     :ptc_inspection_snapshot,
@@ -70,6 +72,8 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
           :mcp
           | :llm
           | :llm_replay
+          | :decision
+          | :decision_replay
           | :ptc_trace_snapshot
           | :ptc_private_trace_snapshot
           | :ptc_inspection_snapshot
@@ -352,6 +356,12 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
       descriptor.destinations in [[:mission], [:workflow, :mission]] and
         not descriptor.workflow_llm? and
         descriptor.connectivity_mode == :acquisition
+
+  defp shipped_consistent?(%{source: source} = descriptor)
+       when source in [:decision, :decision_replay],
+       do:
+         descriptor.destinations == [:workflow] and not descriptor.workflow_llm? and
+           descriptor.authorization_mode == :none and descriptor.connectivity_mode == :none
 
   defp shipped_consistent?(%{source: :llm} = descriptor),
     do:

@@ -18,6 +18,30 @@
       ],
       "type": "type_i"
     },
+    "18a24104a62bd8d265e9579977f61c5d0ea73601693d413d33e62ec09f16de46": {
+      "describe": "type_ii mass=30 lib/ptc_runner/kernel/event_sink.ex:332 <-> lib/ptc_runner/kernel/inspection_sink.ex:276 <-> lib/ptc_runner/kernel/trace_snapshot.ex:412",
+      "files": [
+        "lib/ptc_runner/kernel/event_sink.ex",
+        "lib/ptc_runner/kernel/inspection_sink.ex",
+        "lib/ptc_runner/kernel/trace_snapshot.ex"
+      ],
+      "mass": 30,
+      "occurrences": [
+        {
+          "file": "lib/ptc_runner/kernel/event_sink.ex",
+          "snippet": "07bdb1b79bf800619dd82ab13374e30653f1d6e9045d0093e896e099bfaaeaa0"
+        },
+        {
+          "file": "lib/ptc_runner/kernel/inspection_sink.ex",
+          "snippet": "07bdb1b79bf800619dd82ab13374e30653f1d6e9045d0093e896e099bfaaeaa0"
+        },
+        {
+          "file": "lib/ptc_runner/kernel/trace_snapshot.ex",
+          "snippet": "aff115b509261167cd97fac402ee14b9c0096f7f287d00b28152e16229b1396a"
+        }
+      ],
+      "type": "type_ii"
+    },
     "22056ec49615795b1324c4437d32391888ecc86567ef20660bb47ec6460df34c": {
       "describe": "type_ii mass=36 lib/ptc_runner/lisp/java/surface/validator.ex:1999 <-> lib/ptc_runner/lisp/java/surface/validator.ex:365",
       "files": [
@@ -37,7 +61,7 @@
       "type": "type_ii"
     },
     "35a4de507f3c29f4e654f1f399c7b6eda77058d6a3f723ce2d5e53859f60e3b4": {
-      "describe": "type_i mass=81 test/ptc_runner/lisp/runtime/collection_ops_test.exs:9 <-> test/ptc_runner/lisp/runtime/map_ops_test.exs:20 <-> test/ptc_runner/lisp/runtime/predicates_test.exs:28",
+      "describe": "type_i mass=81 test/ptc_runner/lisp/runtime/collection_ops_test.exs:9 <-> test/ptc_runner/lisp/runtime/map_ops_test.exs:20 <-> test/ptc_runner/lisp/runtime/predicates_test.exs:23",
       "files": [
         "test/ptc_runner/lisp/runtime/collection_ops_test.exs",
         "test/ptc_runner/lisp/runtime/map_ops_test.exs",
@@ -79,43 +103,6 @@
       ],
       "type": "type_ii"
     },
-    "4867a1875b611e451b6ac2b0d81824c975062e0902ccea3d5c1a793c0516e38e": {
-      "describe": "type_i mass=41 test/ptc_runner/lisp/signature/coercion_test.exs:175 <-> test/ptc_runner/lisp/signature/coercion_test.exs:269",
-      "files": [
-        "test/ptc_runner/lisp/signature/coercion_test.exs"
-      ],
-      "mass": 41,
-      "occurrences": [
-        {
-          "file": "test/ptc_runner/lisp/signature/coercion_test.exs",
-          "snippet": "4906b7065e5e66f70810ccae09b360ce2697ce370ba620fc5f5d8d479548e0dd"
-        },
-        {
-          "file": "test/ptc_runner/lisp/signature/coercion_test.exs",
-          "snippet": "4906b7065e5e66f70810ccae09b360ce2697ce370ba620fc5f5d8d479548e0dd"
-        }
-      ],
-      "type": "type_i"
-    },
-    "5ef621c02ed0857b4ef273d1e724ca264db4525e6d0c07e8f9558bf4c0a7e377": {
-      "describe": "type_i mass=30 lib/ptc_runner/kernel/llm_replay_owner.ex:65 <-> lib/ptc_runner/kernel/trace_snapshot.ex:412",
-      "files": [
-        "lib/ptc_runner/kernel/llm_replay_owner.ex",
-        "lib/ptc_runner/kernel/trace_snapshot.ex"
-      ],
-      "mass": 30,
-      "occurrences": [
-        {
-          "file": "lib/ptc_runner/kernel/llm_replay_owner.ex",
-          "snippet": "aff115b509261167cd97fac402ee14b9c0096f7f287d00b28152e16229b1396a"
-        },
-        {
-          "file": "lib/ptc_runner/kernel/trace_snapshot.ex",
-          "snippet": "aff115b509261167cd97fac402ee14b9c0096f7f287d00b28152e16229b1396a"
-        }
-      ],
-      "type": "type_i"
-    },
     "621a8fcdaa04246456265b2ed4cf9c7c8510c612d22b6e291352611505c044ed": {
       "describe": "type_i mass=32 lib/ptc_runner/kernel/session_trace.ex:394 <-> lib/ptc_runner/kernel/session_trace.ex:44",
       "files": [
@@ -133,35 +120,6 @@
         }
       ],
       "type": "type_i"
-    },
-    "676ecb4412a54eef2f319df5d6c64399e2b5faf84ad2ef979bf9c871fb5f32fd": {
-      "describe": "type_ii mass=30 lib/ptc_runner/kernel/event_sink.ex:332 <-> lib/ptc_runner/kernel/inspection_sink.ex:269 <-> lib/ptc_runner/kernel/llm_replay_owner.ex:65 <-> lib/ptc_runner/kernel/trace_snapshot.ex:412",
-      "files": [
-        "lib/ptc_runner/kernel/event_sink.ex",
-        "lib/ptc_runner/kernel/inspection_sink.ex",
-        "lib/ptc_runner/kernel/llm_replay_owner.ex",
-        "lib/ptc_runner/kernel/trace_snapshot.ex"
-      ],
-      "mass": 30,
-      "occurrences": [
-        {
-          "file": "lib/ptc_runner/kernel/event_sink.ex",
-          "snippet": "07bdb1b79bf800619dd82ab13374e30653f1d6e9045d0093e896e099bfaaeaa0"
-        },
-        {
-          "file": "lib/ptc_runner/kernel/inspection_sink.ex",
-          "snippet": "07bdb1b79bf800619dd82ab13374e30653f1d6e9045d0093e896e099bfaaeaa0"
-        },
-        {
-          "file": "lib/ptc_runner/kernel/llm_replay_owner.ex",
-          "snippet": "aff115b509261167cd97fac402ee14b9c0096f7f287d00b28152e16229b1396a"
-        },
-        {
-          "file": "lib/ptc_runner/kernel/trace_snapshot.ex",
-          "snippet": "aff115b509261167cd97fac402ee14b9c0096f7f287d00b28152e16229b1396a"
-        }
-      ],
-      "type": "type_ii"
     },
     "6c3c89e27c7d900e2400f115903056cba7de745b560d2c098344751f4368ec13": {
       "describe": "type_i mass=31 lib/ptc_runner/kernel/mcp_oauth/bearer_challenge.ex:233 <-> lib/ptc_runner/kernel/mcp_oauth/discovery.ex:467 <-> lib/ptc_runner/kernel/mcp_oauth/loopback_listener.ex:310 <-> lib/ptc_runner/kernel/mcp_oauth/token_response.ex:158",
@@ -295,7 +253,7 @@
       "type": "type_i"
     },
     "9a5745cb297a916c230134aaad7350eec097cc0dff4429002490c01db7a8b665": {
-      "describe": "type_ii mass=39 lib/ptc_runner/kernel/trace_log.ex:1976 <-> lib/ptc_runner/kernel/trace_log.ex:2810",
+      "describe": "type_ii mass=39 lib/ptc_runner/kernel/trace_log.ex:1977 <-> lib/ptc_runner/kernel/trace_log.ex:2811",
       "files": [
         "lib/ptc_runner/kernel/trace_log.ex"
       ],
@@ -390,7 +348,7 @@
       "type": "type_i"
     },
     "da241194085c15f4be57bc5d899f9ed222f81e69ad6570a67ae780247351e332": {
-      "describe": "type_i mass=43 lib/ptc_runner/kernel/host_config.ex:2114 <-> lib/ptc_runner/kernel/manifest.ex:1586",
+      "describe": "type_i mass=43 lib/ptc_runner/kernel/host_config.ex:2282 <-> lib/ptc_runner/kernel/manifest.ex:1586",
       "files": [
         "lib/ptc_runner/kernel/host_config.ex",
         "lib/ptc_runner/kernel/manifest.ex"
@@ -445,24 +403,6 @@
       ],
       "type": "type_i"
     },
-    "e88d700823005b5a71c4c23f0d9d9bedf77b737a29b641e125a377ed04edad99": {
-      "describe": "type_i mass=32 lib/ptc_runner/lisp/core_to_source.ex:1323 <-> lib/ptc_runner/lisp/core_to_source.ex:1340",
-      "files": [
-        "lib/ptc_runner/lisp/core_to_source.ex"
-      ],
-      "mass": 32,
-      "occurrences": [
-        {
-          "file": "lib/ptc_runner/lisp/core_to_source.ex",
-          "snippet": "e44079925ac21107643241dec859490e7fb3bd44c06e7059d2d9c3fc2dabaaf7"
-        },
-        {
-          "file": "lib/ptc_runner/lisp/core_to_source.ex",
-          "snippet": "e44079925ac21107643241dec859490e7fb3bd44c06e7059d2d9c3fc2dabaaf7"
-        }
-      ],
-      "type": "type_i"
-    },
     "ee759005e72ef863d7844779dc4a667b279c1d3f64dac872d2f277554e4b7036": {
       "describe": "type_i mass=37 lib/ptc_runner/kernel/inspection_snapshot.ex:193 <-> lib/ptc_runner/kernel/trace_snapshot.ex:282",
       "files": [
@@ -501,7 +441,7 @@
       "type": "type_i"
     },
     "f21b6685d49332e97a96c524b85b146c7fcc8029edbed58879c5aeb7ea626691": {
-      "describe": "type_i mass=41 test/ptc_runner/lisp/runtime/collection_ops_test.exs:16 <-> test/ptc_runner/lisp/runtime/json_test.exs:16 <-> test/ptc_runner/lisp/runtime/map_ops_test.exs:28 <-> test/ptc_runner/lisp/runtime/predicates_test.exs:36",
+      "describe": "type_i mass=41 test/ptc_runner/lisp/runtime/collection_ops_test.exs:16 <-> test/ptc_runner/lisp/runtime/json_test.exs:16 <-> test/ptc_runner/lisp/runtime/map_ops_test.exs:28 <-> test/ptc_runner/lisp/runtime/predicates_test.exs:31",
       "files": [
         "test/ptc_runner/lisp/runtime/collection_ops_test.exs",
         "test/ptc_runner/lisp/runtime/json_test.exs",
@@ -548,7 +488,7 @@
       "type": "type_i"
     },
     "fccf3d34ad4059288f46e6bd8af17812026e2f87b4791a87c608c50b8bee732d": {
-      "describe": "type_i mass=30 lib/ptc_runner/kernel/event_sink.ex:332 <-> lib/ptc_runner/kernel/inspection_sink.ex:269",
+      "describe": "type_i mass=30 lib/ptc_runner/kernel/event_sink.ex:332 <-> lib/ptc_runner/kernel/inspection_sink.ex:276",
       "files": [
         "lib/ptc_runner/kernel/event_sink.ex",
         "lib/ptc_runner/kernel/inspection_sink.ex"

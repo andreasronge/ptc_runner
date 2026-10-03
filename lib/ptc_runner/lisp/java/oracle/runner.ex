@@ -10,6 +10,7 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
 
   import Bitwise
 
+  alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Lisp.ClojureValidator
   alias PtcRunner.Lisp.Java.Oracle.ClojureRuntime
   alias PtcRunner.Lisp.Java.Oracle.Config
@@ -643,21 +644,16 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
     create_temporary_directory(@temporary_directory_attempts)
   end
 
-  defp create_temporary_directory(0) do
-    raise File.Error,
-      reason: :eexist,
-      action: "create exclusive Java oracle temporary directory",
-      path: System.tmp_dir!()
-  end
+  defp create_temporary_directory(attempts) do
+    case PrivateDirectory.create_temp("ptc_java_oracle_", attempts) do
+      {:ok, directory} ->
+        directory
 
-  defp create_temporary_directory(attempts_left) do
-    suffix = 16 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
-    dir = Path.join(System.tmp_dir!(), "ptc_java_oracle_#{suffix}")
-
-    case File.mkdir(dir) do
-      :ok -> dir
-      {:error, :eexist} -> create_temporary_directory(attempts_left - 1)
-      {:error, reason} -> raise File.Error, reason: reason, action: "create directory", path: dir
+      {:error, reason} ->
+        raise File.Error,
+          reason: reason,
+          action: "create private temporary directory",
+          path: System.tmp_dir!()
     end
   end
 

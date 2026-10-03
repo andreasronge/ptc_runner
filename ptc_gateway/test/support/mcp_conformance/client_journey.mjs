@@ -37,6 +37,18 @@ async function callWhenAdmitted(invoke) {
   throw lastError;
 }
 
+// A refusal sent with a non-2xx status reaches the SDK as an HTTP error whose
+// JSON-RPC body is only in `data.text`.
+function isRunCapacityRefusal(error) {
+  let rpcError = error;
+  if (typeof error?.data?.text === "string") {
+    try {
+      rpcError = JSON.parse(error.data.text)?.error ?? error;
+    } catch {}
+  }
+  return rpcError?.code === -31999 && rpcError?.data?.reason === "run_capacity_exhausted";
+}
+
 try {
   await client.connect(transport);
   const discover = client.getDiscoverResult();
@@ -81,7 +93,7 @@ try {
         overloaded = result.isError === true;
       } catch (error) {
         overloadDetail = String(error);
-        overloaded = error?.code === -31999 || String(error).includes("Server busy");
+        overloaded = isRunCapacityRefusal(error);
       }
       if (!overloaded) throw new Error(`admission was released while disconnected-call cleanup was held: ${JSON.stringify(overloadDetail)}`);
       await writeFile(cleanupReleasePath, "release\n");

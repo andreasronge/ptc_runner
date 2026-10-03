@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.ModelOutputDiagnostic do
   @moduledoc false
 
+  alias PtcRunner.Kernel.DiagnosticPattern
   alias PtcRunner.LLM.OutputLimit
 
   @binding_lists (for mask <- 1..63 do
@@ -13,6 +14,12 @@ defmodule PtcRunner.Kernel.ModelOutputDiagnostic do
   @generic "model output was truncated before producing a usable agent action"
   @token_value_pattern "(?:[1-9][0-9]{0,5}|1000000)"
 
+  @heading_template [
+    {:literal, @prefix},
+    {:slot, :alias, :text, "[a-z][a-z0-9._-]{0,127}"},
+    {:literal, @middle}
+  ]
+
   @spec message(map()) :: {:ok, binary()} | :error
   def message(%{
         limit: :max_tokens,
@@ -24,10 +31,7 @@ defmodule PtcRunner.Kernel.ModelOutputDiagnostic do
            OutputLimit.normalize(%{name: :max_tokens, value: value, bindings: bindings}),
          true <- OutputLimit.valid_alias?(alias_name) do
       {:ok,
-       @prefix <>
-         alias_name <>
-         @middle <>
-         limit_phrase(limit.bindings, limit.value) <> ". " <> remedy(limit.bindings)}
+       DiagnosticPattern.render(template(limit.bindings), %{alias: alias_name, value: limit.value})}
     else
       _invalid -> :error
     end
@@ -66,12 +70,11 @@ defmodule PtcRunner.Kernel.ModelOutputDiagnostic do
 
   defp message_regex(bindings), do: Regex.compile!("\\A" <> pattern_body(bindings) <> "\\z")
 
-  defp pattern_body(bindings) do
-    escape_pattern(@prefix) <>
-      "[a-z][a-z0-9._-]{0,127}" <>
-      escape_pattern(@middle) <>
-      limit_pattern(bindings) <>
-      escape_pattern(". " <> remedy(bindings))
+  defp pattern_body(bindings), do: DiagnosticPattern.body(template(bindings))
+
+  defp template(bindings) do
+    @heading_template ++
+      limit_template(bindings) ++ [{:literal, ". " <> remedy(bindings)}]
   end
 
   defp combined_schema_pattern do
@@ -80,11 +83,7 @@ defmodule PtcRunner.Kernel.ModelOutputDiagnostic do
         limit_pattern(bindings) <> escape_pattern(". " <> remedy(bindings))
       end)
 
-    "^" <>
-      escape_pattern(@prefix) <>
-      "[a-z][a-z0-9._-]{0,127}" <>
-      escape_pattern(@middle) <>
-      "(?:" <> alternatives <> ")$"
+    "^" <> DiagnosticPattern.body(@heading_template) <> "(?:" <> alternatives <> ")$"
   end
 
   defp escape_pattern(value) do
@@ -97,31 +96,35 @@ defmodule PtcRunner.Kernel.ModelOutputDiagnostic do
 
   defp binding_phrase(bindings), do: Enum.map_join(bindings, " and ", &Atom.to_string/1)
 
-  defp limit_phrase([:application_limit], value),
-    do: "max_tokens #{value} from the application limit llm_request_output_tokens"
+  defp limit_pattern(bindings), do: DiagnosticPattern.body(limit_template(bindings))
 
-  defp limit_phrase([:installation_param], value),
-    do: "max_tokens #{value} from the installation params.max_tokens"
+  defp limit_template([:application_limit]),
+    do: [
+      {:literal, "max_tokens "},
+      {:slot, :value, :integer, @token_value_pattern},
+      {:literal, " from the application limit llm_request_output_tokens"}
+    ]
 
-  defp limit_phrase([:application_limit, :installation_param], value),
-    do:
-      "max_tokens #{value} from the application limit llm_request_output_tokens and installation params.max_tokens"
+  defp limit_template([:installation_param]),
+    do: [
+      {:literal, "max_tokens "},
+      {:slot, :value, :integer, @token_value_pattern},
+      {:literal, " from the installation params.max_tokens"}
+    ]
 
-  defp limit_phrase(bindings, value),
-    do: binding_phrase(bindings) <> " max_tokens " <> Integer.to_string(value)
+  defp limit_template([:application_limit, :installation_param]),
+    do: [
+      {:literal, "max_tokens "},
+      {:slot, :value, :integer, @token_value_pattern},
+      {:literal,
+       " from the application limit llm_request_output_tokens and installation params.max_tokens"}
+    ]
 
-  defp limit_pattern([:application_limit]),
-    do: "max_tokens #{@token_value_pattern} from the application limit llm_request_output_tokens"
-
-  defp limit_pattern([:installation_param]),
-    do: "max_tokens #{@token_value_pattern} from the installation params\\.max_tokens"
-
-  defp limit_pattern([:application_limit, :installation_param]),
-    do:
-      "max_tokens #{@token_value_pattern} from the application limit llm_request_output_tokens and installation params\\.max_tokens"
-
-  defp limit_pattern(bindings),
-    do: escape_pattern(binding_phrase(bindings) <> " max_tokens ") <> @token_value_pattern
+  defp limit_template(bindings),
+    do: [
+      {:literal, binding_phrase(bindings) <> " max_tokens "},
+      {:slot, :value, :integer, @token_value_pattern}
+    ]
 
   defp remedy(bindings) do
     actions = Enum.map(bindings, &remedy_action/1)

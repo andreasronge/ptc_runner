@@ -19,6 +19,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.BundleCompiler
   alias PtcRunner.Kernel.CommandApplicationDiagnostic
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandFailureCause
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.CompileDiagnostic
@@ -126,19 +127,22 @@ defmodule PtcRunner.Kernel.RunCoordinator do
            end) do
       {:ok, prepared}
     else
-      false -> {:error, diagnostic(:internal, :internal_error)}
+      false -> {:error, prepare_failure(:invalid_run_request)}
       {:error, :private_result_unservable} = error -> error
       {:error, %CommandDiagnostic{} = diagnostic} -> {:error, diagnostic}
-      {:error, _reason} -> {:error, diagnostic(:internal, :internal_error)}
+      {:error, reason} -> {:error, prepare_failure(reason)}
     end
   rescue
-    _exception -> {:error, diagnostic(:internal, :internal_error)}
+    _exception -> {:error, prepare_failure(:unexpected_exception)}
   catch
-    _kind, _reason -> {:error, diagnostic(:internal, :internal_error)}
+    _kind, _reason -> {:error, prepare_failure(:unexpected_exception)}
   end
 
   def prepare(_request, _registry),
-    do: {:error, diagnostic(:internal, :internal_error)}
+    do: {:error, prepare_failure(:invalid_run_request)}
+
+  defp prepare_failure(reason),
+    do: diagnostic(:internal, :internal_error, cause: CommandFailureCause.from_reason(reason))
 
   defp serving_policy(%ServingRequest{}, derived)
        when derived.effective_data_class == :private_inspection or

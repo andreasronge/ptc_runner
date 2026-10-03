@@ -41,7 +41,9 @@ another service and reports the conflict. It runs in the foreground until
 The Viewer never searches for `.env`. Environment-backed credentials come from
 the inherited environment, the project's `host.env_file`, or the exact file
 passed with `--env-file FILE`; that option overrides `host.env_file` for work
-launched from the Live tab. Host-configured file and literal credential
+launched from the Live tab. Each launch reads its own file snapshot and restores
+the declared variables on exit. The foreground Viewer command keeps the file
+path for launches and does not load it while serving. Host-configured file and literal credential
 bindings remain available.
 
 The Viewer ships in the standalone release and container image. It is not part
@@ -54,13 +56,23 @@ The [project reference](project-files.md#viewer) documents the `viewer` block.
 
 The Viewer binds to `127.0.0.1` by default. `--listen 0.0.0.0` is the only
 alternative; it accepts connections through every network interface and prints
-a warning. Set a fresh `PTC_VIEWER_TOKEN` of at least 32 bytes before allowing
+a warning. Every route, including static assets and Live ingestion, requires
+an HTTP authority of `localhost`, `127.0.0.1`, or `[::1]` with the actual
+listener port. Other hosts and ports receive `403 forbidden_request`, even
+with a valid Live token. Port forwards must preserve the listener port.
+Browser mutations require an HTTP Origin matching that same authority. Set a fresh `PTC_VIEWER_TOKEN` of at least 32 bytes before allowing
 any non-loopback peer; for example, generate one with `openssl rand -hex 32`.
 
 For a browser arriving through a non-loopback peer, keep the page authority at
 `localhost`, `127.0.0.1`, or `::1` through a port forward, then open the Viewer
 once with `?live_token=THE_TOKEN` to bootstrap Live access. The page removes
-that query parameter after use. The token protects Live ingestion and controls;
+that query parameter after use. Query tokens are accepted only for the entry
+page and live event stream: the native EventSource client still needs URL
+authentication because it cannot set an Authorization header. Other Live
+requests use Bearer headers, and query tokens never authorize mutations.
+The initial URL and stream URL can expose the token in browser history or
+request logs; keep those private and rotate the token after exposure.
+The token protects Live ingestion and controls;
 it never authenticates the Runs trace browser, so exposing the Viewer can
 disclose trace and private inspection data.
 
@@ -70,7 +82,11 @@ For container binding and host-port rules, see
 ## Reporting a run
 
 Set `PTC_VIEWER_URL` for `ptc run` to report progress to the Live tab. When the
-Viewer requires a token, set the same `PTC_VIEWER_TOKEN` for the run. Reporting
+Viewer requires a token, set the same `PTC_VIEWER_TOKEN` for the run. A token
+is sent only over HTTPS or HTTP to `localhost`, IPv4 loopback (`127.0.0.0/8`),
+or IPv6 loopback (`::1`). URLs must have a host and no userinfo, query, or
+fragment. Redirects are refused. Invalid or insecure targets fail delivery.
+Reporting
 is best-effort and never changes the run result. It sends the exact manifest
 label, or the manifest filename when no label exists, and workflow entry to the
 Viewer for display; trace metadata keeps its fingerprinted label.

@@ -208,6 +208,30 @@ defmodule PtcRunner.Kernel.ConfinedFileTest do
       assert Path.basename(resolved) == "manifest.json"
     end
 
+    test "resolves a parent segment after following a directory symlink", %{root: root} do
+      File.mkdir_p!(Path.join(root, "nested/deep"))
+      File.write!(Path.join(root, "nested/manifest.json"), "trusted")
+      File.ln_s!(Path.join(root, "nested/deep"), Path.join(root, "alias"))
+      path = Path.join([root, "alias", "..", "manifest.json"])
+
+      assert {:ok, resolved} = ConfinedFile.resolve_absolute(path)
+      assert resolved == Path.join(root, "nested/manifest.json")
+    end
+
+    test "preserves parent segments within a symlink target", %{root: root} do
+      File.mkdir_p!(Path.join(root, "other/deep"))
+      File.write!(Path.join(root, "other/manifest.json"), "trusted")
+      File.ln_s!(Path.join(root, "other/deep"), Path.join(root, "parent"))
+      File.ln_s!("parent/../manifest.json", Path.join(root, "alias.json"))
+
+      assert {:ok, resolved} = ConfinedFile.resolve_absolute(Path.join(root, "alias.json"))
+      assert resolved == Path.join(root, "other/manifest.json")
+    end
+
+    test "rejects a relative path" do
+      assert {:error, :invalid_path} = ConfinedFile.resolve_absolute("relative.json")
+    end
+
     test "reports a missing path", %{root: root} do
       assert {:error, :not_found} = ConfinedFile.resolve_absolute(Path.join(root, "absent"))
     end

@@ -126,6 +126,7 @@ defmodule PtcRunner.ReplFrontend do
   alias PtcRunner.Kernel.InspectOnlyRepl
   alias PtcRunner.Kernel.ManifestRepl
   alias PtcRunner.Kernel.ModelContractDiagnostic
+  alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.ProjectContext
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.ReplSession
@@ -697,33 +698,11 @@ defmodule PtcRunner.ReplFrontend do
     _exception -> {:error, :cli, "--session-trace-dir must be an existing normal directory"}
   end
 
-  defp create_temporary_trace_directory(0),
-    do: {:error, :setup, "could not create a private session trace directory"}
-
   defp create_temporary_trace_directory(attempts) do
-    base = System.tmp_dir!() |> Path.expand()
-    name = "ptc-repl-" <> Base.encode16(:crypto.strong_rand_bytes(12), case: :lower)
-    directory = Path.join(base, name)
-
-    case File.mkdir(directory) do
-      :ok ->
-        case File.chmod(directory, 0o700) do
-          :ok ->
-            {:ok, directory, true}
-
-          {:error, _reason} ->
-            _ = File.rmdir(directory)
-            {:error, :setup, "could not secure the session trace directory"}
-        end
-
-      {:error, :eexist} ->
-        create_temporary_trace_directory(attempts - 1)
-
-      {:error, _reason} ->
-        {:error, :setup, "could not create a private session trace directory"}
+    case PrivateDirectory.create_temp("ptc-repl-", attempts) do
+      {:ok, directory} -> {:ok, directory, true}
+      {:error, _reason} -> {:error, :setup, "could not create a private session trace directory"}
     end
-  rescue
-    _exception -> {:error, :setup, "could not create a private session trace directory"}
   end
 
   defp separate_directories(resources, output_directory, temporary?, result_handle, result_role) do
@@ -1601,6 +1580,9 @@ defmodule PtcRunner.ReplFrontend do
 
   defp manifest_repl_error(:environment_file_too_large),
     do: "the named environment file exceeds the 1 MB limit"
+
+  defp manifest_repl_error(:environment_file_invalid),
+    do: "the named environment file contains an invalid assignment"
 
   defp manifest_repl_error(:environment_file_invalid_utf8),
     do: "the named environment file is not valid UTF-8"

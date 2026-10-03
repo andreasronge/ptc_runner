@@ -49,7 +49,6 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.RuntimeTools
-  alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.ValueContractClassification
   alias PtcRunner.Lisp.TrustedError
@@ -57,6 +56,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.TestSupport.MCPHTTPFixture
   alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
+  alias PtcRunner.TestSupport.TraceQuery
 
   @zero_entropy <<0::128>>
 
@@ -2068,7 +2068,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert_schema_valid(outcome.envelope)
 
     assert [trace_path] = Path.wildcard(Path.join(trace_dir, "*.jsonl"))
-    assert {:ok, trace} = TraceLog.new(source: {:file, trace_path})
+    assert {:ok, trace} = TraceQuery.new(source: {:file, trace_path})
 
     assert {:ok,
             %{
@@ -2077,7 +2077,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
               "terminal_limit_value" => 1,
               "truncated" => true
             }} =
-             TraceLog.query(trace, :get_run, %{"run_id" => outcome.envelope["run_ref"]})
+             TraceQuery.query(trace, :get_run, %{"run_id" => outcome.envelope["run_ref"]})
 
     assert terminal_reason in ["timeout", "compile_timeout"]
 
@@ -2536,17 +2536,18 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     end
   end
 
-  test "an embedding host's own setup failure stays undifferentiated" do
+  test "an embedding host's own setup failure retains only a closed cause" do
     # Only the dotenv attachment knows the operator named a file. A caller
     # supplying its own callback must not have an arbitrary failure relabelled
     # as a bad --env-file.
     assert {:ok, runtime} =
              CommandRuntime.new(environment_setup: fn -> {:error, :environment_file_invalid} end)
 
-    assert CommandRuntime.setup_environment(runtime) == {:error, :environment_setup_failed}
+    assert {:error, %CommandDiagnostic{code: :internal_error, cause: :unexpected_exception}} =
+             CommandRuntime.setup_environment(runtime)
 
     assert CommandRuntime.setup_environment_diagnostic(runtime) ==
-             {:error, :environment_setup_failed}
+             CommandRuntime.setup_environment(runtime)
   end
 
   test "invocation-scoped local-preflight codes assert no provider activity" do
@@ -8953,20 +8954,27 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
-  test "compile diagnostics retain fixed fallbacks when structured position is unavailable", %{
+  test "unsupported reader syntax retains public messages and carries token positions", %{
     tmp_dir: directory
   } do
-    source = "(ns app) #_ (defn run [input] input)"
+    for {name, syntax} <- [{"discard", "#_"}, {"deref", "@x"}, {"quote", "'(x)"}] do
+      prefix = "(ns app) "
+      source = prefix <> syntax <> " (defn run [input] input)"
 
-    path =
-      write_application(directory, "unlocated-syntax", valid_manifest(), %{
-        "main.clj" => source
-      })
+      path =
+        write_application(directory, "unsupported-#{name}", valid_manifest(), %{
+          "main.clj" => source
+        })
 
-    diagnostic = assert_error(["validate", path], "bundle", "syntax_invalid").envelope["error"]
+      diagnostic = assert_error(["validate", path], "bundle", "syntax_invalid").envelope["error"]
 
-    assert diagnostic["message"] == "the component source is not valid PTC-Lisp"
-    assert diagnostic["span"] == nil
+      assert diagnostic["message"] == "the component source is not valid PTC-Lisp"
+
+      assert diagnostic["span"] == %{
+               "start_byte" => byte_size(prefix),
+               "end_byte" => byte_size(prefix)
+             }
+    end
   end
 
   @tag :tmp_dir

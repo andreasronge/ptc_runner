@@ -44,6 +44,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Run the default core suite on BSD as well as Linux so OS-specific shell
+  # and filesystem regressions surface daily, including the operator lane.
+  core-tests-macos:
+    name: Core tests (macos-15)
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      MIX_ENV: test
+      HEX_SPONSOR: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+        with:
+          cache-plt: 'false'
+          install-babashka: 'false'
+
+      - name: Compile and run tests
+        run: scripts/ci/core-tests.sh
+
   nightly:
     runs-on: ubuntu-latest
     name: Nightly tests

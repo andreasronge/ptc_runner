@@ -1134,6 +1134,7 @@ defmodule PtcGatewayTest do
       )
 
     assert busy.status == 429
+    assert response(config, "/health/ready").status == 200
     send(audit_worker, :release_audit)
     assert :ok = await_run_release(state.run_admission, 100)
 
@@ -1195,11 +1196,16 @@ defmodule PtcGatewayTest do
       )
 
     assert busy.status == 429
+    assert response(config, "/health/ready").status == 200
 
     assert busy.body == %{
              "jsonrpc" => "2.0",
              "id" => 21,
-             "error" => %{"code" => -31999, "message" => "Server busy"}
+             "error" => %{
+               "code" => -31999,
+               "message" => "Server busy",
+               "data" => %{"reason" => "run_capacity_exhausted"}
+             }
            }
 
     assert {:ok, %{in_use: 1}} = PtcRunner.Kernel.RunAdmission.snapshot(state.run_admission)
@@ -1395,7 +1401,11 @@ defmodule PtcGatewayTest do
 
     assert busy.body == %{
              "jsonrpc" => "2.0",
-             "error" => %{"code" => -31999, "message" => "Server busy"}
+             "error" => %{
+               "code" => -31999,
+               "message" => "Server busy",
+               "data" => %{"reason" => "request_capacity_exhausted"}
+             }
            }
   end
 

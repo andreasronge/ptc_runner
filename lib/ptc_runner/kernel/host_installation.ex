@@ -50,6 +50,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
   results copy that content identity unchanged for citations.
   """
 
+  alias PtcRunner.Kernel.ChatDecisions
+  alias PtcRunner.Kernel.DecisionCapability
+  alias PtcRunner.Kernel.HTTPDecisions
+  alias PtcRunner.Kernel.OpenRouterDecisions
+
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.CommandWarning
@@ -63,6 +68,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.LLMReplay
   alias PtcRunner.Kernel.LLMUsage
+  alias PtcRunner.Kernel.MCPLauncher
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.ManagerCleanup
   alias PtcRunner.Kernel.MCPOAuth.TokenManager
@@ -81,11 +87,9 @@ defmodule PtcRunner.Kernel.HostInstallation do
   alias PtcRunner.LLM.Requirements
 
   @inherited_compatibility_environment ~w(HOME LOGNAME PATH SHELL TERM USER)
-  @stdio_locale_environment %{"LC_ALL" => "C.UTF-8"}
   @max_credential_bytes 65_536
   @max_executable_bytes 268_435_456
   @max_launcher_bytes 16_777_216
-  @launcher_protocol_version 2
 
   @doc """
   Builds the inert declaration catalog installed by a loaded host document.
@@ -178,6 +182,13 @@ defmodule PtcRunner.Kernel.HostInstallation do
   # :req_llm, which is the long-standing behaviour rather than a regression. The
   # request-time check in `provider_application_ready/2` is route-aware, so the
   # error a caller actually sees is correct.
+  defp maybe_provider_application(implementation, %{
+         source: :decision,
+         backend: :chat,
+         chat_installation: chat
+       }),
+       do: maybe_provider_application(implementation, chat)
+
   defp maybe_provider_application(implementation, %{source: :llm}) do
     if Application.get_env(
          :ptc_runner,
@@ -410,7 +421,9 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  def installation_credential_names(%{source: :llm, credential: credential}), do: [credential]
+  def installation_credential_names(%{source: source, credential: credential})
+      when source in [:llm, :decision] and is_binary(credential), do: [credential]
+
   def installation_credential_names(_installation), do: []
 
   defp descriptor_structured_output_mode(%{source: :llm, structured_output_mode: mode})
@@ -470,7 +483,9 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp descriptor_provides(_source), do: []
 
-  defp descriptor_destinations(source) when source in [:llm, :llm_replay], do: [:workflow]
+  defp descriptor_destinations(source)
+       when source in [:llm, :llm_replay, :decision, :decision_replay], do: [:workflow]
+
   defp descriptor_destinations(:mcp), do: [:workflow, :mission]
   defp descriptor_destinations(_source), do: [:mission]
 
@@ -480,7 +495,10 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp local_preflight_mode(%{source: :llm}), do: :audited_local
   defp local_preflight_mode(%{source: :mcp, transport: %{type: :stdio}}), do: :audited_local
-  defp local_preflight_mode(%{source: :llm_replay}), do: :audited_local
+
+  defp local_preflight_mode(%{source: source})
+       when source in [:llm_replay, :decision, :decision_replay], do: :audited_local
+
   defp local_preflight_mode(_installation), do: :none
 
   defp selection_rules(%{source: :mcp} = installation) do
@@ -548,7 +566,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
     )
   end
 
-  defp selection_rules(%{source: :llm} = installation) do
+  defp selection_rules(%{source: source} = installation) when source in [:llm, :decision] do
     SelectionRules.new(
       fields: %{
         "max_request_bytes" => %{
@@ -587,7 +605,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
     )
   end
 
-  defp selection_rules(%{source: :llm_replay} = installation) do
+  defp selection_rules(%{source: source} = installation)
+       when source in [:llm_replay, :decision_replay] do
     SelectionRules.new(
       fields: %{
         "max_entries" => %{
@@ -685,6 +704,19 @@ defmodule PtcRunner.Kernel.HostInstallation do
          data_class: installation.data_class,
          accepts_data: installation.accepts_data,
          capability_effects: mcp_capability_effects(installation, selected, context.provider)
+       }}
+    end
+  end
+
+  defp prepare(_host, %{source: source} = installation, selection, context, _oauth_runtime)
+       when source in [:decision, :decision_replay] do
+    with :ok <- placement(installation, context.destination),
+         {:ok, _selected} <- normalize_runtime_selection(installation, selection, context) do
+      {:ok,
+       %{
+         credential_names: installation_credential_names(installation),
+         data_class: installation.data_class,
+         accepts_data: installation.accepts_data
        }}
     end
   end
@@ -809,6 +841,17 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
+  defp preflight(host, %{source: source} = installation, selection, context, _oauth_runtime)
+       when source in [:decision, :decision_replay] do
+    with nil <- Map.get(context, :provider_call_admission_error),
+         :ok <- placement(installation, context.destination),
+         {:ok, selected} <- normalize_runtime_selection(installation, selection, context) do
+      {:ok,
+       {:private_preflight,
+        fn credentials -> acquire_decision(host, installation, selected, context, credentials) end}}
+    end
+  end
+
   defp preflight(_host, %{source: :llm} = installation, selection, context, _oauth_runtime) do
     with nil <- Map.get(context, :provider_call_admission_error),
          :ok <- placement(installation, context.destination),
@@ -861,7 +904,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
     with :ok <- placement(installation, context.destination),
          {:ok, selected} <- trace_snapshot_selection(installation, selection, context),
          {:ok, directory} <-
-           canonical_snapshot_directory(host.directory, installation.directory) do
+           canonical_snapshot_directory(
+             host.directory,
+             installation.directory,
+             :invalid_trace_snapshot_directory
+           ) do
       {:ok,
        {:private_preflight,
         fn %{} -> acquire_trace_snapshot(directory, installation, selected, context) end}}
@@ -878,7 +925,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
     with :ok <- placement(installation, context.destination),
          {:ok, selected} <- inspection_snapshot_selection(installation, selection, context),
          {:ok, directory} <-
-           canonical_inspection_snapshot_directory(host.directory, installation.directory) do
+           canonical_snapshot_directory(
+             host.directory,
+             installation.directory,
+             :invalid_inspection_snapshot_directory
+           ) do
       {:ok,
        {:private_preflight,
         fn %{}, %{canonical_trace_snapshot: trace_snapshot} ->
@@ -1038,6 +1089,13 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp placement(%{source: :mcp}, :mission), do: :ok
   defp placement(%{source: :mcp}, _destination), do: {:error, :provider_destination_denied}
+
+  defp placement(%{source: source}, :workflow) when source in [:decision, :decision_replay],
+    do: :ok
+
+  defp placement(%{source: source}, _destination) when source in [:decision, :decision_replay],
+    do: {:error, :provider_destination_denied}
+
   defp placement(%{source: :llm}, :workflow), do: :ok
   defp placement(%{source: :llm}, _destination), do: {:error, :provider_destination_denied}
   defp placement(%{source: :llm_replay}, :workflow), do: :ok
@@ -1078,6 +1136,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
              :mcp,
              :llm,
              :llm_replay,
+             :decision,
+             :decision_replay,
              :ptc_trace_snapshot,
              :ptc_private_trace_snapshot,
              :ptc_inspection_snapshot
@@ -1127,6 +1187,10 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp selection_error(:mcp), do: :invalid_mcp_selection
   defp selection_error(:llm), do: :invalid_llm_selection
+
+  defp selection_error(source) when source in [:decision, :decision_replay],
+    do: :invalid_llm_selection
+
   defp selection_error(:llm_replay), do: :invalid_llm_replay_selection
   defp selection_error(:ptc_trace_snapshot), do: :invalid_trace_snapshot_selection
   defp selection_error(:ptc_private_trace_snapshot), do: :invalid_trace_snapshot_selection
@@ -1148,6 +1212,25 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
+  defp local_preflight(
+         _host,
+         %{source: :decision, backend: :chat, chat_installation: chat} = installation,
+         selection,
+         context
+       ) do
+    with :ok <- placement(installation, context.destination),
+         {:ok, _selected} <- normalize_runtime_selection(installation, selection, context),
+         {:ok, model, adapter} <- preflight_llm(chat.model) do
+      maybe_prepare_llm_contract(chat, context, model, adapter)
+    end
+  end
+
+  defp local_preflight(_host, %{source: :decision} = installation, selection, context) do
+    with :ok <- placement(installation, context.destination),
+         {:ok, _selected} <- normalize_runtime_selection(installation, selection, context),
+         do: :ok
+  end
+
   defp local_preflight(_host, %{source: :llm} = installation, selection, context) do
     with :ok <- placement(installation, context.destination),
          {:ok, _selected} <- llm_selection(installation, selection, context),
@@ -1156,7 +1239,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  defp local_preflight(host, %{source: :llm_replay} = installation, selection, context) do
+  defp local_preflight(host, %{source: source} = installation, selection, context)
+       when source in [:llm_replay, :decision_replay] do
     with :ok <- placement(installation, context.destination),
          {:ok, selected} <- llm_replay_selection(installation, selection, context),
          {:ok, _summary} <-
@@ -1690,6 +1774,169 @@ defmodule PtcRunner.Kernel.HostInstallation do
       else: nil
   end
 
+  defp acquire_decision(host, installation, selected, context, credentials) do
+    with {:ok, requester, close, acquisition, content_hash} <-
+           decision_requester(host, installation, selected, context, credentials),
+         admission = Map.get(context, :provider_call_admission),
+         {:ok, capability} <-
+           DecisionCapability.new(
+             requester: fn request, requester_context ->
+               bound_requester = fn request, context ->
+                 requester.(
+                   request,
+                   Map.put(
+                     context,
+                     :provider_run_state,
+                     Map.get(requester_context, :provider_run_state)
+                   )
+                 )
+               end
+
+               if is_nil(admission),
+                 do: requester.(request, requester_context),
+                 else:
+                   ProviderCallOwner.run(
+                     admission,
+                     bound_requester,
+                     request,
+                     llm_requester_context(requester_context)
+                     |> maybe_put_cleanup_timeout(
+                       get_in(context, [:limits, :provider_cleanup_timeout_ms])
+                     )
+                   )
+             end,
+             provider_call_guardian: not is_nil(admission),
+             llm_reservation: %{
+               source: Atom.to_string(installation.source),
+               total_tokens: installation.max_total_tokens_per_call,
+               cost_microusd: installation.max_cost_microusd_per_call,
+               alias: context.provider,
+               installation_revision: installation.installation_revision,
+               max_calls: selected.max_calls,
+               request_timeout_ms:
+                 Map.get(
+                   installation.ceilings,
+                   :request_timeout_ms,
+                   host.limits.llm_request_timeout_ms
+                 )
+             },
+             usage_guarantees:
+               Map.get(installation, :usage_guarantees, %{tokens: true, cost_currency: "USD"}),
+             max_request_bytes: Map.get(selected, :max_request_bytes, 1_000_000),
+             max_response_bytes:
+               Map.get(
+                 selected,
+                 :max_response_bytes,
+                 Map.get(selected, :max_result_bytes, 1_000_000)
+               )
+           ),
+         {:ok, snapshot} <-
+           public_snapshot(installation, context.provider, selected, acquisition, content_hash) do
+      {:ok,
+       %{
+         capabilities: [capability],
+         snapshot: snapshot,
+         close: close,
+         data_class: installation.data_class,
+         accepts_data: installation.accepts_data
+       }}
+    end
+  end
+
+  defp decision_requester(
+         host,
+         %{source: :decision_replay} = installation,
+         selected,
+         context,
+         _credentials
+       ) do
+    with {:ok, replay} <-
+           LLMReplay.start(host.directory, installation.fixtures,
+             max_entries: selected.max_entries,
+             max_result_bytes: selected.max_result_bytes,
+             owner: context.owner,
+             resource_registrar: Map.get(context, :resource_registrar)
+           ) do
+      acquisition = LLMReplay.snapshot(replay)
+
+      {:ok, LLMReplay.requester(replay), fn -> LLMReplay.stop(replay) end, acquisition,
+       acquisition["fixture_set_hash"]}
+    end
+  end
+
+  defp decision_requester(
+         _host,
+         %{source: :decision, backend: :chat, chat_installation: chat} = installation,
+         _selected,
+         context,
+         credentials
+       ) do
+    with {:ok, model, adapter} <- preflight_llm(chat.model),
+         {:ok, requirements} <- live_llm_requirements(chat, context),
+         {:ok, prepared} <- prepare_llm_model(model, requirements, adapter),
+         :ok <- provider_application_ready(adapter, model),
+         {:ok, credential} <- Map.fetch(credentials, installation.credential),
+         {:ok, callback} <-
+           PtcRunner.LLM.callback(prepared, %{credential: credential, cache: chat.cache}),
+         true <-
+           cancellation_witness_supported?(prepared, Map.get(context, :provider_call_admission)) do
+      public_model = PtcRunner.LLM.attested_public_model(adapter, model)
+
+      chat_callback = fn request, context ->
+        with :ok <- provider_application_ready(adapter, model), do: callback.(request, context)
+      end
+
+      requester =
+        ChatDecisions.requester(chat_callback, public_model || "private")
+
+      {:ok, requester, nil,
+       %{"source" => "decision", "backend" => "chat", "model" => public_model}, nil}
+    else
+      _ -> {:error, :invalid_llm_provider}
+    end
+  end
+
+  defp decision_requester(
+         _host,
+         %{source: :decision, backend: :http} = installation,
+         _selected,
+         _context,
+         credentials
+       ) do
+    credential = Map.get(credentials, installation.credential)
+
+    requester =
+      HTTPDecisions.requester(
+        installation.endpoint,
+        installation.model,
+        credential,
+        installation.ceilings.request_timeout_ms
+      )
+
+    {:ok, requester, nil,
+     %{"source" => "decision", "backend" => "http", "model" => installation.model}, nil}
+  end
+
+  defp decision_requester(
+         _host,
+         %{source: :decision} = installation,
+         _selected,
+         _context,
+         credentials
+       ) do
+    with {:ok, credential} <- Map.fetch(credentials, installation.credential) do
+      requester =
+        OpenRouterDecisions.requester(
+          installation.model,
+          credential,
+          installation.routing,
+          installation.ceilings.request_timeout_ms
+        )
+
+      {:ok, requester, nil, %{"source" => "decision", "model" => installation.model}, nil}
+    end
+  end
+
   defp acquire_llm_replay(host, installation, selected, context) do
     with {:ok, replay} <-
            LLMReplay.start(host.directory, installation.fixtures,
@@ -1949,12 +2196,12 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end)
   end
 
-  defp compatibility_environment(false), do: {:ok, @stdio_locale_environment}
+  defp compatibility_environment(false), do: {:ok, MCPLauncher.locale_environment()}
 
   defp compatibility_environment(true) do
     Enum.reduce_while(
       @inherited_compatibility_environment,
-      {:ok, @stdio_locale_environment},
+      {:ok, MCPLauncher.locale_environment()},
       fn name, {:ok, environment} ->
         case System.get_env(name) do
           nil ->
@@ -1985,25 +2232,14 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  defp canonical_snapshot_directory(base, path) do
+  defp canonical_snapshot_directory(base, path, error) do
     candidate = if Path.type(path) == :absolute, do: path, else: Path.expand(path, base)
 
     with {:ok, canonical} <- ConfinedFile.resolve_absolute(candidate),
          {:ok, %{type: :directory}} <- File.stat(canonical) do
       {:ok, canonical}
     else
-      _reason -> {:error, :invalid_trace_snapshot_directory}
-    end
-  end
-
-  defp canonical_inspection_snapshot_directory(base, path) do
-    candidate = if Path.type(path) == :absolute, do: path, else: Path.expand(path, base)
-
-    with {:ok, canonical} <- ConfinedFile.resolve_absolute(candidate),
-         {:ok, %{type: :directory}} <- File.stat(canonical) do
-      {:ok, canonical}
-    else
-      _reason -> {:error, :invalid_inspection_snapshot_directory}
+      _reason -> {:error, error}
     end
   end
 
@@ -2058,28 +2294,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   end
 
   defp resolve_launcher(nil) do
-    launcher_module = Module.concat(["PtcRunnerLauncher"])
-
-    if Code.ensure_loaded?(launcher_module) and
-         function_exported?(launcher_module, :protocol_version, 0) and
-         function_exported?(launcher_module, :executable_path, 0) and
-         launcher_module.protocol_version() == @launcher_protocol_version do
-      case launcher_module.executable_path() do
-        {:ok, path} ->
-          case canonical_executable(path, @max_launcher_bytes, :mcp_stdio_launcher_unavailable) do
-            {:ok, canonical, digest} -> {:ok, canonical, digest}
-            {:error, _reason} = error -> error
-          end
-
-        {:error, :unsupported_platform} ->
-          {:error, :unsupported_mcp_stdio_platform}
-
-        {:error, _reason} ->
-          {:error, :mcp_stdio_launcher_unavailable}
-      end
-    else
-      {:error, :mcp_stdio_launcher_unavailable}
-    end
+    with {:ok, path} <- MCPLauncher.companion(), do: resolve_launcher(path)
   end
 
   defp resolve_launcher(path) do

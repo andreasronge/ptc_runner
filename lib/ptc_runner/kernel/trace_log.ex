@@ -2,8 +2,8 @@ defmodule PtcRunner.Kernel.TraceLog do
   @moduledoc """
   Bounded canonical trace loading, validation, filtering, and pagination.
 
-  A source is an in-memory `PtcRunner.Kernel.EventSink`, one JSONL file, or a
-  directory of JSONL files. Explicit files validate one complete aggregate.
+  A source is one JSONL file or a directory of JSONL files. Explicit files
+  validate one complete aggregate.
   Immutable directory capture instead treats each
   `<run-id>[.private].jsonl` member as one filename-bound run, proves the
   selected namespace and bytes stable, and isolates a damaged connected
@@ -33,23 +33,17 @@ defmodule PtcRunner.Kernel.TraceLog do
   isolation component, but excludes absolute paths, opposite-class names, and
   advisory exclusion counts.
 
-  A direct directory query creates that admission transiently on every call
-  under the same entry, file, source, retained, and result ceilings as an
-  immutable snapshot. Consequently a direct cursor observes later selected
-  evidence as `:source_changed`, while a snapshot cursor stays bound to its
-  retained admission. Run-scoped queries distinguish a grant-visible isolated
-  claim as `:run_isolated` from an absent or out-of-grant run as `:not_found`.
+  Run-scoped snapshot queries distinguish a grant-visible isolated claim as
+  `:run_isolated` from an absent or out-of-grant run as `:not_found`.
 
   The internal trace-snapshot owner uses this module's canonical validation and
   query execution against one immutable directory capture or one exact selected
-  canonical file. A snapshot is
-  deliberately not another public `t:source/0` variant.
+  canonical file.
   """
 
   alias Jason.OrderedObject
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.DeterministicJSON
-  alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.LLMBudget
   alias PtcRunner.Kernel.LLMUsageSummary
@@ -60,22 +54,16 @@ defmodule PtcRunner.Kernel.TraceLog do
   alias PtcRunner.Kernel.QueryValidation
   alias PtcRunner.Kernel.ResultLimit
   alias PtcRunner.Kernel.RuntimeTools
-  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.TraceDirectoryAdmission
   alias PtcRunner.Kernel.TraceEventValidation
   alias PtcRunner.Kernel.TraceIsolationPresentation
   alias PtcRunner.Kernel.TracePublication
-  alias PtcRunner.Lisp.RetainedSize
 
   @default_source_bytes 8_000_000
-  @default_retained_bytes 32_000_000
-  @default_result_bytes 1_000_000
   @default_capture_directory_entries 4_096
   @default_capture_trace_files 1_024
   @capture_listing_timeout_ms 5_000
   @capture_listing_heap_words 1_000_000
-  @direct_capture_timeout_ms 15_000
-  @direct_capture_heap_words 10_000_000
   @default_limit 20
   @max_limit 100
   @max_cursor_bytes 1_024
@@ -92,7 +80,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   lock_body='printf "READY\n"; IFS= read -r command; [ "$command" = X ]; printf "DONE\n"'
   case "$lock_kind" in
     lockf) exec "$lock_executable" -k -t 30 "$lock_file" "$shell" -c "$lock_body" ;;
-    flock) exec "$lock_executable" -w 30 "$lock_file" "$shell" -c "$lock_body" ;;
+    flock) exec "$lock_executable" -E 75 -w 30 "$lock_file" "$shell" -c "$lock_body" ;;
     *) exit 1 ;;
   esac
   """
@@ -108,7 +96,12 @@ defmodule PtcRunner.Kernel.TraceLog do
   printf 'READY\n'
   command=$(dd bs=1 count=1 2>/dev/null)
   [ "$command" = W ]
-  head -c "$byte_count" > "$temporary_name"
+  # BSD head rejects a zero byte count.
+  if [ "$byte_count" -gt 0 ]; then
+    head -c "$byte_count" > "$temporary_name"
+  else
+    : > "$temporary_name"
+  fi
   printf 'DATA\n'
   sentinel=$(dd bs=1 count=1 2>/dev/null)
   [ "$sentinel" = X ]
@@ -125,159 +118,6 @@ defmodule PtcRunner.Kernel.TraceLog do
   trap - EXIT HUP INT TERM
   sync
   """
-
-  @enforce_keys [
-    :source,
-    :source_kind,
-    :max_source_bytes,
-    :max_retained_bytes,
-    :max_result_bytes,
-    :max_directory_entries,
-    :max_trace_files
-  ]
-  defstruct @enforce_keys
-
-  @type source :: EventSink.t() | {:file, binary()} | {:directory, binary()}
-  @type t :: %__MODULE__{
-          source: source(),
-          source_kind: :sanitized | :private,
-          max_source_bytes: pos_integer(),
-          max_retained_bytes: pos_integer(),
-          max_result_bytes: pos_integer(),
-          max_directory_entries: pos_integer(),
-          max_trace_files: pos_integer()
-        }
-
-  @spec new(keyword()) :: {:ok, t()} | {:error, :invalid_trace_log}
-  @doc """
-  Constructs a query boundary from required `:source` and optional positive
-  `:max_source_bytes` and `:max_result_bytes` limits. Directory sources also
-  accept `:max_retained_bytes`, `:max_directory_entries`, and
-  `:max_trace_files`; all five directory limits may be lowered but never raised
-  above the canonical directory-query ceilings.
-  """
-  def new(opts) when is_list(opts) do
-    with {:ok, source, source_kind} <- validate_source(Keyword.get(opts, :source)),
-         {:ok, limits} <- trace_log_limits(source, opts) do
-      {:ok,
-       %__MODULE__{
-         source: source,
-         source_kind: source_kind,
-         max_source_bytes: limits.max_source_bytes,
-         max_retained_bytes: limits.max_retained_bytes,
-         max_result_bytes: limits.max_result_bytes,
-         max_directory_entries: limits.max_directory_entries,
-         max_trace_files: limits.max_trace_files
-       }}
-    else
-      _ -> {:error, :invalid_trace_log}
-    end
-  end
-
-  def new(_opts), do: {:error, :invalid_trace_log}
-
-  defp trace_log_limits({:directory, _path}, opts) do
-    allowed = [
-      :source,
-      :max_source_bytes,
-      :max_retained_bytes,
-      :max_result_bytes,
-      :max_directory_entries,
-      :max_trace_files
-    ]
-
-    with true <- Keyword.keys(opts) -- allowed == [],
-         {:ok, max_source_bytes} <-
-           bounded_limit(opts, :max_source_bytes, @default_source_bytes),
-         {:ok, max_retained_bytes} <-
-           bounded_limit(opts, :max_retained_bytes, @default_retained_bytes),
-         {:ok, max_result_bytes} <-
-           bounded_limit(opts, :max_result_bytes, @default_result_bytes),
-         {:ok, max_directory_entries} <-
-           bounded_limit(opts, :max_directory_entries, @default_capture_directory_entries),
-         {:ok, max_trace_files} <-
-           bounded_limit(opts, :max_trace_files, @default_capture_trace_files) do
-      {:ok,
-       %{
-         max_source_bytes: max_source_bytes,
-         max_retained_bytes: max_retained_bytes,
-         max_result_bytes: max_result_bytes,
-         max_directory_entries: max_directory_entries,
-         max_trace_files: max_trace_files
-       }}
-    else
-      _invalid -> {:error, :invalid_trace_log}
-    end
-  end
-
-  defp trace_log_limits(_source, opts) do
-    with true <- Keyword.keys(opts) -- [:source, :max_source_bytes, :max_result_bytes] == [],
-         {:ok, max_source_bytes} <- positive_limit(opts, :max_source_bytes, @default_source_bytes),
-         {:ok, max_result_bytes} <- positive_limit(opts, :max_result_bytes, @default_result_bytes) do
-      {:ok,
-       %{
-         max_source_bytes: max_source_bytes,
-         max_retained_bytes: @default_retained_bytes,
-         max_result_bytes: max_result_bytes,
-         max_directory_entries: @default_capture_directory_entries,
-         max_trace_files: @default_capture_trace_files
-       }}
-    else
-      _invalid -> {:error, :invalid_trace_log}
-    end
-  end
-
-  defp bounded_limit(opts, key, maximum) do
-    case Keyword.get(opts, key, maximum) do
-      value when is_integer(value) and value in 1..maximum//1 -> {:ok, value}
-      _invalid -> {:error, :invalid_trace_log}
-    end
-  end
-
-  defp positive_limit(opts, key, default) do
-    case Keyword.get(opts, key, default) do
-      value when is_integer(value) and value > 0 -> {:ok, value}
-      _invalid -> {:error, :invalid_trace_log}
-    end
-  end
-
-  @spec query(t(), :list_runs | :get_run | :list_turns | :counters, map()) ::
-          {:ok, map()} | {:error, atom()}
-  @doc "Executes one validated, source-scoped bounded trace query."
-  def query(%__MODULE__{} = trace_log, operation, arguments)
-      when operation in [:list_runs, :get_run, :list_turns, :counters] and is_map(arguments) do
-    with {:ok, events, source_id, source_kind, source_metadata, known_isolated_run_ids} <-
-           load(trace_log) do
-      result_metadata =
-        operation
-        |> source_presence_metadata(source_metadata)
-        |> reserve_snapshot_hash(trace_log.source, source_id)
-
-      operation
-      |> execute(
-        events,
-        source_id,
-        arguments,
-        trace_log.max_result_bytes,
-        source_kind,
-        result_metadata
-      )
-      |> maybe_run_isolated(operation, arguments, known_isolated_run_ids)
-      |> strip_reserved_snapshot_hash(trace_log.source)
-    end
-  end
-
-  def query(_trace_log, _operation, _arguments), do: {:error, :invalid_query}
-
-  defp reserve_snapshot_hash(metadata, {:directory, _path}, source_id),
-    do: Map.put(metadata, "snapshot_hash", SafeMetadata.fingerprint(source_id))
-
-  defp reserve_snapshot_hash(metadata, _source, _source_id), do: metadata
-
-  defp strip_reserved_snapshot_hash({:ok, result}, {:directory, _path}),
-    do: {:ok, Map.delete(result, "snapshot_hash")}
-
-  defp strip_reserved_snapshot_hash(result, _source), do: result
 
   defp maybe_run_isolated(
          {:error, :not_found},
@@ -652,7 +492,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   @doc """
   Appends canonical events to one admin-selected JSONL file under a total byte
   cap. `private: true` requires safe parent ancestry and a mode-`0600` file,
-  owned by the current process authority or root, creating a missing file
+  owned by the current process authority, creating a missing file
   privately before publication. The permission-checked descriptor is retained
   through validation and append so pathname replacement cannot redirect private
   bytes. One OS-released advisory lease keyed by the parent-directory/name
@@ -787,7 +627,7 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   defp with_append_lock(path, callback, attempts \\ 3)
 
-  defp with_append_lock(_path, _callback, 0), do: {:error, :source_unavailable}
+  defp with_append_lock(_path, _callback, 0), do: {:error, :lock_timeout}
 
   defp with_append_lock(path, callback, attempts) do
     case append_path_lock_scope(path) do
@@ -822,6 +662,7 @@ defmodule PtcRunner.Kernel.TraceLog do
                :use_stdio,
                :stderr_to_stdout,
                {:line, 64},
+               {:env, PtcRunner.ChildEnvironment.clear_environment(["PATH"])},
                args: [
                  "-c",
                  @append_lock_helper,
@@ -836,7 +677,7 @@ defmodule PtcRunner.Kernel.TraceLog do
          :ok <- await_append_lock(port) do
       {:ok, port}
     else
-      _ -> {:error, :source_unavailable}
+      {:error, _reason} = error -> error
     end
   rescue
     _exception -> {:error, :source_unavailable}
@@ -860,11 +701,12 @@ defmodule PtcRunner.Kernel.TraceLog do
     receive do
       {^port, {:data, {:eol, "READY"}}} -> :ok
       {^port, {:data, _diagnostic}} -> await_append_lock(port)
-      {^port, {:exit_status, _status}} -> {:error, :source_unavailable}
+      {^port, {:exit_status, 75}} -> {:error, :lock_timeout}
+      {^port, {:exit_status, _status}} -> {:error, :subprocess_failed}
     after
       @append_lock_timeout_ms ->
         if Port.info(port), do: Port.close(port)
-        {:error, :source_unavailable}
+        {:error, :lock_timeout}
     end
   end
 
@@ -987,9 +829,8 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   defp validate_append_lock_root(root, uid) do
     case File.lstat(root, time: :posix) do
-      {:ok, %File.Stat{type: :directory, uid: ^uid, mode: mode}}
-      when Bitwise.band(mode, 0o777) == 0o700 ->
-        :ok
+      {:ok, stat} ->
+        if PrivateDirectory.private_dir?(stat, uid), do: :ok, else: {:error, :source_unavailable}
 
       {:error, :enoent} ->
         {:error, :enoent}
@@ -1369,6 +1210,7 @@ defmodule PtcRunner.Kernel.TraceLog do
                :use_stdio,
                :stderr_to_stdout,
                {:cd, parent},
+               {:env, PtcRunner.ChildEnvironment.clear_environment(["PATH"])},
                {:args,
                 [
                   "-c",
@@ -1805,9 +1647,9 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
-  defp preflight_private_trace(path, %File.Stat{mode: mode, uid: owner}) do
+  defp preflight_private_trace(path, stat) do
     with {:ok, uid} <- PrivateDirectory.preflight_owner(path),
-         true <- owner in [0, uid] and Bitwise.band(mode, 0o777) == 0o600,
+         true <- PrivateDirectory.private_file?(stat, uid),
          :ok <- PrivateDirectory.preflight_writable_file(path) do
       :ok
     else
@@ -1850,12 +1692,8 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   defp ensure_private_trace_file(path, uid, append_hook) do
     case File.lstat(path) do
-      {:ok, %File.Stat{type: :regular, mode: mode, uid: owner}}
-      when owner in [0, uid] and Bitwise.band(mode, 0o777) == 0o600 ->
-        :ok
-
-      {:ok, %File.Stat{}} ->
-        {:error, :source_unavailable}
+      {:ok, stat} ->
+        if PrivateDirectory.private_file?(stat, uid), do: :ok, else: {:error, :source_unavailable}
 
       {:error, :enoent} ->
         publish_empty_private_trace(path, uid, append_hook)
@@ -1929,12 +1767,10 @@ defmodule PtcRunner.Kernel.TraceLog do
          opened = File.Stat.from_record(file_info),
          :ok <- same_file(locked_stat, opened),
          true <-
-           opened.type == :regular and opened.uid in [0, uid] and
-             Bitwise.band(opened.mode, 0o777) == 0o600,
+           PrivateDirectory.private_file?(opened, uid),
          {:ok, current} <- File.lstat(path, time: :posix),
          true <-
-           current.type == :regular and current.uid in [0, uid] and
-             Bitwise.band(current.mode, 0o777) == 0o600,
+           PrivateDirectory.private_file?(current, uid),
          :ok <- same_file(opened, current) do
       :ok
     else
@@ -1979,136 +1815,6 @@ defmodule PtcRunner.Kernel.TraceLog do
       :eof -> {:ok, ""}
       {:ok, _source} -> {:error, :source_limit_exceeded}
       {:error, _reason} -> {:error, :source_unavailable}
-    end
-  end
-
-  defp validate_source(%EventSink{} = sink) do
-    case EventSink.policy(sink) do
-      :normal -> {:ok, sink, :sanitized}
-      _ -> {:error, :invalid_trace_log}
-    end
-  catch
-    :exit, _reason -> {:error, :invalid_trace_log}
-  end
-
-  defp validate_source({:private, %EventSink{} = sink}) do
-    case EventSink.policy(sink) do
-      :private -> {:ok, sink, :private}
-      _ -> {:error, :invalid_trace_log}
-    end
-  catch
-    :exit, _reason -> {:error, :invalid_trace_log}
-  end
-
-  defp validate_source({:file, path}) when is_binary(path) do
-    case {reserved_path?(path), File.lstat(path)} do
-      {true, _stat} ->
-        {:error, :invalid_trace_log}
-
-      {false, {:ok, %File.Stat{type: :regular}}} ->
-        {:ok, {:file, Path.expand(path)}, :sanitized}
-
-      _ ->
-        {:error, :invalid_trace_log}
-    end
-  end
-
-  defp validate_source({:directory, path}) when is_binary(path) do
-    case File.lstat(path) do
-      {:ok, %File.Stat{type: :directory}} ->
-        {:ok, {:directory, Path.expand(path)}, :sanitized}
-
-      _ ->
-        {:error, :invalid_trace_log}
-    end
-  end
-
-  defp validate_source({:private_file, path}) when is_binary(path) do
-    case {private_path?(path), File.lstat(path)} do
-      {true, {:ok, %File.Stat{type: :regular}}} ->
-        {:ok, {:file, Path.expand(path)}, :private}
-
-      _ ->
-        {:error, :invalid_trace_log}
-    end
-  end
-
-  defp validate_source({:private_directory, path}) when is_binary(path) do
-    case File.lstat(path) do
-      {:ok, %File.Stat{type: :directory}} ->
-        {:ok, {:directory, Path.expand(path)}, :private}
-
-      _ ->
-        {:error, :invalid_trace_log}
-    end
-  end
-
-  defp validate_source(_source), do: {:error, :invalid_trace_log}
-
-  defp load(%__MODULE__{source: %EventSink{} = sink} = trace_log) do
-    sink
-    |> EventSink.events()
-    |> normalize()
-    |> validate_loaded(trace_log.max_source_bytes)
-    |> with_source_metadata(trace_log.source_kind, %{})
-  catch
-    :exit, _reason -> {:error, :source_unavailable}
-  end
-
-  defp load(%__MODULE__{source: {:file, path}, max_source_bytes: max_bytes} = trace_log) do
-    with {:ok, source} <- read_regular_file(path, max_bytes),
-         {:ok, events} <- decode_jsonl(source),
-         do:
-           events
-           |> validate_loaded(max_bytes)
-           |> with_source_metadata(trace_log.source_kind, %{})
-  end
-
-  defp load(%__MODULE__{source: {:directory, directory}} = trace_log) do
-    case BoundedWorker.run(
-           fn -> load_directory_admission(directory, trace_log) end,
-           timeout_ms: @direct_capture_timeout_ms,
-           max_heap_words: @direct_capture_heap_words,
-           cancel_with_caller: true
-         ) do
-      {:ok, result} -> result
-      {:error, :heap_exceeded} -> {:error, :source_retained_limit_exceeded}
-      {:error, _reason} -> {:error, :source_unavailable}
-    end
-  end
-
-  defp load_directory_admission(directory, trace_log) do
-    with {:ok, capture} <-
-           capture_directory(directory,
-             max_source_bytes: trace_log.max_source_bytes,
-             max_directory_entries: trace_log.max_directory_entries,
-             max_trace_files: trace_log.max_trace_files,
-             source_kind: trace_log.source_kind,
-             include_sanitized: false
-           ),
-         {:ok, capture} <- retain_transient_directory(capture, trace_log.max_retained_bytes) do
-      {:ok, capture.events, capture.source_id, capture.run_sources,
-       directory_source_metadata(capture), capture.known_isolated_run_ids}
-    end
-  end
-
-  defp with_source_metadata({:ok, events, source_id}, source_kind, metadata),
-    do: {:ok, events, source_id, source_kind, metadata, MapSet.new()}
-
-  defp with_source_metadata({:error, _reason} = error, _source_kind, _metadata), do: error
-
-  defp retain_transient_directory(capture, max_retained_bytes) do
-    retained_capture = RetainedSize.detach_binaries(capture)
-
-    case RetainedSize.bytes(retained_capture) do
-      retained_bytes when is_integer(retained_bytes) and retained_bytes <= max_retained_bytes ->
-        {:ok, retained_capture}
-
-      retained_bytes when is_integer(retained_bytes) ->
-        {:error, :source_retained_limit_exceeded}
-
-      :oversized ->
-        {:error, :source_retained_limit_exceeded}
     end
   end
 
@@ -2796,9 +2502,6 @@ defmodule PtcRunner.Kernel.TraceLog do
     _kind, _reason -> {:error, :source_unavailable}
   end
 
-  defp read_regular_file(_path, remaining) when remaining < 0,
-    do: {:error, :source_limit_exceeded}
-
   defp read_regular_file(path, remaining) do
     with {:ok, %File.Stat{type: :regular} = expected} <- File.lstat(path),
          true <- expected.size <= remaining,
@@ -2944,6 +2647,7 @@ defmodule PtcRunner.Kernel.TraceLog do
       "workflow_capability_calls" => call_counts.workflow,
       "mission_capability_calls" => call_counts.mission,
       "llm_calls" => call_counts.llm,
+      "decision_calls" => call_counts.decision,
       "call_counts_complete" => call_counts.complete?,
       "llm_budget" => terminal_llm_budget(stopped),
       "llm_spend" => terminal_llm_spend(stopped),
@@ -2986,6 +2690,7 @@ defmodule PtcRunner.Kernel.TraceLog do
           workflow: Enum.sum(Map.values(workflow)),
           mission: Enum.sum(Map.values(mission)),
           llm: chat_call_count(workflow),
+          decision: Map.get(workflow, "decision-request", 0),
           complete?: true
         }
 
@@ -2997,6 +2702,7 @@ defmodule PtcRunner.Kernel.TraceLog do
             workflow: scoped_terminal_call_count(calls, "workflow/"),
             mission: scoped_terminal_call_count(calls, "mission/"),
             llm: chat_call_count(calls, "workflow/"),
+            decision: Map.get(calls, "workflow/decision-request", 0),
             complete?: true
           }
         else
@@ -3004,7 +2710,7 @@ defmodule PtcRunner.Kernel.TraceLog do
         end
 
       calls when is_map(calls) ->
-        %{workflow: 0, mission: 0, llm: 0, complete?: true}
+        %{workflow: 0, mission: 0, llm: 0, decision: 0, complete?: true}
 
       _legacy_or_incomplete ->
         observed_call_counts(events)
@@ -3016,6 +2722,13 @@ defmodule PtcRunner.Kernel.TraceLog do
       workflow: quota_backed_capability_call_count(events, "workflow"),
       mission: quota_backed_capability_call_count(events, "mission"),
       llm: capability_name_count(events, "workflow"),
+      decision:
+        Enum.count(
+          events,
+          &(&1["type"] == "capability-started" and
+              stringify(event_data(&1, "environment")) == "workflow" and
+              event_data(&1, "name") == "decision-request")
+        ),
       complete?: false
     }
   end

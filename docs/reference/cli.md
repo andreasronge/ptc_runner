@@ -419,6 +419,18 @@ When a `run` fails with a known pre-sink cause, stdout also receives the V5
 envelope as one JSON line, and stderr retains the human diagnostic. Project
 runs attempt to store that same envelope in the default ledger.
 
+Causes also survive append-lock contention, named-document read failures,
+project and host schema worker unavailability, installation and provider
+admission, environment setup, and doctor service or owner failures. A schema
+worker's time or memory limit is `resource_unavailable`; an append lock that
+expires is `lock_timeout`. An unknown environment callback failure keeps
+`internal_error` with a closed cause. Causes never include filesystem paths,
+callback payloads, exception names, messages, or stack traces.
+
+An unreadable project document also retains its read cause for `models PROJECT`
+and `doctor PROJECT --connect`, even before its host configuration can be
+derived. Invalid command switches still take precedence as argument errors.
+
 <!-- BEGIN GENERATED: command failure causes (mix ptc.gen_docs) -->
 
 The optional `error.cause` in a V5 envelope gives a closed, public reason
@@ -656,6 +668,7 @@ Embedding runtimes can supply authorization targets directly.
 | 4 | `local_preflight` | `authorization_not_applicable` | no | --authorize-mcp applies only to an installation that declares OAuth |
 | 4 | `local_preflight` | `authorization_target_unknown` | no | --authorize-mcp must name an installed provider the application selects |
 | 4 | `local_preflight` | `command_not_found` | no | a required provider command could not be found |
+| 4 | `local_preflight` | `environment_file_invalid` | no | the named environment file contains an invalid assignment |
 | 4 | `local_preflight` | `environment_file_invalid_utf8` | no | the named environment file is not valid UTF-8 |
 | 4 | `local_preflight` | `environment_file_not_found` | no | the named environment file does not exist |
 | 4 | `local_preflight` | `environment_file_not_regular` | no | the named environment file is not a regular file |
@@ -918,7 +931,7 @@ collections
 but they require a correlated inspection snapshot and private authority.
 `analysis/runs` defaults to a compact projection containing run ID, status,
 duration, LLM calls, evaluations, terminal reason, and completeness flags.
-`call_counts_complete` applies to `llm_calls` and the workflow and mission
+`call_counts_complete` applies to `llm_calls`, `decision_calls`, and the workflow and mission
 capability counts in the full view: `true` means terminal usage supplied run
 totals; `false` means the values count retained events and may be low after
 retention loss. `complete` only reports whether the run has a terminal event.
@@ -1092,6 +1105,20 @@ ptc viewer PROJECT.json [--port PORT] [--listen ADDRESS] [--env-file FILE]
 The Viewer opens captured traces and watches or launches live runs for one
 project. See the [Viewer reference](viewer.md) for its display, startup,
 exposure, authentication, and live-reporting contract.
+
+## Environment file syntax and scope
+
+`--env-file` reads one snapshot per command and restores its declared variables
+after the command exits. Blank lines and `#` comment lines are ignored. Each
+other line must be `KEY=VALUE`, with keys matching `[A-Za-z_][A-Za-z0-9_]*`.
+Whitespace around keys and values is trimmed. A quoted value must have matching
+single or double quotes; exactly one pair is removed. There is no `export`
+prefix, interpolation, escaping, or inline comment syntax. Malformed assignments
+and NUL bytes reject the entire file before any environment changes.
+
+File values override inherited values. Overrides of `PATH`, `HOME`, `LD_*`, or
+`DYLD_*` are permitted with a warning on standard error because they can affect
+child processes. The warning never includes values. Only use trusted files.
 
 ## Test a workflow
 

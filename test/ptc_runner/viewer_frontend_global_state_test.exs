@@ -8,7 +8,55 @@ defmodule PtcRunner.ViewerFrontendGlobalStateTest do
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
   import PtcRunner.TestSupport.ViewerFrontendFixtures
 
+  alias PtcRunner.Kernel.CommandRouter
+  alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.ViewerFrontend
+
+  @tag :tmp_dir
+  test "foreground viewer with an explicit env-file admits Live launches", %{tmp_dir: directory} do
+    project_path = viewer_project(directory)
+    env_path = Path.join(directory, "viewer.env")
+    File.write!(env_path, "PTC_VIEWER_LAUNCH_SCOPE=temporary\n")
+    parent = self()
+    {:ok, device} = StringIO.open("")
+
+    listener = fn viewer ->
+      {:ok, {address, port}} = PtcViewer.listener_info(viewer)
+      send(parent, {:viewer_serving, viewer, address, port})
+      {:ok, {address, port}}
+    end
+
+    command =
+      Task.async(fn ->
+        CommandRouter.execute(
+          ["viewer", project_path, "--env-file", env_path],
+          :standalone,
+          fn _arguments -> {:ok, CommandRuntime.standalone()} end,
+          fn arguments, runtime ->
+            ViewerFrontend.run(arguments, runtime, listener_info: listener, device: device)
+          end
+        )
+      end)
+
+    assert_receive {:viewer_serving, viewer, address, port}, 5_000
+
+    on_exit(fn ->
+      if Process.alive?(viewer), do: PtcViewer.stop(viewer)
+    end)
+
+    base_url = "http://#{:inet.ntoa(address)}:#{port}"
+    launch_workflow(base_url, live_nonce(base_url), %{"name" => "browser"})
+    assert_launch_finished(base_url)
+
+    assert {:ok, %{body: %{"launch" => %{"status" => "ok"}}}} =
+             Req.get(base_url <> "/api/live/launch")
+
+    assert Task.yield(command, 0) == nil
+    assert Process.alive?(viewer)
+    send(command.pid, :stop)
+    assert %{exit_status: 0} = Task.await(command, 5_000)
+    StringIO.close(device)
+  end
 
   @tag :tmp_dir
   test "project environment values are restored between Live launches", %{tmp_dir: directory} do

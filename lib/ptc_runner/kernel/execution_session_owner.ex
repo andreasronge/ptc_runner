@@ -30,9 +30,9 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   alias PtcRunner.LiveStatus.Target
 
   @enforce_keys [:pid, :token]
-  defstruct @enforce_keys
+  defstruct @enforce_keys ++ [:monitor]
 
-  @opaque t :: %__MODULE__{pid: pid(), token: reference()}
+  @opaque t :: %__MODULE__{pid: pid(), token: reference(), monitor: reference() | nil}
 
   @doc false
   @spec start(PreparedRun.t(), PublicationAuthority.t(), pid()) ::
@@ -133,6 +133,16 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   end
 
   @doc false
+  @spec start_reserved(
+          pid(),
+          reference(),
+          term(),
+          PreparedRun.t(),
+          PublicationAuthority.t(),
+          pid(),
+          ProviderExecution.t() | ProviderExecution.Retained.t() | nil
+        ) ::
+          {:ok, t()} | {:error, term()}
   def start_reserved(host, ref, ticket, prepared, authority, caller, execution) do
     start_with_admission(
       host,
@@ -162,11 +172,16 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   defp activate_admitted(pid, token, authority) do
     case PublicationAuthority.claim(authority) do
       {:ok, lease} ->
+        # The caller monitors before activation: once activated, the owner may
+        # stop on admission death, and a later monitor reports only `:noproc`.
+        monitor = Process.monitor(pid)
+
         try do
           :ok = GenServer.call(pid, {token, {:activate, lease}}, :infinity)
-          {:ok, %__MODULE__{pid: pid, token: token}}
+          {:ok, %__MODULE__{pid: pid, token: token, monitor: monitor}}
         catch
           :exit, _ ->
+            Process.demonitor(monitor, [:flush])
             PublicationAuthority.abort(authority)
             {:error, :execution_session_unavailable}
         end
@@ -266,6 +281,10 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   @doc false
   @spec pid(t()) :: pid()
   def pid(%__MODULE__{pid: pid}), do: pid
+
+  @doc false
+  @spec monitor(t()) :: reference() | nil
+  def monitor(%__MODULE__{monitor: monitor}), do: monitor
 
   @impl GenServer
   def init({:admitted, host, admission_request, prepared, authority, caller, token, execution}) do

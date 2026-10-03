@@ -26,10 +26,12 @@ defmodule PtcRunner.Kernel.HostConfig do
   are not started, and remote endpoints are not contacted. Those operations
   belong to the later preflight and acquisition phases.
 
-  The closed V1 source identifiers are `mcp`, `llm`, `llm_replay`,
+  The closed V1 source identifiers are `mcp`, `llm`, `llm_replay`, `decision`, `decision_replay`,
   `ptc_trace_snapshot`, `ptc_private_trace_snapshot`, and `ptc_inspection_snapshot`. LLM credentials are explicit bindings passed to
   the adapter per request rather than ambient provider-specific environment
-  lookup. The native snapshot sources fix host-relative directories and
+  lookup. Chat decision installations resolve an installed `llm` alias in
+  `json_schema` mode during decode and retain its declaration in their
+  configuration identity. The native snapshot sources fix host-relative directories and
   expose only PtcRunner's canonical or private inspection query vocabularies.
   Every installation requires a public, non-secret `installation_revision`
   matching `\\A[a-z][a-z0-9._-]{0,127}\\z`; command decoding reports its
@@ -55,6 +57,8 @@ defmodule PtcRunner.Kernel.HostConfig do
   name a read mapping. MCP effects form the closed `read`/`write` operator
   classification; server-supplied annotations cannot widen or narrow it.
   """
+
+  alias PtcRunner.Kernel.LLMUsage
 
   alias PtcRunner.Kernel.ConfinedFile
   alias PtcRunner.Kernel.InstallationConfigDigest
@@ -240,12 +244,23 @@ defmodule PtcRunner.Kernel.HostConfig do
               }
             }
 
+  @type decision_installation :: %{
+          required(:source) => :decision | :decision_replay,
+          required(:installation_revision) => binary(),
+          required(:installation_config_digest) => binary(),
+          required(:max_total_tokens_per_call) => pos_integer(),
+          required(:max_cost_microusd_per_call) => non_neg_integer(),
+          optional(:backend) => :chat | :http,
+          optional(:endpoint) => binary(),
+          optional(atom()) => term()
+        }
+
   @type t :: %__MODULE__{
           path: binary(),
           directory: binary(),
           runtime: %{stdio_launcher: binary() | nil},
           credentials: %{binary() => credential()},
-          install: %{binary() => installation()}
+          install: %{binary() => installation() | decision_installation()}
         }
 
   @doc false
@@ -358,7 +373,7 @@ defmodule PtcRunner.Kernel.HostConfig do
              runtime: %{stdio_launcher: binary() | nil},
              limits: Limits.t(),
              credentials: %{binary() => credential()},
-             install: %{binary() => installation()}
+             install: %{binary() => installation() | decision_installation()}
            }}
           | {:error, :invalid_host_config}
   def decode(value, directory) when is_map(value) and is_binary(directory) do
@@ -468,6 +483,17 @@ defmodule PtcRunner.Kernel.HostConfig do
     if is_binary(endpoint) and is_boolean(insecure_loopback) and is_list(auth),
       do: installed_endpoint(endpoint, insecure_loopback, auth, oauth),
       else: :ok
+  end
+
+  defp endpoint_rejection(%{"source" => "decision", "backend" => "http"} = value) do
+    auth = if Map.has_key?(value, "credential"), do: [value["credential"]], else: []
+
+    installed_endpoint(
+      value["endpoint"],
+      Map.get(value, "allow_insecure_loopback", false),
+      auth,
+      nil
+    )
   end
 
   defp endpoint_rejection(_installation), do: :ok
@@ -687,6 +713,7 @@ defmodule PtcRunner.Kernel.HostConfig do
              do: oauth.installation_id
            ),
          true <- ids == Enum.uniq(ids),
+         {:ok, installations} <- resolve_decision_chats(installations),
          {:ok, installations} <- InstallationConfigDigest.attach_all(installations) do
       {:ok, installations}
     else
@@ -724,6 +751,12 @@ defmodule PtcRunner.Kernel.HostConfig do
 
         "ptc_inspection_snapshot" ->
           inspection_snapshot_installation(value)
+
+        "decision" ->
+          decision_installation(value, credentials, limits)
+
+        "decision_replay" ->
+          decision_replay_installation(value, limits)
 
         "llm_replay" ->
           llm_replay_installation(value)
@@ -771,6 +804,190 @@ defmodule PtcRunner.Kernel.HostConfig do
       _reason -> {:error, :invalid_installation}
     end
   end
+
+  defp resolve_decision_chats(installations) do
+    Enum.reduce_while(installations, {:ok, %{}}, fn {name, installation}, {:ok, acc} ->
+      case resolve_decision_chat(installation, installations) do
+        {:ok, resolved} -> {:cont, {:ok, Map.put(acc, name, resolved)}}
+        error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp resolve_decision_chat(
+         %{source: :decision, backend: :chat, llm: alias_name} = decision,
+         installations
+       ) do
+    with %{source: :llm, structured_output_mode: :json_schema} = llm <-
+           Map.get(installations, alias_name),
+         true <- decision.data_class == llm.data_class,
+         true <- MapSet.subset?(MapSet.new(decision.accepts_data), MapSet.new(llm.accepts_data)) do
+      {:ok,
+       decision
+       |> Map.put(:chat_installation, llm)
+       |> Map.put(:credential, llm.credential)
+       |> Map.put(:usage_guarantees, llm.usage_guarantees)}
+    else
+      _ -> {:error, :invalid_installation}
+    end
+  end
+
+  defp resolve_decision_chat(installation, _installations), do: {:ok, installation}
+
+  defp decision_installation(%{"backend" => "chat"} = value, _credentials, limits) do
+    with :ok <-
+           exact_keys(
+             value,
+             ~w(source backend llm installation_revision ceilings data_class accepts_data max_cost_per_call max_total_tokens_per_call),
+             ~w(source backend llm installation_revision max_cost_per_call max_total_tokens_per_call)
+           ),
+         true <- valid_name?(value["llm"]),
+         {:ok, bounds} <- decision_bounds(value),
+         {:ok, revision} <- revision(value["installation_revision"]),
+         {:ok, ceilings} <- llm_ceilings(Map.get(value, "ceilings", %{}), limits),
+         {:ok, data_class} <- data_class(Map.get(value, "data_class", "normal")),
+         {:ok, accepts_data} <- accepts_data(Map.get(value, "accepts_data", ["normal"])) do
+      {:ok,
+       Map.merge(bounds, %{
+         source: :decision,
+         backend: :chat,
+         llm: value["llm"],
+         installation_revision: revision,
+         ceilings: ceilings,
+         data_class: data_class,
+         accepts_data: accepts_data
+       })}
+    else
+      _ -> {:error, :invalid_installation}
+    end
+  end
+
+  defp decision_installation(%{"backend" => "http"} = value, credentials, limits) do
+    with :ok <-
+           exact_keys(
+             value,
+             ~w(source backend endpoint model credential allow_insecure_loopback usage_guarantees installation_revision ceilings data_class accepts_data max_cost_per_call max_total_tokens_per_call),
+             ~w(source backend endpoint model usage_guarantees installation_revision max_cost_per_call max_total_tokens_per_call)
+           ),
+         true <- valid_string?(value["model"], 256),
+         true <-
+           not Map.has_key?(value, "credential") or Map.has_key?(credentials, value["credential"]),
+         :ok <- endpoint_rejection(value),
+         {:ok, guarantees} <- usage_guarantees(value["usage_guarantees"]),
+         :ok <- usage_guarantee_requirements(guarantees, limits),
+         {:ok, bounds} <- decision_bounds(value),
+         {:ok, revision} <- revision(value["installation_revision"]),
+         {:ok, ceilings} <- llm_ceilings(Map.get(value, "ceilings", %{}), limits),
+         {:ok, data_class} <- data_class(Map.get(value, "data_class", "normal")),
+         {:ok, accepts_data} <- accepts_data(Map.get(value, "accepts_data", ["normal"])) do
+      {:ok,
+       Map.merge(bounds, %{
+         source: :decision,
+         backend: :http,
+         endpoint: value["endpoint"],
+         model: value["model"],
+         credential: value["credential"],
+         usage_guarantees: guarantees,
+         reservation_tariff: nil,
+         allow_insecure_loopback: Map.get(value, "allow_insecure_loopback", false),
+         installation_revision: revision,
+         ceilings: ceilings,
+         data_class: data_class,
+         accepts_data: accepts_data
+       })}
+    else
+      _ -> {:error, :invalid_installation}
+    end
+  end
+
+  defp decision_installation(value, credentials, limits) do
+    allowed =
+      ~w(source model credential routing usage_guarantees reservation_tariff installation_revision ceilings data_class accepts_data max_cost_per_call max_total_tokens_per_call)
+
+    with :ok <-
+           exact_keys(
+             value,
+             allowed,
+             ~w(source model credential usage_guarantees installation_revision max_cost_per_call max_total_tokens_per_call)
+           ),
+         model when is_binary(model) <- value["model"],
+         true <- valid_string?(model, 256),
+         credential when is_binary(credential) <- value["credential"],
+         true <- Map.has_key?(credentials, credential),
+         {:ok, routing} <- decision_routing(Map.get(value, "routing", %{})),
+         {:ok, guarantees} <- usage_guarantees(value["usage_guarantees"]),
+         :ok <- usage_guarantee_requirements(guarantees, limits),
+         {:ok, tariff} <- reservation_tariff(value["reservation_tariff"]),
+         {:ok, bounds} <- decision_bounds(value),
+         {:ok, revision} <- revision(value["installation_revision"]),
+         {:ok, ceilings} <- llm_ceilings(Map.get(value, "ceilings", %{}), limits),
+         {:ok, data_class} <- data_class(Map.get(value, "data_class", "normal")),
+         {:ok, accepts_data} <- accepts_data(Map.get(value, "accepts_data", ["normal"])) do
+      {:ok,
+       Map.merge(bounds, %{
+         source: :decision,
+         model: model,
+         credential: credential,
+         routing: routing,
+         usage_guarantees: guarantees,
+         reservation_tariff: tariff,
+         installation_revision: revision,
+         ceilings: ceilings,
+         data_class: data_class,
+         accepts_data: accepts_data
+       })}
+    else
+      _ -> {:error, :invalid_installation}
+    end
+  end
+
+  defp decision_replay_installation(value, limits) do
+    with {:ok, bounds} <- decision_bounds(value),
+         {:ok, guarantees} <-
+           usage_guarantees(
+             Map.get(value, "usage_guarantees", %{"tokens" => true, "cost_currency" => "USD"})
+           ),
+         :ok <- usage_guarantee_requirements(guarantees, limits),
+         {:ok, replay} <-
+           value
+           |> Map.drop(~w(max_cost_per_call max_total_tokens_per_call usage_guarantees))
+           |> Map.put("source", "llm_replay")
+           |> llm_replay_installation() do
+      {:ok,
+       Map.merge(replay, bounds)
+       |> Map.put(:source, :decision_replay)
+       |> Map.put(:usage_guarantees, guarantees)}
+    else
+      _ -> {:error, :invalid_installation}
+    end
+  end
+
+  defp decision_bounds(%{
+         "max_cost_per_call" => %{"currency" => "USD", "amount" => amount} = cost,
+         "max_total_tokens_per_call" => tokens
+       })
+       when map_size(cost) == 2 and is_binary(amount) and is_integer(tokens) and tokens > 0 do
+    with true <- tokens <= LLMUsage.maximum_integer(),
+         true <- Regex.match?(~r/\A(?:0|[1-9][0-9]*)(?:\.[0-9]+)?\z/, amount),
+         {:ok, microunits} when microunits >= 0 <-
+           LLMUsage.ceil_scaled_decimal(amount, 1_000_000, 1) do
+      {:ok, %{max_cost_microusd_per_call: microunits, max_total_tokens_per_call: tokens}}
+    else
+      _ -> {:error, :invalid_decision_bounds}
+    end
+  end
+
+  defp decision_bounds(_), do: {:error, :invalid_decision_bounds}
+
+  defp decision_routing(value) when is_map(value) do
+    if Map.keys(value) -- ~w(zdr data_collection allow_fallbacks) == [] and
+         Enum.all?(value, fn
+           {"data_collection", v} -> v in ["allow", "deny"]
+           {_, v} -> is_boolean(v)
+         end), do: {:ok, value}, else: {:error, :invalid_routing}
+  end
+
+  defp decision_routing(_), do: {:error, :invalid_routing}
 
   defp llm_installation(value, credentials, limits) do
     allowed =
@@ -1166,7 +1383,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   # travelling over a loopback socket are still plaintext.
   defp installed_endpoint(endpoint, insecure_loopback, auth, oauth)
        when auth != [] or not is_nil(oauth) do
-    if String.starts_with?(endpoint, "http://"),
+    if is_binary(endpoint) and String.starts_with?(endpoint, "http://"),
       do: {:error, :credentials_require_https},
       else: MCPEndpoint.diagnose(endpoint, insecure_loopback)
   end
@@ -1600,11 +1817,108 @@ defmodule PtcRunner.Kernel.HostConfig do
       "oneOf" => [
         mcp_installation_schema(),
         llm_installation_schema(),
+        decision_installation_schema(),
+        chat_decision_installation_schema(),
+        http_decision_installation_schema(),
+        decision_replay_installation_schema(),
         trace_snapshot_installation_schema("ptc_trace_snapshot"),
         trace_snapshot_installation_schema("ptc_private_trace_snapshot"),
         inspection_snapshot_installation_schema(),
         llm_replay_installation_schema()
       ]
+    }
+  end
+
+  defp decision_installation_schema do
+    chat = llm_installation_schema()
+
+    properties =
+      chat["properties"]
+      |> Map.drop(~w(cache params structured_output_mode))
+      |> Map.put("source", %{"const" => "decision"})
+      |> Map.put(
+        "routing",
+        closed_object(%{
+          "zdr" => %{"type" => "boolean"},
+          "data_collection" => %{"enum" => ["allow", "deny"]},
+          "allow_fallbacks" => %{"type" => "boolean"}
+        })
+      )
+      |> Map.merge(decision_bounds_schema())
+
+    required_object(
+      properties,
+      ~w(source model credential usage_guarantees installation_revision max_cost_per_call max_total_tokens_per_call)
+    )
+  end
+
+  defp http_decision_installation_schema do
+    properties =
+      decision_installation_schema()["properties"]
+      |> Map.drop(~w(routing reservation_tariff))
+      |> Map.put("backend", %{"const" => "http"})
+      |> Map.put("endpoint", bounded_string(4_096))
+      |> Map.put("allow_insecure_loopback", %{"type" => "boolean", "default" => false})
+
+    loopback =
+      loopback_endpoint_schema()
+      |> Map.put("not", %{"required" => ["credential"]})
+      |> update_in(["properties"], &Map.delete(&1, "auth"))
+
+    required_object(
+      properties,
+      ~w(source backend endpoint model usage_guarantees installation_revision max_cost_per_call max_total_tokens_per_call)
+    )
+    |> Map.put("oneOf", [secure_endpoint_schema(), loopback])
+  end
+
+  defp chat_decision_installation_schema do
+    properties =
+      decision_installation_schema()["properties"]
+      |> Map.drop(~w(model credential routing usage_guarantees reservation_tariff))
+      |> Map.put("backend", %{"const" => "chat"})
+      |> Map.put("llm", bounded_string(128))
+
+    required_object(
+      properties,
+      ~w(source backend llm installation_revision max_cost_per_call max_total_tokens_per_call)
+    )
+  end
+
+  defp decision_replay_installation_schema do
+    replay = llm_replay_installation_schema()
+
+    properties =
+      replay["properties"]
+      |> Map.put("source", %{"const" => "decision_replay"})
+      |> Map.put("usage_guarantees", llm_installation_schema()["properties"]["usage_guarantees"])
+      |> Map.merge(decision_bounds_schema())
+
+    required_object(
+      properties,
+      ~w(source fixtures installation_revision max_cost_per_call max_total_tokens_per_call)
+    )
+  end
+
+  defp decision_bounds_schema do
+    %{
+      "max_cost_per_call" =>
+        required_object(
+          %{
+            "currency" => %{"const" => "USD"},
+            "amount" => %{
+              "type" => "string",
+              "pattern" => "^(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+              "maxLength" => 64
+            }
+          },
+          ~w(currency amount)
+        ),
+      "max_total_tokens_per_call" => %{
+        "type" => "integer",
+        "minimum" => 1,
+        "maximum" => LLMUsage.maximum_integer()
+      }
     }
   end
 
@@ -1673,6 +1987,8 @@ defmodule PtcRunner.Kernel.HostConfig do
             }
           }),
         "structured_output_mode" => %{
+          "description" =>
+            "Direct openai-compat: supports json_schema as your declaration of strict server schema support (which the adapter cannot verify); configured credentials are sent as Authorization: Bearer; schemas are sent unchanged and returned objects are validated. Direct ollama: refuses structured modes. Direct routes refuse reservation tariffs and cost budgets; token budgets require usage_guarantees.tokens: true.",
           "type" => "string",
           "enum" => ["json_schema", "json_object", "unsupported"]
         },

@@ -34,7 +34,7 @@ defmodule PtcRunner.Kernel.WarmProviderRuntime do
   One explicit ProviderCallAdmission domain governs installed live workflow,
   mission and connectivity requester invocations, including sequential retries.
   ProviderCallOwner guardians retain their leases until positive transport drain
-  and Finch checkout-return evidence. Replay, MCP/OAuth, metadata, embeddings,
+  and Finch checkout-return evidence. Chat replay, MCP/OAuth, metadata, embeddings,
   public direct LLM calls and custom bypasses are outside this guarantee.
 
   `snapshot/1` is bounded and secret-free. Saturation remains ready; loss or fencing

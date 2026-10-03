@@ -105,6 +105,7 @@ defmodule Probe do
       max: percentiles[100],
       peak_leases: held.peak,
       statuses: GatewayLoad.by_status(results),
+      refusal_reasons: GatewayLoad.by_refusal_reason(results),
       mailboxes: depths
     }
   end
@@ -119,7 +120,7 @@ defmodule Probe do
         pad("ok/s", 9) <>
         pad("p50 ms", 9) <>
         pad("p95 ms", 9) <>
-        pad("p99 ms", 9) <> pad("max ms", 9) <> pad("leases", 8) <> "statuses"
+        pad("p99 ms", 9) <> pad("max ms", 9) <> pad("leases", 8) <> "statuses / refusal reasons"
     )
 
     Enum.each(rows, fn row ->
@@ -132,7 +133,7 @@ defmodule Probe do
           pad(ms(row.p99), 9) <>
           pad(ms(row.max), 9) <>
           pad(row.peak_leases, 8) <>
-          inspect(row.statuses)
+          inspect(row.statuses) <> " / " <> inspect(row.refusal_reasons)
       )
     end)
   end

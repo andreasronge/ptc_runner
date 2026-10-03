@@ -177,7 +177,8 @@ defmodule PtcRunner.Scripts.CIGatesTest do
 
     assert File.read!(marker) |> String.split("\n", trim: true) == [
              "CI= MIX_ENV=test HEX_SPONSOR=false ERL_FLAGS= PWD=ptc_viewer :: deps.get --check-locked",
-             "CI= MIX_ENV=test HEX_SPONSOR=false ERL_FLAGS= PWD=ptc_runner_launcher :: deps.get --check-locked"
+             "CI= MIX_ENV=test HEX_SPONSOR=false ERL_FLAGS= PWD=ptc_runner_launcher :: deps.get --check-locked",
+             "CI= MIX_ENV=test HEX_SPONSOR=false ERL_FLAGS= PWD=ptc_gateway :: deps.get --check-locked"
            ]
   end
 

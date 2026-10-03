@@ -17,6 +17,37 @@ defmodule PtcRunner.Kernel.CommandFailureCause do
     destination_exists: "An output destination was already occupied."
   ]
   @causes Keyword.keys(@rows)
+  @configuration_reasons [
+    :invalid_installation_catalog,
+    :invalid_host_installation,
+    :invalid_host_runtime_payload,
+    :invalid_provider_execution,
+    :invalid_provider_runtime,
+    :invalid_publication_authority,
+    :invalid_provider_runtime_services,
+    :invalid_provider_registry,
+    :invalid_prepared_run,
+    :invalid_command_runtime,
+    :invalid_command_preparation,
+    :invalid_run_request,
+    :invalid_doctor_plan
+  ]
+  @resource_reasons [
+    :timeout,
+    :cancelled,
+    :heap_exceeded,
+    :worker_failed,
+    :execution_session_unavailable,
+    :provider_session_unavailable,
+    :provider_runtime_unavailable,
+    :provider_runtime_lost,
+    :provider_pin_unavailable,
+    :run_admission_unavailable,
+    :provider_activity_unavailable,
+    :provider_admission_unavailable,
+    :operation_deadline_expired,
+    :host_installation_unavailable
+  ]
 
   @permission_reasons [:eacces, :eperm, :erofs]
   @filesystem_reasons [:eio, :edquot, :enospc, :enoent, :enotdir, :eisdir]
@@ -33,6 +64,22 @@ defmodule PtcRunner.Kernel.CommandFailureCause do
   def from_reason({:destination_unavailable, reason}), do: from_reason(reason)
   def from_reason(reason) when reason in @permission_reasons, do: :permission
   def from_reason(reason) when reason in @filesystem_reasons, do: :filesystem_error
+  def from_reason(reason) when reason in @configuration_reasons, do: :invalid_configuration
+  def from_reason(reason) when reason in @resource_reasons, do: :resource_unavailable
+  def from_reason(:unreadable), do: :permission
+  def from_reason(:not_found), do: :filesystem_error
+  def from_reason(:changed_during_read), do: :filesystem_error
+
+  def from_reason(reason)
+      when reason in [
+             :invalid_path,
+             :not_regular,
+             :invalid_utf8,
+             :symlink_escape,
+             :symlink_depth_exceeded
+           ],
+      do: :invalid_configuration
+
   def from_reason(:lock_timeout), do: :lock_timeout
   def from_reason(:destination_exists), do: :destination_exists
   def from_reason(:destination_collision), do: :destination_exists

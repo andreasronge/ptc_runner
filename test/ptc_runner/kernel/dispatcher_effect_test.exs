@@ -141,7 +141,9 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "mission-quota-attribution")
     {:ok, capability} = capability(:read, fn -> {:ok, 1} end)
     {:ok, environment} = MissionEnvironment.new(capabilities: [capability])
-    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, "reader", :fail_fast)
+
+    {:ok, _memory, _history, lease} =
+      RunState.reserve_evaluation(state, "reader", mode: :fail_fast)
 
     context = %{
       timeout_ms: 100,
@@ -317,7 +319,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
                environment,
                "llm-request",
                arguments,
-               TestHelpers.dispatch_context(state, :workflow, 100),
+               TestHelpers.dispatch_context(state, :workflow, 5_000),
                nil,
                inspection_sink
              )
@@ -615,7 +617,9 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
         end)
 
       {:ok, environment} = MissionEnvironment.new(capabilities: [capability])
-      {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+
+      {:ok, _memory, _history, lease} =
+        RunState.reserve_evaluation(state, "default", mode: :fail_fast)
 
       task =
         Task.async(fn ->
@@ -703,7 +707,9 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
 
       {:ok, environment} = MissionEnvironment.new(capabilities: [capability])
       {:ok, state} = RunState.start(Limits.defaults())
-      {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+
+      {:ok, _memory, _history, lease} =
+        RunState.reserve_evaluation(state, "default", mode: :fail_fast)
 
       assert %{status: :error, kind: :protocol_error, reason: :invalid_arguments} =
                result =
@@ -864,7 +870,8 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
 
     # Mission dispatch only happens under an evaluation lease in production;
     # the reservation is authenticated against it.
-    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+    {:ok, _memory, _history, lease} =
+      RunState.reserve_evaluation(state, "default", mode: :fail_fast)
 
     Dispatcher.dispatch(
       state,
@@ -875,7 +882,9 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
       TestHelpers.dispatch_context(
         state,
         :mission,
-        Keyword.get(opts, :timeout_ms, 100),
+        # Functional assertions need scheduling headroom in the full async suite.
+        # Deadline tests supply their own timeout explicitly.
+        Keyword.get(opts, :timeout_ms, 5_000),
         lease: lease,
         mission_name: "default"
       ),
@@ -907,7 +916,9 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "mission-limit-attribution")
     {:ok, capability} = capability(:read, callback)
     {:ok, environment} = MissionEnvironment.new(capabilities: [capability])
-    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, "reader", :fail_fast)
+
+    {:ok, _memory, _history, lease} =
+      RunState.reserve_evaluation(state, "reader", mode: :fail_fast)
 
     result =
       Dispatcher.dispatch(

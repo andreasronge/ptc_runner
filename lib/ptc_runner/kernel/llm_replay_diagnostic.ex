@@ -1,21 +1,22 @@
 defmodule PtcRunner.Kernel.LLMReplayDiagnostic do
   @moduledoc false
 
-  alias PtcRunner.Kernel.SafeMetadata
+  alias PtcRunner.Kernel.DiagnosticPattern
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
 
   @prefix "no replay fixture matches this request (request_hash: "
   @suffix ")"
   @hash_pattern "sha256:[0-9a-f]{64}"
-  @hash_regex ~r/\Asha256:[0-9a-f]{64}\z/
-  @message_regex ~r/\Ano replay fixture matches this request \(request_hash: (sha256:[0-9a-f]{64})\)\z/
+  @hash_regex Regex.compile!(DiagnosticPattern.exact(@hash_pattern))
   @maximum_message_bytes byte_size(@prefix) + 71 + byte_size(@suffix)
+
+  @template [{:literal, @prefix}, {:slot, :hash, :text, @hash_pattern}, {:literal, @suffix}]
 
   @doc false
   @spec message(term()) :: {:ok, binary()} | :error
   def message(request_hash) when is_binary(request_hash) do
     if request_hash =~ @hash_regex,
-      do: {:ok, @prefix <> request_hash <> @suffix},
+      do: {:ok, DiagnosticPattern.render(@template, %{hash: request_hash})},
       else: :error
   end
 
@@ -28,10 +29,7 @@ defmodule PtcRunner.Kernel.LLMReplayDiagnostic do
   @doc false
   @spec request_hash(term()) :: {:ok, binary()} | :error
   def request_hash(message) when is_binary(message) do
-    case Regex.run(@message_regex, message, capture: :all_but_first) do
-      [request_hash] -> {:ok, request_hash}
-      _invalid -> :error
-    end
+    with {:ok, %{hash: hash}} <- DiagnosticPattern.parse(@template, message), do: {:ok, hash}
   end
 
   def request_hash(_message), do: :error
@@ -96,19 +94,6 @@ defmodule PtcRunner.Kernel.LLMReplayDiagnostic do
   def retain_candidate_metadata(_metadata), do: %{}
 
   @doc false
-  @spec retain_parallel_failure_metadata(term()) :: map()
-  def retain_parallel_failure_metadata(metadata) when is_map(metadata) do
-    metadata
-    |> SafeMetadata.retain_failure_taxonomy_fields()
-    |> Map.merge(retain_candidate_metadata(metadata))
-    |> Map.merge(SafeMetadata.retain_llm_provider_failure_fields(metadata))
-    |> Map.merge(SafeMetadata.retain_named_quota_refusal_fields(metadata))
-    |> Map.merge(SafeMetadata.retain_budget_refusal_fields(metadata))
-  end
-
-  def retain_parallel_failure_metadata(_metadata), do: %{}
-
-  @doc false
   @spec valid_message?(term()) :: boolean()
   def valid_message?(message), do: match?({:ok, _request_hash}, request_hash(message))
 
@@ -118,13 +103,8 @@ defmodule PtcRunner.Kernel.LLMReplayDiagnostic do
     %{
       "oneOf" => [
         %{"const" => fallback},
-        %{
-          "type" => "string",
-          "minLength" => @maximum_message_bytes,
-          "maxLength" => @maximum_message_bytes,
-          "pattern" =>
-            "^no replay fixture matches this request \\(request_hash: #{@hash_pattern}\\)$(?![\\s\\S])"
-        }
+        DiagnosticPattern.exact_message_schema(@maximum_message_bytes, @template)
+        |> Map.put("minLength", @maximum_message_bytes)
       ]
     }
   end

@@ -1359,7 +1359,11 @@ is distinct from an evaluator error returned under the outer `:error` tag.
 - Immediately terminates the current program execution
 - The outer call to `PtcRunner.Lisp.run/2` succeeds and `Result.return` contains
   `{:__ptc_fail__, value}`
-- Cannot be used inside `pmap` or `pcalls` (raises an error)
+- Inside `pmap` or `pcalls`, terminates the parallel call with an error.
+  Only closed, payload-free failure metadata crosses the worker boundary;
+  the original value, messages, and details maps are dropped. Taxonomy,
+  provider classification, replay request hashes, and quota or aggregate
+  budget refusal fields retain their existing closed vocabularies.
 
 **What a `ptc run` caller observes.** A workflow entry that ends in `fail`
 exits 5 and reports `execution/explicit_failure`, whose message names where the
@@ -2952,9 +2956,9 @@ passed to regex functions but are not otherwise inspected.
 **Note:** `#"..."` is shorthand for `(re-pattern "...")`. Both forms produce compiled regex values. `split` follows Clojure: the delimiter is a regex. A single-character string delimiter is accepted (chars are one-character strings), but a multi-character string delimiter signals a `:type_error` — use a regex literal for those, e.g. `(split s #"---\n")`. For splitting on newlines, prefer `(split-lines s)`.
 
 **Safety Constraints:**
-- **Match Limit:** Regex execution is restricted to 100,000 backtracking steps. Exceeding this limit (e.g., due to ReDoS) terminates evaluation with an error.
-- **Input Truncation:** To prevent super-linear scaling on massive inputs, regex functions only scan the first 32KB of any input string.
-- **Pattern Complexity:** Patterns are limited to 256 bytes in length.
+- **Match Limits:** Every regex operation, including regex `replace`, `split`, `re-split`, and grep, uses a 100,000-step match limit and a 1,000-depth recursion limit. Exceeding either yields a recoverable error signal; split and replacement must not silently return partial results.
+- **Input Truncation:** Regex functions scan at most the first 32,768 bytes of each input string (each line for grep), backing off to a complete UTF-8 codepoint. Split and regex replacement return results for that prefix only. Invalid UTF-8 input yields a recoverable error signal.
+- **Pattern Complexity:** Patterns are limited to 256 bytes in length, including grep patterns and regex literals. Literals are validated during analysis using the same Unicode options and cap as `re-pattern`.
 
 ### 8.11 Function Combinators
 

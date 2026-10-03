@@ -176,6 +176,8 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Items do
       "output_timestamp" => output["timestamp"]
     }
 
+    common = Map.merge(common, Map.take(payload, ["served_model"]))
+
     if Map.has_key?(payload, "result") do
       Map.merge(
         item,

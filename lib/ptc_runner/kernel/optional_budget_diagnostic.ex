@@ -71,11 +71,7 @@ defmodule PtcRunner.Kernel.OptionalBudgetDiagnostic do
     with {:ok, %{scope: :optional_manifest_narrowable} = row} <- LimitCatalog.fetch(limit),
          true <- is_integer(requested),
          true <- LimitCatalog.valid_value?(row, requested) do
-      {:ok,
-       row.name <>
-         " " <>
-         Integer.to_string(requested) <>
-         @unavailable_middle <> row.name <> @unavailable_suffix}
+      {:ok, DiagnosticPattern.render(unavailable_template(row), %{requested: requested})}
     else
       _invalid -> :error
     end
@@ -83,24 +79,13 @@ defmodule PtcRunner.Kernel.OptionalBudgetDiagnostic do
 
   @doc false
   @spec valid_unavailable_message?(term()) :: boolean()
-  def valid_unavailable_message?(message) when is_binary(message) do
+  def valid_unavailable_message?(message) do
     Enum.any?(LimitCatalog.rows(:optional_manifest_narrowable), fn row ->
-      prefix = row.name <> " "
-      suffix = @unavailable_middle <> row.name <> @unavailable_suffix
-
-      DiagnosticPattern.valid_exact_integer_message?(
-        message,
-        prefix,
-        suffix,
-        decimal_digits(row.maximum),
-        fn requested ->
-          unavailable_message(row.field, requested)
-        end
-      )
+      DiagnosticPattern.valid_template?(unavailable_template(row), message, fn values ->
+        unavailable_message(row.field, values.requested)
+      end)
     end)
   end
-
-  def valid_unavailable_message?(_message), do: false
 
   @doc false
   @spec unavailable_message_schema(binary()) :: map()
@@ -110,19 +95,21 @@ defmodule PtcRunner.Kernel.OptionalBudgetDiagnostic do
         prefix = row.name <> " "
         suffix = @unavailable_middle <> row.name <> @unavailable_suffix
 
-        %{
-          "type" => "string",
-          "minLength" => 1,
-          "maxLength" => byte_size(prefix) + decimal_digits(row.maximum) + byte_size(suffix),
-          "pattern" =>
-            DiagnosticPattern.exact(
-              DiagnosticPattern.escape(prefix) <>
-                positive_integer_pattern(row.maximum) <> DiagnosticPattern.escape(suffix)
-            )
-        }
+        DiagnosticPattern.exact_message_schema(
+          byte_size(prefix) + decimal_digits(row.maximum) + byte_size(suffix),
+          unavailable_template(row)
+        )
       end
 
     %{"oneOf" => [%{"const" => fallback} | branches]}
+  end
+
+  defp unavailable_template(row) do
+    [
+      {:literal, row.name <> " "},
+      {:slot, :requested, :integer, positive_integer_pattern(row.maximum)},
+      {:literal, @unavailable_middle <> row.name <> @unavailable_suffix}
+    ]
   end
 
   # JSON Schema patterns compare text, not numbers. Build the exact decimal

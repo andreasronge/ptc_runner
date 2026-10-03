@@ -133,24 +133,6 @@ defmodule PtcRunner.Lisp.Eval.Capture do
     do: record(&Effects.merge(effects, &1))
 
   @doc false
-  @spec current_effects() :: Effects.t()
-  def current_effects do
-    case Process.get(@key, []) do
-      [%Frame{effects: effects} | _rest] -> effects
-      [] -> Effects.empty()
-    end
-  end
-
-  @doc false
-  @spec baseline_effects() :: Effects.t()
-  def baseline_effects do
-    case Process.get(@key, []) do
-      [%Frame{baseline: baseline} | _rest] -> baseline
-      [] -> Effects.empty()
-    end
-  end
-
-  @doc false
   @spec empty?() :: boolean()
   def empty?, do: Process.get(@key, []) == []
 

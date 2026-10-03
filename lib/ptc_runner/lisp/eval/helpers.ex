@@ -61,6 +61,10 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
     "unknown"
   ]
 
+  @doc false
+  @spec safe_type_names() :: [String.t()]
+  def safe_type_names, do: @safe_type_names
+
   @doc """
   Generates a type error tuple for FunctionClauseError in builtins.
   """
@@ -162,7 +166,8 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
     type_descriptions = Enum.map(args, &describe_type/1)
 
     {:type_error, "#{fun_name}: invalid argument types: #{Enum.join(type_descriptions, ", ")}",
-     args}
+     {:safe_diagnostic,
+      %{kind: :builtin_types, name: to_string(fun_name), types: type_descriptions}}}
   end
 
   @doc """
@@ -738,12 +743,10 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
     do: "the parallel worker budget is exhausted; reduce nesting or collection size"
 
   defp sanitize_private_parallel_failure(reason, index, taxonomy) do
-    retained = LLMReplayDiagnostic.retain_parallel_failure_metadata(taxonomy)
+    retained = SafeMetadata.retain_failure_metadata(taxonomy)
 
     case retained do
-      # Taxonomy, provider-failure pair, replay hash, named-quota triple,
-      # and aggregate-budget quadruple.
-      retained when map_size(retained) in 1..7 ->
+      retained when map_size(retained) > 0 ->
         message = "fail called inside #{if(reason == :pmap_error, do: "pmap", else: "pcalls")}"
 
         case reason do

@@ -20,6 +20,20 @@ defmodule PtcRunner.TestSupport.ReplFrontendFixtures do
     ]
   end
 
+  def private_profile_args(fixture) do
+    [
+      "--profile",
+      "private-run-analysis-v2",
+      "--resource",
+      "traces=#{fixture.traces}",
+      "--resource",
+      "inspection=#{fixture.inspection}",
+      "--session-trace-dir",
+      fixture.output,
+      "--private-unattended"
+    ]
+  end
+
   def decode_jsonl(output) do
     output
     |> String.split("\n", trim: true)

@@ -495,6 +495,9 @@ defmodule PtcRunner.MixProject do
           PtcRunner.Kernel.BundleCompiler,
           PtcRunner.Kernel.DeterministicJSON,
           PtcRunner.Kernel.Dispatcher,
+          PtcRunner.Kernel.Dispatcher.ProviderCall,
+          PtcRunner.Kernel.Dispatcher.Result,
+          PtcRunner.Kernel.Dispatcher.LlmResult,
           PtcRunner.Kernel.Environment,
           PtcRunner.Kernel.Evaluation,
           PtcRunner.Kernel.ExecutionOutcome,
@@ -505,12 +508,14 @@ defmodule PtcRunner.MixProject do
           PtcRunner.Kernel.Program,
           PtcRunner.Kernel.PublicationAuthority,
           PtcRunner.Kernel.RunState,
+          PtcRunner.Kernel.RunState.LlmBudget,
+          PtcRunner.Kernel.RunState.Admission,
+          PtcRunner.Kernel.RunState.Providers,
           PtcRunner.Kernel.Runner,
           PtcRunner.Kernel.RuntimeTools,
           PtcRunner.Kernel.SemanticRevision,
           PtcRunner.Kernel.StrictJSON,
-          PtcRunner.Kernel.TypedCanonicalJSON,
-          PtcRunner.Kernel.ViewerAdapter
+          PtcRunner.Kernel.TypedCanonicalJSON
         ],
         "PTC-Lisp": [
           PtcRunner.Lisp,
@@ -651,7 +656,7 @@ defmodule PtcRunner.MixProject do
 
     [
       files:
-        ~w(lib rel docs examples/kernel-tutorial examples/llm-replay examples/debug-a-failed-run examples/support-triage examples/adaptive-web-parser examples/named-mission-reader-writer site/schemas/mcp-2026-07-28.schema.json .formatter.exs mix.exs README.md usage-rules.md LICENSE LICENSES THIRD_PARTY_NOTICES.md CHANGELOG.md priv/source_revision priv/source_dirty priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/shipped_export_owners.json priv/spec priv/semantic_build_inventory.exs priv/semantic_build_projection.json),
+        ~w(lib rel docs examples/kernel-tutorial examples/decision-refund-triage examples/llm-replay examples/debug-a-failed-run examples/support-triage examples/adaptive-web-parser examples/named-mission-reader-writer site/schemas/mcp-2026-07-28.schema.json .formatter.exs mix.exs README.md usage-rules.md LICENSE LICENSES THIRD_PARTY_NOTICES.md CHANGELOG.md priv/source_revision priv/source_dirty priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/shipped_export_owners.json priv/spec priv/semantic_build_inventory.exs priv/semantic_build_projection.json),
       # Hex expands the directories above from the working tree, not from
       # git, so anything ignored but present -- a `.ptc` run directory left by
       # a tutorial walk, a `.env` beside an example -- is published. Ship no

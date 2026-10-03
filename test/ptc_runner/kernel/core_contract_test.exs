@@ -28,7 +28,6 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.SourceCheck
   alias PtcRunner.Kernel.TerminalUsage
-  alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp.Format
@@ -36,8 +35,69 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.TestSupport.ProviderSessionFixture
   alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
+  alias PtcRunner.TestSupport.TraceQuery
 
   @input_schema %{"type" => "object", "additionalProperties" => true}
+
+  for failure <- [:tracker_death, :cancel_worker_death] do
+    @tag cancel_failure: failure
+    test "caller death with #{failure} settles the guardian reservation", %{
+      cancel_failure: failure
+    } do
+      {:ok, state} = RunState.start(Limits.defaults())
+      guardian = spawn(fn -> receive do: (:finish -> :ok) end)
+      guardian_ref = Process.monitor(guardian)
+      on_exit(fn -> Process.exit(guardian, :kill) end)
+
+      {caller, caller_ref} = reserve_guardian(state, guardian)
+
+      assert_receive :attached
+
+      case failure do
+        :tracker_death ->
+          tracker_ref = Process.monitor(state.provider_tracker.pid)
+          Process.exit(state.provider_tracker.pid, :kill)
+          assert_receive {:DOWN, ^tracker_ref, :process, _, :killed}
+
+        :cancel_worker_death ->
+          :ok = :sys.suspend(state.provider_tracker.pid)
+      end
+
+      Process.exit(caller, :kill)
+      assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}
+
+      if failure == :cancel_worker_death do
+        assert_eventually(fn ->
+          Enum.any?(:sys.get_state(state.pid).reservations, fn {_id, reservation} ->
+            is_pid(Map.get(reservation, :cancel_pid))
+          end)
+        end)
+
+        [{_id, reservation}] = Map.to_list(:sys.get_state(state.pid).reservations)
+        Process.exit(reservation.cancel_pid, :kill)
+      end
+
+      assert_receive {:DOWN, ^guardian_ref, :process, ^guardian, :killed}
+      assert_eventually(fn -> :sys.get_state(state.pid).provider_tasks == 0 end)
+      refute RunState.open?(state)
+
+      assert %{kind: :provider_cleanup_error, reason: :provider_cleanup_failed} =
+               RunState.terminal_failure(state)
+
+      if failure == :cancel_worker_death, do: :sys.resume(state.provider_tracker.pid)
+      RunState.stop(state)
+    end
+  end
+
+  test "caller death retains a guardian reservation until cooperative cancellation drains" do
+    assert_cooperative_guardian_drain(Limits.defaults(), nil)
+  end
+
+  @tag :nightly
+  test "guardian cancellation honors a cleanup deadline beyond five seconds" do
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 10_000)
+    assert_cooperative_guardian_drain(limits, 6_000)
+  end
 
   test "environment constructors reject duplicate and mission-reserved capability names" do
     assert {:ok, capability} =
@@ -159,10 +219,13 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   test "only one evaluation lease is granted and failed candidates preserve memory" do
     {:ok, limits} = Limits.new(subordinate_evaluations: 2, evaluation_memory_bytes: 1_000)
     {:ok, state} = RunState.start(limits)
-    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
-    assert {:error, :busy} = RunState.reserve_evaluation(state, "default", :fail_fast)
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", mode: :fail_fast)
+    assert {:error, :busy} = RunState.reserve_evaluation(state, "default", mode: :fail_fast)
     assert :ok = RunState.release_evaluation(state, lease)
-    assert {:ok, %{}, [], next_lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+
+    assert {:ok, %{}, [], next_lease} =
+             RunState.reserve_evaluation(state, "default", mode: :fail_fast)
+
     assert :ok = RunState.commit_evaluation(state, next_lease, %{"x" => 42}, [41])
     assert %{evaluation_memory_bytes: memory_bytes} = RunState.usage(state)
     assert memory_bytes > 0
@@ -271,7 +334,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert :ok = RunState.finish_source_check(state, "default", revision)
 
     assert {:ok, %{}, stale_revision} = RunState.reserve_source_check(state, "default")
-    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", mode: :fail_fast)
     assert :ok = RunState.commit_evaluation(state, lease, %{"retained" => 42}, [])
     assert {:error, :stale} = RunState.finish_source_check(state, "default", stale_revision)
     assert {:error, :limit_exceeded} = RunState.reserve_source_check(state, "default")
@@ -281,7 +344,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
   test "source checks refuse an active evaluation lease without consuming quota" do
     {:ok, state} = RunState.start(Limits.defaults())
-    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", mode: :fail_fast)
     assert {:error, :busy} = RunState.reserve_source_check(state, "default")
     assert %{subordinate_source_checks: 0} = RunState.usage(state)
     assert :ok = RunState.release_evaluation(state, lease)
@@ -293,7 +356,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     evaluation_owner =
       spawn_link(fn ->
-        {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+        {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", mode: :fail_fast)
         send(parent, {:evaluation_ready, self(), lease})
 
         receive do
@@ -356,7 +419,8 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                        terminal_host_failure?: false
                      }}}
 
-    assert {:ok, %{}, [], next_lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+    assert {:ok, %{}, [], next_lease} =
+             RunState.reserve_evaluation(state, "default", mode: :fail_fast)
 
     assert {:ok,
             %{
@@ -368,7 +432,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
   test "evaluation host-failure status is scoped to the exact active lease" do
     {:ok, state} = RunState.start(Limits.defaults())
-    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", mode: :fail_fast)
 
     assert :ok = RunState.mark_evaluation_terminal_host_failure(state, make_ref())
 
@@ -378,7 +442,9 @@ defmodule PtcRunner.Kernel.CoreContractTest do
               terminal_host_failure?: false
             }} = RunState.release_evaluation_status(state, lease)
 
-    assert {:ok, %{}, [], next_lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+    assert {:ok, %{}, [], next_lease} =
+             RunState.reserve_evaluation(state, "default", mode: :fail_fast)
+
     assert :ok = RunState.mark_evaluation_terminal_host_failure(state, next_lease)
 
     assert {:ok,
@@ -402,11 +468,14 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       )
 
     {:ok, state} = RunState.start(limits)
-    assert {:ok, %{}, [], first_lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+
+    assert {:ok, %{}, [], first_lease} =
+             RunState.reserve_evaluation(state, "default", mode: :fail_fast)
+
     assert :ok = RunState.commit_evaluation(state, first_lease, memory, [])
 
     assert {:ok, ^memory, [], history_lease} =
-             RunState.reserve_evaluation(state, "default", :fail_fast)
+             RunState.reserve_evaluation(state, "default", mode: :fail_fast)
 
     assert :ok = RunState.commit_evaluation(state, history_lease, memory, [history_value])
 
@@ -419,7 +488,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert combined_bytes > memory_limit
 
     assert {:ok, ^memory, [^history_value], rejected_lease} =
-             RunState.reserve_evaluation(state, "default", :fail_fast)
+             RunState.reserve_evaluation(state, "default", mode: :fail_fast)
 
     assert {:error, :history_exceeded} =
              RunState.commit_evaluation(
@@ -430,7 +499,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
              )
 
     assert {:ok, ^memory, [^history_value], release_lease} =
-             RunState.reserve_evaluation(state, "default", :fail_fast)
+             RunState.reserve_evaluation(state, "default", mode: :fail_fast)
 
     assert :ok = RunState.release_evaluation(state, release_lease)
   end
@@ -447,11 +516,11 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       )
 
     {:ok, state} = RunState.start(limits)
-    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", mode: :fail_fast)
     assert :ok = RunState.commit_evaluation(state, lease, %{"slice" => slice}, [slice])
 
     assert {:ok, %{"slice" => retained}, [history], next_lease} =
-             RunState.reserve_evaluation(state, "default", :fail_fast)
+             RunState.reserve_evaluation(state, "default", mode: :fail_fast)
 
     assert :binary.referenced_byte_size(retained) == 1_000
     assert :binary.referenced_byte_size(history) == 1_000
@@ -624,7 +693,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, state} = RunState.start(limits)
 
     {:ok, _memory, _history, lease} =
-      RunState.reserve_evaluation(state, "default", :fail_fast)
+      RunState.reserve_evaluation(state, "default", mode: :fail_fast)
 
     assert %{
              status: :error,
@@ -2345,6 +2414,89 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     end)
   end
 
+  test "closed failure metadata transport rejects payloads and retains budget projections" do
+    value = %{
+      status: :error,
+      kind: :limit_exceeded,
+      reason: :llm_total_tokens,
+      details: %{
+        limit: :llm_total_tokens,
+        limit_value: 10,
+        requested: 8,
+        remaining: 2,
+        message: "PRIVATE_BUDGET_PAYLOAD"
+      }
+    }
+
+    expected = %{
+      failure_kind_fingerprint: SafeMetadata.fingerprint("failure-kind:limit_exceeded"),
+      limit: :llm_total_tokens,
+      limit_value: 10,
+      requested: 8,
+      remaining: 2
+    }
+
+    assert SafeMetadata.failure_metadata(value) == expected
+    assert SafeMetadata.retain_failure_metadata(Map.put(expected, :details, value)) == expected
+
+    assert SafeMetadata.retain_failure_metadata(%{
+             limit: :llm_total_tokens,
+             limit_value: 10,
+             requested: 1,
+             remaining: 2,
+             message: "PRIVATE"
+           }) == %{}
+  end
+
+  test "parallel budget failures retain closed fields without leaking forged payloads" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+
+    for limit <- [:llm_total_tokens, :llm_cost_microusd],
+        parallel <- [:pmap, :pcalls],
+        valid? <- [true, false] do
+      {:ok, sink} =
+        EventSink.start(:normal, limits, run_id: "parallel-budget-#{limit}-#{parallel}-#{valid?}")
+
+      {:ok, config} =
+        RunConfig.new(
+          workflow_environment: workflow,
+          missions: %{"default" => mission},
+          input: %{},
+          limits: limits,
+          event_sink: sink
+        )
+
+      requested = if valid?, do: 8, else: 1
+
+      value =
+        "{:status \"error\" :kind :limit-exceeded :reason :#{limit} :details {:limit :#{limit} :limit_value 10 :requested #{requested} :remaining 2 :message \"PRIVATE_BUDGET_PAYLOAD\"} :replay_request_hash \"PRIVATE_HASH\"}"
+
+      source =
+        if parallel == :pmap,
+          do: "(pmap (fn [_] (fail #{value})) [1])",
+          else: "(pcalls #(fail #{value}))"
+
+      assert {:error, step} = PtcRunner.Lisp.run(source)
+      expected_reason = if(parallel == :pmap, do: :pmap_error, else: :pcalls_error)
+      assert step.fail.reason == expected_reason
+
+      if valid? do
+        assert %{limit: ^limit, limit_value: 10, requested: 8, remaining: 2} = step.fail.details
+      else
+        refute Map.has_key?(step.fail.details, :limit)
+      end
+
+      refute inspect(step.fail) =~ "PRIVATE"
+      assert {:error, error} = Kernel.run(source, config)
+      assert error.reason == expected_reason
+      refute Map.has_key?(error.details, :limit)
+      refute inspect(error) =~ "PRIVATE"
+      refute inspect(EventSink.events(sink)) =~ "PRIVATE"
+    end
+  end
+
   test "parallel fail retains only bounded safe taxonomy" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
@@ -3892,7 +4044,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       end)
 
     assert_receive :source_compiled
-    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state, "default", mode: :fail_fast)
     assert :ok = RunState.commit_evaluation(state, lease, %{"changed" => true}, [])
     send(checking.pid, :finish_source_check)
 
@@ -4091,10 +4243,10 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     refute inspect(EventSink.events(sink)) =~ secret
 
-    assert {:ok, trace_log} = TraceLog.new(source: sink)
+    assert {:ok, trace_log} = TraceQuery.new(source: sink)
 
     assert {:ok, %{"items" => items}} =
-             TraceLog.query(trace_log, :list_turns, %{
+             TraceQuery.query(trace_log, :list_turns, %{
                "run_id" => "rejected-annotation-class",
                "capability" => "workflow-annotate"
              })
@@ -4323,6 +4475,47 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     Enum.find_value(messages, fn
       {:"$gen_call", _from, {_token, {:attach, provider}}} -> provider
       _message -> nil
+    end)
+  end
+
+  defp assert_cooperative_guardian_drain(limits, finish_after_ms) do
+    {:ok, state} = RunState.start(limits)
+    parent = self()
+
+    {guardian, guardian_ref} =
+      spawn_monitor(fn ->
+        receive do
+          {:cancel_provider_call, tracker, ref, _deadline} ->
+            send(parent, :draining)
+            if finish_after_ms, do: Process.send_after(self(), :finish, finish_after_ms)
+            receive do: (:finish -> :ok)
+            send(tracker, {:provider_call_drained, ref, self(), :completed})
+        end
+      end)
+
+    on_exit(fn -> Process.exit(guardian, :kill) end)
+    {caller, caller_ref} = reserve_guardian(state, guardian)
+    assert_receive :attached
+    Process.exit(caller, :kill)
+    assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}
+    assert_receive :draining
+    assert :sys.get_state(state.pid).provider_tasks == 1
+    assert RunState.open?(state)
+    if is_nil(finish_after_ms), do: send(guardian, :finish)
+    assert_receive {:DOWN, ^guardian_ref, :process, ^guardian, :normal}, 7_500
+    assert_eventually(fn -> :sys.get_state(state.pid).provider_tasks == 0 end)
+    assert RunState.open?(state)
+    RunState.stop(state)
+  end
+
+  defp reserve_guardian(state, guardian) do
+    parent = self()
+
+    spawn_monitor(fn ->
+      {:ok, reservation} = RunState.reserve_capability(state, :workflow, "read")
+      :ok = RunState.attach_provider_guardian(state, reservation, guardian)
+      send(parent, :attached)
+      receive do: (:finish -> :ok)
     end)
   end
 end

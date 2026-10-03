@@ -24,6 +24,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunState
   alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.TestSupport.RunLifecycle
   alias PtcRunner.TestSupport.StreamingInspection
@@ -31,6 +32,38 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
   @request %{"system" => "bounded", "messages" => [%{"role" => "user", "content" => "hi"}]}
 
   describe "fixture decoding" do
+    @tag :tmp_dir
+    test "retained fixtures have independent atomic sequences for each run", %{tmp_dir: dir} do
+      {:ok, key} = LLMReplay.request_hash(@request)
+
+      write(dir, [
+        %{"request_hash" => key, "responses" => [%{"n" => 1}, %{"n" => 2}, %{"n" => 3}]}
+      ])
+
+      {:ok, replay} = start(dir)
+      {:ok, limits} = Limits.new([])
+      states = for _ <- 1..2, do: elem(RunState.start(limits), 1)
+      requester = LLMReplay.requester(replay)
+
+      for state <- states do
+        assert {:ok, %{"n" => 1}} = requester.(@request, %{provider_run_state: state})
+      end
+
+      for state <- states do
+        results =
+          Task.async_stream(1..2, fn _ -> requester.(@request, %{provider_run_state: state}) end)
+          |> Enum.to_list()
+
+        assert Enum.sort(results) == [{:ok, {:ok, %{"n" => 2}}}, {:ok, {:ok, %{"n" => 3}}}]
+
+        assert {:error, %ProviderError{kind: :not_found}} =
+                 requester.(@request, %{provider_run_state: state})
+      end
+
+      Enum.each(states, &RunState.stop/1)
+      LLMReplay.stop(replay)
+    end
+
     @tag :tmp_dir
     test "replays a provider failure followed by a priced response", %{tmp_dir: dir} do
       {:ok, key} = LLMReplay.request_hash(@request)
@@ -182,6 +215,31 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
                requester.(@request, LLMSupport.llm_context())
 
       assert error.details =~ "exhausted"
+    end
+
+    @tag :tmp_dir
+    test "concurrent requester calls consume one run sequence exactly once", %{tmp_dir: dir} do
+      {:ok, key} = LLMReplay.request_hash(@request)
+      write(dir, [%{"request_hash" => key, "responses" => Enum.map(1..100, &%{"turn" => &1})}])
+      {:ok, replay} = start(dir)
+      on_exit(fn -> LLMReplay.stop(replay) end)
+      requester = LLMReplay.requester(replay)
+
+      results =
+        1..120
+        |> Task.async_stream(fn _ -> requester.(@request, LLMSupport.llm_context()) end,
+          max_concurrency: 32
+        )
+        |> Enum.map(fn {:ok, result} -> result end)
+
+      assert Enum.count(results, &match?({:error, %ProviderError{kind: :not_found}}, &1)) == 20
+
+      assert results
+             |> Enum.flat_map(fn
+               {:ok, %{"turn" => turn}} -> [turn]
+               {:error, %ProviderError{}} -> []
+             end)
+             |> Enum.sort() == Enum.to_list(1..100)
     end
 
     @tag :tmp_dir

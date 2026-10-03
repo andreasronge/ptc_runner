@@ -3,9 +3,9 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
 
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.RunAnalysisCapability
-  alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.Lisp.RetainedSize
+  alias PtcRunner.TestSupport.TraceQuery
 
   @tag :tmp_dir
   test "the accepted minimum result ceiling can return an empty page", %{
@@ -41,24 +41,24 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
     write_events(private_path, [event("private", 1, "run-started")])
     write_events(inspection_path, [event("inspection", 1, "run-started")])
 
-    assert {:ok, live_log} = TraceLog.new(source: {:directory, directory})
+    assert {:ok, live_log} = TraceQuery.new(source: {:directory, directory})
     assert {:ok, snapshot} = TraceSnapshot.start({:directory, directory}, owner: self())
     on_exit(fn -> TraceSnapshot.stop(snapshot) end)
     assert {:ok, %{snapshot_hash: snapshot_hash}} = TraceSnapshot.info(snapshot)
     assert snapshot_hash =~ ~r/\Asha256:[0-9a-f]{64}\z/
 
-    assert {:ok, expected_runs} = TraceLog.query(live_log, :list_runs, %{})
+    assert {:ok, expected_runs} = TraceQuery.query(live_log, :list_runs, %{})
     assert {:ok, snapshot_runs} = TraceSnapshot.query(snapshot, :list_runs, %{})
     assert Map.delete(snapshot_runs, "snapshot_hash") == expected_runs
     assert snapshot_runs["snapshot_hash"] == snapshot_hash
 
-    assert {:ok, expected_run} = TraceLog.query(live_log, :get_run, %{"run_id" => "first"})
+    assert {:ok, expected_run} = TraceQuery.query(live_log, :get_run, %{"run_id" => "first"})
     assert {:ok, snapshot_run} = TraceSnapshot.query(snapshot, :get_run, %{"run_id" => "first"})
     assert Map.delete(snapshot_run, "snapshot_hash") == expected_run
     assert snapshot_run["snapshot_hash"] == snapshot_hash
 
     assert {:ok, expected_turns} =
-             TraceLog.query(live_log, :list_turns, %{"run_id" => "first"})
+             TraceQuery.query(live_log, :list_turns, %{"run_id" => "first"})
 
     assert {:ok, snapshot_turns} =
              TraceSnapshot.query(snapshot, :list_turns, %{"run_id" => "first"})
@@ -66,7 +66,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
     assert Map.delete(snapshot_turns, "snapshot_hash") == expected_turns
     assert snapshot_turns["snapshot_hash"] == snapshot_hash
 
-    assert {:ok, expected_counters} = TraceLog.query(live_log, :counters, %{})
+    assert {:ok, expected_counters} = TraceQuery.query(live_log, :counters, %{})
     assert {:ok, snapshot_counters} = TraceSnapshot.query(snapshot, :counters, %{})
     assert Map.delete(snapshot_counters, "snapshot_hash") == expected_counters
     assert snapshot_counters["snapshot_hash"] == snapshot_hash
@@ -79,7 +79,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
     assert Map.delete(frozen_runs, "snapshot_hash") == expected_runs
     assert frozen_runs["snapshot_hash"] == snapshot_hash
 
-    assert {:ok, %{"items" => live_items}} = TraceLog.query(live_log, :list_runs, %{})
+    assert {:ok, %{"items" => live_items}} = TraceQuery.query(live_log, :list_runs, %{})
     assert Enum.sort(Enum.map(live_items, & &1["run_id"])) == ["changed", "later"]
   end
 
@@ -263,8 +263,8 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
       write_events(Path.join(directory, event["run_id"] <> ".jsonl"), [event])
     end)
 
-    assert {:ok, trace_log} = TraceLog.new(source: {:directory, directory})
-    assert {:ok, raw_page} = TraceLog.query(trace_log, :list_runs, %{})
+    assert {:ok, trace_log} = TraceQuery.new(source: {:directory, directory})
+    assert {:ok, raw_page} = TraceQuery.query(trace_log, :list_runs, %{})
 
     sized_page =
       Map.put(raw_page, "snapshot_hash", "sha256:" <> String.duplicate("0", 64))
@@ -440,7 +440,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
     source_bytes = File.stat!(path).size
 
     assert {:ok, live_log} =
-             TraceLog.new(source: {:directory, directory}, max_source_bytes: source_bytes)
+             TraceQuery.new(source: {:directory, directory}, max_source_bytes: source_bytes)
 
     assert {:ok, snapshot} =
              TraceSnapshot.start({:directory, directory},
@@ -450,7 +450,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
 
     on_exit(fn -> TraceSnapshot.stop(snapshot) end)
 
-    assert {:ok, expected} = TraceLog.query(live_log, :list_runs, %{})
+    assert {:ok, expected} = TraceQuery.query(live_log, :list_runs, %{})
     assert {:ok, actual} = TraceSnapshot.query(snapshot, :list_runs, %{})
     assert Map.delete(actual, "snapshot_hash") == expected
   end
@@ -597,18 +597,12 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
         TraceSnapshot.start({:directory, directory},
           owner: owner,
           capture_deadline_ms: System.monotonic_time(:millisecond) + 60_000,
-          capture_hook: fn ->
-            send(test, {:capture_paused, self()})
-
-            receive do
-              :continue_capture -> :ok
-            end
-          end
+          capture_hook: fn -> pause_until_monitored(test, :capture_paused) end
         )
       end)
 
     assert_receive {:capture_paused, capture_pid}, 5_000
-    capture_ref = Process.monitor(capture_pid)
+    capture_ref = monitor_paused_worker(capture_pid)
     Process.exit(owner, :kill)
 
     assert {:error, :snapshot_unavailable} = Task.await(starter)
@@ -645,18 +639,12 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
       Task.async(fn ->
         TraceSnapshot.start({:directory, directory},
           owner: owner,
-          listing_hook: fn ->
-            send(test, {:listing_paused, self()})
-
-            receive do
-              :continue_listing -> :ok
-            end
-          end
+          listing_hook: fn -> pause_until_monitored(test, :listing_paused) end
         )
       end)
 
     assert_receive {:listing_paused, listing_pid}, 5_000
-    listing_ref = Process.monitor(listing_pid)
+    listing_ref = monitor_paused_worker(listing_pid)
     Process.exit(owner, :kill)
 
     assert {:error, :snapshot_unavailable} = Task.await(starter)
@@ -707,6 +695,28 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
     assert RetainedSize.bytes(page) <= max_result_bytes
 
     collect_runs(snapshot, page["next_cursor"], items ++ page["items"], max_result_bytes)
+  end
+
+  # A monitor and this acknowledgement are signals from the same sender.
+  # Wait for both to reach the paused worker before another process kills it;
+  # otherwise the test can observe :noproc instead of the worker's exit reason.
+  defp monitor_paused_worker(pid) do
+    ref = Process.monitor(pid)
+    send(pid, {:monitor_installed, ref})
+    assert_receive {:monitor_installed, ^ref}, 5_000
+    ref
+  end
+
+  defp pause_until_monitored(test, phase) do
+    send(test, {phase, self()})
+
+    receive do
+      {:monitor_installed, ref} -> send(test, {:monitor_installed, ref})
+    end
+
+    receive do
+      :continue -> :ok
+    end
   end
 
   defp event(run_id, sequence, type) do

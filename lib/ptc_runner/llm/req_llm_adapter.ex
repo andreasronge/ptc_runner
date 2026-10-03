@@ -36,6 +36,7 @@ if Code.ensure_loaded?(ReqLLM) do
     alias PtcRunner.Kernel.AdapterCancellationWitness
     alias PtcRunner.Kernel.LLMUsage
     alias PtcRunner.Kernel.ProviderError
+    alias PtcRunner.LLM.CompatHTTP
     alias PtcRunner.LLM.Invocation
     alias PtcRunner.LLM.OutputLimit
     alias PtcRunner.LLM.ReqLLMPreparedModel
@@ -403,9 +404,10 @@ if Code.ensure_loaded?(ReqLLM) do
     @doc """
     Generate a structured JSON object from an LLM.
 
-    Only supported for ReqLLM providers whose sealed mode is attested.
-    Direct `ollama:` and `openai-compat:` routes return
-    `{:error, :structured_output_not_supported}`.
+    Supported for ReqLLM providers whose sealed mode is attested and direct
+    `openai-compat:` servers declared to support strict JSON schemas. The schema
+    is sent unchanged and the entire response content must decode to one object.
+    Direct `ollama:` routes return `{:error, :structured_output_not_supported}`.
     """
     @spec generate_object(String.t() | ReqLLMPreparedModel.t(), [map()], map(), keyword()) ::
             {:ok, map()} | {:error, term()}
@@ -432,8 +434,20 @@ if Code.ensure_loaded?(ReqLLM) do
         {:ollama, _model_name} ->
           {:error, :structured_output_not_supported}
 
-        {:openai_compat, _base_url, _model_name} ->
-          {:error, :structured_output_not_supported}
+        {:openai_compat, base_url, model_name} ->
+          case call_openai_compat_object(base_url, model_name, messages, schema, opts) do
+            {:ok, %{object: _object}} = result ->
+              result
+
+            {:ok, _usage_only} ->
+              {:error,
+               ProviderError.new(:invalid_result, "LLM provider returned an invalid JSON object",
+                 dispatch_provenance: :dispatched
+               )}
+
+            error ->
+              error
+          end
 
         {:req_llm, model_id} ->
           with {:ok, prepared, _status} <- prepare_req_llm_model(model_id),
@@ -596,6 +610,38 @@ if Code.ensure_loaded?(ReqLLM) do
       end
     end
 
+    defp call_openai_compat_object(base_url, model, messages, schema, opts) do
+      response_format = %{
+        type: "json_schema",
+        json_schema: %{name: "ptc_response", strict: true, schema: schema}
+      }
+
+      with {:ok, result} <-
+             call_openai_compat(
+               base_url,
+               model,
+               messages,
+               Keyword.put(opts, :response_format, response_format)
+             ) do
+        candidate = %{tokens: result.tokens}
+
+        case decode_direct_object(result.content) do
+          {:ok, object} -> {:ok, Map.put(candidate, :object, object)}
+          # The Kernel rejects the missing object while settling observed usage.
+          :error -> {:ok, candidate}
+        end
+      end
+    end
+
+    defp decode_direct_object(content) when is_binary(content) do
+      case Jason.decode(content) do
+        {:ok, object} when is_map(object) -> {:ok, object}
+        _invalid -> :error
+      end
+    end
+
+    defp decode_direct_object(_content), do: :error
+
     defp call_openai_compat(base_url, model, messages, opts) do
       timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
       http_opts = Keyword.get(opts, :req_http_options, [])
@@ -608,7 +654,8 @@ if Code.ensure_loaded?(ReqLLM) do
           :top_p,
           :presence_penalty,
           :frequency_penalty,
-          :reasoning_effort
+          :reasoning_effort,
+          :response_format
         ])
 
       formatted_messages =
@@ -623,10 +670,16 @@ if Code.ensure_loaded?(ReqLLM) do
           receive_timeout: timeout
         ] ++ http_opts
 
-      case Req.post("#{base_url}/chat/completions", request_opts) do
-        {:ok, %{status: 200, body: body}} ->
-          text = get_in(body, ["choices", Access.at(0), "message", "content"]) || ""
-          usage = body["usage"] || %{}
+      case CompatHTTP.request(
+             :post,
+             base_url,
+             "/chat/completions",
+             request_opts,
+             Keyword.get(opts, :api_key)
+           ) do
+        {:ok, %{status: 200, body: body}} when is_map(body) ->
+          content = openai_compat_content(body)
+          usage = if is_map(body["usage"]), do: body["usage"], else: %{}
 
           tokens =
             %{}
@@ -635,7 +688,10 @@ if Code.ensure_loaded?(ReqLLM) do
             |> maybe_put_usage_field(:total_cost, usage, "total_cost")
             |> add_cache_fields()
 
-          {:ok, %{content: text, tokens: tokens}}
+          {:ok, %{content: content, tokens: tokens}}
+
+        {:ok, %{status: 200}} ->
+          {:error, ProviderError.new(:invalid_result, "LLM provider returned an invalid result")}
 
         {:ok, %{status: status, body: body}} ->
           {:error, %{status: status, body: body}}
@@ -644,6 +700,12 @@ if Code.ensure_loaded?(ReqLLM) do
           {:error, reason}
       end
     end
+
+    # Invalid map envelopes still carry usage through the result validator.
+    defp openai_compat_content(%{"choices" => [%{"message" => %{"content" => content}} | _]}),
+      do: content
+
+    defp openai_compat_content(_body), do: nil
 
     defp call_req_llm(%ReqLLMPreparedModel{selector: model, model: req_llm_model}, messages, opts) do
       http_opts = observed_usage_http_options(opts, req_llm_model)
@@ -1024,9 +1086,13 @@ if Code.ensure_loaded?(ReqLLM) do
     defp call_openai_compat_embed(base_url, model, input, opts) do
       timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
 
-      case Req.post("#{base_url}/embeddings",
-             json: %{model: model, input: input},
-             receive_timeout: timeout
+      case CompatHTTP.request(
+             :post,
+             base_url,
+             "/embeddings",
+             [json: %{model: model, input: input}, receive_timeout: timeout] ++
+               Keyword.get(opts, :req_http_options, []),
+             Keyword.get(opts, :api_key)
            ) do
         {:ok, %{status: 200, body: %{"data" => [%{"embedding" => embedding}]}}}
         when is_binary(input) ->
@@ -1229,8 +1295,8 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp parse_provider("openai-compat:" <> rest) do
       case String.split(rest, "|", parts: 2) do
-        [base_url, model] -> {:openai_compat, base_url, model}
-        [base_url] -> {:openai_compat, base_url, "default"}
+        [base_url, model] -> {:openai_compat, PtcRunner.HTTPEndpoint.parse(base_url), model}
+        [base_url] -> {:openai_compat, PtcRunner.HTTPEndpoint.parse(base_url), "default"}
       end
     end
 
@@ -1665,7 +1731,7 @@ if Code.ensure_loaded?(ReqLLM) do
       case target.structured_output_mode do
         :json_schema ->
           target
-          |> generate_object(messages, schema, opts)
+          |> generate_schema_candidate(messages, schema, opts)
           |> case do
             {:ok, result} -> {:ok, result}
             error -> normalize_call_result(error)
@@ -1681,6 +1747,30 @@ if Code.ensure_loaded?(ReqLLM) do
           {:error, ProviderError.new(:invalid_result, "LLM provider returned an invalid result")}
       end
     end
+
+    defp generate_schema_candidate(
+           %ReqLLMPreparedModel{model: nil} = target,
+           messages,
+           schema,
+           opts
+         ) do
+      case parse_provider(target.selector) do
+        {:openai_compat, base_url, model} ->
+          call_openai_compat_object(
+            base_url,
+            model,
+            messages,
+            schema,
+            merge_exact_options(target, opts)
+          )
+
+        _route ->
+          generate_object(target, messages, schema, opts)
+      end
+    end
+
+    defp generate_schema_candidate(target, messages, schema, opts),
+      do: generate_object(target, messages, schema, opts)
 
     defp generate_json(%ReqLLMPreparedModel{model: %LLMDB.Model{}} = model, messages, opts) do
       call_req_llm_json(model, messages, merge_exact_options(model, opts))
@@ -2089,6 +2179,9 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp attest_structured_mode(model, :json_schema) do
       case parse_provider(model) do
+        {:openai_compat, _base_url, _model_name} ->
+          :ok
+
         {:req_llm, selector} ->
           if native_json_schema_selector?(selector),
             do: :ok,
@@ -2744,7 +2837,7 @@ if Code.ensure_loaded?(ReqLLM) do
     end
 
     defp check_openai_compat_available(base_url) do
-      case Req.get("#{base_url}/models", receive_timeout: 2_000) do
+      case CompatHTTP.request(:get, base_url, "/models", receive_timeout: 2_000) do
         {:ok, %{status: 200}} -> true
         _ -> false
       end
