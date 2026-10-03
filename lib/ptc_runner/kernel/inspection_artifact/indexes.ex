@@ -116,11 +116,6 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Indexes do
     %{indexes | trace_facts: RetainedSize.detach_binaries(facts)}
   end
 
-  @spec put_cache(t(), map()) :: t()
-  def put_cache(indexes, cache) when is_map(indexes) and is_map(cache) do
-    %{indexes | cache: RetainedSize.detach_binaries(cache)}
-  end
-
   @spec put_turn_evidence(t(), map()) :: t()
   def put_turn_evidence(indexes, evidence) when is_map(indexes) and is_map(evidence) do
     %{indexes | turn_evidence: RetainedSize.detach_binaries(evidence)}
@@ -140,9 +135,6 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Indexes do
   def tab2list(indexes, table) when is_map(indexes) and is_atom(table) do
     :ets.tab2list(Map.fetch!(indexes.tables, table))
   end
-
-  @spec table_ids(t()) :: [reference()]
-  def table_ids(%{tables: tables}), do: Map.values(tables)
 
   @spec give_away(t(), pid()) :: :ok
   def give_away(%{tables: tables}, owner) when is_pid(owner) do
@@ -209,11 +201,6 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Indexes do
     end)
 
     :ok
-  end
-
-  @spec undefined?(t()) :: boolean()
-  def undefined?(%{tables: tables}) do
-    Enum.all?(tables, fn {_name, tid} -> :ets.info(tid) == :undefined end)
   end
 
   defp table_for(:primary), do: :records

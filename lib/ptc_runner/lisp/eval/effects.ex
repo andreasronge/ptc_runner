@@ -55,12 +55,6 @@ defmodule PtcRunner.Lisp.Eval.Effects do
     %{effects | tool_cache: Map.put(effects.tool_cache, key, value)}
   end
 
-  @doc "Adds prelude-call counts without changing other effect fields."
-  @spec add_prelude_counts(t(), %{String.t() => non_neg_integer()}) :: t()
-  def add_prelude_counts(%__MODULE__{} = effects, counts) when is_map(counts) do
-    %{effects | prelude_call_counts: merge_counts(counts, effects.prelude_call_counts)}
-  end
-
   @doc """
   Merges a newer effect value onto an older one.
 

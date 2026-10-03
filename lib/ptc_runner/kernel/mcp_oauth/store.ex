@@ -8,6 +8,9 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store do
   that reads or mutates a grant is fenced by both principal and authority
   epochs carried in `GrantKey`.
 
+  Authority retirement drains an installation before replacement or release.
+  Principal epochs fence grants; there is no principal-retirement operation.
+
   Persistent adapters must encrypt secret fields at rest, use an
   adapter-authoritative clock, and make each operation crash-atomic at this
   callback boundary. PtcRunner ships only the owner-process in-memory adapter;
@@ -206,11 +209,6 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store do
       when is_map(binding),
       do: call(store, {:begin_code_dispatch, key, flow_id, fence, binding}, deadline)
 
-  @spec terminalize_flow(t(), GrantKey.t(), term(), request_deadline()) ::
-          :ok | {:error, atom()}
-  def terminalize_flow(store, %GrantKey{} = key, flow_id, deadline),
-    do: call(store, {:terminalize_flow, key, flow_id}, deadline)
-
   @spec upsert_requirement(
           t(),
           GrantKey.t(),
@@ -259,42 +257,6 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store do
           {:ok, term()} | {:error, atom()}
   def complete_authority_retirement(store, intent_id, coordinator, deadline),
     do: call(store, {:complete_authority_retirement, intent_id, coordinator}, deadline)
-
-  @spec begin_principal_retirement(
-          t(),
-          binary(),
-          binary(),
-          term(),
-          binary(),
-          pos_integer(),
-          request_deadline()
-        ) :: {:ok, map()} | {:error, atom()}
-  def begin_principal_retirement(
-        store,
-        tenant_id,
-        principal_id,
-        expected_epoch,
-        idempotency_key,
-        lease_ttl_ms,
-        deadline
-      ),
-      do:
-        call(
-          store,
-          {:begin_principal_retirement, tenant_id, principal_id, expected_epoch, idempotency_key,
-           lease_ttl_ms},
-          deadline
-        )
-
-  @spec complete_principal_retirement(t(), term(), term(), request_deadline()) ::
-          {:ok, term()} | {:error, atom()}
-  def complete_principal_retirement(store, intent_id, coordinator, deadline),
-    do: call(store, {:complete_principal_retirement, intent_id, coordinator}, deadline)
-
-  @spec inspect_retirements(t(), binary(), request_deadline()) ::
-          {:ok, [map()]} | {:error, atom()}
-  def inspect_retirements(store, tenant_id, deadline),
-    do: call(store, {:inspect_retirements, tenant_id}, deadline)
 
   defp call({module, adapter_state}, operation, deadline) when is_atom(module) do
     cond do

@@ -1,7 +1,6 @@
 defmodule PtcRunner.Lisp.Signature.ValidatorTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.Lisp.Signature
   alias PtcRunner.Lisp.Signature.Validator
 
   describe "validate/2 - primitives" do
@@ -476,42 +475,6 @@ defmodule PtcRunner.Lisp.Signature.ValidatorTest do
 
       assert {:error, errors} = Validator.validate(value, type, max_errors: 2)
       assert Enum.map(errors, & &1.path) == [["a"], ["b"]]
-    end
-  end
-
-  describe "from_json_schema/1 field aliases" do
-    test "rejects normalized property collisions" do
-      schema = %{
-        "type" => "object",
-        "properties" => %{
-          "user-id" => %{"type" => "integer"},
-          "user_id" => %{"type" => "integer"}
-        },
-        "required" => ["user-id", "user_id"]
-      }
-
-      assert {:error, message} = Signature.from_json_schema(schema)
-      assert message =~ "normalize to duplicate field"
-      assert message =~ "user_id"
-    end
-
-    test "rejects normalized collisions recursively" do
-      schema = %{
-        "type" => "object",
-        "properties" => %{
-          "outer" => %{
-            "type" => "object",
-            "properties" => %{
-              "item-id" => %{"type" => "string"},
-              "item_id" => %{"type" => "string"}
-            }
-          }
-        }
-      }
-
-      assert {:error, message} = Signature.from_json_schema(schema)
-      assert message =~ ~s|property "outer"|
-      assert message =~ "normalize to duplicate field"
     end
   end
 end

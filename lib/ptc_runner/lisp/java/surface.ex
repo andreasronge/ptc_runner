@@ -37,7 +37,6 @@ defmodule PtcRunner.Lisp.Java.Surface do
                           into: %{},
                           do: {spelling, class}
                         )
-  @audit_spec_table Map.new(@audit_specs, &{&1.key, &1})
   @function_entry_table Map.new(@projected_function_entries, &{&1.name, &1})
   @member_family_table @references
                        |> Enum.filter(&(&1.kind == :instance))
@@ -202,18 +201,6 @@ defmodule PtcRunner.Lisp.Java.Surface do
     end
   end
 
-  @doc "Returns all Java namespace atoms admitted by the source vocabulary."
-  @spec source_namespace_atoms() :: [atom()]
-  def source_namespace_atoms do
-    class_atoms =
-      @classes
-      |> Enum.flat_map(&[&1.name | &1.spellings])
-      |> Enum.reject(&String.ends_with?(&1, "."))
-      |> Enum.map(&String.to_atom/1)
-
-    Enum.uniq(Map.keys(@namespace_table) ++ class_atoms)
-  end
-
   @doc "Returns Java namespace labels for analyzer diagnostics."
   @spec available_namespace_labels() :: [String.t()]
   def available_namespace_labels do
@@ -307,10 +294,6 @@ defmodule PtcRunner.Lisp.Java.Surface do
   @doc "Returns Java audit specifications used by docs and upstream checks."
   @spec audit_specs() :: [map()]
   def audit_specs, do: @audit_specs
-
-  @doc "Fetches a Java audit specification."
-  @spec fetch_audit_spec(atom()) :: {:ok, map()} | :error
-  def fetch_audit_spec(key), do: Map.fetch(@audit_spec_table, key)
 
   @doc "Returns sorted Java audit keys."
   @spec audit_keys() :: [atom()]
