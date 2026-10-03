@@ -220,7 +220,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
           owner =
             spawn_link(fn ->
               {:ok, _memory, _history, lease} =
-                RunState.reserve_evaluation(state, "default", :fail_fast)
+                RunState.reserve_evaluation(state, "default", mode: :fail_fast)
 
               send(callback_pid, {:reserved, self(), lease})
 

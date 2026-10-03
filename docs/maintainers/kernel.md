@@ -378,6 +378,22 @@ reasons. `RunState` opens the callback worker's one-shot gate in the same owner
 operation that records the dispatched reservation; an uncertain gate
 acknowledgement remains possibly dispatched and is charged fail-closed.
 
+The dispatcher delegates gated worker lifecycle to `Dispatcher.ProviderCall`,
+bounded result admission and failure envelopes to `Dispatcher.Result`, and
+structured-output decoding, usage evidence and LLM deadlines to
+`Dispatcher.LlmResult`. Invocation resolution, input preparation and event
+orchestration remain in `Dispatcher`.
+
+`RunState` remains the single mutable owner. Its `RunState.LlmBudget`,
+`RunState.Admission` and `RunState.Providers` modules calculate pure transitions;
+the owner performs monitors, timers, replies, guardian cancellation and gate
+sends in their original order. Evaluation reservation uses one request carrying
+`mode: :fail_fast | :block`, `proof?` and the caller's `requested_at` timestamp.
+Fail-fast admission checks busy before the evaluation limit; blocking admission
+checks its caller-time deadline and the limit before queueing. `grant_lease/3`
+accepts a prepared lease tuple: a queued waiter transfers its existing monitor,
+and workflow resume grants without charging a new evaluation.
+
 `LimitCatalog` is the authority for limit names, scope, defaults, ranges, and
 identity participation. Installed limits are ceilings; manifests may narrow
 only rows marked manifest-narrowable. Generated host and manifest schemas must

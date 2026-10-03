@@ -27,7 +27,9 @@ mix run scripts/labs/inspection-lab/run.exs
 The command prints its temporary artifact directory, writes one project
 document per journey beside it, and prints an exact `mix ptc viewer` command
 for the `direct` journey. Those project documents grant the Viewer the private
-inspection artifacts, so treat the browser tab as a private sink. To keep
+inspection artifacts, so treat the browser tab as a private sink. Viewer
+requests must use a loopback HTTP authority and the configured listener port.
+To keep
 artifacts at a chosen location, pass one new empty directory:
 
 ```console

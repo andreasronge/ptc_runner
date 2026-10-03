@@ -99,7 +99,9 @@ defmodule PtcRunner.InspectionRedactionTest do
 
   test "owner format_status does not enumerate continuation payloads" do
     {:ok, state} = RunState.start(Limits.defaults())
-    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
+
+    {:ok, _memory, _history, lease} =
+      RunState.reserve_evaluation(state, "default", mode: :fail_fast)
 
     assert :ok =
              RunState.commit_evaluation(

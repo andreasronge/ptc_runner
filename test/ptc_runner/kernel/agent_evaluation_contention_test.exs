@@ -3,7 +3,7 @@ defmodule PtcRunner.Kernel.AgentEvaluationContentionTest do
   The agent loop must not treat a refused subordinate evaluation as a
   correctable model-program error.
 
-  `RunState.reserve_evaluation/1` refuses admission when another evaluation
+  `RunState.reserve_evaluation/3` refuses admission when another evaluation
   holds the run's single lease (`:busy`) or when the run has spent its
   `subordinate_evaluations` budget (`:limit_exceeded`). Neither is anything the
   model wrote, so neither may be fed back as feedback or spend a turn.
