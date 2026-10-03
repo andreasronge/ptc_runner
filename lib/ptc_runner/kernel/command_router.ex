@@ -94,11 +94,17 @@ defmodule PtcRunner.Kernel.CommandRouter do
   end
 
   defp run_one_shot(entry, bootstrap, runner) do
-    env_file = Keyword.get(entry.arguments.frontend_options, :env_file)
-
-    Dotenv.with_file_scope(env_file, fn ->
+    if entry.arguments.command == :viewer do
+      # Viewer startup only forwards the file path to its launch adapter. A
+      # scope around its serving wait would block launches in other processes.
       run_one_shot_scoped(entry, bootstrap, runner)
-    end)
+    else
+      env_file = Keyword.get(entry.arguments.frontend_options, :env_file)
+
+      Dotenv.with_file_scope(env_file, fn ->
+        run_one_shot_scoped(entry, bootstrap, runner)
+      end)
+    end
   rescue
     _exception ->
       internal_error(entry)

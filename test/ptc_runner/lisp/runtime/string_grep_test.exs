@@ -3,6 +3,26 @@ defmodule PtcRunner.Lisp.Runtime.StringGrepTest do
 
   alias PtcRunner.Lisp.Runtime
 
+  test "grep variants share regex safety limits, including empty patterns" do
+    for grep <- [&Runtime.grep/2, &Runtime.grep_n/2] do
+      assert_raise ArgumentError, ~r/maximum length of 256 bytes/, fn ->
+        grep.(String.duplicate("a", 257), "a")
+      end
+
+      for pattern <- ["a", ""] do
+        assert_raise ArgumentError, ~r/valid UTF-8/, fn ->
+          grep.(pattern, <<97, 255>>)
+        end
+      end
+
+      assert_raise RuntimeError, ~r/Regex complexity limit exceeded/, fn ->
+        grep.("(a+)+$", String.duplicate("a", 30) <> "!")
+      end
+
+      assert grep.("tail", String.duplicate("a", 32_767) <> "é" <> "tail") == []
+    end
+  end
+
   describe "grep" do
     test "returns lines containing pattern" do
       text = "info: starting\nerror: failed\ninfo: done"

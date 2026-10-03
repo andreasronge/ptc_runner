@@ -15,9 +15,9 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
   alias PtcRunner.Kernel.RunAnalysisCapability
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.SessionTrace
-  alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.TestSupport.PrivateInspectionFixture
+  alias PtcRunner.TestSupport.TraceQuery
 
   @profile_id "private-run-analysis-v2"
 
@@ -393,10 +393,10 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
     refute encoded_trace =~ "analysis/read"
     refute encoded_trace =~ "(return 42)"
 
-    assert {:ok, trace} = TraceLog.new(source: {:file, trace_path})
+    assert {:ok, trace} = TraceQuery.new(source: {:file, trace_path})
 
     assert {:ok, %{"items" => [%{"run_id" => analysis_run, "complete" => true}]}} =
-             TraceLog.query(trace, :list_runs, %{})
+             TraceQuery.query(trace, :list_runs, %{})
 
     assert analysis_run == info.session_id
   end

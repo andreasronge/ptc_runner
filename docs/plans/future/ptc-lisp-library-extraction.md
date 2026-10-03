@@ -53,11 +53,11 @@ dependency locally and a Hex dependency when publishing.
 | whole `test/` | 337 `.exs` + 42 support | ~153,000 |
 | lisp-attributable tracked files (code, tests, `docs/conformance/`, lisp `priv/` data) | ~300 of 1,227 | — |
 
-10 of 17 `lib/mix/tasks/` tasks are purely lisp-side (`ptc.clojure_audit`,
-`ptc.conformance_report`, `ptc.audit_upstream`, `ptc.smoke`,
+The lisp-side `lib/mix/tasks/` tasks include `ptc.conformance_report`,
+`ptc.audit_upstream`, `ptc.smoke`,
 `ptc.validate_spec`, `ptc.update_spec_checksums`, `ptc.install_babashka`,
 `ptc.install_clojure`, `ptc.java_conformance`, `ptc.java_fixtures`, plus
-`bench.check`).
+`bench.check`.
 
 ### Coupling direction
 

@@ -509,8 +509,7 @@ defmodule PtcRunner.MixProject do
           PtcRunner.Kernel.RuntimeTools,
           PtcRunner.Kernel.SemanticRevision,
           PtcRunner.Kernel.StrictJSON,
-          PtcRunner.Kernel.TypedCanonicalJSON,
-          PtcRunner.Kernel.ViewerAdapter
+          PtcRunner.Kernel.TypedCanonicalJSON
         ],
         "PTC-Lisp": [
           PtcRunner.Lisp,

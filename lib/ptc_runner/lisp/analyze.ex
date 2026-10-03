@@ -247,15 +247,12 @@ defmodule PtcRunner.Lisp.Analyze do
   # ============================================================
 
   defp do_analyze({:regex_literal, pattern}, _tail?) do
-    case :re.compile(pattern) do
-      {:ok, _} ->
-        {:ok, {:call, {:var, :"re-pattern"}, [{:string, pattern}]}}
-
-      {:error, {reason, position}} ->
-        {:error,
-         {:invalid_form,
-          "invalid regex literal #\"#{pattern}\": #{reason} at position #{position}"}}
-    end
+    PtcRunner.Lisp.Runtime.Regex.re_pattern(pattern)
+    {:ok, {:call, {:var, :"re-pattern"}, [{:string, pattern}]}}
+  rescue
+    error in ArgumentError ->
+      {:error,
+       {:invalid_form, "invalid regex literal #\"#{pattern}\": #{Exception.message(error)}"}}
   end
 
   # ============================================================

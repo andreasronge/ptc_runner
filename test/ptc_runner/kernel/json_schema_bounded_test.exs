@@ -1,13 +1,33 @@
 defmodule PtcRunner.Kernel.JSONSchemaBoundedTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.ExecutionInput
   alias PtcRunner.Kernel.JSONSchema
+  alias PtcRunner.Kernel.ValueContract
 
   @schema %{
     "type" => "object",
     "properties" => %{"ok" => %{"type" => "boolean"}},
     "required" => ["ok"]
   }
+
+  test "runtime contracts refuse values exceeding the validation worker heap" do
+    schema = %{
+      "type" => "object",
+      "properties" => %{"values" => %{"type" => "array", "items" => %{"type" => "integer"}}}
+    }
+
+    {:ok, contract} = ValueContract.compile(schema)
+    value = %{"values" => List.duplicate(1, 3_000_000)}
+    refute JSONSchema.valid?(contract.validator, value)
+    refute ValueContract.valid?(contract, value)
+
+    assert {%{value_kind: :unknown}, nil} =
+             ValueContract.classify_with_evidence(contract, value)
+
+    assert {:error, _reason} =
+             ExecutionInput.new(value, :normal, contract)
+  end
 
   test "bounded compilation matches host compilation for an admitted schema" do
     assert {:ok, normalized, compiled} = JSONSchema.compile(@schema)

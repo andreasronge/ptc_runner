@@ -13,7 +13,6 @@ defmodule PtcRunner.Kernel.DispatcherArgumentViolationTest do
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp
-  alias PtcRunner.Lisp.CoreToSource
   alias PtcRunner.TestSupport.TestHelpers
 
   test "schema rejection names the argument, violated keyword, and declared bound" do
@@ -534,14 +533,14 @@ defmodule PtcRunner.Kernel.DispatcherArgumentViolationTest do
       RunConfig.new(
         workflow_environment: workflow,
         missions: %{"default" => mission},
-        input: %{},
+        input: %{"feedback_result" => projected_result},
         limits: limits,
         event_sink: sink
       )
 
     assert {:ok, %{value: feedback}} =
              PtcRunner.Kernel.run(
-               "(return (agent.feedback/capability-error #{CoreToSource.format(%{value: projected_result})}))",
+               "(return (agent.feedback/capability-error {:value data/feedback_result}))",
                config
              )
 

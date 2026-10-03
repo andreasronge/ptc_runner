@@ -30,7 +30,10 @@ defmodule PtcRunner.Kernel.RunState do
   dispatching process dies mid-call (heap kill, timeout kill), the reservation
   is reclaimed only after the attached provider process has been killed and
   its `:DOWN` observed. Thus connector cleanup cannot begin while a callback
-  from that run remains live. Shutdown — owner death or explicit stop —
+  from that run remains live. Guardian cancellation uses a monitored worker
+  waiting under the configured provider cleanup deadline; if it fails, the
+  run is fenced and the guardian is killed before the
+  reservation is settled on its own `:DOWN`. Shutdown — owner death or explicit stop —
   likewise kills and drains every still-attached provider before state
   terminates. A process holds at most one reservation at a time: dispatch is
   sequential per process, so a second reserve while one is active is a protocol
@@ -775,6 +778,7 @@ defmodule PtcRunner.Kernel.RunState do
        owner_transferable?: owner_transferable?,
        event_sink: event_sink,
        repl_resources: repl_resources,
+       provider_tracker: nil,
        limits: limits,
        deadline_ms: deadline_ms,
        closed?: false,
@@ -817,6 +821,13 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   @impl GenServer
+  def handle_call(
+        {token, {:bind_provider_tracker, %ProviderTaskTracker{} = tracker}},
+        _from,
+        %{token: token, provider_tracker: nil} = state
+      ),
+      do: {:reply, :ok, %{state | provider_tracker: tracker}}
+
   def handle_call(
         {event_token, :owner},
         _from,
@@ -1676,6 +1687,48 @@ defmodule PtcRunner.Kernel.RunState do
       do: {:noreply, clear_evaluation(state)}
 
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do
+    case Enum.find(state.reservations, fn {_id, reservation} ->
+           Map.get(reservation, :cancel_ref) == ref
+         end) do
+      {reservation_id, reservation} ->
+        reservation = Map.drop(reservation, [:cancel_pid, :cancel_ref])
+        state = put_in(state.reservations[reservation_id], reservation)
+
+        if reason == :normal do
+          {:noreply, state}
+        else
+          # Retain the reservation until the guardian's own DOWN proves it
+          # gone, even when the cancel worker or tracker failed.
+          Process.exit(reservation.provider, :kill)
+          {:noreply, maybe_mark_guardian_down(state, reservation, reason)}
+        end
+
+      nil ->
+        handle_reservation_down(ref, pid, reason, state)
+    end
+  end
+
+  def handle_info({:admission_deadline, monitor_ref}, state) do
+    case take_admission_waiter(state, monitor_ref) do
+      {nil, state} ->
+        {:noreply, state}
+
+      {waiter, state} ->
+        Process.demonitor(waiter.monitor_ref, [:flush])
+
+        reply =
+          if deadline_expired?(state),
+            do: {:error, :deadline_expired},
+            else: {:error, :admission_timeout}
+
+        GenServer.reply(waiter.from, reply)
+        {:noreply, state}
+    end
+  end
+
+  def handle_info(_message, state), do: {:noreply, state}
+
+  defp handle_reservation_down(ref, pid, reason, state) do
     case reservation_by_caller_ref(state.reservations, ref) do
       {reservation_id, %{caller: ^pid, provider: provider} = reservation} ->
         cond do
@@ -1683,11 +1736,18 @@ defmodule PtcRunner.Kernel.RunState do
             deadline =
               System.monotonic_time(:millisecond) + state.limits.provider_cleanup_timeout_ms
 
-            tracker = state.provider_tracker
-            spawn(fn -> ProviderTaskTracker.cancel_guardian(tracker, provider, deadline) end)
+            {cancel_pid, cancel_ref} =
+              start_guardian_cancel(state.provider_tracker, provider, deadline)
 
             reservations =
-              Map.put(state.reservations, reservation_id, %{reservation | caller_ref: nil})
+              Map.put(
+                state.reservations,
+                reservation_id,
+                reservation
+                |> Map.put(:caller_ref, nil)
+                |> Map.put(:cancel_pid, cancel_pid)
+                |> Map.put(:cancel_ref, cancel_ref)
+              )
 
             {:noreply, %{state | reservations: reservations}}
 
@@ -1729,25 +1789,14 @@ defmodule PtcRunner.Kernel.RunState do
     end
   end
 
-  def handle_info({:admission_deadline, monitor_ref}, state) do
-    case take_admission_waiter(state, monitor_ref) do
-      {nil, state} ->
-        {:noreply, state}
-
-      {waiter, state} ->
-        Process.demonitor(waiter.monitor_ref, [:flush])
-
-        reply =
-          if deadline_expired?(state),
-            do: {:error, :deadline_expired},
-            else: {:error, :admission_timeout}
-
-        GenServer.reply(waiter.from, reply)
-        {:noreply, state}
-    end
+  defp start_guardian_cancel(tracker, provider, deadline) do
+    spawn_monitor(fn ->
+      case ProviderTaskTracker.cancel_guardian(tracker, provider, deadline) do
+        :ok -> :ok
+        _failure -> exit({:shutdown, :provider_cleanup_failed})
+      end
+    end)
   end
-
-  def handle_info(_message, state), do: {:noreply, state}
 
   defp maybe_mark_guardian_down(state, reservation, reason) do
     if Map.get(reservation, :provider_kind) == :guardian and reason != :normal do
@@ -1774,6 +1823,8 @@ defmodule PtcRunner.Kernel.RunState do
 
   @impl GenServer
   def terminate(_reason, state) do
+    Enum.each(state.reservations, fn {_id, reservation} -> demonitor_reservation(reservation) end)
+
     state.reservations
     |> Enum.flat_map(fn
       {_caller, %{provider: provider, provider_kind: kind}}
@@ -2131,6 +2182,12 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   defp demonitor_reservation(reservation) do
+    if is_pid(Map.get(reservation, :cancel_pid)),
+      do: Process.exit(reservation.cancel_pid, :kill)
+
+    if is_reference(Map.get(reservation, :cancel_ref)),
+      do: Process.demonitor(reservation.cancel_ref, [:flush])
+
     if is_reference(reservation.caller_ref),
       do: Process.demonitor(reservation.caller_ref, [:flush])
 
@@ -2835,6 +2892,7 @@ defmodule PtcRunner.Kernel.RunState do
         case ProviderTaskTracker.start(pid, elem(args, 0).provider_cleanup_timeout_ms) do
           {:ok, provider_tracker} ->
             token = elem(args, 1)
+            :ok = GenServer.call(pid, {token, {:bind_provider_tracker, provider_tracker}})
             {:ok, %__MODULE__{pid: pid, token: token, provider_tracker: provider_tracker}}
 
           {:error, reason} ->

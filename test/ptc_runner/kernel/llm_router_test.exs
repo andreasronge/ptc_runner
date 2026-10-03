@@ -24,11 +24,11 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
-  alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
+  alias PtcRunner.TestSupport.TraceQuery
 
   test "routes by alias, uses the declared default, and strips model before invocation" do
     parent = self()
@@ -1530,7 +1530,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     refute Map.has_key?(stopped.data, :resolved_model)
     refute inspect(events) =~ "answer"
 
-    assert {:ok, trace_log} = TraceLog.new(source: config.event_sink, max_result_bytes: 100_000)
+    assert {:ok, trace_log} = TraceQuery.new(source: config.event_sink, max_result_bytes: 100_000)
 
     assert {:ok,
             %{
@@ -1548,7 +1548,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
               ],
               "llm_usage_by_model" => [],
               "unattributed_model_calls" => 1
-            }} = TraceLog.query(trace_log, :counters, %{"run_id" => "routing-events"})
+            }} = TraceQuery.query(trace_log, :counters, %{"run_id" => "routing-events"})
   end
 
   test "run envelopes and trace counters project the same sealed LLM usage" do
@@ -1959,8 +1959,8 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     {:ok, evidence} = ExecutionOutcome.open(outcome, authority)
     settlement = ArtifactPublisher.publish(evidence, authority)
     {status, command_outcome} = CommandRunOutcome.project(evidence, settlement, run_ref, true)
-    {:ok, trace_log} = TraceLog.new(source: config.event_sink, max_result_bytes: 100_000)
-    {:ok, counters} = TraceLog.query(trace_log, :counters, %{"run_id" => run_id})
+    {:ok, trace_log} = TraceQuery.new(source: config.event_sink, max_result_bytes: 100_000)
+    {:ok, counters} = TraceQuery.query(trace_log, :counters, %{"run_id" => run_id})
     ^events = EventSink.events(config.event_sink)
     :ok = PublicationAuthority.close(authority)
     :ok = EventSink.stop(config.event_sink)

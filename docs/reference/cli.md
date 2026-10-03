@@ -668,6 +668,7 @@ Embedding runtimes can supply authorization targets directly.
 | 4 | `local_preflight` | `authorization_not_applicable` | no | --authorize-mcp applies only to an installation that declares OAuth |
 | 4 | `local_preflight` | `authorization_target_unknown` | no | --authorize-mcp must name an installed provider the application selects |
 | 4 | `local_preflight` | `command_not_found` | no | a required provider command could not be found |
+| 4 | `local_preflight` | `environment_file_invalid` | no | the named environment file contains an invalid assignment |
 | 4 | `local_preflight` | `environment_file_invalid_utf8` | no | the named environment file is not valid UTF-8 |
 | 4 | `local_preflight` | `environment_file_not_found` | no | the named environment file does not exist |
 | 4 | `local_preflight` | `environment_file_not_regular` | no | the named environment file is not a regular file |
@@ -1104,6 +1105,20 @@ ptc viewer PROJECT.json [--port PORT] [--listen ADDRESS] [--env-file FILE]
 The Viewer opens captured traces and watches or launches live runs for one
 project. See the [Viewer reference](viewer.md) for its display, startup,
 exposure, authentication, and live-reporting contract.
+
+## Environment file syntax and scope
+
+`--env-file` reads one snapshot per command and restores its declared variables
+after the command exits. Blank lines and `#` comment lines are ignored. Each
+other line must be `KEY=VALUE`, with keys matching `[A-Za-z_][A-Za-z0-9_]*`.
+Whitespace around keys and values is trimmed. A quoted value must have matching
+single or double quotes; exactly one pair is removed. There is no `export`
+prefix, interpolation, escaping, or inline comment syntax. Malformed assignments
+and NUL bytes reject the entire file before any environment changes.
+
+File values override inherited values. Overrides of `PATH`, `HOME`, `LD_*`, or
+`DYLD_*` are permitted with a warning on standard error because they can affect
+child processes. The warning never includes values. Only use trusted files.
 
 ## Test a workflow
 

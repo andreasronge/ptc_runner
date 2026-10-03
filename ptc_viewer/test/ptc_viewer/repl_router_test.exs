@@ -268,7 +268,12 @@ defmodule PtcViewer.ReplRouterTest do
 
   defp error_code(conn), do: Jason.decode!(conn.resp_body)["error"]["code"]
   defp response_body(conn), do: Jason.decode!(conn.resp_body)
-  defp call_router(conn, opts), do: PtcViewer.Router.call(conn, PtcViewer.Router.init(opts))
+
+  defp call_router(conn, opts) do
+    conn = if conn.host == "www.example.com", do: %{conn | host: "localhost"}, else: conn
+    PtcViewer.Router.call(conn, PtcViewer.Router.init(Keyword.put_new(opts, :expected_port, 80)))
+  end
+
   defp random_id, do: Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
 
   defp safe_stop(pid, stop) do

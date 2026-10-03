@@ -7,8 +7,9 @@ defmodule PtcViewer do
   The trace browser has no authentication. It binds loopback unless the host
   names the wildcard address, and every caller that does is choosing to publish
   whatever trace and inspection data the instance was granted. Live browser
-  controls are available only when the page is opened through a local authority
-  (`localhost`, `127.0.0.1`, or `::1`); non-loopback reporters require the
+  controls and every other route require an HTTP local authority
+  (`localhost`, `127.0.0.1`, or `::1`) with the listener port, including on a
+  wildcard bind. Non-loopback reporters require the
   separately configured `:live_token`.
   """
 

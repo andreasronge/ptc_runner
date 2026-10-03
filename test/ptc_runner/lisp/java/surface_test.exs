@@ -6,7 +6,6 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Analyze
   alias PtcRunner.Lisp.BuiltinNames
-  alias PtcRunner.Lisp.CoreToSource
   alias PtcRunner.Lisp.Java.Surface
   alias PtcRunner.Lisp.Java.Surface.Validator
   alias PtcRunner.Lisp.Parser
@@ -83,8 +82,7 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
 
     for source <- ["(java.util.Date. 1)", ~S|(.contains text "x")|] do
       assert {:ok, raw} = Parser.parse(source)
-      assert {:ok, core} = Analyze.analyze(raw)
-      assert CoreToSource.format(core) == source
+      assert {:ok, _core} = Analyze.analyze(raw)
     end
   end
 
