@@ -70,8 +70,8 @@ defmodule PtcRunner.Kernel.MCPOAuthRemoteE2ETest do
                :mix
              )
 
-    assert {:ok, %CommandOutcome{} = outcome, nil} =
-             CommandEngine.dispatch_frontend_entry(entry, runtime)
+    assert {:ok, %CommandOutcome{} = outcome, nil, _named_env_file?} =
+             CommandEngine.dispatch_frontend_entry_with_context(entry, runtime)
 
     assert outcome.envelope["status"] == "ok"
     assert outcome.envelope["execution"]["outcome"] == "ok"

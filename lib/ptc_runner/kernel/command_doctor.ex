@@ -3,10 +3,10 @@ defmodule PtcRunner.Kernel.CommandDoctor do
 
   alias PtcRunner.Kernel.CommandAcquisition
   alias PtcRunner.Kernel.CommandArguments
-  alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandFailureCause
   alias PtcRunner.Kernel.CommandOutcome
+  alias PtcRunner.Kernel.CommandResults
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.ConnectivityResult
   alias PtcRunner.Kernel.DoctorEnvironment
@@ -32,7 +32,7 @@ defmodule PtcRunner.Kernel.CommandDoctor do
            mode_outcome(arguments, run_ref, host, catalog, runtime)
          end) do
       {:error, %CommandDiagnostic{} = diagnostic} ->
-        {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+        {:error, CommandOutcome.for_arguments(arguments, run_ref, diagnostic)}
 
       result ->
         result
@@ -76,7 +76,7 @@ defmodule PtcRunner.Kernel.CommandDoctor do
               )
 
             {:error, diagnostic} ->
-              {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+              {:error, CommandOutcome.for_arguments(arguments, run_ref, diagnostic)}
           end
         after
           if prepared, do: PreparedRun.close(prepared)
@@ -86,7 +86,7 @@ defmodule PtcRunner.Kernel.CommandDoctor do
         application_failure(:doctor, arguments, run_ref, host, catalog, diagnostic)
 
       {:error, diagnostic} ->
-        {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+        {:error, CommandOutcome.for_arguments(arguments, run_ref, diagnostic)}
     end
   end
 
@@ -140,7 +140,7 @@ defmodule PtcRunner.Kernel.CommandDoctor do
         application_failure({:doctor, :connect}, arguments, run_ref, host, catalog, diagnostic)
 
       {:error, %CommandDiagnostic{} = diagnostic} ->
-        {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+        {:error, CommandOutcome.for_arguments(arguments, run_ref, diagnostic)}
     end
   end
 
@@ -162,7 +162,7 @@ defmodule PtcRunner.Kernel.CommandDoctor do
         )
 
       {:error, %CommandDiagnostic{} = diagnostic} ->
-        {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+        {:error, CommandOutcome.for_arguments(arguments, run_ref, diagnostic)}
     end
   end
 
@@ -186,7 +186,7 @@ defmodule PtcRunner.Kernel.CommandDoctor do
          "checks" => checks,
          "model_aliases" => aliases,
          "provider_activity" => provider_activity,
-         "readiness" => CommandContract.doctor_readiness(provider_checks),
+         "readiness" => CommandResults.doctor_readiness(provider_checks),
          "usage" => usage
        })}
     end
@@ -256,14 +256,24 @@ defmodule PtcRunner.Kernel.CommandDoctor do
       {:error, CommandOutcome.doctor_failure(mode, run_ref, result, diagnostic)}
     else
       {:error, reason} ->
-        {:error, arguments_outcome(arguments, run_ref, operation_diagnostic(reason))}
+        {:error, CommandOutcome.for_arguments(arguments, run_ref, operation_diagnostic(reason))}
     end
   rescue
     _exception ->
-      {:error, arguments_outcome(arguments, run_ref, diagnostic(:internal, :internal_error))}
+      {:error,
+       CommandOutcome.for_arguments(
+         arguments,
+         run_ref,
+         CommandDiagnostic.new!(:internal, :internal_error)
+       )}
   catch
     _kind, _reason ->
-      {:error, arguments_outcome(arguments, run_ref, diagnostic(:internal, :internal_error))}
+      {:error,
+       CommandOutcome.for_arguments(
+         arguments,
+         run_ref,
+         CommandDiagnostic.new!(:internal, :internal_error)
+       )}
   end
 
   defp plan_mode(:doctor), do: :default
@@ -278,7 +288,9 @@ defmodule PtcRunner.Kernel.CommandDoctor do
   defp maybe_add_model_selectors(aliases, _host, _options), do: aliases
 
   defp connect_interrupted(arguments, run_ref, provider_activity),
-    do: {:error, arguments_outcome(arguments, run_ref, projection_diagnostic(provider_activity))}
+    do:
+      {:error,
+       CommandOutcome.for_arguments(arguments, run_ref, projection_diagnostic(provider_activity))}
 
   defp connect_checks(host, catalog, prepared, run_ref, runtime) do
     environment = DoctorEnvironment.facts()
@@ -443,16 +455,8 @@ defmodule PtcRunner.Kernel.CommandDoctor do
   defp unattributed_usage,
     do: %{"llm_usage_state" => "unavailable", "llm_usage" => nil}
 
-  defp projection_diagnostic(false), do: diagnostic(:internal, :internal_error)
+  defp projection_diagnostic(false), do: CommandDiagnostic.new!(:internal, :internal_error)
   defp projection_diagnostic(true), do: active_diagnostic(:internal, :internal_error)
-
-  defp arguments_outcome(%CommandArguments{options: %{connect: true}}, run_ref, diagnostic),
-    do: CommandOutcome.error({:doctor, :connect}, run_ref, diagnostic)
-
-  defp arguments_outcome(%CommandArguments{}, run_ref, diagnostic),
-    do: CommandOutcome.error(:doctor, run_ref, diagnostic)
-
-  defp diagnostic(phase, code), do: CommandDiagnostic.new!(phase, code)
 
   defp active_diagnostic(phase, code),
     do: CommandDiagnostic.new!(phase, code, provider_activity: true)

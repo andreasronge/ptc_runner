@@ -3,7 +3,6 @@ defmodule PtcRunner.TestSupport.CommandEngineFixtures do
 
   import ExUnit.Assertions
 
-  alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandOutcome
@@ -13,6 +12,7 @@ defmodule PtcRunner.TestSupport.CommandEngineFixtures do
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.TestSupport.CommandContractSchema
   alias PtcRunner.TestSupport.TestHelpers
 
   @zero_entropy <<0::128>>
@@ -38,12 +38,12 @@ defmodule PtcRunner.TestSupport.CommandEngineFixtures do
   end
 
   def assert_schema_valid(envelope) do
-    assert {:ok, root} = CommandContract.envelope_schema_root()
+    assert {:ok, root} = CommandContractSchema.envelope_schema_root()
     assert {:ok, _validated} = JSV.validate(envelope, root, cast: false)
   end
 
   def assert_schema_invalid(envelope) do
-    assert {:ok, root} = CommandContract.envelope_schema_root()
+    assert {:ok, root} = CommandContractSchema.envelope_schema_root()
     assert {:error, _reason} = JSV.validate(envelope, root, cast: false)
   end
 

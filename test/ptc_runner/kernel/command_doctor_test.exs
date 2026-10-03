@@ -6,18 +6,20 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
   alias PtcRunner.Kernel.CommandDoctor
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandRenderer
+  alias PtcRunner.Kernel.CommandResults
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.ModelContractDiagnostic
   alias PtcRunner.Kernel.OwnerFailure
+  alias PtcRunner.TestSupport.CommandContractSchema
 
   @run_ref CommandRunRef.encode(<<0::128>>)
 
   test "doctor readiness is derived from settled provider checks" do
-    assert CommandContract.doctor_readiness([]) == "not_applicable"
+    assert CommandResults.doctor_readiness([]) == "not_applicable"
 
-    assert CommandContract.doctor_readiness([
+    assert CommandResults.doctor_readiness([
              %{"name" => "provider/model/local", "status" => "pass", "code" => "available"},
              %{
                "name" => "provider/model/credentials",
@@ -26,7 +28,7 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
              }
            ]) == "unverified"
 
-    assert CommandContract.doctor_readiness([
+    assert CommandResults.doctor_readiness([
              %{"name" => "provider/model/local", "status" => "pass", "code" => "available"},
              %{
                "name" => "provider/model/connectivity",
@@ -257,7 +259,7 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
       CommandDiagnostic.new!(:active_preflight, :connectivity_timeout, provider_activity: false)
 
     envelope = %{outcome.envelope | "error" => CommandDiagnostic.to_map(timeout)}
-    {:ok, root} = CommandContract.envelope_schema_root()
+    {:ok, root} = CommandContractSchema.envelope_schema_root()
 
     assert {:error, _reason} = JSV.validate(envelope, root, cast: false)
   end

@@ -2,12 +2,12 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.ApplicationPackage
-  alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandInitializer
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.ProjectConfig
+  alias PtcRunner.TestSupport.CommandContractSchema
 
   @run_ref CommandRunRef.encode(<<0::128>>)
 
@@ -99,7 +99,7 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
              "ptc.json"
            ]
 
-    assert {:ok, root} = CommandContract.envelope_schema_root()
+    assert {:ok, root} = CommandContractSchema.envelope_schema_root()
 
     assert {:ok, _validated} = JSV.validate(outcome.envelope, root, cast: false)
   end

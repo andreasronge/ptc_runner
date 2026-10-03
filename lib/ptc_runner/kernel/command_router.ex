@@ -12,6 +12,9 @@ defmodule PtcRunner.Kernel.CommandRouter do
   alias PtcRunner.Kernel.CommandRenderer
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.DiagnosticCatalog
+  alias PtcRunner.ReplFrontend
+  alias PtcRunner.TranscriptFrontend
+  alias PtcRunner.ViewerFrontend
 
   @frontend_commands CommandDeclaration.frontend_commands()
 
@@ -21,6 +24,31 @@ defmodule PtcRunner.Kernel.CommandRouter do
                               | {:ok, map()}
                               | {:error, binary()}
                               | {:error, atom(), binary()})
+
+  @spec execute([binary()], :standalone | :mix, module(), keyword()) :: CommandPresentation.t()
+  def execute(argv, mode, bootstrap, opts) when is_atom(bootstrap) do
+    execute(
+      argv,
+      mode,
+      fn arguments ->
+        with {:ok, runtime} <- bootstrap.bootstrap(arguments),
+             do: CommandRuntime.attach_live_status(runtime, opts)
+      end,
+      fn arguments, runtime ->
+        run_frontend(arguments, runtime, Keyword.delete(opts, :live_status))
+      end,
+      opts
+    )
+  end
+
+  defp run_frontend(%{command: :repl} = arguments, runtime, opts),
+    do: ReplFrontend.run(arguments, runtime, opts)
+
+  defp run_frontend(%{command: :transcript} = arguments, runtime, _opts),
+    do: TranscriptFrontend.run(arguments, runtime)
+
+  defp run_frontend(%{command: :viewer} = arguments, runtime, _opts),
+    do: ViewerFrontend.run(arguments, runtime)
 
   @spec execute([binary()], :standalone | :mix, bootstrap(), one_shot_runner(), keyword()) ::
           CommandPresentation.t()

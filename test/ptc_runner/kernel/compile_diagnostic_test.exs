@@ -1,11 +1,11 @@
 defmodule PtcRunner.Kernel.CompileDiagnosticTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CompileDiagnostic
   alias PtcRunner.Lisp.NamespaceDiagnostic
+  alias PtcRunner.TestSupport.CommandContractSchema
 
   test "rebuilds only exact bounded names present in submitted component source" do
     source = "(ns app) (defn run [input] (+ missing-value other-value))"
@@ -150,7 +150,7 @@ defmodule PtcRunner.Kernel.CompileDiagnosticTest do
              )
 
     assert {:ok, schema} =
-             CommandContract.catalog_diagnostic_schema()
+             CommandContractSchema.catalog_diagnostic_schema()
              |> JSV.build(atoms: false, warnings: :silent)
 
     assert {:ok, _validated} =

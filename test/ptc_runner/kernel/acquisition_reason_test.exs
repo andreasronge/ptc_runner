@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.ModelContractPricingCause
+  alias PtcRunner.TestSupport.CommandContractSchema
 
   @occurrence %{provider: "selected", destination: :workflow, index: 3}
 
@@ -174,7 +175,7 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
 
     assert {:ok, root} =
              JSV.build(
-               CommandContract.catalog_diagnostic_schema(),
+               CommandContractSchema.catalog_diagnostic_schema(),
                atoms: false,
                warnings: :silent
              )

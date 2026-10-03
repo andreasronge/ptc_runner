@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandResults
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.ConnectivityResult
   alias PtcRunner.Kernel.DiagnosticCatalog
@@ -774,7 +775,8 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
   # The contract, not this test, decides whether a row set is well formed: both
   # the generated schema and the ordering semantics it cannot express.
   defp assert_contract(checks, provider_activity, readiness \\ nil) do
-    readiness = readiness || CommandContract.doctor_readiness(Enum.drop(checks, 3))
+    readiness =
+      readiness || CommandResults.doctor_readiness(Enum.drop(checks, 3))
 
     result = %{
       "checks" => checks,

@@ -2,7 +2,6 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.AgentConfigDiagnostic
-  alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.DeclaredReadEffectDiagnostic
@@ -18,6 +17,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
   alias PtcRunner.Kernel.OptionalBudgetDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.SchemaViolationDiagnostic
+  alias PtcRunner.TestSupport.CommandContractSchema
 
   # Catalog rows whose dynamic message describes a document, a fixture, or a
   # contract rule rather than a setting the caller chose. Listed so the sweep
@@ -193,7 +193,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
   # this exact text rather than to a prefix.
   test "every setting message survives its own validator, admission, and published schema" do
     assert {:ok, schema} =
-             JSV.build(CommandContract.catalog_diagnostic_schema(),
+             JSV.build(CommandContractSchema.catalog_diagnostic_schema(),
                atoms: false,
                warnings: :silent
              )
@@ -272,7 +272,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
   # stops describing the producer.
   test "an explicit failure message is admitted and published only without a source" do
     assert {:ok, schema} =
-             JSV.build(CommandContract.catalog_diagnostic_schema(),
+             JSV.build(CommandContractSchema.catalog_diagnostic_schema(),
                atoms: false,
                warnings: :silent
              )
@@ -308,7 +308,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
 
   test "a candidate_refused message is admitted only as a complete gated sentence" do
     assert {:ok, schema} =
-             JSV.build(CommandContract.catalog_diagnostic_schema(),
+             JSV.build(CommandContractSchema.catalog_diagnostic_schema(),
                atoms: false,
                warnings: :silent
              )
@@ -385,7 +385,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
   # later edit cannot loosen the runtime validator to match the schema.
   test "the published installed-ceiling schema accepts text the constructor refuses" do
     assert {:ok, schema} =
-             JSV.build(CommandContract.catalog_diagnostic_schema(),
+             JSV.build(CommandContractSchema.catalog_diagnostic_schema(),
                atoms: false,
                warnings: :silent
              )
@@ -421,7 +421,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
 
   test "optional-budget messages enforce cataloged names, prerequisites, values, and suffixes" do
     assert {:ok, schema} =
-             JSV.build(CommandContract.catalog_diagnostic_schema(),
+             JSV.build(CommandContractSchema.catalog_diagnostic_schema(),
                atoms: false,
                warnings: :silent
              )
@@ -505,7 +505,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
   # "max_turns 4 is outside 1–128".
   test "an in-range or overflowing agent option is not an invalid_agent_config message" do
     assert {:ok, schema} =
-             JSV.build(CommandContract.catalog_diagnostic_schema(),
+             JSV.build(CommandContractSchema.catalog_diagnostic_schema(),
                atoms: false,
                warnings: :silent
              )

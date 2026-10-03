@@ -17,6 +17,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   alias PtcRunner.Kernel.CandidateRefusedDiagnostic
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandFailureCause
+  alias PtcRunner.Kernel.CommandResults
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.ComponentOverrideDiagnostic
@@ -123,14 +124,6 @@ defmodule PtcRunner.Kernel.CommandContract do
   @doctor_application_failure_codes DiagnosticCatalog.doctor_application_rows()
                                     |> Enum.map(& &1.code)
                                     |> Enum.map(&Atom.to_string/1)
-  @doctor_notice "doctor --connect may perform one or more real provider requests and may incur provider cost"
-  @run_notice "set PTC_VIEWER_URL; it reports an externally started run to a Viewer Live tab"
-  @viewer_notice "for an externally started run, use the Viewer URL printed at startup as PTC_VIEWER_URL when it is loopback; otherwise use an address that reaches the Viewer"
-  @init_notices [
-    "DIRECTORY must not already exist",
-    "init assembles the complete scaffold or selected example tree and publishes it atomically without replacing anything",
-    "to add PtcRunner to an existing repository, initialize a new sibling or subdirectory and deliberately copy or move the generated files the repository wants"
-  ]
   @spec schema() :: map()
   def schema do
     %{
@@ -229,27 +222,14 @@ defmodule PtcRunner.Kernel.CommandContract do
     end)
   end
 
-  # The strict envelope refs only the per-branch diagnostic definitions. This
-  # union over every catalog row is deliberately not part of the contract: it
-  # exists so callers can assert that each row renders to something the
-  # generated constants admit, without publishing a definition no branch admits.
-  @doc false
-  @spec catalog_diagnostic_schema() :: map()
-  def catalog_diagnostic_schema, do: diagnostic_schema()
-
-  @doc false
-  @spec unclassified_diagnostic_phase?(atom()) :: boolean()
-  def unclassified_diagnostic_phase?(phase), do: phase in @unclassified_run_phases
-
   @doc false
   @spec diagnostic_allowed?(term(), atom(), atom()) :: boolean()
   def diagnostic_allowed?(mode, phase, code) do
     Enum.any?(diagnostic_rows(mode), &(&1.phase == phase and &1.code == code))
   end
 
-  @doc false
   @spec envelope_schema_root() :: {:ok, term()} | {:error, term()}
-  def envelope_schema_root, do: compiled_jsv_root(@envelope_root_key, &schema/0)
+  defp envelope_schema_root, do: compiled_jsv_root(@envelope_root_key, &schema/0)
 
   @doc false
   @spec valid_envelope?(term()) :: boolean()
@@ -355,7 +335,7 @@ defmodule PtcRunner.Kernel.CommandContract do
             provider_groups_start_with_local?(keys) and
             provider_groups_match_application?(keys, application_check)
 
-        common and readiness == doctor_readiness(provider_checks) and
+        common and readiness == CommandResults.doctor_readiness(provider_checks) and
           doctor_readiness_consistent?(
             readiness,
             application_check,
@@ -406,16 +386,6 @@ defmodule PtcRunner.Kernel.CommandContract do
       do: true
 
   def valid_success_semantics?(_command, _result), do: false
-
-  @doc false
-  @spec doctor_readiness([map()]) :: String.t()
-  def doctor_readiness([]), do: "not_applicable"
-
-  def doctor_readiness(provider_checks) when is_list(provider_checks) do
-    if Enum.any?(provider_checks, &(&1["status"] == "skipped")),
-      do: "unverified",
-      else: "ready"
-  end
 
   defp doctor_readiness_consistent?(
          "not_applicable",
@@ -989,52 +959,6 @@ defmodule PtcRunner.Kernel.CommandContract do
   defp ordered_subset?(values, order) do
     ranks = Enum.map(values, fn value -> Enum.find_index(order, &(&1 == value)) end)
     Enum.all?(ranks, &is_integer/1) and ranks == Enum.sort(ranks) and ranks == Enum.uniq(ranks)
-  end
-
-  @spec help_result(atom()) :: map()
-  def help_result(topic, frontend \\ :standalone) do
-    if topic in CommandDeclaration.topics() and frontend in [:standalone, :mix] do
-      %{
-        "topic" => Atom.to_string(topic),
-        "usage" => CommandDeclaration.usage(topic),
-        "options" => CommandDeclaration.help_options(topic, frontend),
-        "notices" => help_notices(topic)
-      }
-    else
-      raise ArgumentError, "invalid help topic"
-    end
-  end
-
-  defp help_notices(:doctor), do: [@doctor_notice]
-  defp help_notices(:init), do: @init_notices
-  defp help_notices(:run), do: [@run_notice]
-  defp help_notices(:viewer), do: [@viewer_notice]
-  defp help_notices(_topic), do: []
-
-  @spec version_result() :: map()
-  def version_result do
-    identity = PtcRunner.BuildIdentity.current()
-
-    %{
-      "version" => identity.version,
-      "source_revision" => identity.source_revision,
-      "source_dirty" => identity.source_dirty
-    }
-  end
-
-  @doc """
-  Builds the `docs` result: the served listing, or one embedded page.
-  """
-  @spec docs_result(binary() | nil | {:search, binary()}) :: map()
-  def docs_result(nil), do: %{"pages" => DocumentationLibrary.listing()}
-
-  def docs_result({:search, term}) when is_binary(term), do: DocumentationLibrary.search(term)
-
-  def docs_result(page) when is_binary(page) do
-    case DocumentationLibrary.fetch(page) do
-      {:ok, content} -> %{"page" => page, "content" => content}
-      :error -> raise ArgumentError, "invalid docs page"
-    end
   end
 
   defp error_envelope(command, rows, provider_activity, compound?) do
@@ -2214,7 +2138,7 @@ defmodule PtcRunner.Kernel.CommandContract do
             frontend <- [:standalone, :mix],
             uniq: true do
           topic
-          |> help_result(frontend)
+          |> CommandResults.help_result(frontend)
           |> const_object()
         end
     }

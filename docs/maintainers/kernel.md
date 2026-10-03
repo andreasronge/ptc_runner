@@ -210,7 +210,14 @@ registry.
 Only `doctor --connect` performs provider connectivity work. Exact command
 envelopes and diagnostic rows are owned by `CommandOutcome`,
 `CommandContract`, and `DiagnosticCatalog`; `mix ptc.gen_docs` projects their
-schemas.
+schemas. `CommandResults` builds help, version, documentation, and doctor
+readiness payloads; `CommandContract` owns their schema and validation.
+`CommandOutcome.for_arguments/3` maps argument failures to the command mode
+and preserves requested run artifact states. Both CLI adapters use
+`CommandRouter` for bootstrap and frontend dispatch. `ReplFrontend` validates
+invocations and owns the workflow input loop, rendering, and cleanup.
+`ReplProfileRunner` owns profile execution and cleanup; `ReplSessionRunner`
+opens direct, manifest, and inspect-only sessions for the workflow runner.
 
 Dynamic diagnostic prose is declared as literal segments and named typed
 slots in `DiagnosticPattern` templates. Rendering, parsing, and schema patterns
