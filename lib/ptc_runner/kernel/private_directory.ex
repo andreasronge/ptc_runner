@@ -407,9 +407,8 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
   def stale_marker?(:missing, stat), do: System.os_time(:second) - stat.mtime > 60
   def stale_marker?(:unknown, _stat), do: false
 
-  @doc false
   @spec owner_dead?(binary()) :: boolean()
-  def owner_dead?(pid) do
+  defp owner_dead?(pid) do
     with true <- Regex.match?(~r/\A[1-9][0-9]{0,9}\z/, pid),
          {number, ""} when number <= 2_147_483_647 <- Integer.parse(pid),
          executable when is_binary(executable) <- System.find_executable("kill"),

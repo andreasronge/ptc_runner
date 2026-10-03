@@ -1602,6 +1602,9 @@ defmodule PtcRunner.ReplFrontend do
   defp manifest_repl_error(:environment_file_too_large),
     do: "the named environment file exceeds the 1 MB limit"
 
+  defp manifest_repl_error(:environment_file_invalid),
+    do: "the named environment file contains an invalid assignment"
+
   defp manifest_repl_error(:environment_file_invalid_utf8),
     do: "the named environment file is not valid UTF-8"
 

@@ -57,8 +57,8 @@ defmodule PtcRunner.Lisp.Runtime.Args do
   def valid_callable?(x), do: Builtin.builtin?(x) or closure?(x)
 
   @spec valid_predicate?(term()) :: boolean()
-  def valid_predicate?(%MapSet{}), do: true
-  def valid_predicate?(x), do: valid_keyfn?(x)
+  defp valid_predicate?(%MapSet{}), do: true
+  defp valid_predicate?(x), do: valid_keyfn?(x)
 
   @spec valid_keyfn?(term()) :: boolean()
   def valid_keyfn?(%MapSet{}), do: true
@@ -67,8 +67,8 @@ defmodule PtcRunner.Lisp.Runtime.Args do
   def valid_keyfn?(x), do: valid_callable?(x)
 
   @spec valid_sort_keyfn?(term()) :: boolean()
-  def valid_sort_keyfn?(x) when is_list(x), do: true
-  def valid_sort_keyfn?(x), do: valid_keyfn?(x)
+  defp valid_sort_keyfn?(x) when is_list(x), do: true
+  defp valid_sort_keyfn?(x), do: valid_keyfn?(x)
 
   defp validate_shape!(name, specs, args) when is_list(specs) do
     validate_list!(name, specs, args)

@@ -28,7 +28,6 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.SourceCheck
   alias PtcRunner.Kernel.TerminalUsage
-  alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp.Format
@@ -36,6 +35,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.TestSupport.ProviderSessionFixture
   alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
+  alias PtcRunner.TestSupport.TraceQuery
 
   @input_schema %{"type" => "object", "additionalProperties" => true}
 
@@ -4234,10 +4234,10 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     refute inspect(EventSink.events(sink)) =~ secret
 
-    assert {:ok, trace_log} = TraceLog.new(source: sink)
+    assert {:ok, trace_log} = TraceQuery.new(source: sink)
 
     assert {:ok, %{"items" => items}} =
-             TraceLog.query(trace_log, :list_turns, %{
+             TraceQuery.query(trace_log, :list_turns, %{
                "run_id" => "rejected-annotation-class",
                "capability" => "workflow-annotate"
              })

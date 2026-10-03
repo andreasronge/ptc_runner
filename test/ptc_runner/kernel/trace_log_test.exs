@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.TestSupport.TestHelpers
+  alias PtcRunner.TestSupport.TraceQuery
 
   test "analysis facts count only workflow llm-request exchanges" do
     events = [
@@ -51,8 +52,8 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     query = fn events, name ->
       path = Path.join(directory, "result-hash-#{name}.jsonl")
       File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
-      {:ok, log} = TraceLog.new(source: {:file, path})
-      TraceLog.query(log, :get_run, %{"run_id" => name})
+      {:ok, log} = TraceQuery.new(source: {:file, path})
+      TraceQuery.query(log, :get_run, %{"run_id" => name})
     end
 
     hash = result_hash(%{"answer" => 42})
@@ -113,8 +114,8 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     ]
 
     assert :ok = TraceLog.append_jsonl(path, events)
-    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
-    assert {:ok, %{"items" => items}} = TraceLog.query(trace_log, :list_runs, %{})
+    assert {:ok, trace_log} = TraceQuery.new(source: {:file, path})
+    assert {:ok, %{"items" => items}} = TraceQuery.query(trace_log, :list_runs, %{})
 
     summaries = Map.new(items, &{&1["run_id"], &1})
 
@@ -147,8 +148,8 @@ defmodule PtcRunner.Kernel.TraceLogTest do
 
       File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
 
-      with {:ok, trace_log} <- TraceLog.new(source: {:file, path}),
-           do: TraceLog.query(trace_log, :list_runs, %{})
+      with {:ok, trace_log} <- TraceQuery.new(source: {:file, path}),
+           do: TraceQuery.query(trace_log, :list_runs, %{})
     end
 
     assert {:ok, _page} = load.(valid, "valid")
@@ -217,8 +218,8 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     ]
 
     File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
-    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
-    assert {:error, :malformed_source} = TraceLog.query(trace_log, :list_runs, %{})
+    assert {:ok, trace_log} = TraceQuery.new(source: {:file, path})
+    assert {:error, :malformed_source} = TraceQuery.query(trace_log, :list_runs, %{})
   end
 
   @tag :tmp_dir
@@ -260,7 +261,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     ]
 
     assert :ok = TraceLog.append_jsonl(path, events)
-    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
+    assert {:ok, trace_log} = TraceQuery.new(source: {:file, path})
 
     assert {:ok,
             %{
@@ -271,16 +272,16 @@ defmodule PtcRunner.Kernel.TraceLogTest do
                   "subordinate_evaluations" => 0
                 }
               ]
-            }} = TraceLog.query(trace_log, :list_runs, %{"bundle" => bundle_a})
+            }} = TraceQuery.query(trace_log, :list_runs, %{"bundle" => bundle_a})
 
     assert {:ok, %{"items" => [%{"run_id" => "bundle-b-run"}]}} =
-             TraceLog.query(trace_log, :list_runs, %{"bundle" => bundle_b})
+             TraceQuery.query(trace_log, :list_runs, %{"bundle" => bundle_b})
 
     assert {:ok, %{"runs" => 1, "evaluations" => 1}} =
-             TraceLog.query(trace_log, :counters, %{"bundle" => bundle_a})
+             TraceQuery.query(trace_log, :counters, %{"bundle" => bundle_a})
 
     assert {:error, :invalid_query} =
-             TraceLog.query(trace_log, :list_runs, %{"bundle_hash" => bundle_a})
+             TraceQuery.query(trace_log, :list_runs, %{"bundle_hash" => bundle_a})
   end
 
   @tag :tmp_dir
@@ -319,12 +320,12 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     ]
 
     assert :ok = TraceLog.append_jsonl(path, events)
-    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
+    assert {:ok, trace_log} = TraceQuery.new(source: {:file, path})
 
     # One errored evaluation and one errored capability call are the two rows a
     # reader can open. The run's own outcome is its status, not a third error.
     assert {:ok, %{"items" => [%{"error_count" => 2, "status" => "error"}]}} =
-             TraceLog.query(trace_log, :list_runs, %{})
+             TraceQuery.query(trace_log, :list_runs, %{})
   end
 
   @tag :tmp_dir
@@ -338,10 +339,10 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     ]
 
     File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
-    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
+    assert {:ok, trace_log} = TraceQuery.new(source: {:file, path})
 
     assert {:error, :malformed_source} =
-             TraceLog.query(trace_log, :list_runs, %{"bundle" => "bundle-a"})
+             TraceQuery.query(trace_log, :list_runs, %{"bundle" => "bundle-a"})
   end
 
   @tag :tmp_dir
@@ -352,10 +353,10 @@ defmodule PtcRunner.Kernel.TraceLogTest do
 
     assert :ok = TraceLog.append_jsonl(path, [first])
     assert :ok = TraceLog.append_jsonl(path, [second])
-    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
+    assert {:ok, trace_log} = TraceQuery.new(source: {:file, path})
 
     assert {:ok, %{"items" => [%{"run_id" => "append", "complete" => true}]}} =
-             TraceLog.query(trace_log, :list_runs, %{})
+             TraceQuery.query(trace_log, :list_runs, %{})
   end
 
   @tag :tmp_dir
@@ -454,14 +455,14 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     assert_receive {^port, {:data, {:eol, "APPEND_RESULT=:ok"}}}, 10_000
     assert_receive {^port, {:exit_status, 0}}, 10_000
     assert Task.await(second_append, 10_000) == :ok
-    assert {:ok, first_log} = TraceLog.new(source: {:file, first_path})
-    assert {:ok, second_log} = TraceLog.new(source: {:file, second_path})
+    assert {:ok, first_log} = TraceQuery.new(source: {:file, first_path})
+    assert {:ok, second_log} = TraceQuery.new(source: {:file, second_path})
 
     assert {:ok, %{"items" => [%{"run_id" => "first-collision"}]}} =
-             TraceLog.query(first_log, :list_runs, %{})
+             TraceQuery.query(first_log, :list_runs, %{})
 
     assert {:ok, %{"items" => [%{"run_id" => "second-collision"}]}} =
-             TraceLog.query(second_log, :list_runs, %{})
+             TraceQuery.query(second_log, :list_runs, %{})
   end
 
   @tag :tmp_dir
@@ -559,8 +560,8 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     assert_receive {^port, {:exit_status, 0}}, 10_000
     assert Task.await(second_append, 10_000) == :ok
 
-    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
-    assert {:ok, %{"items" => runs}} = TraceLog.query(trace_log, :list_runs, %{"limit" => 100})
+    assert {:ok, trace_log} = TraceQuery.new(source: {:file, path})
+    assert {:ok, %{"items" => runs}} = TraceQuery.query(trace_log, :list_runs, %{"limit" => 100})
     assert Enum.sort(Enum.map(runs, & &1["run_id"])) == ["first-runtime", "second-runtime"]
   end
 
@@ -595,8 +596,8 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     Enum.each(tasks, &send(&1.pid, :append))
     assert Enum.all?(Task.await_many(tasks, 30_000), &(&1 == :ok))
 
-    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
-    assert {:ok, %{"items" => runs}} = TraceLog.query(trace_log, :list_runs, %{"limit" => 100})
+    assert {:ok, trace_log} = TraceQuery.new(source: {:file, path})
+    assert {:ok, %{"items" => runs}} = TraceQuery.query(trace_log, :list_runs, %{"limit" => 100})
     assert length(runs) == 8
   end
 
@@ -632,8 +633,8 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     Enum.each(tasks, &send(&1.pid, :append))
     assert Enum.all?(Task.await_many(tasks, 30_000), &(&1 == :ok))
 
-    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
-    assert {:ok, %{"items" => runs}} = TraceLog.query(trace_log, :list_runs, %{"limit" => 100})
+    assert {:ok, trace_log} = TraceQuery.new(source: {:file, path})
+    assert {:ok, %{"items" => runs}} = TraceQuery.query(trace_log, :list_runs, %{"limit" => 100})
     assert length(runs) == 8
   end
 
@@ -894,21 +895,21 @@ defmodule PtcRunner.Kernel.TraceLogTest do
              TraceLog.append_jsonl(normal_path, [private_event], private: true)
 
     assert {:error, :invalid_trace_log} = TraceLog.append_jsonl(private_path, [normal_event])
-    assert {:error, :invalid_trace_log} = TraceLog.new(source: {:file, private_path})
-    assert {:ok, private_log} = TraceLog.new(source: {:private_file, private_path})
-    assert {:ok, normal_log} = TraceLog.new(source: {:directory, directory})
+    assert {:error, :invalid_trace_log} = TraceQuery.new(source: {:file, private_path})
+    assert {:ok, private_log} = TraceQuery.new(source: {:private_file, private_path})
+    assert {:ok, normal_log} = TraceQuery.new(source: {:directory, directory})
 
     assert {:ok, private_directory_log} =
-             TraceLog.new(source: {:private_directory, directory})
+             TraceQuery.new(source: {:private_directory, directory})
 
     assert {:ok, %{"items" => [%{"run_id" => "normal", "source" => "sanitized"}]}} =
-             TraceLog.query(normal_log, :list_runs, %{})
+             TraceQuery.query(normal_log, :list_runs, %{})
 
     assert {:ok, %{"items" => [%{"run_id" => "private", "source" => "private"}]}} =
-             TraceLog.query(private_log, :list_runs, %{})
+             TraceQuery.query(private_log, :list_runs, %{})
 
     assert {:ok, %{"items" => [%{"run_id" => "private", "source" => "private"}]}} =
-             TraceLog.query(private_directory_log, :list_runs, %{})
+             TraceQuery.query(private_directory_log, :list_runs, %{})
   end
 
   @tag :tmp_dir
@@ -929,11 +930,11 @@ defmodule PtcRunner.Kernel.TraceLogTest do
                private: true
              )
 
-    assert {:ok, sanitized_log} = TraceLog.new(source: {:directory, directory})
-    assert {:ok, private_log} = TraceLog.new(source: {:private_directory, directory})
+    assert {:ok, sanitized_log} = TraceQuery.new(source: {:directory, directory})
+    assert {:ok, private_log} = TraceQuery.new(source: {:private_directory, directory})
 
     assert {:ok, %{"items" => [%{"run_id" => "normal"}]} = page} =
-             TraceLog.query(sanitized_log, :list_runs, %{})
+             TraceQuery.query(sanitized_log, :list_runs, %{})
 
     assert page["excluded_private_trace_files"] == 1
     refute Map.has_key?(page, "excluded_sanitized_trace_files")
@@ -943,15 +944,15 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     assert page["omitted_count"] == 0
 
     assert {:ok, %{"excluded_private_trace_files" => 1}} =
-             TraceLog.query(sanitized_log, :counters, %{})
+             TraceQuery.query(sanitized_log, :counters, %{})
 
     # A run-scoped answer would attach a directory-wide exclusion to one run,
     # where it states nothing true about that run.
-    assert {:ok, run} = TraceLog.query(sanitized_log, :get_run, %{"run_id" => "normal"})
+    assert {:ok, run} = TraceQuery.query(sanitized_log, :get_run, %{"run_id" => "normal"})
     refute Map.has_key?(run, "excluded_private_trace_files")
 
     assert {:ok, %{"items" => [%{"run_id" => "private"}]} = private_page} =
-             TraceLog.query(private_log, :list_runs, %{})
+             TraceQuery.query(private_log, :list_runs, %{})
 
     assert private_page["excluded_sanitized_trace_files"] == 1
   end
@@ -1010,13 +1011,13 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     path = Path.join(directory, "run.ptcins")
     File.write!(path, jsonl_event("inspection", 1, "run-started"))
 
-    assert {:error, :invalid_trace_log} = TraceLog.new(source: {:file, path})
-    assert {:error, :invalid_trace_log} = TraceLog.new(source: {:private_file, path})
+    assert {:error, :invalid_trace_log} = TraceQuery.new(source: {:file, path})
+    assert {:error, :invalid_trace_log} = TraceQuery.new(source: {:private_file, path})
 
-    assert {:ok, normal_log} = TraceLog.new(source: {:directory, directory})
-    assert {:ok, private_log} = TraceLog.new(source: {:private_directory, directory})
-    assert {:ok, %{"items" => []}} = TraceLog.query(normal_log, :list_runs, %{})
-    assert {:ok, %{"items" => []}} = TraceLog.query(private_log, :list_runs, %{})
+    assert {:ok, normal_log} = TraceQuery.new(source: {:directory, directory})
+    assert {:ok, private_log} = TraceQuery.new(source: {:private_directory, directory})
+    assert {:ok, %{"items" => []}} = TraceQuery.query(normal_log, :list_runs, %{})
+    assert {:ok, %{"items" => []}} = TraceQuery.query(private_log, :list_runs, %{})
   end
 
   @tag :tmp_dir
@@ -1024,20 +1025,20 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     File.write!(Path.join(directory, "first.jsonl"), jsonl_event("first", 1, "run-started"))
     File.write!(Path.join(directory, "second.jsonl"), jsonl_event("second", 1, "run-started"))
 
-    {:ok, trace_log} = TraceLog.new(source: {:directory, directory})
+    {:ok, trace_log} = TraceQuery.new(source: {:directory, directory})
 
     assert {:ok, %{"next_cursor" => cursor}} =
-             TraceLog.query(trace_log, :list_runs, %{"limit" => 1})
+             TraceQuery.query(trace_log, :list_runs, %{"limit" => 1})
 
     assert {:error, :invalid_query} =
-             TraceLog.query(trace_log, :list_runs, %{
+             TraceQuery.query(trace_log, :list_runs, %{
                "limit" => 1,
                "status" => "ok",
                "cursor" => cursor
              })
 
     assert {:error, :invalid_query} =
-             TraceLog.query(trace_log, :list_turns, %{
+             TraceQuery.query(trace_log, :list_turns, %{
                "run_id" => "first",
                "cursor" => cursor
              })
@@ -1093,18 +1094,21 @@ defmodule PtcRunner.Kernel.TraceLogTest do
       Enum.map_join(event_after_stop, "", &(Jason.encode!(&1) <> "\n"))
     )
 
-    {:ok, version_log} = TraceLog.new(source: {:file, version_path})
-    {:ok, mixed_log} = TraceLog.new(source: {:file, mixed_path})
-    {:ok, shared_trace_log} = TraceLog.new(source: {:file, shared_trace_path})
-    {:ok, stopped_only_log} = TraceLog.new(source: {:file, stopped_only_path})
-    {:ok, stopped_before_start_log} = TraceLog.new(source: {:file, stopped_before_start_path})
-    {:ok, event_after_stop_log} = TraceLog.new(source: {:file, event_after_stop_path})
-    assert {:error, :unsupported_version} = TraceLog.query(version_log, :list_runs, %{})
-    assert {:error, :malformed_source} = TraceLog.query(mixed_log, :list_runs, %{})
-    assert {:error, :malformed_source} = TraceLog.query(shared_trace_log, :list_runs, %{})
-    assert {:error, :malformed_source} = TraceLog.query(stopped_only_log, :list_runs, %{})
-    assert {:error, :malformed_source} = TraceLog.query(stopped_before_start_log, :list_runs, %{})
-    assert {:error, :malformed_source} = TraceLog.query(event_after_stop_log, :list_runs, %{})
+    {:ok, version_log} = TraceQuery.new(source: {:file, version_path})
+    {:ok, mixed_log} = TraceQuery.new(source: {:file, mixed_path})
+    {:ok, shared_trace_log} = TraceQuery.new(source: {:file, shared_trace_path})
+    {:ok, stopped_only_log} = TraceQuery.new(source: {:file, stopped_only_path})
+    {:ok, stopped_before_start_log} = TraceQuery.new(source: {:file, stopped_before_start_path})
+    {:ok, event_after_stop_log} = TraceQuery.new(source: {:file, event_after_stop_path})
+    assert {:error, :unsupported_version} = TraceQuery.query(version_log, :list_runs, %{})
+    assert {:error, :malformed_source} = TraceQuery.query(mixed_log, :list_runs, %{})
+    assert {:error, :malformed_source} = TraceQuery.query(shared_trace_log, :list_runs, %{})
+    assert {:error, :malformed_source} = TraceQuery.query(stopped_only_log, :list_runs, %{})
+
+    assert {:error, :malformed_source} =
+             TraceQuery.query(stopped_before_start_log, :list_runs, %{})
+
+    assert {:error, :malformed_source} = TraceQuery.query(event_after_stop_log, :list_runs, %{})
   end
 
   @tag :tmp_dir
@@ -1114,8 +1118,8 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     query = fn events, name ->
       path = Path.join(directory, "#{name}.jsonl")
       File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
-      {:ok, log} = TraceLog.new(source: {:file, path})
-      TraceLog.query(log, :list_runs, %{})
+      {:ok, log} = TraceQuery.new(source: {:file, path})
+      TraceQuery.query(log, :list_runs, %{})
     end
 
     valid = [
@@ -1161,8 +1165,8 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     query = fn events, name ->
       path = Path.join(directory, "parent-edge-#{name}.jsonl")
       File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
-      {:ok, log} = TraceLog.new(source: {:file, path})
-      TraceLog.query(log, :list_runs, %{})
+      {:ok, log} = TraceQuery.new(source: {:file, path})
+      TraceQuery.query(log, :list_runs, %{})
     end
 
     valid = [
@@ -1463,9 +1467,9 @@ defmodule PtcRunner.Kernel.TraceLogTest do
       ]
 
       File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
-      {:ok, trace_log} = TraceLog.new(source: {:file, path})
+      {:ok, trace_log} = TraceQuery.new(source: {:file, path})
 
-      assert {:error, :malformed_source} = TraceLog.query(trace_log, :list_runs, %{})
+      assert {:error, :malformed_source} = TraceQuery.query(trace_log, :list_runs, %{})
     end
   end
 
@@ -1496,9 +1500,9 @@ defmodule PtcRunner.Kernel.TraceLogTest do
       ]
 
       File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
-      {:ok, trace_log} = TraceLog.new(source: {:file, path})
+      {:ok, trace_log} = TraceQuery.new(source: {:file, path})
 
-      assert {:error, :malformed_source} = TraceLog.query(trace_log, :list_runs, %{})
+      assert {:error, :malformed_source} = TraceQuery.query(trace_log, :list_runs, %{})
     end
   end
 
@@ -1533,9 +1537,9 @@ defmodule PtcRunner.Kernel.TraceLogTest do
       ]
 
       File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
-      {:ok, trace_log} = TraceLog.new(source: {:file, path})
+      {:ok, trace_log} = TraceQuery.new(source: {:file, path})
 
-      assert {:error, :malformed_source} = TraceLog.query(trace_log, :list_runs, %{})
+      assert {:error, :malformed_source} = TraceQuery.query(trace_log, :list_runs, %{})
     end
   end
 
@@ -1560,10 +1564,10 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     ]
 
     File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
-    {:ok, trace_log} = TraceLog.new(source: {:file, path})
+    {:ok, trace_log} = TraceQuery.new(source: {:file, path})
 
     assert {:ok, %{"items" => [%{"workflow_capability_calls" => 513}]}} =
-             TraceLog.query(trace_log, :list_runs, %{})
+             TraceQuery.query(trace_log, :list_runs, %{})
   end
 
   @tag :tmp_dir
@@ -1577,9 +1581,9 @@ defmodule PtcRunner.Kernel.TraceLogTest do
 
     events = [decoded_event("missing-terminal-usage", 1, "run-started"), stopped]
     File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
-    {:ok, trace_log} = TraceLog.new(source: {:file, path})
+    {:ok, trace_log} = TraceQuery.new(source: {:file, path})
 
-    assert {:error, :malformed_source} = TraceLog.query(trace_log, :list_runs, %{})
+    assert {:error, :malformed_source} = TraceQuery.query(trace_log, :list_runs, %{})
   end
 
   @tag :tmp_dir
@@ -1596,9 +1600,9 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     ]
 
     File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
-    {:ok, trace_log} = TraceLog.new(source: {:file, path})
+    {:ok, trace_log} = TraceQuery.new(source: {:file, path})
 
-    assert {:error, :malformed_source} = TraceLog.query(trace_log, :list_runs, %{})
+    assert {:error, :malformed_source} = TraceQuery.query(trace_log, :list_runs, %{})
   end
 
   @tag :tmp_dir
@@ -1615,16 +1619,16 @@ defmodule PtcRunner.Kernel.TraceLogTest do
       File.write!(Path.join(directory, run_id <> ".jsonl"), Jason.encode!(event) <> "\n")
     end
 
-    {:ok, trace_log} = TraceLog.new(source: {:directory, directory})
+    {:ok, trace_log} = TraceQuery.new(source: {:directory, directory})
 
     assert {:ok, %{"items" => first, "next_cursor" => cursor}} =
-             TraceLog.query(trace_log, :list_runs, %{"limit" => 2})
+             TraceQuery.query(trace_log, :list_runs, %{"limit" => 2})
 
     assert Enum.map(first, & &1["run_id"]) == ["newer", "tie-z"]
     assert is_binary(cursor)
 
     assert {:ok, %{"items" => second, "next_cursor" => nil}} =
-             TraceLog.query(trace_log, :list_runs, %{"limit" => 2, "cursor" => cursor})
+             TraceQuery.query(trace_log, :list_runs, %{"limit" => 2, "cursor" => cursor})
 
     assert Enum.map(second, & &1["run_id"]) == ["tie-a", "older"]
   end
@@ -1634,10 +1638,10 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     path = Path.join(directory, "timestamp.jsonl")
     event = %{decoded_event("time", 1, "run-started") | "timestamp" => "2026-07-12T12:00:00.1Z"}
     File.write!(path, Jason.encode!(event) <> "\n")
-    {:ok, trace_log} = TraceLog.new(source: {:file, path})
+    {:ok, trace_log} = TraceQuery.new(source: {:file, path})
 
     assert {:ok, %{"items" => [%{"run_id" => "time"}]}} =
-             TraceLog.query(trace_log, :list_runs, %{"to" => "2026-07-12T12:00:00.10Z"})
+             TraceQuery.query(trace_log, :list_runs, %{"to" => "2026-07-12T12:00:00.10Z"})
   end
 
   defp jsonl_event(run_id, sequence, type) do

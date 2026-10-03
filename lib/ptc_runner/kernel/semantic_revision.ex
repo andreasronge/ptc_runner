@@ -99,22 +99,15 @@ defmodule PtcRunner.Kernel.SemanticRevision do
     |> Enum.sort_by(&Map.fetch!(&1, "name"))
   end
 
-  @spec actual_compile_feature_projection([module()], (module() -> boolean())) :: [map()]
-  @doc false
-  def actual_compile_feature_projection(
-        modules,
-        resolver \\ &Code.ensure_loaded?/1
-      )
-
-  def actual_compile_feature_projection(modules, resolver)
-      when is_list(modules) and is_function(resolver, 1) do
+  @spec actual_compile_feature_projection([module()]) :: [map()]
+  defp actual_compile_feature_projection(modules) when is_list(modules) do
     modules
     |> Enum.uniq()
     |> Enum.sort()
     |> Enum.map(fn module ->
       %{
         "module" => Atom.to_string(module),
-        "presence" => if(resolver.(module), do: "present", else: "absent")
+        "presence" => if(Code.ensure_loaded?(module), do: "present", else: "absent")
       }
     end)
   end

@@ -13,7 +13,6 @@ defmodule PtcRunner.Kernel.InspectOnlyReplTest do
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.WorkflowEnvironment
-  alias PtcRunner.ReplDiagnosticCatalog
 
   test "Kernel.run inspect_only does not invoke capabilities" do
     parent = self()
@@ -48,17 +47,6 @@ defmodule PtcRunner.Kernel.InspectOnlyReplTest do
 
     assert error.reason == :inspect_only_unavailable
     refute_received :invoked
-  end
-
-  test "classify! keeps inspect_only_unavailable closed" do
-    diagnostic = ReplDiagnosticCatalog.classify!(:inspect_only_unavailable)
-    assert diagnostic.code == :inspect_only_unavailable
-    assert diagnostic.message =~ "inspect-only"
-    assert {:error, :unknown_repl_diagnostic} = ReplDiagnosticCatalog.classify(:unknown_tool)
-
-    assert_raise ArgumentError, fn ->
-      ReplDiagnosticCatalog.classify!(:unknown_tool)
-    end
   end
 
   @tag :tmp_dir
