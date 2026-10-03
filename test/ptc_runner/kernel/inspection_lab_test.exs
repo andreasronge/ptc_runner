@@ -117,6 +117,7 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
       {:ok, inspection_store} = PtcViewer.InspectionStore.start(inspection_source)
 
       viewer_opts = [
+        expected_port: 80,
         trace_dir: Path.dirname(journey.trace),
         kernel_trace_adapter: ViewerAdapter,
         inspection_store: inspection_store,
@@ -124,18 +125,18 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
       ]
 
       conversation =
-        Plug.Test.conn(:get, "/api/analysis/runs/#{journey.run_id}/conversation")
+        Plug.Test.conn(:get, "http://localhost/api/analysis/runs/#{journey.run_id}/conversation")
         |> PtcViewer.Router.call(PtcViewer.Router.init(viewer_opts))
 
       assert conversation.status == 200
       assert %{"streams" => [%{"turns" => [_ | _]}]} = Jason.decode!(conversation.resp_body)
 
       metadata =
-        Plug.Test.conn(:get, "/api/kernel/runs/#{journey.run_id}")
+        Plug.Test.conn(:get, "http://localhost/api/kernel/runs/#{journey.run_id}")
         |> PtcViewer.Router.call(PtcViewer.Router.init(viewer_opts))
 
       turns =
-        Plug.Test.conn(:get, "/api/kernel/runs/#{journey.run_id}/turns?limit=100")
+        Plug.Test.conn(:get, "http://localhost/api/kernel/runs/#{journey.run_id}/turns?limit=100")
         |> PtcViewer.Router.call(PtcViewer.Router.init(viewer_opts))
 
       assert metadata.status == 200

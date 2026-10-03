@@ -26,33 +26,39 @@ defmodule PtcRunner.Kernel.CapabilityRequirementDiagnostic do
 
   @spec valid_message?(term(), binary(), binary()) :: boolean()
   def valid_message?(message, singular_prefix, plural_prefix)
-      when is_binary(message) and is_binary(singular_prefix) and is_binary(plural_prefix) do
-    names =
-      cond do
-        String.starts_with?(message, singular_prefix) ->
-          [String.replace_prefix(message, singular_prefix, "")]
-
-        String.starts_with?(message, plural_prefix) ->
-          message |> String.replace_prefix(plural_prefix, "") |> String.split(", ")
-
-        true ->
-          []
-      end
-
-    message(names, singular_prefix, plural_prefix) == {:ok, message}
+      when is_binary(singular_prefix) and is_binary(plural_prefix) do
+    Enum.any?(templates(singular_prefix, plural_prefix), fn template ->
+      DiagnosticPattern.valid_template?(template, message, fn values ->
+        message(String.split(values.names, ", "), singular_prefix, plural_prefix)
+      end)
+    end)
   end
 
   def valid_message?(_message, _singular_prefix, _plural_prefix), do: false
 
   @spec message_schema(binary(), binary(), binary()) :: map()
-  def message_schema(fallback, singular_pattern_prefix, plural_pattern_prefix) do
+  def message_schema(fallback, singular_prefix, plural_prefix) do
     %{
       "oneOf" => [
-        %{"const" => fallback},
-        dynamic_schema(singular_pattern_prefix <> @symbol_pattern),
-        dynamic_schema(plural_pattern_prefix <> @symbol_pattern <> "(, #{@symbol_pattern}){1,7}")
+        %{"const" => fallback}
+        | Enum.map(templates(singular_prefix, plural_prefix), fn template ->
+            DiagnosticPattern.exact_message_schema(@max_message_bytes, template)
+            |> Map.delete("minLength")
+          end)
       ]
     }
+  end
+
+  @doc false
+  @spec templates(binary(), binary()) :: [DiagnosticPattern.template()]
+  def templates(singular_prefix, plural_prefix) do
+    [
+      [{:literal, singular_prefix}, {:slot, :names, :text, @symbol_pattern}],
+      [
+        {:literal, plural_prefix},
+        {:slot, :names, :text, @symbol_pattern <> "(, #{@symbol_pattern}){1,7}"}
+      ]
+    ]
   end
 
   defp bounded_names(names) when is_list(names) and length(names) in 1..@max_names do
@@ -64,14 +70,9 @@ defmodule PtcRunner.Kernel.CapabilityRequirementDiagnostic do
   defp valid_name?(name),
     do: is_binary(name) and byte_size(name) <= @max_name_bytes and SymbolRef.valid_name?(name)
 
-  defp render([name], singular_prefix, _plural_prefix), do: singular_prefix <> name
-  defp render(names, _singular_prefix, plural_prefix), do: plural_prefix <> Enum.join(names, ", ")
-
-  defp dynamic_schema(pattern) do
-    %{
-      "type" => "string",
-      "maxLength" => @max_message_bytes,
-      "pattern" => DiagnosticPattern.exact(pattern)
-    }
+  defp render(names, singular_prefix, plural_prefix) do
+    templates = templates(singular_prefix, plural_prefix)
+    template = if length(names) == 1, do: hd(templates), else: List.last(templates)
+    DiagnosticPattern.render(template, %{names: Enum.join(names, ", ")})
   end
 end

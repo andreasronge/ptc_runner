@@ -1,6 +1,7 @@
 defmodule PtcRunner.Lisp.NamespaceDiagnostic do
   @moduledoc false
 
+  alias PtcRunner.Kernel.DiagnosticPattern
   alias PtcRunner.Lisp.Java.Surface, as: JavaSurface
 
   @builtin_namespaces [
@@ -41,8 +42,17 @@ defmodule PtcRunner.Lisp.NamespaceDiagnostic do
   @spec message(binary(), [binary()]) :: binary()
   def message(namespace, available_namespaces \\ available_namespaces())
       when is_binary(namespace) and is_list(available_namespaces) do
-    "unknown namespace #{namespace}/. Available namespaces: " <>
-      Enum.join(available_namespaces, ", ") <> ". " <> @hint
+    DiagnosticPattern.render(template(".+", available_namespaces), %{namespace: namespace})
+  end
+
+  @doc false
+  @spec template(binary(), [binary()]) :: DiagnosticPattern.template()
+  def template(pattern, namespaces \\ available_namespaces()) do
+    [
+      {:literal, "unknown namespace "},
+      {:slot, :namespace, :text, pattern},
+      {:literal, "/. Available namespaces: " <> Enum.join(namespaces, ", ") <> ". " <> @hint}
+    ]
   end
 
   @doc """
@@ -122,19 +132,8 @@ defmodule PtcRunner.Lisp.NamespaceDiagnostic do
   @doc false
   @spec rejected_namespace(binary()) :: {:ok, binary()} | :error
   def rejected_namespace(message) when is_binary(message) do
-    prefix = "unknown namespace "
-
-    suffix =
-      "/. Available namespaces: " <> Enum.join(available_namespaces(), ", ") <> ". " <> @hint
-
-    with true <- String.starts_with?(message, prefix),
-         true <- String.ends_with?(message, suffix),
-         namespace_bytes = byte_size(message) - byte_size(prefix) - byte_size(suffix),
-         true <- namespace_bytes > 0 do
-      {:ok, binary_part(message, byte_size(prefix), namespace_bytes)}
-    else
-      _invalid -> :error
-    end
+    with {:ok, %{namespace: namespace}} <- DiagnosticPattern.parse(template("[\\s\\S]+"), message),
+         do: {:ok, namespace}
   end
 
   def rejected_namespace(_message), do: :error

@@ -123,6 +123,53 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
     assert ModelOutputDiagnostic.valid_message?(generic)
   end
 
+  test "template admission preserves semantic relationships and canonical integer spelling" do
+    assert {:ok, capacity} = LimitCapacityDiagnostic.message(10_000, 20_000)
+    assert {:ok, budget} = RuntimeLimitDiagnostic.budget_message(:llm_total_tokens, 100, 30, 20)
+
+    assert {:ok, ceiling} =
+             RuntimeLimitDiagnostic.installed_ceiling_message("normal_event_bytes", 200, 100)
+
+    rejected = [
+      {:application, :limit_capacity_invalid,
+       String.replace(capacity, "required 20000", "required 10000")},
+      {:execution, :runtime_limit_exceeded,
+       String.replace(budget, "30 tokens reservation", "20 tokens reservation")},
+      {:application, :installed_limit_exceeded,
+       String.replace(ceiling, "ceiling 100", "ceiling 200")}
+    ]
+
+    # Assert each module directly as well as through the command admission
+    # boundary, so the catalog fallback cannot disguise a weakened validator.
+    refute LimitCapacityDiagnostic.valid_message?(elem(hd(rejected), 2))
+    refute RuntimeLimitDiagnostic.budget_message?(elem(Enum.at(rejected, 1), 2))
+    refute RuntimeLimitDiagnostic.installed_ceiling_message?(elem(List.last(rejected), 2))
+
+    for {phase, code, message} <- rejected do
+      opts = if phase == :application, do: [source: CommandSource.fixed(:application)], else: []
+
+      assert {:error, :invalid_command_diagnostic} =
+               CommandDiagnostic.new(phase, code, [message: message] ++ opts)
+    end
+
+    for malformed <- [
+          String.replace(capacity, "limit 10000", "limit 010000"),
+          String.replace(capacity, "limit 10000", "limit +10000"),
+          capacity <> "\n",
+          capacity <> "\r\n"
+        ] do
+      refute LimitCapacityDiagnostic.valid_message?(malformed)
+    end
+
+    assert {:ok, limits} = Limits.new(event_payload_bytes: 10_000)
+    required = LimitConfiguration.required_normal_event_bytes(limits)
+    assert {:ok, configuration} = LimitConfigurationDiagnostic.message(1, required, 10_000)
+
+    refute LimitConfigurationDiagnostic.valid_message?(
+             String.replace(configuration, "required #{required}", "required #{required + 1}")
+           )
+  end
+
   test "every breached setting names the setting, its configured value, and a remedy" do
     for row <- setting_rows() do
       assert {:ok, message} = row.build.()
