@@ -13,14 +13,6 @@ defmodule PtcRunner.Kernel.CommandRuntime do
   alias PtcRunner.Kernel.CommandFailureCause
   alias PtcRunner.LiveStatus.Target
 
-  @environment_file_errors [
-    :environment_file_not_found,
-    :environment_file_not_regular,
-    :environment_file_unreadable,
-    :environment_file_too_large,
-    :environment_file_invalid_utf8
-  ]
-
   @enforce_keys [
     :provider_application_mode,
     :authorization_targets,
@@ -92,7 +84,7 @@ defmodule PtcRunner.Kernel.CommandRuntime do
   def valid?(_runtime), do: false
 
   @doc false
-  @spec setup_environment(t()) :: :ok | {:error, atom() | CommandDiagnostic.t()}
+  @spec setup_environment(t()) :: :ok | {:error, CommandDiagnostic.t()}
   def setup_environment(%__MODULE__{environment_setup: nil} = runtime) do
     if valid?(runtime), do: :ok, else: environment_failure(:invalid_command_runtime)
   end
@@ -100,12 +92,21 @@ defmodule PtcRunner.Kernel.CommandRuntime do
   def setup_environment(%__MODULE__{} = runtime) do
     if valid?(runtime) do
       case runtime.environment_setup.() do
-        :ok -> :ok
-        # Only the dotenv attachment may name a file-specific code. Other
-        # callbacks retain a closed cause under the shared internal code.
-        {:error, reason} when reason in @environment_file_errors -> {:error, reason}
-        {:error, reason} -> environment_failure(reason)
-        _failure -> environment_failure(:unexpected_exception)
+        :ok ->
+          :ok
+
+        # A named-file attachment returns a sealed diagnostic. Raw errors from
+        # an embedding callback stay internal even if they resemble file codes.
+        {:error, %CommandDiagnostic{} = diagnostic} ->
+          if CommandDiagnostic.valid?(diagnostic),
+            do: {:error, diagnostic},
+            else: environment_failure(:unexpected_exception)
+
+        {:error, reason} ->
+          environment_failure(reason)
+
+        _failure ->
+          environment_failure(:unexpected_exception)
       end
     else
       environment_failure(:invalid_command_runtime)
@@ -132,22 +133,8 @@ defmodule PtcRunner.Kernel.CommandRuntime do
   project's `host.env_file`, with the same code instead of one of them
   reporting an internal failure.
   """
-  @spec setup_environment_diagnostic(t()) :: :ok | {:error, CommandDiagnostic.t() | atom()}
-  def setup_environment_diagnostic(runtime) do
-    case setup_environment(runtime) do
-      :ok ->
-        :ok
-
-      {:error, reason} when reason in @environment_file_errors ->
-        {:error,
-         CommandDiagnostic.new!(:local_preflight, reason,
-           cause: CommandFailureCause.from_reason(reason)
-         )}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
+  @spec setup_environment_diagnostic(t()) :: :ok | {:error, CommandDiagnostic.t()}
+  def setup_environment_diagnostic(runtime), do: setup_environment(runtime)
 
   @doc false
   @spec with_environment(t(), (-> :ok | {:error, term()})) ::
