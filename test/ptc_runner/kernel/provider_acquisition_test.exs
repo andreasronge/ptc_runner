@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionTest do
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.SelectionRules
+  alias PtcRunner.TestSupport.ProviderSessionFixture
 
   test "only the sealed closure is ever prepared" do
     # Preparation is provider work, not a lookup: a prepare callback can fail
@@ -325,7 +326,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionTest do
     {:ok, registry} = InstallationCatalog.runtime_registry(catalog, services)
 
     limits = prepared.request.package.limits
-    {:ok, session} = ProviderSession.start_active(limits, prepared.attestation)
+    {:ok, session} = ProviderSessionFixture.start_active(limits, prepared.attestation)
 
     # An embedding opens the plain session `RunBuilder` opens for it, which
     # carries no operation deadline — the same distinction acquisition uses to

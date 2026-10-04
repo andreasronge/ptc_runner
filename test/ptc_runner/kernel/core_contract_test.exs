@@ -1252,7 +1252,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, generic_sink} = EventSink.start(:normal, limits)
     {:ok, active_sink} = EventSink.start(:normal, limits)
     {:ok, generic_session} = ProviderSession.start(generic_limits)
-    {:ok, active_session} = ProviderSession.start_active(limits, "prepared-operation")
+    {:ok, active_session} = ProviderSessionFixture.start_active(limits, "prepared-operation")
 
     assert {:ok, %{run_deadline: nil}} =
              RunConfig.new(

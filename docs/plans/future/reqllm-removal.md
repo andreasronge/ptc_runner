@@ -217,12 +217,14 @@ Removal must preserve the existing capability contract exactly:
   never reads an environment variable or a file itself; and
 - the stable seam being preserved is the `PtcRunner.LLM` adapter behaviour and
   Kernel `llm-request` capability, not the current
-  `ReqLLMAdapter.generate_*`, `embed/3`, `embed!/3`, `available?/1`, or
-  `requires_api_key?/1` convenience surface. Delete those adapter-specific
-  helpers and migrate their test/support callers. There is no provider-neutral
-  embedding behaviour today; adding one is separate work. Provider readiness
-  belongs to the installed local/credential/connectivity checks above, not a
-  boolean helper that reads environment variables or calls a public model list.
+  `ReqLLMAdapter.generate_*` convenience surface. Completed in #2152: the
+  bang generation, embedding, availability, credential, and stream-done
+  helpers and their test/support callers have been retired. The non-bang
+  generation dispatch and shared normalization remain. There is no
+  provider-neutral embedding behaviour today; adding one is separate work.
+  Provider readiness belongs to the installed local/credential/connectivity
+  checks above, not a boolean helper that reads environment variables or calls
+  a public model list.
 
 Restructure the host model source before making the direct adapter selectable.
 Replace string-encoded routing with a closed tagged source: `openai_compat`
@@ -277,7 +279,8 @@ and missing-usage outcomes, and enforcement through the existing ReqLLM path.
    LLM and host-configuration guides. Because this is a 0.x library, delete the
    string selector rather than adding a compatibility parser. Migrate
    generation callers to the behaviour seam and delete the adapter-specific
-   embedding/availability/credential helper calls and tests described above.
+   generation convenience calls. The embedding/availability/credential helper
+   calls and tests were already deleted in #2152.
    Add exact-key/type tests for `usage_guarantees`, ceiling/guarantee
    compatibility and missing promised metadata; URL/auth rejection tests; plus
    `Inspect`, diagnostics, model-list, snapshot, trace, and effective-identity

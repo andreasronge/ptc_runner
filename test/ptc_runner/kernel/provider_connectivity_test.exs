@@ -27,6 +27,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.TestSupport.HostBoundFixture
+  alias PtcRunner.TestSupport.ProviderSessionFixture
 
   test "a selection needing no connectivity completes without acquiring or evaluating" do
     # `RunBuilder.execute_built/1` can only answer with an execution outcome, so
@@ -344,7 +345,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     limits = prepared.request.package.limits
     assert limits.doctor_connectivity_timeout_ms > limits.run_duration_ms
 
-    {:ok, session} = ProviderSession.start_active(limits, prepared.attestation)
+    {:ok, session} = ProviderSessionFixture.start_active(limits, prepared.attestation)
     on_exit(fn -> ProviderSession.close(session) end)
     {:ok, session} = ProviderSession.begin_operation(session, :connect)
 
@@ -358,7 +359,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     # budget behind its back.
     %{prepared: prepared} = fixture(%{"inert" => [destination: :workflow]})
     limits = prepared.request.package.limits
-    {:ok, session} = ProviderSession.start_active(limits, prepared.attestation)
+    {:ok, session} = ProviderSessionFixture.start_active(limits, prepared.attestation)
     on_exit(fn -> ProviderSession.close(session) end)
 
     assert ProviderSession.compatible_limits?(session, limits)
@@ -1067,7 +1068,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
 
   defp begin_remaining(prepared, catalog, operation) do
     limits = prepared.request.package.limits
-    {:ok, session} = ProviderSession.start_active(limits, prepared.attestation)
+    {:ok, session} = ProviderSessionFixture.start_active(limits, prepared.attestation)
     on_exit(fn -> ProviderSession.close(session) end)
     {:ok, services} = ProviderRuntimeServices.new()
 

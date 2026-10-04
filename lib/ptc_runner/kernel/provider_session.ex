@@ -154,13 +154,6 @@ defmodule PtcRunner.Kernel.ProviderSession do
   def start(_limits), do: {:error, :invalid_provider_session}
 
   @doc false
-  @spec start_active(Limits.t(), binary()) :: {:ok, t()} | {:error, term()}
-  def start_active(%Limits{} = limits, operation_identity) when is_binary(operation_identity),
-    do: start_session(limits, operation_identity, self(), false, nil)
-
-  def start_active(_limits, _operation_identity), do: {:error, :invalid_provider_session}
-
-  @doc false
   @spec start_active_owned(Limits.t(), binary(), pid(), (t() -> :ok | {:error, term()})) ::
           {:ok, t()} | {:error, :invalid_provider_session | :provider_session_unavailable}
   def start_active_owned(

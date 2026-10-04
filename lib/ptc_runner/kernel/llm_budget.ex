@@ -6,12 +6,6 @@ defmodule PtcRunner.Kernel.LLMBudget do
   @maximum_integer 9_007_199_254_740_991
   @states ~w(available incomplete overrun)
 
-  @spec validate_projection(term()) :: {:ok, map()} | {:error, :invalid_llm_budget}
-  def validate_projection(projection), do: validate_projection(projection, :runtime)
-
-  @spec validate_terminal_projection(term()) :: {:ok, map()} | {:error, :invalid_llm_budget}
-  def validate_terminal_projection(projection), do: validate_projection(projection, :terminal)
-
   @doc false
   @spec initial_terminal_projection(Limits.t()) :: map()
   def initial_terminal_projection(%Limits{} = limits) do
@@ -30,22 +24,20 @@ defmodule PtcRunner.Kernel.LLMBudget do
     }
   end
 
-  defp validate_projection(
-         %{"total_tokens" => total_tokens, "cost" => cost} = projection,
-         phase
-       )
-       when map_size(projection) == 2 do
-    with :ok <- validate_total_tokens(total_tokens, phase),
-         :ok <- validate_cost(cost, phase) do
+  @spec validate_terminal_projection(term()) :: {:ok, map()} | {:error, :invalid_llm_budget}
+  def validate_terminal_projection(%{"total_tokens" => total_tokens, "cost" => cost} = projection)
+      when map_size(projection) == 2 do
+    with :ok <- validate_total_tokens(total_tokens),
+         :ok <- validate_cost(cost) do
       {:ok, projection}
     else
       _invalid -> {:error, :invalid_llm_budget}
     end
   end
 
-  defp validate_projection(_projection, _phase), do: {:error, :invalid_llm_budget}
+  def validate_terminal_projection(_projection), do: {:error, :invalid_llm_budget}
 
-  defp validate_total_tokens(nil, _phase), do: :ok
+  defp validate_total_tokens(nil), do: :ok
 
   defp validate_total_tokens(
          %{
@@ -55,16 +47,15 @@ defmodule PtcRunner.Kernel.LLMBudget do
            "charged" => charged,
            "remaining" => remaining,
            "refused" => refused
-         } = ledger,
-         phase
+         } = ledger
        )
        when map_size(ledger) == 6 do
-    validate_ledger(state, limit, reserved, charged, remaining, refused, phase)
+    validate_ledger(state, limit, reserved, charged, remaining, refused)
   end
 
-  defp validate_total_tokens(_ledger, _phase), do: :error
+  defp validate_total_tokens(_ledger), do: :error
 
-  defp validate_cost(nil, _phase), do: :ok
+  defp validate_cost(nil), do: :ok
 
   defp validate_cost(
          %{
@@ -75,16 +66,15 @@ defmodule PtcRunner.Kernel.LLMBudget do
            "charged_microusd" => charged,
            "remaining_microusd" => remaining,
            "refused" => refused
-         } = ledger,
-         phase
+         } = ledger
        )
        when map_size(ledger) == 7 do
-    validate_ledger(state, limit, reserved, charged, remaining, refused, phase)
+    validate_ledger(state, limit, reserved, charged, remaining, refused)
   end
 
-  defp validate_cost(_ledger, _phase), do: :error
+  defp validate_cost(_ledger), do: :error
 
-  defp validate_ledger(state, limit, reserved, charged, remaining, refused, phase) do
+  defp validate_ledger(state, limit, reserved, charged, remaining, refused) do
     cond do
       state not in @states ->
         :error
@@ -98,7 +88,7 @@ defmodule PtcRunner.Kernel.LLMBudget do
       reserved > limit ->
         :error
 
-      phase == :terminal and reserved != 0 ->
+      reserved != 0 ->
         :error
 
       state != "overrun" and charged > limit ->

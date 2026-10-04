@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ProviderTaskTracker
   alias PtcRunner.Kernel.ResourceRegistrar
+  alias PtcRunner.TestSupport.ProviderSessionFixture
 
   test "a wedged session cannot outrun the operation deadline" do
     # `:sys.suspend/1` wedges the session deterministically, with no timing
@@ -15,7 +16,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     # slice `open_registrar/1` waited a fixed five seconds and activate, commit,
     # and abort waited `:infinity`, so a short operation budget bought nothing.
     {:ok, limits} = Limits.installed(%{run_duration_ms: 200})
-    {:ok, session} = ProviderSession.start_active(limits, "wedged-operation")
+    {:ok, session} = ProviderSessionFixture.start_active(limits, "wedged-operation")
     on_exit(fn -> Process.exit(session.pid, :kill) end)
     {:ok, session} = ProviderSession.begin_operation(session, :run)
 
@@ -41,7 +42,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     # scope in `scope_order` where only session close would ever reap it. Both
     # sides fence on the same absolute instant instead.
     {:ok, limits} = Limits.installed(%{run_duration_ms: 200})
-    {:ok, session} = ProviderSession.start_active(limits, "fenced-operation")
+    {:ok, session} = ProviderSessionFixture.start_active(limits, "fenced-operation")
     on_exit(fn -> ProviderSession.close(session) end)
     {:ok, session} = ProviderSession.begin_operation(session, :run)
 
@@ -62,7 +63,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     # copy of the deadline, that stale handle would send `nil` and open a scope
     # with no bound at all, after the operation had already expired.
     {:ok, limits} = Limits.installed(%{run_duration_ms: 200})
-    {:ok, stale} = ProviderSession.start_active(limits, "stale-handle")
+    {:ok, stale} = ProviderSessionFixture.start_active(limits, "stale-handle")
     on_exit(fn -> ProviderSession.close(stale) end)
     {:ok, begun} = ProviderSession.begin_operation(stale, :run)
 
@@ -81,7 +82,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     # mint the unbounded handle the sealed-budget rule exists to prevent, so the
     # scope is refused until the operation it belongs to has started.
     {:ok, limits} = Limits.installed(%{run_duration_ms: 2_000})
-    {:ok, session} = ProviderSession.start_active(limits, "pre-begin")
+    {:ok, session} = ProviderSessionFixture.start_active(limits, "pre-begin")
     on_exit(fn -> ProviderSession.close(session) end)
 
     assert ProviderSession.run_deadline(session) == nil
@@ -115,7 +116,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     # The budget only has to be finite and observable; the test spends it in
     # full, so its size is pure wall clock.
     {:ok, limits} = Limits.installed(%{run_duration_ms: 300})
-    {:ok, stale} = ProviderSession.start_active(limits, "stale-budget")
+    {:ok, stale} = ProviderSessionFixture.start_active(limits, "stale-budget")
     on_exit(fn -> Process.exit(stale.pid, :kill) end)
     {:ok, begun} = ProviderSession.begin_operation(stale, :run)
 
@@ -173,7 +174,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     # already anchored a fresh budget per abort before the deadline classes
     # existed, so it passes at the base commit too.
     {:ok, limits} = Limits.installed(%{run_duration_ms: 200, provider_cleanup_timeout_ms: 5_000})
-    {:ok, session} = ProviderSession.start_active(limits, "abort-budget")
+    {:ok, session} = ProviderSessionFixture.start_active(limits, "abort-budget")
     on_exit(fn -> ProviderSession.close(session) end)
     {:ok, session} = ProviderSession.begin_operation(session, :run)
     {:ok, registrar} = ProviderSession.open_registrar(session)
@@ -290,7 +291,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     {:ok, limits} =
       Limits.installed(%{run_duration_ms: 200, provider_cleanup_timeout_ms: 300})
 
-    {:ok, session} = ProviderSession.start_active(limits, "wedged-commit")
+    {:ok, session} = ProviderSessionFixture.start_active(limits, "wedged-commit")
     {:ok, session} = ProviderSession.begin_operation(session, :run)
     {:ok, registrar} = ProviderSession.open_registrar(session)
     assert :ok = ResourceRegistrar.activate(registrar)
@@ -319,7 +320,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     # the caller stops waiting, so the closer stays with exactly one owner.
     {:ok, closed} = Agent.start_link(fn -> 0 end)
     {:ok, limits} = Limits.installed(%{run_duration_ms: 200})
-    {:ok, session} = ProviderSession.start_active(limits, "commit-fence")
+    {:ok, session} = ProviderSessionFixture.start_active(limits, "commit-fence")
     on_exit(fn -> ProviderSession.close(session) end)
     {:ok, session} = ProviderSession.begin_operation(session, :run)
     {:ok, registrar} = ProviderSession.open_registrar(session)
@@ -416,7 +417,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
 
   @tag timeout: 15_000
   test "a timed-out begin request cannot mutate a suspended session later" do
-    {:ok, session} = ProviderSession.start_active(limits(), "prepared-operation")
+    {:ok, session} = ProviderSessionFixture.start_active(limits(), "prepared-operation")
     monitor = Process.monitor(session.pid)
     parent = self()
 
@@ -442,17 +443,17 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     refute ProviderSession.alive?(session)
   end
 
-  test "claimed operation remains claimed after lifecycle ownership transfers" do
+  test "claimed owned operation remains claimed after rejected lifecycle rebinding" do
     identity = "prepared-operation"
     limits = limits()
-    {:ok, session} = ProviderSession.start_active(limits, identity)
+    {:ok, session} = ProviderSessionFixture.start_active(limits, identity)
     {:ok, session} = ProviderSession.begin_operation(session, :run)
     assert :ok = ProviderSession.claim_operation(session, limits, identity)
 
     lifecycle_owner = spawn(fn -> receive do: (:stop -> :ok) end)
     run_state = spawn(fn -> receive do: (:stop -> :ok) end)
 
-    assert :ok =
+    assert {:error, :provider_session_unavailable} =
              ProviderSession.bind_lifecycle(
                session,
                lifecycle_owner,

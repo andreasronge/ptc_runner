@@ -42,14 +42,6 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
     end
   end
 
-  describe "generate_object!/4" do
-    test "raises for ollama" do
-      assert_raise RuntimeError, ~r/structured_output_not_supported/, fn ->
-        ReqLLMAdapter.generate_object!("ollama:model", [], %{})
-      end
-    end
-  end
-
   describe "generate_with_tools/4" do
     test "returns tool_calling_not_supported for ollama" do
       assert {:error, :tool_calling_not_supported} =
@@ -595,36 +587,6 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
     end
   end
 
-  describe "available?/1" do
-    test "returns boolean for cloud providers" do
-      assert is_boolean(ReqLLMAdapter.available?("openrouter:anthropic/claude-haiku-4.5"))
-    end
-  end
-
-  describe "requires_api_key?/1" do
-    test "returns false for ollama" do
-      refute ReqLLMAdapter.requires_api_key?("ollama:model")
-    end
-
-    test "returns false for openai-compat" do
-      refute ReqLLMAdapter.requires_api_key?("openai-compat:http://localhost|model")
-    end
-
-    test "returns true for cloud providers" do
-      assert ReqLLMAdapter.requires_api_key?("openrouter:model")
-    end
-  end
-
-  describe "embed/3" do
-    test "embed! raises on connection error" do
-      assert_raise RuntimeError, ~r/Embedding error/, fn ->
-        ReqLLMAdapter.embed!("ollama:nomic-embed-text", "hello",
-          ollama_base_url: "http://localhost:1"
-        )
-      end
-    end
-  end
-
   # --- Pure transformers (network-free): prompt-cache activation & token/cost accounting ---
 
   describe "apply_caching/3 — Anthropic direct" do
@@ -769,23 +731,6 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
       assert ReqLLMAdapter.build_tokens_from_req_llm_response(%{}, %{}) == %{
                cache_read: 0,
                cache_creation: 0
-             }
-    end
-  end
-
-  describe "build_stream_done_chunk/1" do
-    test "preserves normalized cost and token usage for streamed responses" do
-      usage = %{input_tokens: 12, output_tokens: 4, total_cost: 0.125}
-
-      assert ReqLLMAdapter.build_stream_done_chunk(usage) == %{
-               done: true,
-               tokens: %{
-                 input: 12,
-                 output: 4,
-                 cache_creation: 0,
-                 cache_read: 0,
-                 total_cost: 0.125
-               }
              }
     end
   end
