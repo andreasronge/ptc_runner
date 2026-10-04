@@ -296,7 +296,12 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     assert :ok = ResourceRegistrar.activate(registrar)
 
     parent = self()
-    close = fn -> Agent.update(closed, &(&1 + 1)) && :ok end
+
+    close = fn ->
+      Agent.update(closed, &(&1 + 1))
+      :ok
+    end
+
     reference = Process.monitor(session.pid)
 
     # Suspended and never resumed: the commit can never be served.
@@ -327,7 +332,11 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
 
     burn_until(Deadline.expires_at(ProviderSession.run_deadline(session)) + 5)
 
-    close = fn -> Agent.update(closed, &(&1 + 1)) && :ok end
+    close = fn ->
+      Agent.update(closed, &(&1 + 1))
+      :ok
+    end
+
     assert {:error, :resource_registrar_unavailable} = ResourceRegistrar.commit(registrar, close)
 
     # The session took no ownership, so closing it runs nothing...

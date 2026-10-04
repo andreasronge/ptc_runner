@@ -116,7 +116,10 @@ defmodule PtcRunner.Soak.ProviderSessionSoakTest do
               limits(),
               unique_operation(),
               owner,
-              fn opened -> send(parent, {:handed_off, opened}) && :ok end
+              fn opened ->
+                send(parent, {:handed_off, opened})
+                :ok
+              end
             )
 
           assert_receive {:handed_off, ^session}
