@@ -132,6 +132,12 @@ no-replace and privacy rules. Private directories (0700) and regular files
 only when the runtime itself runs as root. Temporary private directories
 receive mode 0700 at creation, before any artifacts are written.
 
+Shared path resolution follows at most 16 symlinks, including links in parent
+directories. This bound also applies to the MCP stdio launcher: a path through
+16 links is accepted; 17 or more is refused with
+`mcp_stdio_launcher_unavailable`. There is no per-caller override.
+
+
 `artifacts.result` controls both the standalone result artifact and result-value
 retention in command envelopes. When it is `false` and no `--output` or
 `--private-output` override requests a result artifact, persisted project-ledger

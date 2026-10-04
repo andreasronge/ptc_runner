@@ -924,6 +924,49 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   end
 
   @tag :tmp_dir
+  test "stdio launcher preflight accepts 16 symlinks and refuses 17", %{tmp_dir: dir} do
+    launcher = Path.join(dir, "launcher")
+    File.write!(launcher, "#!/bin/sh\nexit 0\n")
+    File.chmod!(launcher, 0o700)
+
+    links =
+      Enum.scan(1..17, launcher, fn depth, target ->
+        link = Path.join(dir, "launcher-link-#{depth}")
+        File.ln_s!(Path.basename(target), link)
+        link
+      end)
+
+    for {depth, expected} <- [
+          {16, :ok},
+          {17, {:error, :mcp_stdio_launcher_unavailable}}
+        ] do
+      config =
+        stdio_config(launcher)
+        |> put_in(["runtime", "stdio_launcher"], Enum.at(links, depth - 1))
+
+      host = load_host(dir, config)
+      assert {:ok, catalog} = HostInstallation.catalog(host)
+      assert {:ok, registry} = HostInstallation.runtime_registry(host, catalog)
+
+      try do
+        assert {:ok, prepared} =
+                 ProviderRegistry.prepare(registry, "workspace", %{}, context(dir, :mission))
+
+        case expected do
+          :ok ->
+            assert {:ok, %{acquire: acquire}} = ProviderRegistry.preflight(prepared)
+            assert is_function(acquire, 1)
+
+          error ->
+            assert ^error = ProviderRegistry.preflight(prepared)
+        end
+      after
+        ProviderRegistry.close(registry)
+      end
+    end
+  end
+
+  @tag :tmp_dir
   test "stdio compatibility environment pins UTF-8 for locale-sensitive servers", %{
     tmp_dir: dir
   } do
