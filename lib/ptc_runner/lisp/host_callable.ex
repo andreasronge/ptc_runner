@@ -34,6 +34,15 @@ defmodule PtcRunner.Lisp.HostCallable do
     error!(Helpers.type_error_for_args(fun, [value]))
   end
 
+  # Normal, collect and multi-arity builtins have always let the original host
+  # exception escape, inside an evaluator context too (arithmetic faults are
+  # classified by the evaluator through the tagged reason). Callers such as
+  # `apply_with_arity_check/3` rescue it and report a named diagnostic.
+  def builtin_result!(binding, {:error, %{exception: exception, stacktrace: stacktrace}})
+      when not is_nil(exception) and not is_struct(exception, ArithmeticError) and
+             elem(binding, 0) in [:normal, :collect, :multi_arity],
+      do: reraise(exception, stacktrace)
+
   def builtin_result!(binding, {:error, %{reason: reason} = failure}) do
     case HostContext.current() do
       nil -> raise_builtin_error(binding, failure)
