@@ -395,6 +395,6 @@ by name through `providers.workflow`, just as it selects a chat installation:
 
 Include `{"library":"decision"}` in `workflow.components`, declare it as a
 dependency of the calling component, and call `decision/request` with `state`
-and named `questions`. The workflow owns probability thresholds. Live alpha
-HTTP, chat, and OpenRouter Decisions configuration and the required per-call reservation
+and named `questions`. The workflow owns probability thresholds. Live
+HTTP, chat, and alpha OpenRouter Decisions configuration and the required per-call reservation
 bounds belong to [the host installation](host-installation.md#decision-model-installations).

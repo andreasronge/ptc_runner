@@ -503,12 +503,7 @@ invoking the workflow:</p><pre><code class="console language-console">ptc init k
 ptc doctor kernel-tutorial/02-deepseek-extract.ptc-project.json --connect</code></pre><p><code class="inline">readiness</code> is <code class="inline">not_applicable</code> when there are no provider check rows, <code class="inline">ready</code>
 when every provider row passes, and <code class="inline">unverified</code> when any provider row is
 skipped. A failed check reports <code class="inline">failed</code> and exits nonzero. The report
-does not expose endpoints, commands, paths, credentials, or OAuth authority.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/reference/application-manifest/">Manifests and capabilities</a> selects and
-narrows these aliases.</li><li><a href="/guides/building-agents/">Building agents</a> uses the installed model and mission
-capabilities.</li><li><a href="/reference/cli/">Running and debugging</a> runs and inspects the
-application.</li><li><a href="/reference/mcp/">Connecting tools with MCP</a> installs external
-tools without putting transport authority in a manifest.</li><li><a href="/guides/evaluating-with-replay/">Evaluating with replay</a> fixes model responses for
-deterministic comparisons.</li></ul><h2 id="decision-model-installations">Decision model installations</h2><p><code class="inline">decision</code> installs a generic HTTP backend, a JSON-schema chat backend, or the <strong>alpha</strong> <a href="https://openrouter.ai/typesafe/jev-1.13">OpenRouter Decisions backend</a>. Its vendor-neutral capability
+does not expose endpoints, commands, paths, credentials, or OAuth authority.</p><h2 id="decision-model-installations">Decision model installations</h2><p><code class="inline">decision</code> installs a generic HTTP backend, a JSON-schema chat backend, or the <strong>alpha</strong> <a href="https://openrouter.ai/typesafe/jev-1.13">OpenRouter Decisions backend</a>. Its vendor-neutral capability
 is <code class="inline">decision-request</code>, exposed by the shipped <code class="inline">decision/request</code> prelude.
 Jev boolean answers contain measured probabilities; your workflow applies thresholds.
 An optional boolean <code class="inline">value</code> carries a discrete answer: <code class="inline">false</code> is an answer,
@@ -520,7 +515,54 @@ Trace events and inspection model exchanges retain a valid response model ID
 as <code class="inline">served_model</code> even when answer admission or a reservation overrun rejects
 the call. The final result remains a permanent failure; rejected answers are
 not published as successful results, and configured aliases are not substituted
-for missing or invalid response identity.</p><pre><code class="json language-json">{
+for missing or invalid response identity.</p><h3 id="shared-decision-bounds">Shared decision bounds</h3><p><code class="inline">max_cost_per_call</code> is a non-negative USD decimal string for every decision backend, including replay. <code class="inline">0.01</code> USD is recommended
+for the OpenRouter backend. <code class="inline">max_total_tokens_per_call</code> is a positive integer;
+<code class="inline">8000</code> is recommended, and hosts sending large <code class="inline">state</code> inputs must raise it.
+When the corresponding ceiling is enabled, each call reserves exactly these
+bounds against <code class="inline">llm_cost_microusd</code> and <code class="inline">llm_total_tokens</code>, shared with chat
+calls. Validated reported cost and tokens settle after the response. An
+exceeded bound is still charged in full and fails permanently with
+<code class="inline">invalid_result</code>, without retry. Usage that reports no valid value, or lacks
+a valid value promised by <code class="inline">usage_guarantees</code>, fails permanently with
+<code class="inline">usage_unavailable</code>, without retry. The call charges the full reservation,
+marks the affected ledger incomplete, and retains neither answers nor
+<code class="inline">served_model</code>. Other invalid usage fails with <code class="inline">invalid_result</code> and settles
+the valid values. Decision
+calls also count against <code class="inline">max_active_provider_calls</code>.</p><h3 id="request-questions-and-answer-policy">Request questions and answer policy</h3><p>Discovery advertises named question maps with required non-empty <code class="inline">instructions</code>
+and a <code class="inline">type</code> enum (<code class="inline">boolean</code>, <code class="inline">choice</code>, <code class="inline">score</code>), the answer fields and nullable
+measurements, a non-empty <code class="inline">model</code>, and required non-negative integer
+<code class="inline">input_tokens</code> and <code class="inline">output_tokens</code> in <code class="inline">usage</code>. Unknown question keys are refused;
+answer and usage extension fields remain permitted.</p><p>The bounded schema profile leaves these checks to runtime validation: non-empty
+<code class="inline">questions</code> and question IDs; criteria shapes and bounds per type (optional
+boolean criteria, otherwise exactly <code class="inline">true</code> and <code class="inline">false</code> string descriptions;
+one to 255 choice names mapped to string descriptions; two to ten ordered score
+string descriptions); per-type required answer fields; answer IDs matching
+question IDs; options and legends matching criteria; probability sums;
+weighted-score consistency; and optional usage <code class="inline">cost</code>. Passing the discovery
+schema alone does not establish a valid decision call.</p><p>Trusted workflow code can send all three question types in one call. Select a
+decision installation in the manifest before calling this prelude:</p><pre><code class="clojure language-clojure">(decision/request
+  {&quot;state&quot; {&quot;number&quot; 2}
+   &quot;questions&quot;
+   {&quot;positive&quot; {&quot;type&quot; &quot;boolean&quot;
+                &quot;instructions&quot; &quot;Is the number positive?&quot;}
+    &quot;sign&quot; {&quot;type&quot; &quot;choice&quot;
+            &quot;instructions&quot; &quot;Choose the sign of the number.&quot;
+            &quot;criteria&quot; {&quot;negative&quot; &quot;Less than zero&quot;
+                        &quot;zero&quot; &quot;Equal to zero&quot;
+                        &quot;positive&quot; &quot;Greater than zero&quot;}}
+    &quot;magnitude&quot; {&quot;type&quot; &quot;score&quot;
+                 &quot;instructions&quot; &quot;Rate the absolute magnitude of the number.&quot;
+                 &quot;criteria&quot; [&quot;Less than 1&quot; &quot;At least 1 and less than 10&quot;
+                             &quot;At least 10&quot;]}}})</code></pre><p>Choice criteria map option names to descriptions. Score criteria are ordered
+from level zero upward. The response's <code class="inline">answers</code> map uses the same question
+IDs: boolean answers carry <code class="inline">probability</code> and optional <code class="inline">value</code>, choice answers
+carry <code class="inline">choice</code>, and score answers carry <code class="inline">score</code>. Measurements may be null;
+check for a failure signal before reading answers.</p><p>Choose policy explicitly: use a measured probability when present and a
+supplied <code class="inline">value</code> otherwise, or require measurement and abstain/escalate when
+it is null. Test absence with <code class="inline">nil?</code> so <code class="inline">false</code> remains a real answer.
+Unavailable measurement is not low confidence. Backend interchangeability
+promises the contract, not identical answers or measurements; a workflow
+requiring probabilities must handle their absence.</p><h3 id="openrouter-decisions-backend-alpha">OpenRouter Decisions backend (alpha)</h3><pre><code class="json language-json">{
   &quot;credentials&quot;: {&quot;decisions_key&quot;: {&quot;env&quot;: &quot;OPENROUTER_API_KEY&quot;}},
   &quot;install&quot;: {
     &quot;decisions&quot;: {
@@ -541,31 +583,7 @@ Optional <code class="inline">routing</code> accepts only boolean <code class="i
 <code class="inline">deny</code>), and boolean <code class="inline">allow_fallbacks</code>, sent as the backend's <code class="inline">provider</code> field.
 Optional <code class="inline">reservation_tariff</code> identifies a host policy; it does not compute a
 reservation. <code class="inline">ceilings</code>, <code class="inline">data_class</code>, and <code class="inline">accepts_data</code> use the same fields
-as live LLM installations. Decision sources belong in the workflow.</p><p><code class="inline">max_cost_per_call</code> is a non-negative USD decimal string for every decision backend, including replay. <code class="inline">0.01</code> USD is recommended
-for this first backend. <code class="inline">max_total_tokens_per_call</code> is a positive integer;
-<code class="inline">8000</code> is recommended, and hosts sending large <code class="inline">state</code> inputs must raise it.
-When the corresponding ceiling is enabled, each call reserves exactly these
-bounds against <code class="inline">llm_cost_microusd</code> and <code class="inline">llm_total_tokens</code>, shared with chat
-calls. Validated reported cost and tokens settle after the response. An
-exceeded bound is still charged in full and fails permanently with
-<code class="inline">invalid_result</code>, without retry. Usage that reports no valid value, or lacks
-a valid value promised by <code class="inline">usage_guarantees</code>, fails permanently with
-<code class="inline">usage_unavailable</code>, without retry. The call charges the full reservation,
-marks the affected ledger incomplete, and retains neither answers nor
-<code class="inline">served_model</code>. Other invalid usage fails with <code class="inline">invalid_result</code> and settles
-the valid values. Decision
-calls also count against <code class="inline">max_active_provider_calls</code>.</p><p>Discovery advertises named question maps with required non-empty <code class="inline">instructions</code>
-and a <code class="inline">type</code> enum (<code class="inline">boolean</code>, <code class="inline">choice</code>, <code class="inline">score</code>), the answer fields and nullable
-measurements, a non-empty <code class="inline">model</code>, and required non-negative integer
-<code class="inline">input_tokens</code> and <code class="inline">output_tokens</code> in <code class="inline">usage</code>. Unknown question keys are refused;
-answer and usage extension fields remain permitted.</p><p>The bounded schema profile leaves these checks to runtime validation: non-empty
-<code class="inline">questions</code> and question IDs; criteria shapes and bounds per type (optional
-boolean criteria, otherwise exactly <code class="inline">true</code> and <code class="inline">false</code> string descriptions;
-one to 255 choice names mapped to string descriptions; two to ten ordered score
-string descriptions); per-type required answer fields; answer IDs matching
-question IDs; options and legends matching criteria; probability sums;
-weighted-score consistency; and optional usage <code class="inline">cost</code>. Passing the discovery
-schema alone does not establish a valid decision call.</p><h3 id="http-backend">HTTP backend</h3><p>Use <code class="inline">backend: &quot;http&quot;</code> to send measured decisions to a host-owned endpoint.
+as live LLM installations. Decision sources belong in the workflow.</p><h3 id="http-backend">HTTP backend</h3><p>Use <code class="inline">backend: &quot;http&quot;</code> to send measured decisions to a host-owned endpoint.
 This closed variant requires <code class="inline">source</code>, <code class="inline">backend</code>, <code class="inline">endpoint</code>, <code class="inline">model</code>,
 <code class="inline">usage_guarantees</code>, <code class="inline">installation_revision</code>, and both per-call bounds.
 Optional fields are <code class="inline">credential</code>, <code class="inline">allow_insecure_loopback</code>, <code class="inline">ceilings</code>,
@@ -631,12 +649,7 @@ served-model identity for chat remains the LLM adapter's existing contract.
 Usage keeps reported tokens and optional USD cost (normalized fixed-point
 <code class="inline">{&quot;currency&quot;:&quot;USD&quot;,&quot;microunits&quot;:200}</code> is accepted as well as numeric cost).</p><p>Each call reserves and settles the decision bounds, occupies one shared
 admission slot, and records one decision model exchange. The underlying chat
-callback does not create another capability call, reservation or exchange.</p><p>Choose policy explicitly: use a measured probability when present and a
-supplied <code class="inline">value</code> otherwise, or require measurement and abstain/escalate when
-it is null. Test absence with <code class="inline">nil?</code> so <code class="inline">false</code> remains a real answer.
-Unavailable measurement is not low confidence. Backend interchangeability
-promises the contract, not identical answers or measurements; a workflow
-requiring probabilities must handle their absence.</p><p><code class="inline">decision_replay</code> uses the same JSON Lines fixture format and request hashing
+callback does not create another capability call, reservation or exchange.</p><h3 id="decision-replay">Decision replay</h3><p><code class="inline">decision_replay</code> uses the same JSON Lines fixture format and request hashing
 as <code class="inline">llm_replay</code>, with vendor-neutral decision responses. It requires <code class="inline">fixtures</code>,
 <code class="inline">installation_revision</code>, <code class="inline">max_cost_per_call</code>, and <code class="inline">max_total_tokens_per_call</code>;
 no credential or model selector is needed. Its optional <code class="inline">ceilings</code> are the
@@ -649,7 +662,12 @@ including through warm serving runtimes and shared provider admission.
 Warm decision replay retains the fixture acquisition while each run has an
 independent response cursor; repeated calls inside one run consume its sequence.
 See <code class="inline">examples/decision-refund-triage/ptc-project.json</code> for a
-complete offline project.</p>
+complete offline project.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/reference/application-manifest/">Manifests and capabilities</a> selects and
+narrows these aliases.</li><li><a href="/guides/building-agents/">Building agents</a> uses the installed model and mission
+capabilities.</li><li><a href="/reference/cli/">Running and debugging</a> runs and inspects the
+application.</li><li><a href="/reference/mcp/">Connecting tools with MCP</a> installs external
+tools without putting transport authority in a manifest.</li><li><a href="/guides/evaluating-with-replay/">Evaluating with replay</a> fixes model responses for
+deterministic comparisons.</li></ul>
 </article>
 <nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/application-manifest/">&larr; Application-manifest reference</a><a class="pager-next" href="/reference/project-files/">Project-configuration reference &rarr;</a></nav>
 <footer>

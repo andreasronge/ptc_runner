@@ -358,8 +358,8 @@ admission outcomes are documented by `RunState` and `Evaluation`.
 model policy. `model_call?/1` applies to request hashes, reservations, spend,
 deadlines, usage, and private model exchanges; `chat?/1` additionally selects
 structured-output handling, chat routing, conversation turns, and LLM call
-counts. Both currently recognize only `llm-request`. `decision-request` is
-reserved for a future model-call capability. MCP public tool mappings cannot
+counts. `model_call?/1` recognizes both `llm-request` and
+`decision-request`; `chat?/1` recognizes only `llm-request`. MCP public tool mappings cannot
 use either reserved name. Manifest provider selections and component
 requirements do not create capabilities; host-built capabilities are trusted
 and retain model-call treatment by name. The model-exchange inspection class
