@@ -57,6 +57,10 @@ belongs in guides or retained specifications.
   and the trigger-gated plan for extracting the PTC-Lisp implementation into
   a nested Mix library. A separate Git repository is explicitly not planned
   while language and Kernel changes still benefit from atomic commits.
+- [`future/gateway-roles-and-tenancy.md`](future/gateway-roles-and-tenancy.md)
+  plans roles (tool sets per client) and multiple isolated tenants in one
+  gateway, the prerequisites they share, and when to run one gateway per
+  tenant instead.
 - [`future/reqllm-removal.md`](future/reqllm-removal.md) records the trigger
   and required adapter shape for replacing the optional `req_llm`/`llm_db`
   closure with a direct `Req` adapter for OpenAI-compatible endpoints.
