@@ -20,6 +20,7 @@ traversed in order to find the one thing you came for.
 | Two named missions granted different capabilities | `support-triage` | `03-specialists.ptc-project.json` |
 | A denied capability at a mission boundary, with no provider | `support-triage` | `mission-boundary-check.ptc-project.json` |
 | A write kept behind its own mission | `named-mission-reader-writer` | `ptc-project.json` |
+| Batched decision questions with offline replay | `decision-refund-triage` | `ptc-project.json` |
 | Replaying a recorded model response | `llm-replay` | `ptc-project.json` |
 | Verifying a result inside the run that produced it | `dabstep-fraud` | `ptc-project.json`, after `fetch-data.sh` |
 | Repairing a workflow from a failed run's evidence | `debug-a-failed-run` | `run-self-improvement.sh` |
@@ -29,7 +30,7 @@ traversed in order to find the one thing you came for.
 The trees below are listed in learning order: each one assumes the surface
 the one before it introduced.
 
-Five trees are embedded in the executable and materialize anywhere:
+These trees are embedded in the executable and materialize anywhere:
 
 ```console
 ptc init DIRECTORY --example kernel-tutorial
@@ -37,6 +38,7 @@ ptc init DIRECTORY --example support-triage
 ptc init DIRECTORY --example named-mission-reader-writer
 ptc init DIRECTORY --example debug-a-failed-run
 ptc init DIRECTORY --example llm-replay
+ptc init DIRECTORY --example decision-refund-triage
 ```
 
 `ptc init` refuses a directory that already exists and writes the tree
@@ -140,6 +142,12 @@ meet more than one bug.
 `llm-replay` serves one recorded model response from `replay.jsonl`. It needs
 no credential and performs no network activity, which makes it the tree to copy
 when building a test that must not call a provider.
+
+`decision-refund-triage` batches six boolean refund questions through
+`decision/request` with frozen decision responses. It needs no credential.
+The workflow applies a probability threshold or uses a discrete boolean answer
+when measurement is absent. See [decision model installations](host-installation.md#decision-model-installations)
+for live backends and question shapes.
 
 ## The example that needs a checkout
 

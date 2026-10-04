@@ -57,7 +57,7 @@ used, reported token usage and cost, timing, and a safe failure class. Prompts
 and responses are private and appear only when private inspection is enabled.
 
 Start with [Install models and tools](host-configuration.md) for one complete
-workflow. The [model and host reference](../reference/host-installation.md)
+workflow. The [model and decision reference](../reference/host-installation.md#decision-model-installations)
 owns selector forms, credentials, cache policy, request parameters, ceilings,
 diagnostics, and connectivity behavior. See [Customize an
 agent](building-agents.md) for the model-neutral loop.
