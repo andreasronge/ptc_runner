@@ -579,7 +579,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
                      %{"role" => "user", "content" => "private prompt sentinel"}
                    ]
                  },
-                 TestHelpers.dispatch_context(state, :workflow, 1_000),
+                 TestHelpers.dispatch_context(state, :workflow),
                  nil,
                  inspection_sink
                )

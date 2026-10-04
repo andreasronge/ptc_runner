@@ -213,6 +213,10 @@ must be generic and not overlap existing domains unless asked.
 
 ## Testing
 
+- Functional tests use the shared dispatch budget. A short explicit budget belongs
+  only in a test that asserts the deadline, with enough headroom for the callback
+  or validator to start.
+
 - Bug fixes: write a failing test that reproduces the bug **before** fixing it.
 - Prefer integration tests over unit tests that mirror the implementation; if a
   test is as simple as the code it tests, delete it. Test at the boundary a

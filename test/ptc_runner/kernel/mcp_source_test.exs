@@ -278,7 +278,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
           environment,
           capability.name,
           %{"query" => "x"},
-          TestHelpers.dispatch_context(state, :mission, @expiring_timeout_ms,
+          TestHelpers.dispatch_context(state, :mission,
+            timeout_ms: @expiring_timeout_ms,
             lease: lease,
             mission_name: "default"
           ),
@@ -1770,7 +1771,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         %{capabilities: %{capability.name => capability}},
         capability.name,
         %{"query" => "x"},
-        TestHelpers.dispatch_context(state, :mission, 1_000,
+        TestHelpers.dispatch_context(state, :mission,
           lease: lease,
           mission_name: "default"
         ),

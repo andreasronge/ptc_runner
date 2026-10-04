@@ -245,7 +245,7 @@ defmodule PtcRunner.Kernel.DispatcherBoundedSchemaTest do
         environment,
         capability.name,
         %{},
-        TestHelpers.dispatch_context(state, :mission, 100, lease: lease, mission_name: "reader"),
+        TestHelpers.dispatch_context(state, :mission, lease: lease, mission_name: "reader"),
         nil,
         nil
       )
@@ -329,8 +329,6 @@ defmodule PtcRunner.Kernel.DispatcherBoundedSchemaTest do
   end
 
   defp dispatch_capability(capability, arguments, opts, {environment, state, sink}) do
-    timeout_ms = Keyword.get(opts, :timeout_ms, 1_000)
-
     result =
       Dispatcher.dispatch(
         state,
@@ -338,7 +336,7 @@ defmodule PtcRunner.Kernel.DispatcherBoundedSchemaTest do
         environment,
         capability.name,
         arguments,
-        TestHelpers.dispatch_context(state, :workflow, timeout_ms, opts),
+        TestHelpers.dispatch_context(state, :workflow, opts),
         sink,
         nil
       )

@@ -114,7 +114,7 @@ defmodule PtcRunner.Kernel.CapabilitySchemaTest do
                  environment,
                  "named",
                  arguments,
-                 TestHelpers.dispatch_context(state, :workflow, 5000),
+                 TestHelpers.dispatch_context(state, :workflow),
                  nil,
                  nil
                )
@@ -128,7 +128,7 @@ defmodule PtcRunner.Kernel.CapabilitySchemaTest do
                  environment,
                  "named",
                  arguments,
-                 TestHelpers.dispatch_context(state, :workflow, 5000),
+                 TestHelpers.dispatch_context(state, :workflow),
                  nil,
                  nil
                )
@@ -203,7 +203,7 @@ defmodule PtcRunner.Kernel.CapabilitySchemaTest do
                environment,
                "checked",
                @valid_arguments,
-               TestHelpers.dispatch_context(state, :workflow, 5_000),
+               TestHelpers.dispatch_context(state, :workflow),
                nil,
                nil
              )
@@ -219,7 +219,7 @@ defmodule PtcRunner.Kernel.CapabilitySchemaTest do
                environment,
                "checked",
                invalid_schema,
-               TestHelpers.dispatch_context(state, :workflow, 5_000),
+               TestHelpers.dispatch_context(state, :workflow),
                nil,
                nil
              )
@@ -233,7 +233,7 @@ defmodule PtcRunner.Kernel.CapabilitySchemaTest do
                environment,
                "checked",
                semantic_rejection,
-               TestHelpers.dispatch_context(state, :workflow, 5_000),
+               TestHelpers.dispatch_context(state, :workflow),
                nil,
                nil
              )
@@ -270,7 +270,7 @@ defmodule PtcRunner.Kernel.CapabilitySchemaTest do
                environment,
                "bad-output",
                %{},
-               TestHelpers.dispatch_context(state, :workflow, 5_000),
+               TestHelpers.dispatch_context(state, :workflow),
                nil,
                nil
              )

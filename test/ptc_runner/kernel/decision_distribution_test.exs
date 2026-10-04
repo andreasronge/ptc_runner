@@ -68,7 +68,7 @@ defmodule PtcRunner.Kernel.DecisionDistributionTest do
           "urgent" => %{"type" => "boolean", "instructions" => "Urgent?"}
         }
       },
-      TestHelpers.dispatch_context(state, :workflow, 500),
+      TestHelpers.dispatch_context(state, :workflow),
       nil,
       nil
     )

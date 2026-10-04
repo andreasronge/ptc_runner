@@ -455,7 +455,7 @@ defmodule PtcRunner.Kernel.LLMBudgetDispatcherTest do
       environment,
       "llm-request",
       @arguments,
-      TestHelpers.dispatch_context(state, :workflow, 500),
+      TestHelpers.dispatch_context(state, :workflow),
       nil,
       inspection_sink
     )

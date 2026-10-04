@@ -277,7 +277,6 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
       Task.async(fn ->
         dispatch_llm(parent,
           request_timeout_ms: 300,
-          timeout_ms: 1_000,
           requester: fn _request, context ->
             send(parent, {:ready, context, self()})
 
@@ -316,7 +315,6 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
         {result, state, sink} =
           dispatch_llm(parent,
             request_timeout_ms: 100,
-            timeout_ms: 1_000,
             requester: fn _request, %{llm_request_deadline_ms: deadline} ->
               send(parent, {:ready, deadline, self()})
 
@@ -512,14 +510,7 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
     {:ok, limits} = Limits.new(Keyword.get(opts, :limits, []))
     {:ok, state} = RunState.start(limits, run_deadline: Keyword.get(opts, :run_deadline))
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "llm-deadline")
-    timeout_ms = Keyword.get(opts, :timeout_ms, 1_000)
     arguments = Keyword.get(opts, :arguments, %{})
-
-    dispatch_opts =
-      case Keyword.get(opts, :validation_deadline_ms) do
-        nil -> []
-        deadline_ms -> [validation_deadline_ms: deadline_ms]
-      end
 
     result =
       Dispatcher.dispatch(
@@ -528,7 +519,7 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
         environment,
         "llm-request",
         arguments,
-        TestHelpers.dispatch_context(state, :workflow, timeout_ms, dispatch_opts),
+        TestHelpers.dispatch_context(state, :workflow, opts),
         sink,
         nil
       )
