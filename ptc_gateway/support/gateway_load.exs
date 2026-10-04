@@ -105,7 +105,7 @@ defmodule PtcGateway.TestSupport.GatewayLoad do
     deadline = now() + Keyword.get(opts, :timeout_ms, 30_000) * 1_000
 
     case :gen_tcp.connect(
-           ~c"127.0.0.1",
+           {127, 0, 0, 1},
            port,
            [:binary, active: false, nodelay: true],
            @connect_timeout_ms
@@ -638,6 +638,80 @@ defmodule PtcGateway.TestSupport.GatewayLoad do
     end
   end
 
+  @doc """
+  Writes `count` requests before reading any response on one keep-alive socket.
+
+  Requests receive consecutive JSON-RPC IDs starting at `opts[:id]` (default 1).
+  Returns status and decoded result per response in wire order. Framed reads
+  retain bytes belonging to later responses, even when TCP coalesces them.
+  """
+  @spec pipelined(map(), pos_integer(), keyword()) :: [map()]
+  def pipelined(config, count, opts \\ []) do
+    opts = Keyword.put_new(opts, :method, "tools/list")
+    first_id = Keyword.get(opts, :id, 1)
+    {:ok, socket} = connect(config)
+
+    try do
+      requests =
+        for id <- first_id..(first_id + count - 1) do
+          request_bytes(config, Keyword.merge(opts, id: id, connection: "keep-alive"))
+        end
+
+      :ok = :gen_tcp.send(socket, requests)
+      Enum.map(1..count, fn _ -> read_framed_response(socket) end)
+    after
+      :gen_tcp.close(socket)
+    end
+  end
+
+  defp read_framed_response(socket) do
+    :ok = :inet.setopts(socket, packet: :http_bin)
+    {:ok, {:http_response, _, status, _}} = :gen_tcp.recv(socket, 0, 10_000)
+    headers = read_framed_headers(socket, %{})
+    :ok = :inet.setopts(socket, packet: :raw)
+
+    body =
+      case headers do
+        %{"transfer-encoding" => "chunked"} -> read_chunks(socket, [])
+        %{"content-length" => length} -> read_bytes(socket, String.to_integer(length))
+      end
+
+    %{status: status, result: decode_result("HTTP/1.1 #{status}\r\n\r\n" <> body)}
+  end
+
+  defp read_framed_headers(socket, headers) do
+    case :gen_tcp.recv(socket, 0, 10_000) do
+      {:ok, :http_eoh} ->
+        headers
+
+      {:ok, {:http_header, _, name, _, value}} ->
+        read_framed_headers(socket, Map.put(headers, String.downcase(to_string(name)), value))
+    end
+  end
+
+  defp read_chunks(socket, chunks) do
+    :ok = :inet.setopts(socket, packet: :line)
+    {:ok, line} = :gen_tcp.recv(socket, 0, 10_000)
+    {size, _} = line |> String.trim() |> Integer.parse(16)
+    :ok = :inet.setopts(socket, packet: :raw)
+
+    if size == 0 do
+      "\r\n" = read_bytes(socket, 2)
+      chunks |> Enum.reverse() |> IO.iodata_to_binary()
+    else
+      chunk = read_bytes(socket, size)
+      "\r\n" = read_bytes(socket, 2)
+      read_chunks(socket, [chunk | chunks])
+    end
+  end
+
+  defp read_bytes(_socket, 0), do: ""
+
+  defp read_bytes(socket, length) do
+    {:ok, bytes} = :gen_tcp.recv(socket, length, 10_000)
+    bytes
+  end
+
   # ---------------------------------------------------------------------------
   # Leak slope
   # ---------------------------------------------------------------------------
@@ -717,7 +791,7 @@ defmodule PtcGateway.TestSupport.GatewayLoad do
 
   defp connect(config) do
     :gen_tcp.connect(
-      ~c"127.0.0.1",
+      {127, 0, 0, 1},
       config["listen"]["port"],
       [:binary, active: false, nodelay: true],
       @connect_timeout_ms
