@@ -7,6 +7,8 @@ defmodule PtcRunner.Lisp.BuiltinInvocation do
   those carriers untouched. Host callbacks unwrap successes and raise errors.
   """
 
+  import PtcRunner.Lisp.Helpers, only: [lisp_name: 1]
+
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Runtime.Math
 
@@ -164,7 +166,4 @@ defmodule PtcRunner.Lisp.BuiltinInvocation do
       true -> :bad_argument
     end
   end
-
-  defp lisp_name(name) when is_atom(name), do: Atom.to_string(name)
-  defp lisp_name(name) when is_binary(name), do: name
 end

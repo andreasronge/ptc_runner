@@ -14,6 +14,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   - Plain Erlang functions
   """
 
+  import PtcRunner.Lisp.Helpers, only: [lisp_name: 1]
+
   alias PtcRunner.Lisp.BuiltinInvocation
   alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Eval.Abort
@@ -1673,9 +1675,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
        do: Map.put(bindings, name, result)
 
   defp preserve_capability_binding(bindings, _pattern, _result), do: bindings
-
-  defp lisp_name(name) when is_atom(name), do: Atom.to_string(name)
-  defp lisp_name(name) when is_binary(name), do: name
 
   defp not_callable_details({:data_ref, name}) when is_binary(name), do: %{name: name}
 

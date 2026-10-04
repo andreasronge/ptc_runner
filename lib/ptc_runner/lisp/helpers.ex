@@ -1,7 +1,12 @@
 defmodule PtcRunner.Lisp.Helpers do
   @moduledoc """
-  Shared result threading and safe existing-atom conversion.
+  Shared result threading, builtin labels, and safe existing-atom conversion.
   """
+
+  @doc "Renders an atom or string builtin name as its Lisp diagnostic label."
+  @spec lisp_name(atom() | String.t()) :: String.t()
+  def lisp_name(name) when is_atom(name), do: Atom.to_string(name)
+  def lisp_name(name) when is_binary(name), do: name
 
   @doc """
   Reduces an enumerable with a callback returning tagged accumulators.
