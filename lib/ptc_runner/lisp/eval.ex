@@ -523,7 +523,8 @@ defmodule PtcRunner.Lisp.Eval do
            eval_all([start_ast, end_ast, step_ast], eval_ctx3) do
       if builtin_named?(take_fun, :take) and builtin_named?(range_fun, :range) and
            zero_number?(step) and is_integer(n) and is_number(start) and is_number(end_val) do
-        {:ok, List.duplicate(start, max(n, 0)), eval_ctx4}
+        values = if start == end_val, do: [], else: List.duplicate(start, max(n, 0))
+        {:ok, values, eval_ctx4}
       else
         with {:ok, range_val, eval_ctx5} <-
                Apply.apply_fun(range_fun, [start, end_val, step], eval_ctx4, &do_eval/2) do

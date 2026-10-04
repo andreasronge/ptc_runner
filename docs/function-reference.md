@@ -232,7 +232,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `prewalk` * | `(prewalk f form)` | Transform tree top-down (pre-order traversal) |
 | `println` | `(println ...)` | Records spaced arguments in the evaluation result's bounded `prints` list. Returns `nil`. |
 | `quote` | `(quote symbol)` | Return a symbolic reference without resolving it — Only symbols are supported in this phase; quoted collections remain unsupported. |
-| `range` | `(range end), (range start end), (range start end step)` | Returns sequence with specific step — DIV-02: zero-arity (range) (infinite lazy seq) is not supported — bounds must be specified. Direct zero-step ranges raise unless consumed by bounded take. PTC-Lisp has no lazy sequences. See docs/clojure-conformance-gaps.md. |
+| `range` | `(range end), (range start end), (range start end step)` | Returns sequence with specific step — DIV-02: zero-arity (range) (infinite lazy seq) is not supported — bounds must be specified. Zero-step ranges with numerically equal bounds return an empty vector (including mixed integer/float bounds). Other direct zero-step ranges raise unless consumed by bounded take. PTC-Lisp has no lazy sequences. See docs/clojure-conformance-gaps.md. |
 | `ratio?` | `(ratio? ...)` |  — DIV-20: always returns false; BEAM has no ratio type. See docs/clojure-conformance-gaps.md. |
 | `rational?` | `(rational? ...)` |  — DIV-20: returns true only for integers (BEAM has no ratio type, so the only BEAM rationals are integers). See docs/clojure-conformance-gaps.md. |
 | `reduce` | `(reduce f coll), (reduce f init coll)` | Fold collection |

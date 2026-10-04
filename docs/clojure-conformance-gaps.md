@@ -5298,7 +5298,8 @@ API boundary.
 ```
 
 **Fix:** The evaluator now recognizes bounded `(take n (range start end 0))`
-directly. Other direct zero-step `range` uses raise because PTC-Lisp does not
+directly. Zero-step ranges with numerically equal bounds return an empty vector.
+Other direct zero-step `range` uses raise because PTC-Lisp does not
 expose lazy infinite sequences.
 
 **Decision:** BUG. PTC-Lisp intentionally excludes unbounded zero-arity
