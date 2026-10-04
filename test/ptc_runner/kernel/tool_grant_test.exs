@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.ToolGrant
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.TestSupport.TestHelpers
 
   @input_schema %{"type" => "object", "additionalProperties" => false}
 
@@ -78,7 +79,7 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
             state,
             :mission,
             environment,
-            dispatch_context(),
+            dispatch_context(state),
             nil,
             nil
           )
@@ -120,7 +121,7 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
         state,
         :mission,
         environment,
-        dispatch_context(),
+        dispatch_context(state),
         nil,
         nil
       )
@@ -154,7 +155,7 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
         state,
         :workflow,
         environment,
-        dispatch_context(validation_heap_words: 233, mission_name: nil),
+        dispatch_context(state, validation_heap_words: 233, mission_name: nil),
         nil,
         nil
       )
@@ -193,6 +194,7 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
         :mission,
         environment,
         dispatch_context(
+          state,
           validation_heap_words: 100_000_000,
           evaluation_lease: lease,
           # The dispatcher reserves a fixed handoff window (25 ms) out of the
@@ -231,7 +233,7 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
         state,
         :mission,
         environment,
-        dispatch_context(),
+        dispatch_context(state),
         nil,
         nil
       )
@@ -244,17 +246,10 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
     environment
   end
 
-  defp dispatch_context(overrides \\ []) do
-    Map.merge(
-      %{
-        timeout_ms: 1_000,
-        validation_heap_words: Limits.defaults().evaluation_heap_words,
-        evaluation_lease: nil,
-        validation_deadline_ms: nil,
-        mission_name: "default"
-      },
-      Map.new(overrides)
-    )
+  defp dispatch_context(state, overrides \\ []) do
+    state
+    |> TestHelpers.dispatch_context(:mission, mission_name: "default")
+    |> Map.merge(Map.new(overrides))
   end
 
   defp capability(name, opts \\ []) do

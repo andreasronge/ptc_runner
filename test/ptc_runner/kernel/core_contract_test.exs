@@ -394,7 +394,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
           mission,
           "blocked",
           %{},
-          TestHelpers.dispatch_context(state, :mission, 2_000,
+          TestHelpers.dispatch_context(state, :mission,
             lease: lease,
             mission_name: "default"
           ),
@@ -565,7 +565,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                environment,
                "unavailable",
                %{},
-               TestHelpers.dispatch_context(state, :workflow, 100),
+               TestHelpers.dispatch_context(state, :workflow),
                nil,
                nil
              )
@@ -577,7 +577,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                environment,
                "invalid",
                %{},
-               TestHelpers.dispatch_context(state, :workflow, 100),
+               TestHelpers.dispatch_context(state, :workflow),
                nil,
                nil
              )
@@ -589,7 +589,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                environment,
                "malformed-struct",
                %{},
-               TestHelpers.dispatch_context(state, :workflow, 100),
+               TestHelpers.dispatch_context(state, :workflow),
                nil,
                nil
              )
@@ -629,7 +629,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                    environment,
                    "tiny-heap",
                    %{},
-                   TestHelpers.dispatch_context(state, :workflow, 100),
+                   TestHelpers.dispatch_context(state, :workflow),
                    nil,
                    nil
                  )
@@ -665,7 +665,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                  environment,
                  "llm-request",
                  %{},
-                 TestHelpers.dispatch_context(state, :workflow, 1_000),
+                 TestHelpers.dispatch_context(state, :workflow),
                  sink,
                  nil
                )
@@ -712,7 +712,6 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                  TestHelpers.dispatch_context(
                    state,
                    :mission,
-                   100,
                    lease: lease,
                    mission_name: "default"
                  ),
@@ -766,29 +765,28 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       )
 
     {:ok, environment} = WorkflowEnvironment.new(capabilities: [capability])
-    {:ok, limits} = Limits.new(live_provider_tasks: 1, run_duration_ms: 1_000)
+    {:ok, limits} = Limits.new(live_provider_tasks: 1)
     {:ok, state} = RunState.start(limits)
 
-    # The budget only has to outlast the dispatch's own pre-provider work, not
-    # the callback: it blocks until `:finish`, which never arrives. A 1 ms
-    # request cannot do that. The validation worker is given the requested
-    # budget minus the time already spent reaching it, so anything under a
-    # millisecond of setup — a cold JSON-schema validator, a loaded CI
-    # scheduler — collapses it to zero and reports the validator as
-    # unavailable instead of the provider as timed out.
-    assert %{status: :error, kind: :timeout, reason: :provider_timeout} =
-             Dispatcher.dispatch(
-               state,
-               :workflow,
-               environment,
-               "slow",
-               %{},
-               TestHelpers.dispatch_context(state, :workflow, 100),
-               nil,
-               nil
-             )
+    task =
+      Task.async(fn ->
+        Dispatcher.dispatch(
+          state,
+          :workflow,
+          environment,
+          "slow",
+          %{},
+          TestHelpers.dispatch_context(state, :workflow, timeout_ms: 2_000),
+          nil,
+          nil
+        )
+      end)
 
-    assert_received :started
+    assert_receive :started, 5_000
+
+    assert %{status: :error, kind: :timeout, reason: :provider_timeout} =
+             Task.await(task, 5_000)
+
     assert :ok = RunState.close(state)
 
     assert %{status: :error, kind: :limit_exceeded, reason: :run_closed} =
@@ -798,7 +796,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                environment,
                "slow",
                %{},
-               TestHelpers.dispatch_context(state, :workflow, 100),
+               TestHelpers.dispatch_context(state, :workflow),
                nil,
                nil
              )
@@ -831,7 +829,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
           environment,
           "gate",
           %{},
-          TestHelpers.dispatch_context(state, :workflow, 1_000),
+          TestHelpers.dispatch_context(state, :workflow),
           nil,
           nil
         )
@@ -1005,7 +1003,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
           environment,
           "slow",
           %{},
-          TestHelpers.dispatch_context(state, :workflow, 30_000),
+          TestHelpers.dispatch_context(state, :workflow, timeout_ms: 30_000),
           nil,
           nil
         )
@@ -1054,7 +1052,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
           environment,
           "slow",
           %{},
-          TestHelpers.dispatch_context(state, :workflow, 30_000),
+          TestHelpers.dispatch_context(state, :workflow, timeout_ms: 30_000),
           nil,
           nil
         )
@@ -4358,7 +4356,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                environment,
                "checked",
                %{},
-               TestHelpers.dispatch_context(state, :workflow, 100),
+               TestHelpers.dispatch_context(state, :workflow),
                nil,
                nil
              )
@@ -4374,7 +4372,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                environment,
                "checked",
                %{},
-               TestHelpers.dispatch_context(state, :workflow, 100),
+               TestHelpers.dispatch_context(state, :workflow),
                nil,
                nil
              )

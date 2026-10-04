@@ -350,7 +350,7 @@ defmodule PtcRunner.Kernel.DecisionProviderTest do
           alias: "decision",
           installation_revision: "decision-v1",
           max_calls: nil,
-          request_timeout_ms: 500
+          request_timeout_ms: 5_000
         }
       )
 
@@ -371,7 +371,7 @@ defmodule PtcRunner.Kernel.DecisionProviderTest do
       environment,
       name,
       request,
-      TestHelpers.dispatch_context(state, :workflow, 500),
+      TestHelpers.dispatch_context(state, :workflow),
       nil,
       nil
     )

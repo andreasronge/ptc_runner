@@ -121,7 +121,7 @@ defmodule PtcRunner.Kernel.ModelCapabilitiesTest do
 
     context =
       state
-      |> TestHelpers.dispatch_context(:workflow, 500)
+      |> TestHelpers.dispatch_context(:workflow)
       |> Map.put(:model_call_names, [name])
 
     assert %{status: :ok} =
@@ -262,7 +262,7 @@ defmodule PtcRunner.Kernel.ModelCapabilitiesTest do
     {:ok, environment} = WorkflowEnvironment.new(capabilities: [capability])
     {:ok, limits} = Limits.new(llm_total_tokens: 50)
     {:ok, state} = RunState.start(limits)
-    context = TestHelpers.dispatch_context(state, :workflow, 500)
+    context = TestHelpers.dispatch_context(state, :workflow)
 
     assert %{status: :ok} =
              Dispatcher.dispatch(state, :workflow, environment, name, %{}, context, nil, nil)

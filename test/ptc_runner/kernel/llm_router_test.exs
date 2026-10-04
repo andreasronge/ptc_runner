@@ -346,7 +346,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     assert {:ok, limits} = Limits.new()
     assert {:ok, state} = RunState.start(limits)
     assert {:ok, sink} = EventSink.start(:normal, limits, run_id: "max-calls-event")
-    context = TestHelpers.dispatch_context(state, :workflow, 1_000)
+    context = TestHelpers.dispatch_context(state, :workflow)
     arguments = %{"model" => "expensive", "messages" => []}
 
     assert %{status: :ok} =
@@ -410,7 +410,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     assert {:ok, explicit_workflow} = WorkflowEnvironment.new(capabilities: [explicit_router])
     assert {:ok, limits} = Limits.new()
     assert {:ok, state} = RunState.start(limits)
-    context = TestHelpers.dispatch_context(state, :workflow, 1_000)
+    context = TestHelpers.dispatch_context(state, :workflow)
 
     assert %{
              status: :error,
@@ -767,7 +767,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
 
     assert {:ok, workflow} = WorkflowEnvironment.new(capabilities: [router])
     assert {:ok, state} = RunState.start(limits)
-    context = TestHelpers.dispatch_context(state, :workflow, 1_000)
+    context = TestHelpers.dispatch_context(state, :workflow)
 
     assert %{status: :ok} =
              Dispatcher.dispatch(
@@ -842,7 +842,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
 
     assert {:ok, workflow} = WorkflowEnvironment.new(capabilities: [router])
     assert {:ok, state} = RunState.start(limits)
-    context = TestHelpers.dispatch_context(state, :workflow, 1_000)
+    context = TestHelpers.dispatch_context(state, :workflow)
     arguments = %{"messages" => []}
 
     assert %{status: :ok} =
@@ -906,7 +906,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
 
     assert {:ok, workflow} = WorkflowEnvironment.new(capabilities: [router])
     assert {:ok, state} = RunState.start(limits)
-    context = TestHelpers.dispatch_context(state, :workflow, 1_000)
+    context = TestHelpers.dispatch_context(state, :workflow)
     arguments = %{"messages" => []}
 
     assert %{status: :ok} =
@@ -970,7 +970,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
 
     assert {:ok, workflow} = WorkflowEnvironment.new(capabilities: [router])
     assert {:ok, state} = RunState.start(limits)
-    context = TestHelpers.dispatch_context(state, :workflow, 1_000)
+    context = TestHelpers.dispatch_context(state, :workflow)
     arguments = %{"messages" => []}
 
     assert %{status: :ok} =
@@ -1234,7 +1234,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
                  workflow,
                  "llm-request",
                  arguments,
-                 TestHelpers.dispatch_context(state, :workflow, 1_000),
+                 TestHelpers.dispatch_context(state, :workflow),
                  sink,
                  nil
                )
@@ -1275,7 +1275,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
                workflow,
                "llm-request",
                %{},
-               TestHelpers.dispatch_context(state, :workflow, 1_000),
+               TestHelpers.dispatch_context(state, :workflow),
                nil,
                nil
              )
@@ -1317,7 +1317,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
                workflow,
                "route",
                %{},
-               TestHelpers.dispatch_context(state, :workflow, 1_000),
+               TestHelpers.dispatch_context(state, :workflow),
                nil,
                nil
              )
@@ -1404,7 +1404,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
                workflow,
                "public-route",
                %{},
-               TestHelpers.dispatch_context(state, :workflow, 1_000),
+               TestHelpers.dispatch_context(state, :workflow),
                sink,
                nil
              )

@@ -9,6 +9,8 @@ defmodule PtcRunner.TestSupport.TestHelpers do
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunState
 
+  @functional_dispatch_timeout_ms 5_000
+
   @doc "Dummy tool that ignores name and args and returns :ok"
   def dummy_tool(_name, _args), do: :ok
 
@@ -27,13 +29,19 @@ defmodule PtcRunner.TestSupport.TestHelpers do
     Map.merge(base, overrides)
   end
 
-  @doc "Builds the complete canonical dispatch context used by Kernel tests."
-  def dispatch_context(state, environment, timeout_ms, opts \\ [])
+  @doc """
+  Builds the complete canonical dispatch context used by Kernel tests.
+
+  Functional tests share a generous dispatch budget. Tests asserting deadline
+  behavior override it with `timeout_ms:`; `lease`, `mission_name`, and
+  `validation_deadline_ms` carry the remaining dispatch authority and budget.
+  """
+  def dispatch_context(state, environment, opts \\ [])
       when environment in [:workflow, :mission] do
     limits = RunState.limits(state)
 
     %{
-      timeout_ms: timeout_ms,
+      timeout_ms: Keyword.get(opts, :timeout_ms, @functional_dispatch_timeout_ms),
       validation_heap_words:
         if(environment == :workflow,
           do: limits.workflow_heap_words,

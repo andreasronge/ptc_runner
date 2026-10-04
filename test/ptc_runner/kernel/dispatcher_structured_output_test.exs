@@ -471,7 +471,6 @@ defmodule PtcRunner.Kernel.DispatcherStructuredOutputTest do
     {:ok, limits} = Limits.new()
     {:ok, state} = RunState.start(limits)
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "structured-output")
-    timeout_ms = Keyword.get(opts, :timeout_ms, 1_000)
 
     result =
       Dispatcher.dispatch(
@@ -480,7 +479,7 @@ defmodule PtcRunner.Kernel.DispatcherStructuredOutputTest do
         environment,
         "llm-request",
         arguments,
-        TestHelpers.dispatch_context(state, :workflow, timeout_ms, opts),
+        TestHelpers.dispatch_context(state, :workflow, opts),
         sink,
         nil
       )
@@ -516,7 +515,7 @@ defmodule PtcRunner.Kernel.DispatcherStructuredOutputTest do
         environment,
         "llm-request",
         %{"schema" => @schema},
-        TestHelpers.dispatch_context(state, :workflow, 1_000),
+        TestHelpers.dispatch_context(state, :workflow),
         sink,
         nil
       )
@@ -529,7 +528,6 @@ defmodule PtcRunner.Kernel.DispatcherStructuredOutputTest do
     {:ok, limits} = Limits.new()
     {:ok, state} = RunState.start(limits)
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "structured-output")
-    timeout_ms = Keyword.get(opts, :timeout_ms, 1_000)
 
     result =
       Dispatcher.dispatch(
@@ -538,7 +536,7 @@ defmodule PtcRunner.Kernel.DispatcherStructuredOutputTest do
         environment,
         "llm-request",
         arguments,
-        TestHelpers.dispatch_context(state, :workflow, timeout_ms, opts),
+        TestHelpers.dispatch_context(state, :workflow, opts),
         sink,
         nil
       )

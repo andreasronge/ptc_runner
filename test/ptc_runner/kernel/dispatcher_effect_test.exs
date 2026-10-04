@@ -116,9 +116,9 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
 
   test "mission quota, timeout, and result-size limits retain mission attribution" do
     cases = [
-      {[capability_result_bytes: 64], 100, fn -> {:ok, String.duplicate("x", 256)} end,
+      {[capability_result_bytes: 64], [], fn -> {:ok, String.duplicate("x", 256)} end,
        :provider_result_limit},
-      {[], 100,
+      {[], [timeout_ms: 2_000],
        fn ->
          receive do
            :never -> {:ok, nil}
@@ -126,8 +126,8 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
        end, :provider_timeout}
     ]
 
-    for {limit_opts, timeout_ms, callback, reason} <- cases do
-      {result, events} = dispatch_mission_with_events(limit_opts, timeout_ms, callback)
+    for {limit_opts, dispatch_opts, callback, reason} <- cases do
+      {result, events} = dispatch_mission_with_events(limit_opts, dispatch_opts, callback)
       assert result.kind in [:result_exceeded, :timeout]
 
       assert %{data: %{reason: ^reason, environment: :mission, mission_name: "reader"}} =
@@ -145,13 +145,8 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
     {:ok, _memory, _history, lease} =
       RunState.reserve_evaluation(state, "reader", mode: :fail_fast)
 
-    context = %{
-      timeout_ms: 100,
-      validation_heap_words: limits.evaluation_heap_words,
-      evaluation_lease: lease,
-      validation_deadline_ms: nil,
-      mission_name: "reader"
-    }
+    context =
+      TestHelpers.dispatch_context(state, :mission, lease: lease, mission_name: "reader")
 
     assert %{status: :ok} =
              Dispatcher.dispatch(
@@ -319,7 +314,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
                environment,
                "llm-request",
                arguments,
-               TestHelpers.dispatch_context(state, :workflow, 5_000),
+               TestHelpers.dispatch_context(state, :workflow),
                nil,
                inspection_sink
              )
@@ -362,7 +357,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
 
     # Generous enough that spawn-and-raise still wins under a loaded suite.
     # A formatter that blocked the provider-result path would still miss it.
-    {result, events} = dispatch_mission_with_events([], 5_000, callback, inspection_sink)
+    {result, events} = dispatch_mission_with_events([], [], callback, inspection_sink)
 
     assert result == %{
              status: :error,
@@ -389,7 +384,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
     secret = "SECRET_PROVIDER_DETAIL"
 
     {result, events} =
-      dispatch_mission_with_events([], 100, fn ->
+      dispatch_mission_with_events([], [], fn ->
         {:error, ProviderError.new(:unavailable, secret, retryable?: true)}
       end)
 
@@ -485,9 +480,9 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
 
     # This checks exception projection, not scheduling latency under suite load.
     {captured_result, captured_events} =
-      dispatch_mission_with_events([], 5_000, callback, inspection_sink)
+      dispatch_mission_with_events([], [], callback, inspection_sink)
 
-    {plain_result, plain_events} = dispatch_mission_with_events([], 5_000, callback)
+    {plain_result, plain_events} = dispatch_mission_with_events([], [], callback)
 
     assert %{kind: :provider_error, reason: :exception} = captured_result
     assert captured_result == plain_result
@@ -629,7 +624,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
             environment,
             capability.name,
             %{},
-            TestHelpers.dispatch_context(state, :mission, 3_000,
+            TestHelpers.dispatch_context(state, :mission,
               lease: lease,
               mission_name: "default"
             ),
@@ -719,7 +714,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
                  environment,
                  capability.name,
                  %{},
-                 TestHelpers.dispatch_context(state, :mission, 100,
+                 TestHelpers.dispatch_context(state, :mission,
                    lease: lease,
                    mission_name: "default"
                  ),
@@ -795,7 +790,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
                environment,
                "llm-request",
                %{},
-               TestHelpers.dispatch_context(state, :workflow, 100),
+               TestHelpers.dispatch_context(state, :workflow),
                nil,
                nil
              )
@@ -882,11 +877,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
       TestHelpers.dispatch_context(
         state,
         :mission,
-        # Functional assertions need scheduling headroom in the full async suite.
-        # Deadline tests supply their own timeout explicitly.
-        Keyword.get(opts, :timeout_ms, 5_000),
-        lease: lease,
-        mission_name: "default"
+        Keyword.merge(opts, lease: lease, mission_name: "default")
       ),
       nil,
       Keyword.get(opts, :inspection_sink)
@@ -904,13 +895,13 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
       environment,
       capability.name,
       %{},
-      TestHelpers.dispatch_context(state, :workflow, 100),
+      TestHelpers.dispatch_context(state, :workflow),
       nil,
       Keyword.get(opts, :inspection_sink)
     )
   end
 
-  defp dispatch_mission_with_events(limit_opts, timeout_ms, callback, inspection_sink \\ nil) do
+  defp dispatch_mission_with_events(limit_opts, dispatch_opts, callback, inspection_sink \\ nil) do
     {:ok, limits} = Limits.new(limit_opts)
     {:ok, state} = RunState.start(limits)
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "mission-limit-attribution")
@@ -927,13 +918,11 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
         environment,
         capability.name,
         %{},
-        %{
-          timeout_ms: timeout_ms,
-          validation_heap_words: limits.evaluation_heap_words,
-          evaluation_lease: lease,
-          validation_deadline_ms: nil,
-          mission_name: "reader"
-        },
+        TestHelpers.dispatch_context(
+          state,
+          :mission,
+          Keyword.merge(dispatch_opts, lease: lease, mission_name: "reader")
+        ),
         sink,
         inspection_sink
       )
