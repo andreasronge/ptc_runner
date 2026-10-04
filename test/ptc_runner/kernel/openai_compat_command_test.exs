@@ -47,6 +47,64 @@ defmodule PtcRunner.Kernel.OpenAICompatCommandTest do
       assert outcome.envelope["execution"]["usage"]["llm_budget"]["total_tokens"]["charged"] == 12
     end
 
+    test "#{route} keyless installation passes validate, connected doctor and run", %{
+      tmp_dir: dir
+    } do
+      project = project(dir, unquote(route), ~s({"q":false}), 200, true)
+
+      rewrite_host(dir, fn host ->
+        host
+        |> Map.delete("credentials")
+        |> update_in(["install", "local"], &Map.delete(&1, "credential"))
+      end)
+
+      assert {:ok, _} =
+               CommandEngine.dispatch([
+                 "validate",
+                 Path.join(dir, "ptc.json"),
+                 "--host-config",
+                 Path.join(dir, "ptc-host.json")
+               ])
+
+      assert {:ok, _} = CommandEngine.dispatch(["doctor", project, "--connect"])
+      LLMSupport.stop_provider_applications()
+      assert {:ok, outcome} = CommandEngine.dispatch(["run", project])
+      value = outcome.envelope["result"]["value"]
+
+      if unquote(route) == :llm do
+        assert value["structured_output"] == %{"q" => false}
+      else
+        assert value["answers"]["q"]["value"] == false
+      end
+
+      if unquote(route) == :llm do
+        assert_receive {:wire, probe}
+        refute Map.has_key?(probe.headers, "authorization")
+      end
+
+      assert_receive {:wire, request}
+      refute Map.has_key?(request.headers, "authorization")
+    end
+
+    test "#{route} configured unset credential fails acquisition", %{tmp_dir: dir} do
+      project = project(dir, unquote(route), ~s({"q":false}), 200, true)
+
+      rewrite_host(
+        dir,
+        &put_in(&1, ["credentials", "key"], %{"env" => "PTC_KEYLESS_TEST_UNSET_KEY"})
+      )
+
+      assert System.get_env("PTC_KEYLESS_TEST_UNSET_KEY") == nil
+
+      for command <- [["doctor", project, "--connect"], ["run", project]] do
+        LLMSupport.stop_provider_applications()
+        assert {:error, outcome} = CommandEngine.dispatch(command)
+        assert Jason.encode!(outcome.envelope) =~ "credential_unavailable"
+      end
+
+      refute_received {:wire, _}
+    end
+
     for {name, content, status} <- [
           {"invalid schema", ~s({"q":"wrong"}), 200},
           {"truncated", ~s({"q":), 200},
@@ -153,6 +211,12 @@ defmodule PtcRunner.Kernel.OpenAICompatCommandTest do
     assert {:error, outcome} = CommandEngine.dispatch(["run", project])
     assert Jason.encode!(outcome.envelope) =~ "model_contract_unsupported"
     refute_received {:wire, _}
+  end
+
+  defp rewrite_host(dir, fun) do
+    path = Path.join(dir, "ptc-host.json")
+    host = path |> File.read!() |> Jason.decode!() |> fun.()
+    File.write!(path, Jason.encode!(host))
   end
 
   defp project(dir, route, content, status, tokens?) do

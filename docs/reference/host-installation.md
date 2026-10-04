@@ -304,7 +304,12 @@ even when the content is rejected or missing, including empty or malformed
 choices. Ordinary requests also reject missing or non-string text content;
 reported usage still settles their budget. To use Ollama schema output, select
 `openai-compat:http://localhost:11434/v1|<model>`.
-Configured credentials are sent as `Authorization: Bearer <credential>`.
+For `openai-compat:`, `credential` may be omitted, including when the alias
+backs a `chat` decision installation. No credential is resolved and no
+`Authorization` header is sent in that case. Other live LLM routes require a
+credential binding. Configured credentials are sent as
+`Authorization: Bearer <credential>`; an unset configured credential still
+fails acquisition.
 OpenAI-compatible base URLs must use HTTP or HTTPS and contain a host, with no
 userinfo, query, or fragment. Credentials require HTTPS except for `localhost`,
 IPv4 loopback addresses (`127.0.0.0/8`), and IPv6 loopback (`::1`). Keyless HTTP

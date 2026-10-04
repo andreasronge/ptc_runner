@@ -776,6 +776,27 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     assert host.install["deepseek"].structured_output_mode == :unsupported
     assert host.install["deepseek"].usage_guarantees == %{tokens: true, cost_currency: "USD"}
 
+    keyless =
+      llm
+      |> Map.delete("credentials")
+      |> put_in(["install", "deepseek", "model"], "openai-compat:http://localhost:8080/v1|local")
+      |> update_in(["install", "deepseek"], &Map.delete(&1, "credential"))
+
+    assert {:ok, _} = JSV.validate(keyless, root, cast: false)
+    assert {:ok, keyless_host} = HostConfig.decode(keyless, "/tmp")
+    assert keyless_host.install["deepseek"].credential == nil
+
+    for model <- ["openrouter:some/model", "ollama:local"] do
+      invalid = put_in(keyless, ["install", "deepseek", "model"], model)
+      assert {:error, _} = JSV.validate(invalid, root, cast: false)
+      assert {:error, :invalid_host_config} = HostConfig.decode(invalid, "/tmp")
+    end
+
+    for credential <- [nil, "", "undeclared"] do
+      invalid = put_in(keyless, ["install", "deepseek", "credential"], credential)
+      assert {:error, :invalid_host_config} = HostConfig.decode(invalid, "/tmp")
+    end
+
     missing_guarantees =
       update_in(llm, ["install", "deepseek"], &Map.delete(&1, "usage_guarantees"))
 
