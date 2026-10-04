@@ -6,6 +6,7 @@ defmodule PtcRunner.Lisp.HostCallable do
   effects and authority. Errors use the same abort carrier as evaluator calls.
   """
 
+  alias PtcRunner.Lisp.BuiltinInvocation
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Eval.HostContext
@@ -22,38 +23,52 @@ defmodule PtcRunner.Lisp.HostCallable do
   def error!(reason), do: HostContext.error!(reason)
 
   @doc "Unwraps builtin results, preserving host exceptions outside evaluation."
-  @spec builtin_result!(tuple(), {:ok, term()} | {:error, term()}) :: term()
+  @spec builtin_result!(tuple(), {:ok, term()} | {:error, BuiltinInvocation.failure()}) :: term()
   def builtin_result!(_binding, {:ok, value}), do: value
 
   # Host unary arithmetic has historically used the generic builtin diagnostic.
   def builtin_result!(
         {:variadic, fun, _identity},
-        {:error, {:type_error, "expected number, got " <> _type, value}}
+        {:error, %{reason: {:type_error, "expected number, got " <> _type, value}}}
       ) do
     error!(Helpers.type_error_for_args(fun, [value]))
   end
 
-  def builtin_result!(binding, {:error, reason}) do
+  def builtin_result!(binding, {:error, %{reason: reason} = failure}) do
     case HostContext.current() do
-      nil -> raise_builtin_error(binding, reason)
+      nil -> raise_builtin_error(binding, failure)
       {_context, _do_eval} -> HostContext.error!(reason)
     end
   end
 
-  @spec raise_builtin_error(tuple(), term()) :: no_return()
-  defp raise_builtin_error(_binding, {:arithmetic_error, _token}) do
-    raise ArithmeticError, "bad argument in arithmetic expression"
+  @spec raise_builtin_error(tuple(), BuiltinInvocation.failure()) :: no_return()
+  defp raise_builtin_error({tag, _, _}, %{
+         reason: {:arithmetic_error, _token},
+         stacktrace: stacktrace
+       })
+       when tag in [:variadic, :variadic_nonempty] do
+    reraise ArithmeticError, [message: "bad argument in arithmetic expression"], stacktrace
   end
 
-  defp raise_builtin_error({:variadic_nonempty, name, _fun}, {:arity_error, %{actual: 0}}) do
+  defp raise_builtin_error({tag, _, _}, %{reason: {:type_error, _, _} = reason})
+       when tag in [:variadic, :variadic_nonempty], do: HostContext.error!(reason)
+
+  defp raise_builtin_error(_binding, %{exception: exception, stacktrace: stacktrace})
+       when not is_nil(exception), do: reraise(exception, stacktrace)
+
+  defp raise_builtin_error({:variadic_nonempty, name, _fun}, %{
+         reason: {:arity_error, %{actual: 0}}
+       }) do
     raise ArgumentError, "#{name} requires at least 1 argument"
   end
 
-  defp raise_builtin_error({:multi_arity, name, _funs}, {:arity_error, %{actual: actual}}) do
+  defp raise_builtin_error({:multi_arity, name, _funs}, %{
+         reason: {:arity_error, %{actual: actual}}
+       }) do
     raise ArgumentError, "#{name} arity mismatch: got #{actual} arguments"
   end
 
-  defp raise_builtin_error(_binding, reason), do: HostContext.error!(reason)
+  defp raise_builtin_error(_binding, %{reason: reason}), do: HostContext.error!(reason)
 
   @spec call(term(), [term()]) :: term()
   # Prelude introspection builtins. Like `%RuntimeCallable{}`, these need the

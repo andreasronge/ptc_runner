@@ -20,6 +20,31 @@ defmodule PtcRunner.Lisp.Runtime.CallableTest do
     end
   end
 
+  test "host builtin failures retain their exception class and original stacktrace" do
+    for binding <- [
+          {:normal, &raise_host_failure/1},
+          {:collect, &raise_host_failure/1},
+          {:multi_arity, :host_failure, {&raise_host_failure/1}}
+        ] do
+      error =
+        try do
+          Callable.call(binding, [1])
+        rescue
+          exception -> {exception, __STACKTRACE__}
+        end
+
+      assert {%RuntimeError{message: "host failure"}, stacktrace} = error
+      assert Enum.any?(stacktrace, &match?({__MODULE__, :raise_host_failure, 1, _}, &1))
+    end
+  end
+
+  test "host builtin arity and clause failures retain their original exceptions" do
+    assert_raise BadArityError, fn -> Callable.call({:normal, &String.upcase/1}, []) end
+    assert_raise FunctionClauseError, fn -> Callable.call({:normal, &String.upcase/1}, [1]) end
+  end
+
+  def raise_host_failure(_argument), do: raise("host failure")
+
   describe "call/2 with {:normal, fun}" do
     test "calls normal builtin" do
       normal = {:normal, &String.upcase/1}

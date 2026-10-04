@@ -1204,7 +1204,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
            BuiltinInvocation.invoke(binding, args)
          end) do
       {:ok, {:ok, result}, final_ctx} -> {:ok, result, final_ctx}
-      {:ok, {:error, reason}, _final_ctx} -> {:error, reason}
+      {:ok, {:error, %{reason: reason}}, _final_ctx} -> {:error, reason}
     end
   rescue
     error in Abort -> reraise_hof_callback_error(error, args, __STACKTRACE__)
