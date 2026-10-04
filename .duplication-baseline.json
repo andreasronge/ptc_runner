@@ -230,28 +230,6 @@
       ],
       "type": "type_i"
     },
-    "8de541de6a8463e0066a928ed6f9484b223f9a92739fddd33b59298e252d99d6": {
-      "describe": "type_i mass=36 lib/ptc_runner/lisp/eval.ex:1245 <-> lib/ptc_runner/lisp/eval.ex:1299 <-> lib/ptc_runner/lisp/eval.ex:1319",
-      "files": [
-        "lib/ptc_runner/lisp/eval.ex"
-      ],
-      "mass": 36,
-      "occurrences": [
-        {
-          "file": "lib/ptc_runner/lisp/eval.ex",
-          "snippet": "786aecb217e9537b0be2656d9dd2492fff4b95f4117c15085437a402bc756a57"
-        },
-        {
-          "file": "lib/ptc_runner/lisp/eval.ex",
-          "snippet": "786aecb217e9537b0be2656d9dd2492fff4b95f4117c15085437a402bc756a57"
-        },
-        {
-          "file": "lib/ptc_runner/lisp/eval.ex",
-          "snippet": "786aecb217e9537b0be2656d9dd2492fff4b95f4117c15085437a402bc756a57"
-        }
-      ],
-      "type": "type_i"
-    },
     "9a5745cb297a916c230134aaad7350eec097cc0dff4429002490c01db7a8b665": {
       "describe": "type_ii mass=39 lib/ptc_runner/kernel/trace_log.ex:1977 <-> lib/ptc_runner/kernel/trace_log.ex:2811",
       "files": [
@@ -284,24 +262,6 @@
         {
           "file": "test/ptc_runner/kernel/provider_declaration_test.exs",
           "snippet": "3b3ca48e8a441949c379dfa6d09ca19fd4bb8c3b12cd13921a1fb7e63f3ebad2"
-        }
-      ],
-      "type": "type_i"
-    },
-    "b06e4bbe2481479f6a55f33afd45e868e6bf4c83ee58c63cb7f4747d3737d81e": {
-      "describe": "type_i mass=49 lib/ptc_runner/lisp/eval.ex:1201 <-> lib/ptc_runner/lisp/eval.ex:1217",
-      "files": [
-        "lib/ptc_runner/lisp/eval.ex"
-      ],
-      "mass": 49,
-      "occurrences": [
-        {
-          "file": "lib/ptc_runner/lisp/eval.ex",
-          "snippet": "c506f9f60f73f0d14d6568cc95be953d4e83edc65408769b40d8c252671e1ae9"
-        },
-        {
-          "file": "lib/ptc_runner/lisp/eval.ex",
-          "snippet": "c506f9f60f73f0d14d6568cc95be953d4e83edc65408769b40d8c252671e1ae9"
         }
       ],
       "type": "type_i"
@@ -384,25 +344,6 @@
       ],
       "type": "type_i"
     },
-    "dc2e14ff12bce79fc1f349be1145bfcd1fcc54f831690b9f6881cd88c32ef399": {
-      "describe": "type_i mass=31 lib/ptc_runner/lisp/eval/apply.ex:372 <-> lib/ptc_runner/lisp/runtime/callable.ex:181",
-      "files": [
-        "lib/ptc_runner/lisp/eval/apply.ex",
-        "lib/ptc_runner/lisp/runtime/callable.ex"
-      ],
-      "mass": 31,
-      "occurrences": [
-        {
-          "file": "lib/ptc_runner/lisp/eval/apply.ex",
-          "snippet": "b63dd3091059d05cd324f3b990d10b17b5ba7d665d5f917b46d400c4ed17287b"
-        },
-        {
-          "file": "lib/ptc_runner/lisp/runtime/callable.ex",
-          "snippet": "b63dd3091059d05cd324f3b990d10b17b5ba7d665d5f917b46d400c4ed17287b"
-        }
-      ],
-      "type": "type_i"
-    },
     "ee759005e72ef863d7844779dc4a667b279c1d3f64dac872d2f277554e4b7036": {
       "describe": "type_i mass=37 lib/ptc_runner/kernel/inspection_snapshot.ex:193 <-> lib/ptc_runner/kernel/trace_snapshot.ex:282",
       "files": [
@@ -465,24 +406,6 @@
         {
           "file": "test/ptc_runner/lisp/runtime/predicates_test.exs",
           "snippet": "5dc3bceac87422072aec83bb537a8cea6617348265ae9e7ea5275f36b9d70cd0"
-        }
-      ],
-      "type": "type_i"
-    },
-    "f66f82977c275de48e7b4c9e8efc31bc68c18d12a7d60066e73b9e3e1af62eb2": {
-      "describe": "type_i mass=39 lib/ptc_runner/lisp/eval.ex:1245 <-> lib/ptc_runner/lisp/eval.ex:1319",
-      "files": [
-        "lib/ptc_runner/lisp/eval.ex"
-      ],
-      "mass": 39,
-      "occurrences": [
-        {
-          "file": "lib/ptc_runner/lisp/eval.ex",
-          "snippet": "87d9ab87b1fdf368ac6d97484eba19734d4ff38d5944be753797f984c021f6a4"
-        },
-        {
-          "file": "lib/ptc_runner/lisp/eval.ex",
-          "snippet": "87d9ab87b1fdf368ac6d97484eba19734d4ff38d5944be753797f984c021f6a4"
         }
       ],
       "type": "type_i"
