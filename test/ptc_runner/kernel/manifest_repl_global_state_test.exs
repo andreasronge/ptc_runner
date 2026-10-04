@@ -190,7 +190,10 @@ defmodule PtcRunner.Kernel.ManifestReplGlobalStateTest do
     {:ok, runtime} =
       CommandRuntime.new(
         provider_application_mode: :host_owned,
-        environment_setup: fn -> send(parent, :unrelated_environment_setup) && :ok end
+        environment_setup: fn ->
+          send(parent, :unrelated_environment_setup)
+          :ok
+        end
       )
 
     assert {:ok, session} =

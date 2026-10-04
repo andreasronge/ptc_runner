@@ -1213,7 +1213,10 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
       {:ok,
        %{
          capabilities: [capability],
-         close: fn -> send(parent, {:closed, name}) && :ok end,
+         close: fn ->
+           send(parent, {:closed, name})
+           :ok
+         end,
          exports: Map.new(provides, &{&1, name})
        }}
     end
