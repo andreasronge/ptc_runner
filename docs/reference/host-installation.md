@@ -694,6 +694,21 @@ marks the affected ledger incomplete, and retains neither answers nor
 the valid values. Decision
 calls also count against `max_active_provider_calls`.
 
+Discovery advertises named question maps with required non-empty `instructions`
+and a `type` enum (`boolean`, `choice`, `score`), the answer fields and nullable
+measurements, a non-empty `model`, and required non-negative integer
+`input_tokens` and `output_tokens` in `usage`. Unknown question keys are refused;
+answer and usage extension fields remain permitted.
+
+The bounded schema profile leaves these checks to runtime validation: non-empty
+`questions` and question IDs; criteria shapes and bounds per type (optional
+boolean criteria, otherwise exactly `true` and `false` string descriptions;
+one to 255 choice names mapped to string descriptions; two to ten ordered score
+string descriptions); per-type required answer fields; answer IDs matching
+question IDs; options and legends matching criteria; probability sums;
+weighted-score consistency; and optional usage `cost`. Passing the discovery
+schema alone does not establish a valid decision call.
+
 ### HTTP backend
 
 Use `backend: "http"` to send measured decisions to a host-owned endpoint.

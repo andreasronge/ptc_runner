@@ -26,6 +26,13 @@ defmodule PtcRunner.Kernel.DecisionCapability do
   its served model; chat uses the adapter-attested public selector, or
   `private` when the selector is hidden.
 
+  Discovery schemas publish structural fields within the bounded capability
+  schema profile. Runtime validation additionally requires non-empty questions
+  and question IDs, criteria shapes and bounds for each type, per-type required
+  answer fields, answer IDs matching question IDs, options and legends matching
+  criteria, probability sums, weighted-score consistency, and valid optional
+  usage `cost`. Answer and usage extension fields remain permitted.
+
   Model calls use the shared chat spend, token, admission, deadline, replay,
   and inspection machinery. Host installations declare non-negative per-call cost
   and positive token bounds; they never estimate decision reservations from tokens.
@@ -81,7 +88,12 @@ defmodule PtcRunner.Kernel.DecisionCapability do
         "type" => "object",
         "properties" => %{
           "state" => %{"type" => "object", "additionalProperties" => true},
-          "questions" => %{"type" => "object", "additionalProperties" => true}
+          "questions" => %{
+            "type" => "object",
+            "description" =>
+              "Questions keyed by non-empty IDs; at least one is required at runtime.",
+            "additionalProperties" => DecisionContract.question_schema()
+          }
         },
         "required" => ["state", "questions"],
         "additionalProperties" => false
@@ -89,12 +101,12 @@ defmodule PtcRunner.Kernel.DecisionCapability do
       output_schema: %{
         "type" => "object",
         "properties" => %{
-          "model" => %{"type" => "string"},
+          "model" => %{"type" => "string", "minLength" => 1},
           "answers" => %{
             "type" => "object",
             "additionalProperties" => DecisionContract.answer_schema()
           },
-          "usage" => %{"type" => "object", "additionalProperties" => true}
+          "usage" => DecisionContract.usage_schema()
         },
         "required" => ["model", "answers", "usage"],
         "additionalProperties" => false

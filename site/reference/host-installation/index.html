@@ -549,7 +549,18 @@ a valid value promised by <code class="inline">usage_guarantees</code>, fails pe
 marks the affected ledger incomplete, and retains neither answers nor
 <code class="inline">served_model</code>. Other invalid usage fails with <code class="inline">invalid_result</code> and settles
 the valid values. Decision
-calls also count against <code class="inline">max_active_provider_calls</code>.</p><h3 id="http-backend">HTTP backend</h3><p>Use <code class="inline">backend: &quot;http&quot;</code> to send measured decisions to a host-owned endpoint.
+calls also count against <code class="inline">max_active_provider_calls</code>.</p><p>Discovery advertises named question maps with required non-empty <code class="inline">instructions</code>
+and a <code class="inline">type</code> enum (<code class="inline">boolean</code>, <code class="inline">choice</code>, <code class="inline">score</code>), the answer fields and nullable
+measurements, a non-empty <code class="inline">model</code>, and required non-negative integer
+<code class="inline">input_tokens</code> and <code class="inline">output_tokens</code> in <code class="inline">usage</code>. Unknown question keys are refused;
+answer and usage extension fields remain permitted.</p><p>The bounded schema profile leaves these checks to runtime validation: non-empty
+<code class="inline">questions</code> and question IDs; criteria shapes and bounds per type (optional
+boolean criteria, otherwise exactly <code class="inline">true</code> and <code class="inline">false</code> string descriptions;
+one to 255 choice names mapped to string descriptions; two to ten ordered score
+string descriptions); per-type required answer fields; answer IDs matching
+question IDs; options and legends matching criteria; probability sums;
+weighted-score consistency; and optional usage <code class="inline">cost</code>. Passing the discovery
+schema alone does not establish a valid decision call.</p><h3 id="http-backend">HTTP backend</h3><p>Use <code class="inline">backend: &quot;http&quot;</code> to send measured decisions to a host-owned endpoint.
 This closed variant requires <code class="inline">source</code>, <code class="inline">backend</code>, <code class="inline">endpoint</code>, <code class="inline">model</code>,
 <code class="inline">usage_guarantees</code>, <code class="inline">installation_revision</code>, and both per-call bounds.
 Optional fields are <code class="inline">credential</code>, <code class="inline">allow_insecure_loopback</code>, <code class="inline">ceilings</code>,
