@@ -458,6 +458,7 @@ defmodule PtcRunner.Scripts.CIGatesTest do
     for {path, body} <- [
           {"scripts/duplication_gate.sh", "#!/bin/sh\nexit 0\n"},
           {"scripts/guide_budget.sh", "#!/bin/sh\nexit 0\n"},
+          {"scripts/doc_history_gate.sh", "#!/bin/sh\nexit 0\n"},
           {"bin/mix",
            """
            #!/bin/sh

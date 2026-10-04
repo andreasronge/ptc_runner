@@ -43,6 +43,13 @@ field tables, limits, or state machines between layers. Do not present
 speculative APIs as current behavior. Git history already records removed 0.x
 designs.
 
+Describe current behavior only. Do not cite issue or pull-request numbers or
+write before/after comparisons in a page; the reason and measurements for a
+change belong in its pull request and commit message, and git is the history.
+`scripts/doc_history_gate.sh` fails when a Markdown page gains such a
+reference. Existing ones are baselined; remove them when you next edit the
+page, then run `scripts/doc_history_gate.sh bless`.
+
 Public prose in `README.md`, `docs/guides/`, and `docs/reference/` describes
 the executable, JSON documents, PTC-Lisp boundary, capabilities, limits, and
 artifacts without explaining behavior through the implementation language.

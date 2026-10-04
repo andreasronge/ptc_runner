@@ -41,6 +41,7 @@ mix do compile --warnings-as-errors + \
   ptc.conformance_report --check-inventory
 scripts/duplication_gate.sh check
 scripts/guide_budget.sh check
+scripts/doc_history_gate.sh check
 
 if [ -n "$checked_tree" ] && tree="$(current_tree)" && [ "$tree" = "$checked_tree" ]; then
   mkdir -p "$(dirname "$stamp_file")"
