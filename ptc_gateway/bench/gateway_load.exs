@@ -207,10 +207,9 @@ IO.puts(
 
 IO.puts("one per call:        #{round(serial.rps)} req/s")
 
-# The write path adds one durable audit append per call, made from inside a
-# single owner while the call still holds its run capacity. If that append is
-# the ceiling, write throughput stops scaling where read throughput does not,
-# and the audit mailbox is where the queue shows.
+# The write path adds one durable audit record per call while the call still
+# holds run capacity. Group commit lets concurrent records share a sync. The
+# goodput and audit mailbox show whether the audit remains the ceiling.
 write_dir = Path.join(scratch, "write")
 
 {write_path, write_config} =
@@ -252,10 +251,11 @@ Enum.each(write_rows, fn row ->
   )
 end)
 
-# One append in isolation, for scale: the owner does `:file.write` then
-# `:file.sync`, so this is a durable round-trip and nothing else.
+# One append in isolation, including the batching delay and durable sync.
+# This does not measure the amortized cost of concurrent group commit.
 record = %{
   "call_id" => "bench",
+  "run_ref" => "cmd-00000000000000000000000000",
   "tool_name" => "a",
   "started_at" => "2026-09-16T00:00:00.000Z",
   "ended_at" => "2026-09-16T00:00:01.000Z",
@@ -278,8 +278,7 @@ write_peak = write_rows |> Enum.max_by(& &1.goodput) |> Map.get(:goodput)
 append_ms = append_us / 200 / 1000
 
 IO.puts("\none durable audit append: #{Float.round(append_ms, 3)} ms")
-IO.puts("  serialized in one owner, so the write path cannot exceed")
-IO.puts("  #{round(1000 / append_ms)} calls/s however much run capacity is configured")
+IO.puts("  isolated calls include the batching delay; concurrent calls can share a sync")
 IO.puts("peak read goodput:  #{round(read_peak)} calls/s")
 IO.puts("peak write goodput: #{round(write_peak)} calls/s")
 

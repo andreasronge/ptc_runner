@@ -96,33 +96,26 @@ the owner that queues — `RequestAdmission` stays near zero throughout.
 Numbers are machine- and scheduler-specific, so a comparison is only meaningful
 against another run on the same machine. There is no committed baseline.
 
-## The write path collapses under load, and adding capacity makes it worse
+## Private-audit group commit
 
-Every write call appends one record to the private audit, durably, from inside a
-single owner — `:file.write` then `:file.sync` — and the call keeps its run
-capacity until that append returns. One append measures 0.44 ms, so the whole
-write path is serialized behind roughly 2,280 appends per second no matter what
-`max_concurrent_runs` says.
+The private audit batches durable writes. Pending records share one sync after
+at most 2 ms, 64 records, or 64 KiB of encoded JSONL (also bounded by the
+configured file size); a larger valid record is synced alone. Each call keeps
+its run admission until its batch is durable, so admission bounds the callers
+waiting on the audit. The [gateway reference](../reference/gateway.md#private-audit-directory)
+owns the durability contract.
 
-What that produces is not a plateau. Goodput measured on a ten-scheduler
-darwin/arm64 machine, 200 calls per level:
+To compare a change to this path, run `mix run bench/gateway_load.exs` before
+and after on the same host, with the same scheduler count and the same number
+of calls per level, then compare goodput, refusals, and audit mailbox depth on
+the write path. Mailbox depth is peak/mean and excludes records already
+collected into the current batch. HTTP publication can precede audit
+completion, so client latency does not measure how long run admission stays
+held; do not read it as the cost of the write path.
 
-| concurrency | offered req/s | goodput req/s | refused | audit mailbox (peak/mean) |
-| --- | --- | --- | --- | --- |
-| 8 | 931 | 931 | 0% | 53 / 24 |
-| 16 | 1995 | 918 | 54% | 60 / 55 |
-| 32 | 2665 | 840 | 69% | 59 / 56 |
-| 64 | 3230 | 727 | 78% | 58 / 54 |
-
-Useful work *falls* as offered load rises. The audit queue deepens, every run in
-it holds its capacity while it waits, run capacity fills, and the overflow is
-refused rather than queued — so raising `max_concurrent_runs` admits more runs
-into the same queue and lowers goodput further. The read path over the same
-sweep plateaus at ~1,190 calls per second and refuses nothing.
-
-Read the offered column carefully: at concurrency 64 it looks like the write
-path is three times faster than the read path. It is counting refusals, which
-are cheap. Only the goodput column is throughput.
+Read offered load carefully: it counts cheap refusals. Only goodput reports
+successful work. An isolated append includes the batching delay and cannot
+predict the throughput of concurrent calls sharing a sync.
 
 ## Other operational properties
 

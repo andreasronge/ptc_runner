@@ -11,11 +11,20 @@ defmodule PtcGateway.PrivateAudit do
   numeric names and are never truncated.
   The directory is exclusively locked for this owner's lifetime. Per-call
   records, fencing and shutdown policy belong to the execution integration.
+
+  Appends share a sync after 2 ms, 64 records or 64 KiB (also bounded by the
+  configured file size). A larger valid record is synced alone. Replies follow
+  the successful sync; failures refuse every pending caller and stop the owner.
+  Normal shutdown flushes pending records through the same barrier.
   """
   use GenServer
   use PtcGateway.OwnerStatusRedaction
   alias PtcRunner.Kernel.PrivateDirectory
   import Bitwise
+
+  @batch_delay_ms 2
+  @batch_records 64
+  @batch_bytes 65_536
 
   @spec start_link(map()) :: GenServer.on_start()
   def start_link(config), do: GenServer.start_link(__MODULE__, config)
@@ -29,8 +38,12 @@ defmodule PtcGateway.PrivateAudit do
   @impl true
   def init(config) do
     case open(config) do
-      {:ok, state} -> {:ok, state}
-      _ -> {:stop, :audit_unavailable}
+      {:ok, state} ->
+        {:ok,
+         Map.merge(state, %{pending: [], count: 0, bytes: 0, timer: nil, sync: &:file.sync/1})}
+
+      _ ->
+        {:stop, :audit_unavailable}
     end
   end
 
@@ -181,26 +194,89 @@ defmodule PtcGateway.PrivateAudit do
   end
 
   @impl true
-  def handle_call({:append, record}, _from, state) do
-    result = append_record(state, record)
+  def handle_call({:append, record}, from, state) do
+    with true <- audit_record?(record),
+         {:ok, encoded} <- PtcRunner.Kernel.DeterministicJSON.encode(record),
+         bytes = byte_size(encoded) + 1,
+         true <- bytes <= state.config["max_file_bytes"] do
+      case make_room(state, bytes) do
+        {:ok, state} ->
+          state = enqueue(state, from, encoded, bytes)
 
-    case result do
-      {:ok, next} -> {:reply, :ok, next}
-      error -> {:stop, :audit_unavailable, error, state}
+          if state.count >= @batch_records or state.bytes >= byte_limit(state),
+            do: flush_reply(state),
+            else: {:noreply, state}
+
+        {:error, state} ->
+          {:stop, :audit_unavailable, {:error, :audit_unavailable}, state}
+      end
+    else
+      _ ->
+        {:stop, :audit_unavailable, {:error, :audit_unavailable}, fail_pending(state)}
     end
   end
 
-  defp append_record(state, record) do
-    with true <- audit_record?(record),
-         {:ok, encoded} <- PtcRunner.Kernel.DeterministicJSON.encode(record),
-         true <- byte_size(encoded) + 1 <= state.config["max_file_bytes"],
-         {:ok, state} <- ensure_space(state, byte_size(encoded) + 1),
-         :ok <- :file.write(state.io, [encoded, "\n"]),
-         :ok <- :file.sync(state.io) do
-      {:ok, state}
-    else
-      _ -> {:error, :audit_unavailable}
+  @impl true
+  def handle_info({:flush, token}, %{timer: {_, token}} = state), do: flush_reply(state)
+  def handle_info({:flush, _stale}, state), do: {:noreply, state}
+
+  defp byte_limit(state), do: min(@batch_bytes, state.config["max_file_bytes"])
+
+  defp make_room(%{count: 0} = state, _bytes), do: {:ok, state}
+
+  defp make_room(state, bytes) do
+    if state.bytes + bytes > byte_limit(state), do: flush(state), else: {:ok, state}
+  end
+
+  defp enqueue(state, from, encoded, bytes) do
+    timer = state.timer || new_timer()
+
+    %{
+      state
+      | pending: [{from, [encoded, "\n"]} | state.pending],
+        count: state.count + 1,
+        bytes: state.bytes + bytes,
+        timer: timer
+    }
+  end
+
+  defp new_timer do
+    token = make_ref()
+    {Process.send_after(self(), {:flush, token}, @batch_delay_ms), token}
+  end
+
+  defp flush_reply(state) do
+    case flush(state) do
+      {:ok, state} -> {:noreply, state}
+      {:error, state} -> {:stop, :audit_unavailable, state}
     end
+  end
+
+  defp flush(%{count: 0} = state), do: {:ok, state}
+
+  defp flush(state) do
+    case ensure_space(state, state.bytes) do
+      {:ok, state} ->
+        records = state.pending |> Enum.reverse() |> Enum.map(&elem(&1, 1))
+
+        with :ok <- :file.write(state.io, records),
+             :ok <- state.sync.(state.io) do
+          {:ok, reply_pending(state, :ok)}
+        else
+          _ -> {:error, fail_pending(state)}
+        end
+
+      _ ->
+        {:error, fail_pending(state)}
+    end
+  end
+
+  defp fail_pending(state), do: reply_pending(state, {:error, :audit_unavailable})
+
+  defp reply_pending(state, result) do
+    if state.timer, do: Process.cancel_timer(elem(state.timer, 0))
+    for {from, _} <- Enum.reverse(state.pending), do: GenServer.reply(from, result)
+    %{state | pending: [], count: 0, bytes: 0, timer: nil}
   end
 
   defp ensure_space(state, bytes) do
@@ -258,7 +334,15 @@ defmodule PtcGateway.PrivateAudit do
   defp audit_record?(_record), do: false
 
   @impl true
-  def terminate(_, state) do
+  def terminate(reason, state) do
+    state =
+      if reason in [:normal, :shutdown] do
+        {_, state} = flush(state)
+        state
+      else
+        fail_pending(state)
+      end
+
     File.close(state.io)
     File.rmdir(state.lock)
     :ok
