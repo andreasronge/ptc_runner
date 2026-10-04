@@ -70,8 +70,7 @@ struct launcher_config {
   char *cwd;
   int executable_fd;
   int cwd_fd;
-  dev_t executable_device;
-  ino_t executable_inode;
+  struct stat executable_identity;
   uint8_t executable_sha256[SHA256_BYTES];
   char **argv;
   size_t argc;
@@ -927,8 +926,7 @@ static bool resolve_config_paths(struct launcher_config *config) {
       fstat(config->cwd_fd, &cwd_stat) == 0 && S_ISDIR(cwd_stat.st_mode) &&
       sha256_fd(readable_executable_fd, executable_sha256) &&
       memcmp(executable_sha256, config->executable_sha256, SHA256_BYTES) == 0) {
-    config->executable_device = executable_stat.st_dev;
-    config->executable_inode = executable_stat.st_ino;
+    config->executable_identity = readable_executable_stat;
     valid = true;
   }
 
@@ -1492,14 +1490,31 @@ static bool start_group_watchdog(const int lifeline[2],
  * window from "the whole hash", which a rename against a 64 MiB target wins by
  * three hundred milliseconds, to this call pair. The hashed descriptor is
  * still open, so the inode number it reports cannot have been recycled by a
- * different file underneath the comparison.
+ * different file underneath the comparison. Size and nanosecond modification
+ * and change times are compared with the readable descriptor before hashing,
+ * so an in-place write during hashing is refused too.
  */
 static bool executable_identity_unchanged(const struct launcher_config *config) {
   struct stat current;
+  const struct stat *hashed = &config->executable_identity;
 
-  return stat(config->executable, &current) == 0 && S_ISREG(current.st_mode) &&
-         current.st_dev == config->executable_device &&
-         current.st_ino == config->executable_inode;
+  if (stat(config->executable, &current) != 0 || !S_ISREG(current.st_mode) ||
+      current.st_dev != hashed->st_dev || current.st_ino != hashed->st_ino ||
+      current.st_size != hashed->st_size) {
+    return false;
+  }
+
+#if defined(__APPLE__)
+  return current.st_mtimespec.tv_sec == hashed->st_mtimespec.tv_sec &&
+         current.st_mtimespec.tv_nsec == hashed->st_mtimespec.tv_nsec &&
+         current.st_ctimespec.tv_sec == hashed->st_ctimespec.tv_sec &&
+         current.st_ctimespec.tv_nsec == hashed->st_ctimespec.tv_nsec;
+#else
+  return current.st_mtim.tv_sec == hashed->st_mtim.tv_sec &&
+         current.st_mtim.tv_nsec == hashed->st_mtim.tv_nsec &&
+         current.st_ctim.tv_sec == hashed->st_ctim.tv_sec &&
+         current.st_ctim.tv_nsec == hashed->st_ctim.tv_nsec;
+#endif
 }
 #endif
 

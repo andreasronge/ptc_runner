@@ -12,7 +12,7 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
   and executes the same held readable descriptor. macOS hashes a readable
   descriptor for the same file, re-reads the canonical path immediately before
   `execve`, and refuses to start unless it still resolves to the device and
-  inode that were hashed. The trusted operator must not modify executable
+  inode, size, and nanosecond modification and change times recorded before hashing. The trusted operator must not modify executable
   contents during startup on either platform, and a macOS operator must also
   leave the executable path hierarchy alone: an interpreted `#!` target is
   handed to its interpreter as a path, which opens it a second time outside any

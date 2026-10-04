@@ -9,7 +9,9 @@ defmodule PtcRunner.Lisp.Java.Oracle.Config do
 
   @versions_path "priv/java_oracle_versions.exs"
   @external_resource @versions_path
-  @versions Code.eval_file(@versions_path) |> elem(0)
+  @pins Code.eval_file(@versions_path) |> elem(0)
+  @versions Map.delete(@pins, :babashka_sha256)
+  @babashka_sha256 @pins.babashka_sha256
 
   @environment %{
     locale: "en_US",
@@ -20,6 +22,18 @@ defmodule PtcRunner.Lisp.Java.Oracle.Config do
   @doc "Returns the pinned Java, JVM Clojure, and Babashka releases."
   @spec versions() :: map()
   def versions, do: @versions
+
+  @doc """
+  Returns a pinned release archive digest for the requested Babashka version and platform.
+
+  Versions without committed checksums are refused by the installer. The pins
+  live beside the version in `priv/java_oracle_versions.exs`.
+  """
+  @spec babashka_checksum(String.t(), {atom(), atom()}) :: {:ok, String.t()} | :error
+  def babashka_checksum(version, platform) when version == @versions.babashka,
+    do: Map.fetch(@babashka_sha256, platform)
+
+  def babashka_checksum(_version, _platform), do: :error
 
   @doc "Returns the deterministic process locale and timezone requested for every oracle."
   @spec environment() :: %{locale: String.t(), timezone: String.t()}

@@ -53,7 +53,8 @@ The trusted operator must not modify executable contents during startup.
 Linux hashes and executes the same held readable descriptor, which prevents a
 path replacement but not an in-place write. macOS cannot exec a descriptor at
 all, so it re-reads the canonical path immediately before `execve` and refuses
-to start unless that path still resolves to the device and inode it hashed. For
+to start unless that path still matches the hashed descriptor’s device, inode,
+size, and nanosecond modification and change times recorded before hashing. For
 a native executable that leaves the interval between the re-read and the
 kernel's own lookup, rather than the length of the hash, which scales with the
 executable. An interpreted `#!` target is weaker still: macOS gives the
@@ -62,7 +63,9 @@ it a second time and no launcher check covers that lookup. A macOS host must
 therefore keep the executable path hierarchy immutable for the whole of startup.
 
 The conformance suite tests replacement during hashing with a test-only build
-that interposes the executable read and renames the target at that exact point.
+that interposes the executable read and renames or overwrites the target at
+that exact point. The overwrite retains its inode and size and restores mtime,
+so rejecting it exercises the change-time check.
 A marker proves the replacement occurred; no delay or large padded script is
 needed. The shipped launcher contains no synchronization hook. This check does
 not cover macOS's later interpreter path lookup described above.
