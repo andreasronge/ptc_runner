@@ -14,6 +14,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   - Plain Erlang functions
   """
 
+  alias PtcRunner.Lisp.BuiltinInvocation
   alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Eval.Abort
   alias PtcRunner.Lisp.Eval.CapabilityResult
@@ -33,7 +34,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   alias PtcRunner.Lisp.Prelude.Contract
   alias PtcRunner.Lisp.PreludeClosure
   alias PtcRunner.Lisp.Runtime.Args
-  alias PtcRunner.Lisp.Runtime.Math
   alias PtcRunner.Lisp.Runtime.Predicates
   alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.Lisp.SpecialBuiltin
@@ -157,21 +157,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
        )
        when name in [:fnil, :complement, :constantly] and is_function(fun) do
     with :ok <- validate_builtin_args!(builtin, args, eval_ctx, do_eval_fn) do
-      try do
-        with_side_effect_stash(eval_ctx, do_eval_fn, fn -> apply(fun, args) end)
-      rescue
-        e in Abort ->
-          reraise_hof_callback_error(e, args, __STACKTRACE__)
-
-        FunctionClauseError ->
-          {:error, Helpers.type_error_for_args(fun, args)}
-
-        BadArityError ->
-          {:error, {:arity_error, %{actual: length(args)}}}
-
-        e in RuntimeError ->
-          {:error, {:type_error, Exception.message(e), args}}
-      end
+      invoke_builtin(Builtin.unwrap(builtin), args, eval_ctx, do_eval_fn, false)
     end
   end
 
@@ -183,13 +169,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
        )
        when name in [:comp, :partial, :"every-pred", :"some-fn"] and is_function(fun, 1) do
     with :ok <- validate_builtin_args!(builtin, args, eval_ctx, do_eval_fn) do
-      try do
-        with_side_effect_stash(eval_ctx, do_eval_fn, fn -> fun.(args) end)
-      rescue
-        e in Abort -> reraise_hof_callback_error(e, args, __STACKTRACE__)
-        FunctionClauseError -> {:error, Helpers.type_error_for_args(fun, args)}
-        e in RuntimeError -> {:error, {:type_error, Exception.message(e), args}}
-      end
+      invoke_builtin(Builtin.unwrap(builtin), args, eval_ctx, do_eval_fn, false)
     end
   end
 
@@ -314,179 +294,15 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     end
   end
 
-  # Normal builtins: {:normal, fun}
-  # Special handling for closures - convert them to Erlang functions
-  defp do_apply_fun({:normal, fun}, args, %EvalContext{} = eval_ctx, do_eval_fn)
-       when is_function(fun) do
-    converted_args = Enum.map(args, fn arg -> closure_to_fun(arg, eval_ctx, do_eval_fn) end)
-
-    try do
-      with_side_effect_stash(eval_ctx, do_eval_fn, fn -> apply(fun, converted_args) end)
-    rescue
-      e in Abort ->
-        reraise_hof_callback_error(e, converted_args, __STACKTRACE__)
-
-      FunctionClauseError ->
-        # Provide a helpful error message for type mismatches
-        {:error, Helpers.type_error_for_args(fun, converted_args)}
-
-      BadArityError ->
-        {:error, {:arity_error, %{actual: length(converted_args)}}}
-
-      e in RuntimeError ->
-        # Catch errors from closure evaluation (destructuring, arity, eval errors)
-        {:error, {:type_error, Exception.message(e), converted_args}}
-
-      e in ArithmeticError ->
-        {:error, {:arithmetic_error, arithmetic_token(e)}}
-
-      e in BadFunctionError ->
-        # Catch attempts to use non-functions as functions (e.g., :keyword passed to map)
-        {:error, {:type_error, Exception.message(e), converted_args}}
-    end
+  # Closure conversion and effect capture belong to the evaluator adapter.
+  defp do_apply_fun({tag, _} = binding, args, %EvalContext{} = eval_ctx, do_eval_fn)
+       when tag in [:normal, :collect] do
+    invoke_builtin(binding, args, eval_ctx, do_eval_fn, true)
   end
 
-  # Unary variadic builtins still route through Math for validation and
-  # operator-specific single-argument behavior.
-  defp do_apply_fun(
-         {:variadic, fun2, _identity},
-         [x],
-         %EvalContext{} = eval_ctx,
-         _do_eval_fn
-       ) do
-    {:ok, Math.unary_variadic(fun2, x), eval_ctx}
-  rescue
-    ArithmeticError ->
-      {:error, {:type_error, "expected number, got #{Helpers.describe_type(x)}", x}}
-  end
-
-  # Variadic builtins: {:variadic, fun2, identity}
-  defp do_apply_fun(
-         {:variadic, fun2, identity},
-         args,
-         %EvalContext{} = eval_ctx,
-         _do_eval_fn
-       )
-       when is_function(fun2, 2) do
-    result =
-      case args do
-        [] -> identity
-        [x] -> Math.unary_variadic(fun2, x)
-        [x, y] -> fun2.(x, y)
-        [h | t] -> Enum.reduce(t, h, fn x, acc -> fun2.(acc, x) end)
-      end
-
-    {:ok, result, eval_ctx}
-  rescue
-    e in Abort ->
-      reraise_hof_callback_error(e, args, __STACKTRACE__)
-
-    e in ArithmeticError ->
-      # Distinguish between type errors (nil/non-number) and arithmetic errors (e.g., overflow)
-      if Enum.all?(args, &is_number/1) do
-        {:error, {:arithmetic_error, arithmetic_token(e)}}
-      else
-        {:error, Helpers.type_error_for_args(fun2, args)}
-      end
-  end
-
-  # Variadic requiring at least one arg: {:variadic_nonempty, name, fun2}
-  defp do_apply_fun({:variadic_nonempty, name, _fun2}, [], %EvalContext{}, _do_eval_fn) do
-    {:error, {:arity_error, %{name: lisp_name(name), expected: {:at_least, 1}, actual: 0}}}
-  end
-
-  defp do_apply_fun(
-         {:variadic_nonempty, name, fun2},
-         args,
-         %EvalContext{} = eval_ctx,
-         _do_eval_fn
-       )
-       when is_function(fun2, 2) do
-    result =
-      case args do
-        [x] -> Math.unary_variadic_nonempty(name, fun2, x)
-        [x, y] -> fun2.(x, y)
-        [h | t] -> Enum.reduce(t, h, fn x, acc -> fun2.(acc, x) end)
-      end
-
-    {:ok, result, eval_ctx}
-  rescue
-    e in Abort ->
-      reraise_hof_callback_error(e, args, __STACKTRACE__)
-
-    e in ArithmeticError ->
-      # Distinguish between type errors (nil/non-number) and arithmetic errors
-      if Enum.all?(args, &is_number/1) do
-        token =
-          cond do
-            arithmetic_token(e) == :division_by_zero -> :division_by_zero
-            Enum.any?(tl(args), &(&1 === 0)) -> :division_by_zero
-            true -> :bad_argument
-          end
-
-        {:error, {:arithmetic_error, token}}
-      else
-        {:error, Helpers.type_error_for_args(fun2, args)}
-      end
-  end
-
-  # Collect builtins: pass all args as a list to unary function
-  defp do_apply_fun({:collect, fun}, args, %EvalContext{} = eval_ctx, do_eval_fn)
-       when is_function(fun, 1) do
-    # Convert any closures/builtins in args to callable functions
-    converted_args = Enum.map(args, fn arg -> closure_to_fun(arg, eval_ctx, do_eval_fn) end)
-
-    try do
-      with_side_effect_stash(eval_ctx, do_eval_fn, fn -> fun.(converted_args) end)
-    rescue
-      e in Abort ->
-        reraise_hof_callback_error(e, converted_args, __STACKTRACE__)
-
-      FunctionClauseError ->
-        # A bad argument shape inside a collect builtin (e.g. (update-in [1 2]
-        # [] f) routing a vector root through flex_update_in's integer-key
-        # clauses) must surface as a recoverable type error, not leak the
-        # internal module/function name as a raw :runtime_error. Mirrors the
-        # {:normal} and {:multi_arity} handlers so all builtin dispatch shapes
-        # fail consistently.
-        {:error, Helpers.type_error_for_args(fun, converted_args)}
-    end
-  end
-
-  # Multi-arity builtins: select function based on argument count
-  # Tuple {fun2, fun3} means index 0 = arity 2, index 1 = arity 3, etc.
-  defp do_apply_fun({:multi_arity, name, funs}, args, %EvalContext{} = eval_ctx, do_eval_fn)
-       when is_atom(name) and is_tuple(funs) do
-    converted_args = Enum.map(args, fn arg -> closure_to_fun(arg, eval_ctx, do_eval_fn) end)
-
-    arity = length(args)
-
-    # Determine min_arity from first function in tuple
-    min_arity = :erlang.fun_info(elem(funs, 0), :arity) |> elem(1)
-    idx = arity - min_arity
-
-    if idx >= 0 and idx < tuple_size(funs) do
-      fun = elem(funs, idx)
-
-      try do
-        with_side_effect_stash(eval_ctx, do_eval_fn, fn -> apply(fun, converted_args) end)
-      rescue
-        e in Abort ->
-          reraise_hof_callback_error(e, converted_args, __STACKTRACE__)
-
-        FunctionClauseError ->
-          # Provide a helpful error message for type mismatches
-          {:error, Helpers.type_error_for_args(fun, converted_args)}
-
-        e in RuntimeError ->
-          # Catch errors from closure evaluation (destructuring, arity, eval errors)
-          {:error, {:type_error, Exception.message(e), converted_args}}
-      end
-    else
-      arities = Enum.map(0..(tuple_size(funs) - 1), fn i -> i + min_arity end)
-
-      {:error, {:arity_error, %{name: lisp_name(name), expected: arities, actual: arity}}}
-    end
+  defp do_apply_fun({tag, _, _} = binding, args, %EvalContext{} = eval_ctx, do_eval_fn)
+       when tag in [:variadic, :variadic_nonempty, :multi_arity] do
+    invoke_builtin(binding, args, eval_ctx, do_eval_fn, tag == :multi_arity)
   end
 
   defp do_apply_fun(fun, args, %EvalContext{} = eval_ctx, do_eval_fn)
@@ -1379,6 +1195,19 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   defp hof_callback_type_error_message(reason), do: Helpers.format_closure_error(reason)
 
+  defp invoke_builtin(binding, args, eval_ctx, do_eval_fn, convert?) do
+    args = if convert?, do: Enum.map(args, &closure_to_fun(&1, eval_ctx, do_eval_fn)), else: args
+
+    case with_side_effect_stash(eval_ctx, do_eval_fn, fn ->
+           BuiltinInvocation.invoke(binding, args)
+         end) do
+      {:ok, {:ok, result}, final_ctx} -> {:ok, result, final_ctx}
+      {:ok, {:error, reason}, _final_ctx} -> {:error, reason}
+    end
+  rescue
+    error in Abort -> reraise_hof_callback_error(error, args, __STACKTRACE__)
+  end
+
   defp with_side_effect_stash(%EvalContext{} = eval_ctx, do_eval_fn, fun)
        when is_function(do_eval_fn, 2) and is_function(fun, 0) do
     case HostContext.run_value(eval_ctx, do_eval_fn, fun) do
@@ -1844,18 +1673,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
        do: Map.put(bindings, name, result)
 
   defp preserve_capability_binding(bindings, _pattern, _result), do: bindings
-
-  defp arithmetic_token(%ArithmeticError{} = error) do
-    message = Exception.message(error)
-
-    cond do
-      message == "division by zero" -> :division_by_zero
-      String.contains?(message, "division by zero") -> :division_by_zero
-      message == "integer overflow" -> :integer_overflow
-      String.contains?(message, "integer overflow") -> :integer_overflow
-      true -> :bad_argument
-    end
-  end
 
   defp lisp_name(name) when is_atom(name), do: Atom.to_string(name)
   defp lisp_name(name) when is_binary(name), do: name

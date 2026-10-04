@@ -13,6 +13,7 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
   3. Hyphen↔underscore normalized variant (`:turn-summaries` → `:turn_summaries`, `"turn_summaries"`)
   """
 
+  alias PtcRunner.Lisp.Helpers
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
 
   @doc """
@@ -60,11 +61,7 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
       :error ->
         # Try converting string to existing atom (safe - won't create new atoms)
         result =
-          try do
-            Map.fetch(map, String.to_existing_atom(key))
-          rescue
-            ArgumentError -> :error
-          end
+          fetch_existing_atom(map, key)
 
         case result do
           {:ok, value} ->
@@ -138,11 +135,7 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
 
       :error ->
         result =
-          try do
-            Map.fetch(map, String.to_existing_atom(key))
-          rescue
-            ArgumentError -> :error
-          end
+          fetch_existing_atom(map, key)
 
         case result do
           {:ok, _} = ok ->
@@ -368,11 +361,7 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
 
   defp fetch_normalized_atom_first(map, normalized) do
     result =
-      try do
-        Map.fetch(map, String.to_existing_atom(normalized))
-      rescue
-        ArgumentError -> :error
-      end
+      fetch_existing_atom(map, normalized)
 
     case result do
       {:ok, _} = ok -> ok
@@ -386,11 +375,7 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
         ok
 
       :error ->
-        try do
-          Map.fetch(map, String.to_existing_atom(normalized))
-        rescue
-          ArgumentError -> :error
-        end
+        fetch_existing_atom(map, normalized)
     end
   end
 
@@ -410,16 +395,17 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
 
   defp fetch_keyword_name(map, name) do
     result =
-      try do
-        Map.fetch(map, String.to_existing_atom(name))
-      rescue
-        ArgumentError -> :error
-      end
+      fetch_existing_atom(map, name)
 
     case result do
       {:ok, _} = ok -> ok
       :error -> Map.fetch(map, name)
     end
+  end
+
+  defp fetch_existing_atom(map, name) do
+    with {:ok, atom} <- Helpers.existing_atom(name),
+         do: Map.fetch(map, atom)
   end
 
   # Normalize to underscores — the canonical Elixir separator.

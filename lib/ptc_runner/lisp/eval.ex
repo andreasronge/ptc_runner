@@ -36,6 +36,8 @@ defmodule PtcRunner.Lisp.Eval do
 
   require Logger
 
+  import PtcRunner.Lisp.Helpers, only: [map_reduce_ok: 3]
+
   alias PtcRunner.Lisp.AmbiguousArguments
   alias PtcRunner.Lisp.ChildResult
   alias PtcRunner.Lisp.ClosureCapture
@@ -1197,33 +1199,27 @@ defmodule PtcRunner.Lisp.Eval do
   defp args_to_string_map(args) do
     args
     |> Enum.chunk_every(2)
-    |> Enum.reduce_while({:ok, %{}}, fn [key, value], {:ok, normalized} ->
-      with {:ok, normalized_key} <- stringify_key(key),
-           false <- Map.has_key?(normalized, normalized_key),
-           {:ok, normalized_value} <- stringify_value(value) do
-        {:cont, {:ok, Map.put(normalized, normalized_key, normalized_value)}}
-      else
-        true -> {:halt, :ambiguous}
-        :ambiguous -> {:halt, :ambiguous}
-        {:error, _reason} = error -> {:halt, error}
-      end
+    |> map_reduce_ok(%{}, fn [key, value], normalized ->
+      stringify_entry(key, value, normalized)
     end)
   end
 
   # Recursively convert map keys to strings (for tool boundary).
-  # Handles nested maps and lists to ensure full protection against atom leaks.
   defp stringify_keys(map) when is_map(map) and not is_struct(map) do
-    Enum.reduce_while(map, {:ok, %{}}, fn {key, value}, {:ok, normalized} ->
-      with {:ok, normalized_key} <- stringify_key(key),
-           false <- Map.has_key?(normalized, normalized_key),
-           {:ok, normalized_value} <- stringify_value(value) do
-        {:cont, {:ok, Map.put(normalized, normalized_key, normalized_value)}}
-      else
-        true -> {:halt, :ambiguous}
-        :ambiguous -> {:halt, :ambiguous}
-        {:error, _reason} = error -> {:halt, error}
-      end
+    map_reduce_ok(map, %{}, fn {key, value}, normalized ->
+      stringify_entry(key, value, normalized)
     end)
+  end
+
+  defp stringify_entry(key, value, normalized) do
+    with {:ok, normalized_key} <- stringify_key(key),
+         false <- Map.has_key?(normalized, normalized_key),
+         {:ok, normalized_value} <- stringify_value(value) do
+      {:ok, Map.put(normalized, normalized_key, normalized_value)}
+    else
+      true -> :ambiguous
+      other -> other
+    end
   end
 
   # Recursively stringify values (for nested maps/lists in tool args).
@@ -1242,13 +1238,7 @@ defmodule PtcRunner.Lisp.Eval do
 
     if map_size(set) == 2 and MapSet.new(values) == set do
       values
-      |> Enum.reduce_while({:ok, []}, fn value, {:ok, normalized} ->
-        case stringify_value(value) do
-          {:ok, item} -> {:cont, {:ok, [item | normalized]}}
-          :ambiguous -> {:halt, :ambiguous}
-          {:error, _reason} = error -> {:halt, error}
-        end
-      end)
+      |> map_reduce_ok([], &stringify_item/2)
       |> case do
         {:ok, normalized} ->
           projected = MapSet.new(normalized)
@@ -1275,16 +1265,9 @@ defmodule PtcRunner.Lisp.Eval do
 
     struct
     |> Map.from_struct()
-    |> Enum.reduce_while({:ok, %{}}, fn {field, value}, {:ok, normalized} ->
-      case stringify_value(value) do
-        {:ok, normalized_value} ->
-          {:cont, {:ok, Map.put(normalized, field, normalized_value)}}
-
-        :ambiguous ->
-          {:halt, :ambiguous}
-
-        {:error, _reason} = error ->
-          {:halt, error}
+    |> map_reduce_ok(%{}, fn {field, value}, normalized ->
+      with {:ok, item} <- stringify_value(value) do
+        {:ok, Map.put(normalized, field, item)}
       end
     end)
     |> case do
@@ -1296,13 +1279,7 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp stringify_value(list) when is_list(list) do
     if proper_list?(list) do
-      Enum.reduce_while(list, {:ok, []}, fn value, {:ok, normalized} ->
-        case stringify_value(value) do
-          {:ok, item} -> {:cont, {:ok, [item | normalized]}}
-          :ambiguous -> {:halt, :ambiguous}
-          {:error, _reason} = error -> {:halt, error}
-        end
-      end)
+      map_reduce_ok(list, [], &stringify_item/2)
       |> case do
         {:ok, normalized} -> {:ok, Enum.reverse(normalized)}
         :ambiguous -> :ambiguous
@@ -1316,13 +1293,7 @@ defmodule PtcRunner.Lisp.Eval do
   defp stringify_value(tuple) when is_tuple(tuple) do
     tuple
     |> Tuple.to_list()
-    |> Enum.reduce_while({:ok, []}, fn value, {:ok, normalized} ->
-      case stringify_value(value) do
-        {:ok, item} -> {:cont, {:ok, [item | normalized]}}
-        :ambiguous -> {:halt, :ambiguous}
-        {:error, _reason} = error -> {:halt, error}
-      end
-    end)
+    |> map_reduce_ok([], &stringify_item/2)
     |> case do
       {:ok, normalized} -> {:ok, normalized |> Enum.reverse() |> List.to_tuple()}
       :ambiguous -> :ambiguous
@@ -1331,6 +1302,10 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   defp stringify_value(other), do: {:ok, other}
+
+  defp stringify_item(value, normalized) do
+    with {:ok, item} <- stringify_value(value), do: {:ok, [item | normalized]}
+  end
 
   defp proper_list?([]), do: true
   defp proper_list?([_head | tail]), do: proper_list?(tail)

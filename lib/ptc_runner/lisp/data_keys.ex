@@ -18,6 +18,7 @@ defmodule PtcRunner.Lisp.DataKeys do
   """
 
   alias PtcRunner.Lisp.Format.SymbolRef
+  alias PtcRunner.Lisp.Helpers
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Parser
 
@@ -133,9 +134,10 @@ defmodule PtcRunner.Lisp.DataKeys do
   end
 
   defp existing_atom_key(key) do
-    [String.to_existing_atom(key)]
-  rescue
-    ArgumentError -> []
+    case Helpers.existing_atom(key) do
+      {:ok, atom} -> [atom]
+      :error -> []
+    end
   end
 
   # The normal public run path validates and normalizes wrappers before calling
@@ -249,8 +251,9 @@ defmodule PtcRunner.Lisp.DataKeys do
   defp source_referenceable_form(_name), do: :skip
 
   defp existing_atom_or(key) do
-    String.to_existing_atom(key)
-  rescue
-    ArgumentError -> key
+    case Helpers.existing_atom(key) do
+      {:ok, atom} -> atom
+      :error -> key
+    end
   end
 end
