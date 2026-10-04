@@ -164,7 +164,7 @@ mean 1,638,400 connections, not 16,384. The probe opens twelve idle keep-alive
 sockets, reports queued versus refused exchanges and health reachability on a
 new socket, and checks recovery after closing them. Request leases and run
 capacity must stay zero while only idle sockets consume the transport. It does
-not change `Domain.listen/2`; listener policy belongs to #2026.
+not change `Domain.listen/2`; listener policy is decided separately from these probe limits.
 
 Measured on Linux with the dependency defaults for retry timing: all twelve
 TCP handshakes succeeded; eight `/health` exchanges returned HTTP 404, and four
