@@ -184,8 +184,9 @@ defmodule PtcRunner.Kernel.MCPSource do
   and `"max_result_bytes"` values; invalid selections return
   `{:error, :invalid_mcp_selection}`. An explicit `"model_visible"` list may
   name any authorized `"allow"` entry, including a mapping whose host
-  `model_visible` flag is false. MCP sources are mission-only; direct
-  registry assembly rejects a workflow destination before credentials,
+  `model_visible` flag is false. Normal MCP tool selections are mission-only;
+  workflows may select `"catalog": true` for a model-hidden catalog capability.
+  Direct registry assembly rejects other workflow selections before credentials,
   transport acquisition, discovery, or RPC. Assembly returns
   `{:ok, %{capabilities: list, snapshot: map, close: zero_arity_function}}` or
   one of these closed error reasons: `:mcp_authentication_failed`, `:mcp_timeout`,

@@ -173,6 +173,18 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
     do: %{data_class: descriptor.data_class, accepts_data: descriptor.accepts_data}
 
   @doc false
+  @spec selection_destination_allowed?(t(), map(), :workflow | :mission) :: boolean()
+  def selection_destination_allowed?(%__MODULE__{source: :mcp} = descriptor, config, destination) do
+    selected_destination =
+      if Map.get(config, "catalog", false) == true, do: :workflow, else: :mission
+
+    destination in descriptor.destinations and destination == selected_destination
+  end
+
+  def selection_destination_allowed?(%__MODULE__{} = descriptor, _config, destination),
+    do: destination in descriptor.destinations
+
+  @doc false
   @spec explain_selection(t(), map(), map()) :: {:ok, map()} | {:error, atom()}
   def explain_selection(%__MODULE__{} = descriptor, value, limits) do
     with {:ok, rules} <- selection_rules_for_mode(descriptor, value) do

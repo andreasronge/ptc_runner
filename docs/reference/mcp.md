@@ -114,8 +114,12 @@ A workflow can receive the same catalog without shell access by selecting the
 installed MCP provider under `providers.workflow` with
 `{"config":{"catalog":true}}`. This grants one model-hidden read capability
 named `PROVIDER.catalog`. The setting is valid only for the workflow; normal
-MCP tool selections remain mission providers. Calling that capability with an
-empty object returns the command's catalog result.
+MCP tool selections remain mission providers. Selecting an MCP provider in
+`providers.workflow` without `catalog: true` fails during validation with
+`placement_denied`, before credentials or transport startup. Selecting catalog
+mode under `providers.mission` also fails with `placement_denied`. Calling the
+workflow catalog capability with an empty object returns the command's catalog
+result.
 
 This authoring catalog is current acquisition data. The private
 `provider_exchanges` inspection collection is retrospective evidence from an

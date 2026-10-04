@@ -173,8 +173,12 @@ required.</p><p>A workflow can receive the same catalog without shell access by 
 installed MCP provider under <code class="inline">providers.workflow</code> with
 <code class="inline">{&quot;config&quot;:{&quot;catalog&quot;:true}}</code>. This grants one model-hidden read capability
 named <code class="inline">PROVIDER.catalog</code>. The setting is valid only for the workflow; normal
-MCP tool selections remain mission providers. Calling that capability with an
-empty object returns the command's catalog result.</p><p>This authoring catalog is current acquisition data. The private
+MCP tool selections remain mission providers. Selecting an MCP provider in
+<code class="inline">providers.workflow</code> without <code class="inline">catalog: true</code> fails during validation with
+<code class="inline">placement_denied</code>, before credentials or transport startup. Selecting catalog
+mode under <code class="inline">providers.mission</code> also fails with <code class="inline">placement_denied</code>. Calling the
+workflow catalog capability with an empty object returns the command's catalog
+result.</p><p>This authoring catalog is current acquisition data. The private
 <code class="inline">provider_exchanges</code> inspection collection is retrospective evidence from an
 already captured run and may include exact MCP wire bodies; use it to debug a
 past exchange, not to discover definitions for a new manifest.</p><p>A cold <code class="inline">npx</code> launch can spend more than the default budget before that protocol

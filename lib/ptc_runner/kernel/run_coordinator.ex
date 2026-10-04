@@ -673,7 +673,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
          occurrence,
          prepared
        ) do
-    with :ok <- validate_placement(descriptor, name, occurrence),
+    with :ok <- validate_placement(descriptor, name, config, occurrence),
          selection_context <-
            selection_context(
              request,
@@ -717,8 +717,12 @@ defmodule PtcRunner.Kernel.RunCoordinator do
     end
   end
 
-  defp validate_placement(descriptor, name, occurrence) do
-    if occurrence.destination in descriptor.destinations do
+  defp validate_placement(descriptor, name, config, occurrence) do
+    if ProviderDescriptor.selection_destination_allowed?(
+         descriptor,
+         config,
+         occurrence.destination
+       ) do
       :ok
     else
       {:ok, subject} = CommandSubject.provider(name, :selection, occurrence)

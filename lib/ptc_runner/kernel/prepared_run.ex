@@ -459,6 +459,12 @@ defmodule PtcRunner.Kernel.PreparedRun do
              else: :declarative
            ),
          true <- validation_state == expected_state,
+         true <-
+           ProviderDescriptor.selection_destination_allowed?(
+             descriptor,
+             original_config,
+             destination
+           ),
          {:ok, ^config} <-
            ProviderDescriptor.explain_selection(
              descriptor,

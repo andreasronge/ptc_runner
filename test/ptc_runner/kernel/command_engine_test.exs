@@ -444,6 +444,46 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "MCP selections reject unsupported destinations before transport startup", %{
+    tmp_dir: directory
+  } do
+    host =
+      http_mcp_host("http://127.0.0.1:1/mcp")
+      |> put_in(["install", "workspace", "tools", "structured", "effect"], "read")
+
+    host_path = write_host_config(directory, "workflow-mcp", host)
+
+    selections = [
+      {:workflow, %{}},
+      {:workflow, %{"catalog" => false}},
+      {:mission, %{"catalog" => true}}
+    ]
+
+    for {destination, config} <- selections do
+      application =
+        doctor_application(directory, "mcp-#{destination}-#{map_size(config)}", [
+          {destination, [{"workspace", config}]}
+        ])
+
+      for command <- ["validate", "run"] do
+        assert {:error, %CommandOutcome{} = outcome} =
+                 CommandEngine.dispatch([command, application, "--host-config", host_path])
+
+        assert outcome.envelope["error"]["code"] == "placement_denied"
+        assert_schema_valid(outcome.envelope)
+      end
+    end
+
+    application =
+      doctor_application(directory, "workflow-catalog",
+        workflow: [{"workspace", %{"catalog" => true}}]
+      )
+
+    assert {:ok, %CommandOutcome{}} =
+             CommandEngine.dispatch(["validate", application, "--host-config", host_path])
+  end
+
+  @tag :tmp_dir
   test "HTTP method rejection withholds the endpoint URL and remote error payload", %{
     tmp_dir: directory
   } do
