@@ -114,7 +114,22 @@ confined read/write filesystem server over live bytes. Pin it from a host
 document with <code class="inline">npx</code>; a hermetic spawn that does not inherit <code class="inline">PATH</code> must run
 absolute <code class="inline">node</code> against the installed <code class="inline">dist/cli.js</code>.</p><p>It is a demo server, not a release payload. A separately cloned project should
 install that package at a pinned version; the PtcRunner release does not add
-Node.js.</p><h2 id="protocol-compatibility">Protocol compatibility</h2><p>PtcRunner implements the final MCP <code class="inline">2026-07-28</code> profile. Acquisition starts
+Node.js.</p><h2 id="concurrent-requests-and-cleanup">Concurrent requests and cleanup</h2><p>Each acquired MCP transport admits at most 128 in-flight requests, for both
+stdio and HTTP. A full transport refuses a request before writing any bytes
+with <code class="inline">mcp_transport_busy</code>. This refusal is retryable for both read and write
+mappings and carries <code class="inline">not_dispatched</code> provenance; it does not make a write's
+mutation state indeterminate. MCP requests do not consume LLM provider slots.</p><p>Cancellation, caller expiry, and caller death discard queued requests without
+sending a request or cancellation. A stdio frame already being written finishes
+under a separate write-settlement deadline bounded by the selected installation
+<code class="inline">timeout_ms</code>. Once sent, an abandoned request receives
+<code class="inline">notifications/cancelled</code>; its slot stays occupied until that notification's
+write is acknowledged, and late responses are dropped. A write-settlement
+expiry or another transport fault fails all pending stdio requests. An HTTP
+socket worker closes its own connection and retains its slot until it exits.</p><p>Cleanup seals request admission before waiting for local settlement within
+<code class="inline">provider_cleanup_timeout_ms</code>, including requests whose callers already left.
+This proves local transport cleanup, not remote completion. A server that ignores
+cancellation may continue remote work; an abandoned dispatched write remains
+indeterminate.</p><h2 id="protocol-compatibility">Protocol compatibility</h2><p>PtcRunner implements the final MCP <code class="inline">2026-07-28</code> profile. Acquisition starts
 with <code class="inline">server/discover</code>; it does not retry the legacy <code class="inline">initialize</code> handshake or
 downgrade to an older protocol revision. A server must advertise <code class="inline">2026-07-28</code>
 in <code class="inline">supportedVersions</code> and implement the tools surface from that profile.</p><p>An incompatible but responsive endpoint fails with

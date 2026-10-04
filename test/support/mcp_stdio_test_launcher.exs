@@ -6,11 +6,27 @@ defmodule PtcRunner.TestSupport.MCPStdioTestLauncher do
     write_packet("R")
 
     cond do
+      :binary.match(bootstrap, "fake-manual-ack") != :nomatch ->
+        manual_ack()
+
       :binary.match(bootstrap, "fake-cancel-ack") != :nomatch ->
         stall_cancellation_ack()
 
       :binary.match(bootstrap, "fake-premature-response") != :nomatch ->
         send_premature_response()
+    end
+  end
+
+  defp manual_ack do
+    case read_packet() do
+      {:ok, "C"} ->
+        write_packet(<<"X", 1, 0::signed-big-32, 0>>)
+
+      {:ok, _packet} ->
+        manual_ack()
+
+      :eof ->
+        :ok
     end
   end
 

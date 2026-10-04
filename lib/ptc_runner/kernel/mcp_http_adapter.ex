@@ -108,6 +108,7 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
   """
 
   alias PtcRunner.Kernel.MCPAddressResolver
+  alias PtcRunner.Kernel.MCPRequestContext
 
   @typedoc "A bounded response with downcased header names."
   @type response :: %{
@@ -190,7 +191,13 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
     {pid, monitor_ref} =
       spawn_monitor(fn ->
         watcher = start_caller_watcher(caller)
-        result = perform_request(request, caller)
+
+        result =
+          case register_settlement_worker(request) do
+            :ok -> perform_request(request, caller)
+            _closed -> {:error, :transport_error, :not_dispatched}
+          end
+
         send(caller, {reply_ref, result})
         send(watcher, {:stop, self()})
       end)
@@ -207,8 +214,9 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
     else
       receive do
         {^reply_ref, result} ->
-          Process.demonitor(monitor_ref, [:flush])
-          result
+          receive do
+            {:DOWN, ^monitor_ref, :process, ^pid, _reason} -> result
+          end
 
         {:DOWN, ^monitor_ref, :process, ^pid, _reason} ->
           {:error, :transport_error, :possibly_dispatched}
@@ -221,7 +229,7 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
   end
 
   defp stop_worker(pid, monitor_ref, reply_ref) do
-    Process.exit(pid, :kill)
+    send(pid, :mcp_cancel)
 
     receive do
       {:DOWN, ^monitor_ref, :process, ^pid, _reason} -> :ok
@@ -245,7 +253,7 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
 
         receive do
           {:DOWN, ^caller_ref, :process, ^caller, _reason} ->
-            Process.exit(worker, :kill)
+            send(worker, :mcp_cancel)
 
           {:DOWN, ^worker_ref, :process, ^worker, _reason} ->
             :ok
@@ -261,8 +269,21 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
     end
   end
 
+  defp register_settlement_worker(%{settlement: nil}), do: :ok
+
+  defp register_settlement_worker(%{settlement: {context, id}}),
+    do: MCPRequestContext.register_worker(context, id, self())
+
+  defp cancelled? do
+    receive do
+      :mcp_cancel -> true
+    after
+      0 -> false
+    end
+  end
+
   defp perform_request(request, caller) do
-    with true <- Process.alive?(caller),
+    with true <- Process.alive?(caller) and not cancelled?(),
          {:ok, connection} <- connect(request) do
       if Process.alive?(caller) do
         safe_perform(connection, request)
@@ -310,7 +331,8 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
       :on_headers,
       :on_data,
       :address,
-      :connected_peer
+      :connected_peer,
+      :settlement
     ]
 
     with true <- Keyword.keyword?(opts),
@@ -368,7 +390,8 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
          on_status: on_status,
          on_headers: on_headers,
          on_data: on_data,
-         connected_peer: connected_peer
+         connected_peer: connected_peer,
+         settlement: Keyword.get(opts, :settlement)
        }}
     else
       _invalid -> {:error, :invalid_request}
@@ -930,7 +953,8 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
 
   defp perform(connection, request) do
     result =
-      with remaining when remaining > 0 <- remaining_ms(request),
+      with false <- cancelled?(),
+           remaining when remaining > 0 <- remaining_ms(request),
            {:ok, connection, ref} <-
              Mint.HTTP.request(
                connection,
@@ -941,6 +965,9 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
              ) do
         receive_response(connection, ref, request, nil, 0)
       else
+        true ->
+          {:error, :timeout, :not_dispatched}
+
         remaining when is_integer(remaining) and remaining <= 0 ->
           {:error, :timeout, :not_dispatched}
 
@@ -986,6 +1013,9 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
       {:error, :timeout, :possibly_dispatched, connection}
     else
       receive do
+        :mcp_cancel ->
+          {:error, :timeout, :possibly_dispatched, connection}
+
         message ->
           case count_pending_bytes(message, request, pending_bytes) do
             {:ok, pending_bytes} ->

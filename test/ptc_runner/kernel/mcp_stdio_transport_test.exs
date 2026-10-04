@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
 
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
 
+  alias PtcRunner.Kernel.MCPBorrowToken
   alias PtcRunner.Kernel.MCPStdioTransport
   alias PtcRunner.TestSupport.MCPStdioTransportHelpers
 
@@ -381,6 +382,183 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     assert {:error, :mcp_protocol_error} = request(transport, "junk")
 
     assert {:error, :closed} = request(transport, "after-junk")
+  end
+
+  @tag :tmp_dir
+  test "write-settlement expiry fails every pending caller", %{tmp_dir: tmp_dir} do
+    transport = start_test_launcher(tmp_dir, "fake-manual-ack")
+    first = Task.async(fn -> request(transport, "first") end)
+    assert_eventually(fn -> unacknowledged_request?(transport) end)
+    second = Task.async(fn -> request(transport, "second") end)
+    assert_eventually(fn -> map_size(safe_state(transport.pid).pending) == 2 end)
+    ack = safe_state(transport.pid).writing.ack_id
+    send(transport.pid, {:write_ack_timeout, ack})
+    assert {:error, :mcp_transport_error} = Task.await(first)
+    assert {:error, :mcp_transport_error} = Task.await(second)
+    assert {:error, :closed} = request(transport, "after-fault")
+  end
+
+  @tag :tmp_dir
+  test "an expired request behind a writing frame is discarded before dispatch", %{
+    tmp_dir: tmp_dir
+  } do
+    transport = start_test_launcher(tmp_dir, "fake-manual-ack")
+    first = Task.async(fn -> request(transport, "first") end)
+    assert_eventually(fn -> unacknowledged_request?(transport) end)
+    expired = Task.async(fn -> request(transport, "expired") end)
+    assert_eventually(fn -> map_size(safe_state(transport.pid).pending) == 2 end)
+    # Make the deadline precede queue release while its timer message is delayed.
+    :sys.replace_state(transport.pid, fn state ->
+      {id, _entry} = Enum.find(state.pending, fn {_id, entry} -> entry.caller == expired.pid end)
+      put_in(state.pending[id].deadline, System.monotonic_time(:millisecond) - 1)
+    end)
+
+    id = acknowledge_write(transport)
+    assert {:error, :mcp_timeout} = Task.await(expired)
+    assert safe_state(transport.pid).writing == nil
+    respond(transport, id)
+    assert {:ok, _} = Task.await(first)
+    assert :ok = MCPStdioTransport.close(transport)
+  end
+
+  @tag :tmp_dir
+  test "serialized exchanges keep their original queued deadline", %{tmp_dir: tmp_dir} do
+    transport = start_test_launcher(tmp_dir, "fake-manual-ack")
+
+    first =
+      Task.async(fn ->
+        MCPStdioTransport.request_exchange(
+          transport,
+          "first",
+          %{},
+          %{},
+          8_192,
+          @settle_timeout_ms
+        )
+      end)
+
+    assert_eventually(fn -> unacknowledged_request?(transport) end)
+    id = acknowledge_write(transport)
+
+    assert {:error, :mcp_timeout} =
+             MCPStdioTransport.request_exchange(transport, "expired", %{}, %{}, 8_192, 25)
+
+    assert safe_state(transport.pid).writing == nil
+    respond(transport, id)
+    assert {:ok, _} = Task.await(first)
+    assert :ok = MCPStdioTransport.close(transport)
+  end
+
+  for phase <- [:queued, :writing, :sent], event <- [:cancel, :death, :expiry] do
+    @tag :tmp_dir
+    test "#{event} of a #{phase} caller preserves another in-flight request", %{tmp_dir: tmp_dir} do
+      assert_shared_detachment(tmp_dir, unquote(phase), unquote(event))
+    end
+  end
+
+  defp assert_shared_detachment(tmp_dir, phase, event) do
+    transport = start_test_launcher(tmp_dir, "fake-manual-ack")
+    other = Task.async(fn -> request(transport, "other") end)
+    assert_eventually(fn -> unacknowledged_request?(transport) end)
+    other_id = acknowledge_write(transport)
+
+    blocker =
+      if phase == :queued do
+        task = Task.async(fn -> request(transport, "blocker") end)
+        assert_eventually(fn -> unacknowledged_request?(transport) end)
+        task
+      end
+
+    target_handle = MCPStdioTransport.with_borrow(transport, MCPBorrowToken.new())
+    target = Task.async(fn -> request(target_handle, "target") end)
+
+    assert_eventually(fn ->
+      Enum.any?(safe_state(transport.pid).pending, fn {_id, entry} ->
+        entry.caller == target.pid
+      end)
+    end)
+
+    state = safe_state(transport.pid)
+    {id, _entry} = Enum.find(state.pending, fn {_id, entry} -> entry.caller == target.pid end)
+    if phase == :sent, do: acknowledge_write(transport)
+
+    case event do
+      :cancel -> assert :ok = MCPStdioTransport.cancel(transport, id)
+      :expiry -> send(transport.pid, {:request_timeout, id})
+      :death -> Task.shutdown(target, :brutal_kill)
+    end
+
+    if event != :death do
+      expected = if event == :cancel, do: :mcp_cancelled, else: :mcp_timeout
+      assert {:error, ^expected} = Task.await(target)
+    end
+
+    respond(transport, other_id)
+    assert {:ok, %{"result" => %{}}} = Task.await(other)
+    assert Process.alive?(transport.pid)
+
+    if phase == :queued do
+      assert_eventually(fn -> not Map.has_key?(safe_state(transport.pid).pending, id) end)
+      queued = :queue.to_list(safe_state(transport.pid).writes)
+      refute Enum.any?(queued, &(&1.request_id in [id, {:cancel, id}]))
+      blocker_id = acknowledge_write(transport)
+      respond(transport, blocker_id)
+      assert {:ok, _} = Task.await(blocker)
+      assert safe_state(transport.pid).writing == nil
+    else
+      if phase == :writing, do: acknowledge_write(transport)
+
+      assert_eventually(fn ->
+        match?(%{writing: %{request_id: {:cancel, ^id}}}, safe_state(transport.pid))
+      end)
+
+      # Even a late response cannot release a detached slot.
+      respond(transport, id)
+      assert Map.has_key?(safe_state(transport.pid).pending, id)
+
+      settled =
+        Task.async(fn ->
+          MCPStdioTransport.settle(target_handle, System.monotonic_time(:millisecond) + 10_000)
+        end)
+
+      assert_eventually(fn ->
+        MCPBorrowToken.sealed?(target_handle.borrow_token)
+      end)
+
+      assert_eventually(fn -> map_size(safe_state(transport.pid).settlement.waiters) > 0 end)
+      assert {:error, :closed} = request(target_handle, "sealed")
+      refute Task.yield(settled, 0)
+      acknowledge_write(transport)
+      assert :ok = Task.await(settled)
+    end
+
+    assert :ok =
+             MCPStdioTransport.settle(transport, System.monotonic_time(:millisecond) + 10_000)
+
+    assert :ok = MCPStdioTransport.close(transport)
+  end
+
+  defp acknowledge_write(transport) do
+    state = safe_state(transport.pid)
+    write = state.writing
+    send(transport.pid, {state.port, {:data, <<"A", write.ack_id::64>>}})
+
+    assert_eventually(fn ->
+      not match?(%{writing: %{ack_id: ack}} when ack == write.ack_id, safe_state(transport.pid))
+    end)
+
+    write.request_id
+  end
+
+  defp respond(transport, id) do
+    port = safe_state(transport.pid).port
+
+    send(
+      transport.pid,
+      {port, {:data, <<"O", ~s({"jsonrpc":"2.0","id":#{id},"result":{}}\n)::binary>>}}
+    )
+
+    :sys.get_state(transport.pid)
   end
 
   @tag :tmp_dir

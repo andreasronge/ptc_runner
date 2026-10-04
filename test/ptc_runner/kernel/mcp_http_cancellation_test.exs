@@ -16,6 +16,35 @@ defmodule PtcRunner.Kernel.MCPHTTPCancellationTest do
   # before the never-completing call can time out.
   @call_timeout_ms 2_000
 
+  test "HTTP busy refusal is not dispatched and retryable for read and write mappings" do
+    for effect <- [:read, :write] do
+      %{capability: capability, close: close} = source(:incomplete, 30_000, self(), effect)
+      parent = self()
+
+      callers =
+        for _ <- 1..128 do
+          caller = spawn(fn -> send(parent, {:call_finished, self(), call(capability)}) end)
+          assert_receive {:mcp_stream_holding, _stream}, @receive_timeout
+          caller
+        end
+
+      assert {:error,
+              %ProviderError{
+                details: "mcp_transport_busy",
+                retryable?: true,
+                dispatch_provenance: :not_dispatched,
+                mutation_state: nil
+              }} = call(capability)
+
+      caller = hd(callers)
+      ref = Process.monitor(caller)
+      Process.exit(caller, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^caller, :killed}, @receive_timeout
+      assert_receive {:mcp_stream_closed, _stream}, @receive_timeout
+      assert :ok = close.()
+    end
+  end
+
   test "timeout closes the HTTP response stream without a cancellation notification" do
     %{capability: capability, close: close} = source(:incomplete, @call_timeout_ms)
     on_exit(close)
@@ -176,7 +205,7 @@ defmodule PtcRunner.Kernel.MCPHTTPCancellationTest do
 
   defp call(capability), do: capability.callback.(%{}, %{inspection_sink: nil})
 
-  defp source(mode, timeout_ms, owner \\ self()) do
+  defp source(mode, timeout_ms, owner \\ self(), effect \\ :read) do
     parent = self()
 
     fixture =
@@ -191,7 +220,7 @@ defmodule PtcRunner.Kernel.MCPHTTPCancellationTest do
     builder =
       MCPSource.builder(
         transport: {:streamable_http, endpoint: fixture.endpoint, allow_insecure_loopback: true},
-        tools: %{"fixture" => %{as: "remote.fixture", effect: :read}},
+        tools: %{"fixture" => %{as: "remote.fixture", effect: effect}},
         timeout_ms: timeout_ms
       )
 

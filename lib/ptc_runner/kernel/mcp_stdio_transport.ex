@@ -4,13 +4,15 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   use GenServer
   use PtcRunner.Kernel.OwnerStatusRedaction
 
+  alias PtcRunner.Kernel.MCPBorrowToken
   alias PtcRunner.Kernel.MCPLauncher
   alias PtcRunner.Kernel.MCPProtocol
+  alias PtcRunner.Kernel.MCPSettlement
   alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Utf8
 
   @enforce_keys [:pid, :outcome]
-  defstruct [:pid, :outcome]
+  defstruct [:pid, :outcome, :borrow_token]
 
   @type t :: %__MODULE__{pid: pid(), outcome: map()}
 
@@ -46,9 +48,14 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
 
     with {:ok, config} <- validate_options(opts) do
       case GenServer.start(__MODULE__, {owner, config, outcome, registrar}) do
-        {:ok, pid} -> {:ok, %__MODULE__{pid: pid, outcome: outcome}}
-        {:error, reason} when is_atom(reason) -> {:error, reason}
-        {:error, _reason} -> {:error, :mcp_stdio_launcher_unavailable}
+        {:ok, pid} ->
+          {:ok, %__MODULE__{pid: pid, outcome: outcome, borrow_token: MCPBorrowToken.new()}}
+
+        {:error, reason} when is_atom(reason) ->
+          {:error, reason}
+
+        {:error, _reason} ->
+          {:error, :mcp_stdio_launcher_unavailable}
       end
     end
   end
@@ -89,14 +96,18 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
              | :mcp_transport_busy
              | :mcp_transport_error}
   def request(
-        %__MODULE__{pid: pid},
+        %__MODULE__{pid: pid, borrow_token: token},
         method,
         params,
         metadata,
         max_bytes,
         timeout_ms
       ) do
-    safe_call(pid, {:request, method, params, metadata, max_bytes, timeout_ms, false})
+    safe_call(
+      pid,
+      {:borrow_request, token, request_deadline(timeout_ms),
+       {:request, method, params, metadata, max_bytes, timeout_ms, false}}
+    )
   end
 
   @doc false
@@ -111,14 +122,38 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
              | :mcp_transport_busy
              | :mcp_transport_error}
   def request_exchange(
-        %__MODULE__{pid: pid},
+        %__MODULE__{pid: pid, borrow_token: token},
         method,
         params,
         metadata,
         max_bytes,
         timeout_ms
       ) do
-    safe_call(pid, {:request, method, params, metadata, max_bytes, timeout_ms, true})
+    safe_call(
+      pid,
+      {:borrow_request, token, request_deadline(timeout_ms),
+       {:request, method, params, metadata, max_bytes, timeout_ms, true}}
+    )
+  end
+
+  @doc false
+  def cancel(%__MODULE__{pid: pid}, id), do: safe_call(pid, {:cancel_request, id})
+
+  @doc false
+  def with_borrow(%__MODULE__{} = handle, %MCPBorrowToken{} = token),
+    do: %{handle | borrow_token: token}
+
+  @doc false
+  def settle(%__MODULE__{pid: pid, borrow_token: token, outcome: outcome}, deadline) do
+    case MCPSettlement.seal_and_wait(pid, token, deadline) do
+      :ok ->
+        :ok
+
+      error ->
+        if not Process.alive?(pid) and outcome_status(outcome) == @outcome_clean,
+          do: :ok,
+          else: error
+    end
   end
 
   @spec close(t()) :: :ok | {:error, :mcp_transport_error | {:mcp_transport_error, map()}}
@@ -173,8 +208,12 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
        %{
          port: port,
          owner_ref: owner_ref,
+         write_timeout_ms: config.write_timeout_ms,
          next_id: 1,
          next_ack_id: 1,
+         settlement: MCPSettlement.new(),
+         admission_token: nil,
+         admission_deadline: nil,
          pending: %{},
          monitors: %{},
          writes: :queue.new(),
@@ -185,7 +224,6 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
          stderr: "",
          stderr_limit: config.stderr_bytes,
          stderr_truncated?: false,
-         exchange_waiters: :queue.new(),
          unscoped_notification_bytes: 0,
          closing: nil,
          close_timeout_ms: config.grace_ms * 4 + 2_000,
@@ -199,6 +237,28 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   end
 
   @impl GenServer
+  def handle_call({:cancel_request, id}, _from, state) do
+    state = cancel_request(state, id, :mcp_cancelled, true)
+
+    case flush_writes(state) do
+      {:ok, state} -> {:reply, :ok, state}
+      {:error, state} -> stop_transport(state)
+    end
+  end
+
+  def handle_call({:seal_borrow, token}, _from, state),
+    do: MCPSettlement.seal_reply(state, token)
+
+  def handle_call({:await_borrow, token, deadline}, from, state),
+    do: MCPSettlement.await_reply(state, token, deadline, from)
+
+  def handle_call({:borrow_request, token, deadline, request}, from, state) do
+    if MCPSettlement.sealed?(token),
+      do: {:reply, {:error, :closed}, state},
+      else:
+        handle_call(request, from, %{state | admission_token: token, admission_deadline: deadline})
+  end
+
   def handle_call(
         {:request, _method, _params, _metadata, _max_bytes, _timeout_ms, _exchange?},
         _from,
@@ -213,20 +273,6 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
       )
       when not is_nil(closing),
       do: {:reply, {:error, :closed}, state}
-
-  def handle_call(
-        {:request, method, params, metadata, max_bytes, timeout_ms, true},
-        from,
-        state
-      ) do
-    if exchange_in_flight?(state) do
-      waiter = {from, method, params, metadata, max_bytes, timeout_ms}
-
-      {:noreply, %{state | exchange_waiters: :queue.in(waiter, state.exchange_waiters)}}
-    else
-      dispatch_request(from, method, params, metadata, max_bytes, timeout_ms, true, state)
-    end
-  end
 
   def handle_call(
         {:request, _method, _params, _metadata, _max_bytes, _timeout_ms, _exchange?},
@@ -369,15 +415,9 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   def handle_info({:request_timeout, id}, state) do
     case Map.fetch(state.pending, id) do
       {:ok, _pending} ->
-        if writing_request?(state, id) do
-          state
-          |> reply_pending(id, {:error, :mcp_timeout})
-          |> stop_transport()
-        else
-          state
-          |> cancel_request(id, :mcp_timeout, true)
-          |> continue_after_flush()
-        end
+        state
+        |> cancel_request(id, :mcp_timeout, true)
+        |> continue_after_flush()
 
       :error ->
         {:noreply, state}
@@ -422,20 +462,17 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
     case Map.fetch(state.monitors, ref) do
       {:ok, id} ->
-        if writing_request?(state, id) do
-          state
-          |> drop_pending(id)
-          |> stop_transport()
-        else
-          state
-          |> cancel_request(id, :mcp_transport_error, false)
-          |> continue_after_flush()
-        end
+        state
+        |> cancel_request(id, :mcp_transport_error, false)
+        |> continue_after_flush()
 
       :error ->
         {:noreply, state}
     end
   end
+
+  def handle_info({:settlement_timeout, ref}, state),
+    do: {:noreply, %{state | settlement: MCPSettlement.timeout(state.settlement, ref)}}
 
   def handle_info(_message, state), do: {:noreply, state}
 
@@ -456,7 +493,8 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
       :env,
       :grace_ms,
       :stderr_bytes,
-      :start_timeout_ms
+      :start_timeout_ms,
+      :write_timeout_ms
     ]
 
     with true <- Keyword.keyword?(opts),
@@ -486,7 +524,10 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
            Keyword.get(opts, :stderr_bytes, @default_stderr_bytes),
          start_timeout_ms
          when is_integer(start_timeout_ms) and start_timeout_ms in 1..@max_start_timeout_ms <-
-           Keyword.get(opts, :start_timeout_ms, @default_start_timeout_ms) do
+           Keyword.get(opts, :start_timeout_ms, @default_start_timeout_ms),
+         write_timeout_ms
+         when is_integer(write_timeout_ms) and write_timeout_ms in 1..@max_request_timeout_ms <-
+           Keyword.get(opts, :write_timeout_ms, 5_000) do
       {:ok,
        %{
          launcher: launcher,
@@ -497,7 +538,8 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
          env: env,
          grace_ms: grace_ms,
          stderr_bytes: stderr_bytes,
-         start_timeout_ms: start_timeout_ms
+         start_timeout_ms: start_timeout_ms,
+         write_timeout_ms: write_timeout_ms
        }}
     else
       _reason -> {:error, :invalid_mcp_stdio_launch}
@@ -680,36 +722,53 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   defp flush_request_write(state) do
     case :queue.out(state.writes) do
       {{:value, write}, writes} ->
-        case port_command(state.port, write.bytes) do
-          :ok ->
-            timer =
-              Process.send_after(
-                self(),
-                {:write_ack_timeout, write.ack_id},
-                write.timeout_ms
-              )
-
-            state =
-              state
-              |> Map.put(:writes, writes)
-              |> Map.put(
-                :writing,
-                write
-                |> Map.take([:ack_id, :request_id])
-                |> Map.put(:timer, timer)
-              )
-
-            {:ok, state}
-
-          :busy ->
-            {:ok, schedule_retry(state)}
-
-          :closed ->
-            {:error, state}
+        if expired_queued_write?(state, write.request_id) do
+          state
+          |> cancel_request(write.request_id, :mcp_timeout, true)
+          |> flush_request_write()
+        else
+          send_request_write(state, write, writes)
         end
 
       {:empty, _writes} ->
         {:ok, state}
+    end
+  end
+
+  defp expired_queued_write?(state, id) when is_integer(id) do
+    pending = Map.fetch!(state.pending, id)
+    remaining_ms(pending.deadline) == 0 or not Process.alive?(pending.caller)
+  end
+
+  defp expired_queued_write?(_state, _id), do: false
+
+  defp send_request_write(state, write, writes) do
+    case port_command(state.port, write.bytes) do
+      :ok ->
+        timer =
+          Process.send_after(
+            self(),
+            {:write_ack_timeout, write.ack_id},
+            write.timeout_ms
+          )
+
+        state =
+          state
+          |> Map.put(:writes, writes)
+          |> Map.put(
+            :writing,
+            write
+            |> Map.take([:ack_id, :request_id])
+            |> Map.put(:timer, timer)
+          )
+
+        {:ok, state}
+
+      :busy ->
+        {:ok, schedule_retry(state)}
+
+      :closed ->
+        {:error, state}
     end
   end
 
@@ -729,12 +788,20 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     %{state | retry_scheduled?: true}
   end
 
-  defp mark_sent(state, nil), do: state
+  defp mark_sent(state, {:cancel, id}), do: drop_pending(state, id)
 
   defp mark_sent(state, id) do
     case Map.fetch(state.pending, id) do
-      {:ok, pending} -> put_in(state, [:pending, id], %{pending | sent?: true})
-      :error -> state
+      {:ok, %{detached?: true} = pending} ->
+        state
+        |> put_in([:pending, id, :sent?], true)
+        |> enqueue_write({:cancel, id}, encode_cancellation(id), pending.write_timeout_ms)
+
+      {:ok, pending} ->
+        put_in(state, [:pending, id], %{pending | sent?: true})
+
+      :error ->
+        state
     end
   end
 
@@ -785,6 +852,9 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
 
   defp consume_response(id, response, bytes, state) do
     case Map.fetch(state.pending, id) do
+      {:ok, %{sent?: true, detached?: true}} ->
+        charge_unscoped_bytes(state, bytes)
+
       {:ok, %{sent?: true} = pending} ->
         state = %{state | unscoped_notification_bytes: 0}
 
@@ -852,7 +922,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
        )
        when is_integer(id) and id > 0 do
     case Map.fetch(pending_requests, id) do
-      {:ok, %{sent?: true} = pending} -> {:ok, id, pending}
+      {:ok, %{sent?: true, detached?: false} = pending} -> {:ok, id, pending}
       _missing_or_unsent -> :unscoped
     end
   end
@@ -861,15 +931,29 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
 
   defp cancel_request(state, id, reason, reply?) do
     case Map.fetch(state.pending, id) do
-      {:ok, %{sent?: sent?, write_timeout_ms: write_timeout_ms}} ->
-        state =
-          if reply?, do: reply_pending(state, id, {:error, reason}), else: drop_pending(state, id)
+      {:ok, %{detached?: true}} ->
+        state
 
-        if sent? do
-          state
-          |> enqueue_write(nil, encode_cancellation(id), write_timeout_ms)
-        else
-          %{state | writes: reject_write(state.writes, id)}
+      {:ok, pending} ->
+        if reply?, do: GenServer.reply(pending.from, {:error, reason})
+        Process.cancel_timer(pending.timer)
+        Process.demonitor(pending.monitor, [:flush])
+
+        state = %{state | monitors: Map.delete(state.monitors, pending.monitor)}
+
+        cond do
+          pending.sent? ->
+            state
+            |> put_in([:pending, id, :detached?], true)
+            |> enqueue_write({:cancel, id}, encode_cancellation(id), pending.write_timeout_ms)
+
+          writing_request?(state, id) ->
+            put_in(state, [:pending, id, :detached?], true)
+
+          true ->
+            state
+            |> Map.put(:writes, reject_write(state.writes, id))
+            |> drop_pending(id)
         end
 
       :error ->
@@ -896,11 +980,11 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
         state
 
       {%{exchange?: true} = pending, state} ->
-        GenServer.reply(pending.from, result)
+        if not pending.detached?, do: GenServer.reply(pending.from, result)
         start_next_exchange(state)
 
       {pending, state} ->
-        GenServer.reply(pending.from, result)
+        if not pending.detached?, do: GenServer.reply(pending.from, result)
         state
     end
   end
@@ -911,7 +995,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
         state
 
       {pending, state} ->
-        GenServer.reply(pending.from, result)
+        if not pending.detached?, do: GenServer.reply(pending.from, result)
         state
     end
   end
@@ -936,15 +1020,14 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
         {pending,
          %{
            state
-           | pending: remaining,
+           | settlement: MCPSettlement.release(state.settlement, id),
+             pending: remaining,
              monitors: Map.delete(state.monitors, pending.monitor)
          }}
     end
   end
 
   defp fail_pending(state, reason) do
-    state = fail_exchange_waiters(state, reason)
-
     Enum.reduce(Map.keys(state.pending), state, fn id, state ->
       complete_pending(state, id, {:error, reason})
     end)
@@ -1165,77 +1248,77 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   end
 
   defp begin_request(from, method, params, metadata, max_bytes, timeout_ms, exchange?, state) do
+    remaining = remaining_ms(state.admission_deadline)
+
     with :ok <- validate_request(method, params, metadata, max_bytes, timeout_ms),
+         true <- remaining > 0,
          {:ok, request, bytes} <- encode_request(state.next_id, method, params, metadata) do
       id = state.next_id
       {caller, _tag} = from
       monitor = Process.monitor(caller)
-      timer = Process.send_after(self(), {:request_timeout, id}, timeout_ms)
+      timer = Process.send_after(self(), {:request_timeout, id}, remaining)
+      deferred? = exchange? and exchange_in_flight?(state)
 
       pending = %{
+        borrow_token: state.admission_token,
         from: from,
         caller: caller,
         monitor: monitor,
         timer: timer,
+        deadline: state.admission_deadline,
         max_bytes: max_bytes,
         response_bytes: 0,
-        write_timeout_ms: timeout_ms,
+        write_timeout_ms: state.write_timeout_ms,
         exchange?: exchange?,
+        deferred?: deferred?,
+        bytes: if(deferred?, do: bytes),
         request: if(exchange?, do: request),
+        detached?: false,
         sent?: false
       }
 
-      {:ok,
-       state
-       |> Map.put(:next_id, id + 1)
-       |> put_in([:pending, id], pending)
-       |> put_in([:monitors, monitor], id)
-       |> enqueue_write(id, bytes, timeout_ms)}
+      state =
+        state
+        |> Map.put(:settlement, MCPSettlement.admit(state.settlement, id, state.admission_token))
+        |> Map.put(:next_id, id + 1)
+        |> put_in([:pending, id], pending)
+        |> put_in([:monitors, monitor], id)
+
+      state =
+        if deferred?, do: state, else: enqueue_write(state, id, bytes, state.write_timeout_ms)
+
+      {:ok, state}
     else
+      false -> {:error, :mcp_timeout, state}
       {:error, reason} -> {:error, reason, state}
     end
   end
 
   defp exchange_in_flight?(state) do
-    Enum.any?(state.pending, fn {_id, pending} -> pending.exchange? end)
+    Enum.any?(state.pending, fn {_id, pending} -> pending.exchange? and not pending.deferred? end)
   end
 
   defp start_next_exchange(state) do
-    case :queue.out(state.exchange_waiters) do
-      {{:value, {from, method, params, metadata, max_bytes, timeout_ms}}, waiters} ->
-        state = %{state | exchange_waiters: waiters}
+    if exchange_in_flight?(state) do
+      state
+    else
+      case state.pending
+           |> Enum.filter(fn {_id, pending} -> pending.deferred? end)
+           |> Enum.min_by(&elem(&1, 0), fn -> nil end) do
+        {id, pending} ->
+          state
+          |> put_in([:pending, id, :deferred?], false)
+          |> put_in([:pending, id, :bytes], nil)
+          |> enqueue_write(id, pending.bytes, state.write_timeout_ms)
 
-        case begin_request(
-               from,
-               method,
-               params,
-               metadata,
-               max_bytes,
-               timeout_ms,
-               true,
-               state
-             ) do
-          {:ok, state} ->
-            state
-
-          {:error, reason, state} ->
-            GenServer.reply(from, {:error, reason})
-            start_next_exchange(state)
-        end
-
-      {:empty, _waiters} ->
-        state
+        nil ->
+          state
+      end
     end
   end
 
-  defp fail_exchange_waiters(state, reason) do
-    Enum.each(:queue.to_list(state.exchange_waiters), fn {from, _method, _params, _metadata,
-                                                          _max_bytes, _timeout_ms} ->
-      GenServer.reply(from, {:error, reason})
-    end)
-
-    %{state | exchange_waiters: :queue.new()}
-  end
+  defp request_deadline(timeout_ms) when is_integer(timeout_ms), do: monotonic_ms() + timeout_ms
+  defp request_deadline(_invalid), do: monotonic_ms()
 
   defp monotonic_ms, do: System.monotonic_time(:millisecond)
   defp remaining_ms(deadline), do: max(deadline - monotonic_ms(), 0)

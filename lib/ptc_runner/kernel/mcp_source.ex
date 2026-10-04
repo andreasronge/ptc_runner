@@ -235,7 +235,10 @@ defmodule PtcRunner.Kernel.MCPSource do
   stdio transport failure is likewise terminal, because neither session can be
   re-established within the run; only an in-flight HTTP transport failure stays
   retryable. Parameter-header projection, outbound-header validation, and a
-  closed HTTP request context are trusted `:not_dispatched` failures. Once an HTTP request
+  closed HTTP request context are trusted `:not_dispatched` failures. Both
+  transports admit at most 128 in-flight requests. A cap refusal reports
+  `mcp_transport_busy` before dispatch and is retryable for read and write
+  mappings with `:not_dispatched` provenance. Once an HTTP request
   begins or a stdio request may have been written, failures carry internal
   `:possibly_dispatched` provenance unless the callee returned a complete
   decoded answer. A possibly dispatched write failure is
@@ -543,7 +546,7 @@ defmodule PtcRunner.Kernel.MCPSource do
              snapshot: snapshot,
              cleanup_context: cleanup_context(installed.transport),
              cleanup_snapshot: fn -> cleanup_snapshot(transport) end,
-             close: fn -> close_transport(transport) end
+             close: fn -> settle_and_close_transport(transport, context) end
            }}
 
         {:error, reason} ->
@@ -647,6 +650,7 @@ defmodule PtcRunner.Kernel.MCPSource do
            deadline_ms - System.monotonic_time(:millisecond),
          options =
            options
+           |> Keyword.put(:write_timeout_ms, selected.timeout_ms)
            |> Keyword.put(:launcher, staged.path)
            |> Keyword.put(:launcher_protocol_version, MCPLauncher.protocol_version())
            |> Keyword.update(
@@ -715,6 +719,31 @@ defmodule PtcRunner.Kernel.MCPSource do
       {:ok, launcher} -> {:ok, launcher}
       :error -> MCPLauncher.companion()
     end
+  end
+
+  defp settle_and_close_transport(%{type: :streamable_http, handle: handle} = transport, context) do
+    if Process.alive?(handle.pid) do
+      deadline = System.monotonic_time(:millisecond) + context.limits.provider_cleanup_timeout_ms
+
+      result =
+        with :ok <- MCPRequestContext.cancel_borrow(handle),
+             do: MCPRequestContext.settle(handle, deadline)
+
+      closed = close_transport(transport)
+      if result == :ok, do: closed, else: {:error, :mcp_transport_error}
+    else
+      close_transport(transport)
+    end
+  end
+
+  defp settle_and_close_transport(transport, context) do
+    timeout_ms = context.limits.provider_cleanup_timeout_ms
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+
+    result = MCPStdioTransport.settle(transport.handle, deadline)
+
+    closed = close_transport(transport)
+    if result == :ok, do: closed, else: {:error, :mcp_transport_error}
   end
 
   defp close_transport(%{
@@ -1432,6 +1461,9 @@ defmodule PtcRunner.Kernel.MCPSource do
 
       {:error, :mcp_authorization_required} ->
         {:error, :mcp_authorization_required, :not_dispatched}
+
+      {:error, :mcp_transport_busy} ->
+        {:error, :mcp_transport_busy, :not_dispatched}
     end
   end
 
@@ -1446,6 +1478,7 @@ defmodule PtcRunner.Kernel.MCPSource do
     case rpc(transport, method, params, max_bytes, header_parameters, context) do
       {:ok, _result} = success -> success
       {:error, _reason, _provenance} = error -> error
+      {:error, :mcp_transport_busy} -> {:error, :mcp_transport_busy, :not_dispatched}
       {:error, reason} -> {:error, reason, :possibly_dispatched}
     end
   end
@@ -1711,6 +1744,9 @@ defmodule PtcRunner.Kernel.MCPSource do
 
       {:error, :mcp_authorization_required} ->
         {:error, :mcp_authorization_required}
+
+      {:error, :mcp_transport_busy} ->
+        {:error, :mcp_transport_busy}
     end
   end
 
@@ -1833,6 +1869,7 @@ defmodule PtcRunner.Kernel.MCPSource do
     with {:ok, body} <- Jason.encode(payload),
          {:ok, network_options} <- oauth_network_options(request) do
       [
+        settlement: {request.request_context, request.id},
         method: :post,
         url: request.endpoint,
         headers: headers,
@@ -2197,6 +2234,9 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   defp provider_error(:mcp_unsupported_result, _transport, effect, provenance),
     do: provider_error(:invalid_result, "mcp_unsupported_result", false, effect, provenance)
+
+  defp provider_error(:mcp_transport_busy, _transport, effect, provenance),
+    do: provider_error(:transport_error, "mcp_transport_busy", true, effect, provenance)
 
   # A closed transport stays closed for the rest of the run, and a stdio
   # session cannot be re-established either, so neither failure is retryable.
