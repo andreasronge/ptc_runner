@@ -2297,7 +2297,7 @@ The `seq` function converts a value to PTC-Lisp's eager sequence representation:
 (take 3 (range 1 5 0))             ; => [1 1 1]
 ```
 
-**Note:** Unlike Clojure, `range` in PTC-Lisp is always finite and **requires at least one argument**. The zero-arity `(range)` which produces an infinite sequence is not supported because PTC-Lisp does not support lazy sequences. A direct zero-step `(range start end 0)` also raises unless it is consumed by bounded `take`.
+**Note:** Unlike Clojure, `range` in PTC-Lisp is always finite and **requires at least one argument**. The zero-arity `(range)` which produces an infinite sequence is not supported because PTC-Lisp does not support lazy sequences. A zero-step `(range start end 0)` returns `[]` when the bounds are numerically equal (including mixed integer/float bounds and step `0.0`). With unequal bounds, it raises unless consumed by bounded `take`, which repeats `start`.
 
 ### 8.2 Map Operations
 

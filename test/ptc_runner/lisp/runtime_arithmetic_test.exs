@@ -149,6 +149,23 @@ defmodule PtcRunner.Lisp.RuntimeArithmeticTest do
       assert_lisp("(take 2 (range 1 5 (identity 0)))", [1, 1])
     end
 
+    test "zero-step range is empty exactly when its numeric bounds are equal" do
+      for {source, expected} <- [
+            {"(take 3 (range 0 10 0))", [0, 0, 0]},
+            {"(take 3 (range 10 0 0))", [10, 10, 10]},
+            {"(take 3 (range 5 5 0))", []},
+            {"(range 5 5 0)", []},
+            {"(take 3 (range 5 5.0 0))", []},
+            {"(take 3 (range 5.0 5 0))", []},
+            {"(take 3 (range 5 5.0 0.0))", []},
+            {"(range 5 5.0 0)", []},
+            {"(range 5.0 5 0)", []},
+            {"(range 5 5.0 0.0)", []}
+          ] do
+        assert_lisp(source, expected)
+      end
+    end
+
     test "bounded zero-step range shortcut preserves left-to-right argument evaluation" do
       assert_lisp(
         """

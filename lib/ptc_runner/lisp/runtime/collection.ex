@@ -1246,10 +1246,15 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def range(start, end_val, step)
       when is_number(start) and is_number(end_val) and is_number(step) do
-    if step == 0 do
-      raise "type_error: zero-step range must be consumed by bounded take"
-    else
-      generate_range(start, end_val, step, [])
+    cond do
+      step == 0 and start == end_val ->
+        []
+
+      step == 0 ->
+        raise "type_error: zero-step range must be consumed by bounded take"
+
+      true ->
+        generate_range(start, end_val, step, [])
     end
   end
 

@@ -3028,7 +3028,7 @@
       see_also: [],
       clojure_var: "range",
       divergences:
-        "DIV-02: zero-arity (range) (infinite lazy seq) is not supported — bounds must be specified. Direct zero-step ranges raise unless consumed by bounded take. PTC-Lisp has no lazy sequences. See docs/clojure-conformance-gaps.md."
+        "DIV-02: zero-arity (range) (infinite lazy seq) is not supported — bounds must be specified. Zero-step ranges with numerically equal bounds return an empty vector (including mixed integer/float bounds). Other direct zero-step ranges raise unless consumed by bounded take. PTC-Lisp has no lazy sequences. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "ratio?",

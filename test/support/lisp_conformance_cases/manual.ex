@@ -4875,6 +4875,76 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         true,
         "Clojure Character values are not strings; PTC-Lisp currently treats character literals as one-character strings."
       ),
+      c(
+        "core/range-zero-step-bounds-001",
+        "clojure.core",
+        ["range", "take"],
+        "(take 3 (range 0 10 0))",
+        [:edge]
+      ),
+      c(
+        "core/range-zero-step-bounds-002",
+        "clojure.core",
+        ["range", "take"],
+        "(take 3 (range 10 0 0))",
+        [:edge]
+      ),
+      c(
+        "core/range-zero-step-bounds-003",
+        "clojure.core",
+        ["range", "take"],
+        "(take 3 (range 5 5 0))",
+        [:edge]
+      ),
+      c(
+        "core/range-zero-step-bounds-004",
+        "clojure.core",
+        ["range", "take"],
+        "(range 5 5 0)",
+        [:edge]
+      ),
+      c(
+        "core/range-zero-step-bounds-005",
+        "clojure.core",
+        ["range", "take"],
+        "(take 3 (range 5 5.0 0))",
+        [:edge]
+      ),
+      c(
+        "core/range-zero-step-bounds-006",
+        "clojure.core",
+        ["range", "take"],
+        "(take 3 (range 5.0 5 0))",
+        [:edge]
+      ),
+      c(
+        "core/range-zero-step-bounds-007",
+        "clojure.core",
+        ["range", "take"],
+        "(take 3 (range 5 5.0 0.0))",
+        [:edge]
+      ),
+      c(
+        "core/range-zero-step-bounds-008",
+        "clojure.core",
+        ["range", "take"],
+        "(range 5 5.0 0)",
+        [:edge]
+      ),
+      c(
+        "core/range-zero-step-bounds-009",
+        "clojure.core",
+        ["range", "take"],
+        "(range 5.0 5 0)",
+        [:edge]
+      ),
+      c(
+        "core/range-zero-step-bounds-010",
+        "clojure.core",
+        ["range", "take"],
+        "(range 5 5.0 0.0)",
+        [:edge]
+      ),
       fixed_bug_case(
         "core/range-zero-step-bug-001",
         "clojure.core",
