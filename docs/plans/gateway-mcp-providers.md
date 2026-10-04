@@ -87,10 +87,12 @@ root `ptc_runner`, so run `mix compile` in `ptc_gateway/` first.
 | C. Pool of N exclusive connections | ~20 ms | Concurrent calls separated; sequential calls still share state | High: pool sizing, replacement, fairness | Rejected: the isolation it buys is partial. |
 | D. Per-installation choice between A and B | Either | Either | B plus A | Deferred with A. |
 
-Option B fits the gateway's trust model. A gateway has one bearer credential and
-one host document, so all its callers already share one authority. Sharing an
-upstream process among them adds two exposures, both documented as trusted-server
-requirements in the MCP reference:
+Option B fits the gateway's current trust model. Today a gateway has one bearer
+credential and one host document, so all its callers share one authority. That
+holds per gateway process, not per deployment: roles and tenants (#2206) will
+scope each shared acquisition to one tenant, never across tenants. Sharing an
+upstream process among one authority's callers adds two exposures, both
+documented as trusted-server requirements in the MCP reference:
 
 - a server that keeps caller-sensitive state in memory leaks it between calls;
 - a server that ignores `notifications/cancelled` keeps running abandoned work
@@ -266,7 +268,101 @@ Serving validation is unchanged: pins stay required at startup.
 `mix ptc.provider_pins` is deleted. The exact command spelling follows
 `docs/reference/cli.md` conventions.
 
-### 8. Example, documentation, and landing page
+### 8. Gateway event log
+
+Today a gateway is hard to debug. `/health/ready` returns only
+`{"status":"not_ready"}`, a startup failure prints one code such as
+`{"error":"internal_error"}`, and the gateway writes no log. Sharing upstream
+processes adds new failure kinds (transport loss, busy refusals, detached
+requests, settlement timeouts) that need a record.
+
+- A new optional `artifacts.events` object writes an owner-only JSON Lines
+  event log under the artifact root:
+  `{"max_file_bytes": N, "max_retained_files": M, "stderr": false}`. Files are
+  `events/<gateway_start_ref>-<sequence>.jsonl`, rotated and retained like the
+  private audit files, with the same private-directory checks. The bounds are
+  independent of `private_audit`, so a read-only gateway can log.
+- Records carry a closed `kind` and a timestamp: `startup_stage` (stage name
+  and outcome), `startup_failed` (the catalogued code plus the internal reason
+  class that `PtcGateway.StartupError` normalizes away today), `readiness`
+  (transition, tool name, provider name, cause class), `transport` (tool,
+  provider, fault kind, exit status), per-interval counters for `busy`,
+  `detached`, `settlement_timeout`, and `dropped_events` per tool and
+  provider, and, only when `stderr` is true, `stderr_tail`.
+- Every record except `stderr_tail` names tools, providers, and closed classes
+  only: no call arguments, results, credentials, endpoints, or paths.
+  `stderr_tail` is raw upstream output (the bounded per-transport buffer from
+  design 6, written on transport loss and at shutdown), may contain anything
+  the server printed, and is classified as private upstream evidence. It is
+  never exposed through any served tool.
+- Logging never fences serving. Records go through a bounded in-memory queue;
+  an open or write failure, or a full queue, drops records and counts them in
+  the next `dropped_events` record that can be written. A startup failure to
+  create the log directory is a startup error, reported as
+  `artifact_root_unavailable`.
+- Startup writes events only once the artifact root has passed validation; a
+  failure before that stage leaves the existing one-code diagnostic only.
+- The public surfaces stay unchanged: health bodies, startup stderr, and MCP
+  error envelopes still carry only catalogued codes.
+- Version 1 reads the log as plain, documented JSON Lines. No served tool,
+  REPL profile, or Viewer page reads it.
+
+### 9. Debug tools by configuration
+
+A gateway that records traces can also serve a tool that debugs them. The
+runtime adds no special debug endpoint. It makes one shape possible by
+configuration, and the example in design 10 ships it as an optional manifest:
+
+- **Analysis eval.** A served workflow takes PTC-Lisp source text and evaluates
+  it with `kernel/eval-source` in a mission granted a `ptc_trace_snapshot` of
+  the gateway's trace directory. The MCP client's own model writes the
+  queries; the gateway runs no model. A second tool returns the mission's
+  prompt-visible API so the client knows what it may call. The source is
+  bounded by the existing source, evaluation, and run limits, and the entry is
+  read when every selectable grant is read (design 1).
+- **Binding.** The shipped `analysis` prelude calls `tool/analysis-runs`,
+  `analysis-open`, `analysis-read`, and `analysis-counters`, which exist only
+  for the REPL's unnamed snapshot (`run_analysis_capability.ex:57-58`). An
+  installed snapshot provides `<alias>.runs`, `<alias>.open`, `<alias>.read`,
+  and `<alias>.counters`. The example therefore ships a small mission facade
+  component over its alias instead of the `analysis` prelude; no runtime
+  change is needed.
+- The same pattern works for any mission, so it is also a general "code mode"
+  endpoint over composed MCP grants once slice 2b lands.
+
+Two runtime changes make it work:
+
+- **Cold tools.** Snapshot sources capture their directory once at
+  acquisition (`docs/reference/host-installation.md`, "Trace and inspection
+  snapshots"). Acquired once at gateway startup, a debug tool would never see
+  later runs. A served tool whose providers are all `ptc_trace_snapshot`
+  installations is therefore a cold tool: it gets no warm runtime and each
+  call acquires its whole selection through the existing per-run path
+  (`RunAdmission.activate/5`), with cleanup owned by that run. No upstream OS
+  process is spawned; the cost is one bounded directory capture, measured in
+  slice 5. A tool that mixes a snapshot source with any other provider kind is
+  refused with `provider_source_unsupported`.
+- **Pins for cold tools.** `installation_config_pins` keeps the snapshot
+  installation's configuration digest and is checked at startup.
+  `provider_snapshot_pins` omits snapshot sites, because their acquisition
+  identity includes the capture's content and changes by design; discovery
+  (design 7) prints the map without them. Startup still runs the snapshot
+  preflight (directory resolution and private-directory checks) before the
+  listener binds.
+- **Normal data only.** `ptc_trace_snapshot` contributes data class `normal`,
+  and ordinary canonical traces exclude exact prompts, responses, and
+  capability payloads (`dispatcher.ex:556-580, 697-728`). They show run
+  structure, timing, limits, tool-call identities, and failure classes, so a
+  version 1 debug tool can say where and how a run failed more often than
+  why. `ptc_private_trace_snapshot` and `ptc_inspection_snapshot` (which
+  `debug.nav` needs) classify a run as `private_inspection`, which the gateway
+  never returns; they stay refused with `provider_source_unsupported` until
+  the private-evidence decision (open question 2).
+
+A debug tool should write its own runs to a different artifact root, or
+filter them out, so it does not analyse itself.
+
+### 10. Example, documentation, and landing page
 
 - A runnable example under `examples/` serves a tool composing an upstream MCP
   server. The default path needs no model and no key and is declared read; an
@@ -278,6 +374,10 @@ Serving validation is unchanged: pins stay required at startup.
   the gateway. `docs/reference/cli.md` lists `ptc gateway` and its exit status
   78. Conformance-suite internals move from `gateway.md` to
   `docs/maintainers/`.
+- The example also ships the analysis-eval debug tool of design 9 as an
+  optional manifest that runs offline.
+- `docs/reference/gateway.md` documents the event log schema, and
+  `docs/reference/debug-navigation.md` gains a section on serving debug tools.
 - `docs/guides/serving-a-workflow-over-mcp.md` gains at most a link to the
   example (follow `.claude/skills/write-guide/SKILL.md`).
 - A landing-page section contrasts one task-level tool over composed upstream
@@ -290,15 +390,26 @@ Serving validation is unchanged: pins stay required at startup.
 | 1 | Read-only served tools (#2201) | — | Failing test first: a read workflow calling `kernel/eval-source` on a read-only mission validates and serves with `readOnlyHint: true`. A provider-bearing read entry is refused when an unreferenced mission export or capability is write or unknown. A declared-read mission helper calling a mission implicit route (for example `runtime-usage`) validates. |
 | 2a | Shared transports: detach on cancel, synchronous settlement, busy provenance, HTTP cap | — | Deterministic stdio tests for each state (queued, writing, sent) under caller cancel, caller death, and caller expiry, with another request in flight: a queued caller sends neither request nor cancellation; the other request succeeds; the transport survives. Write-settlement expiry fails all pending requests. Races: expiry against acknowledgement, and queue delay against deadline. Settlement is per borrow: ordinary stdio and HTTP completion empties the ledger and returns the borrow without fencing; a callback that timed out and left the task tracker is still awaited before the borrow returns; a sealed borrow's later requests are refused. A detached request holds its slot until cancellation is acknowledged; late responses are dropped. HTTP: cap rejection and slot recovery, cancel and caller death during a request. Busy is `not_dispatched` and retryable for read and write mappings. |
 | 2b | Warm MCP in `ProviderRuntime` and gateway | 2a | Stdio and static-header HTTP fixtures served warm; concurrent borrows return distinct correct results; OAuth and workflow catalog selections refused with the catalogued code, selected vs unselected, mixed tools, missing OAuth credential, no store or upstream activity; transport-owner exit fences readiness, HTTP request failure does not; settlement timeout fences; killing the execution owner with detached work outstanding and delayed transport `DOWN` keeps the borrow counted until `ProviderRuntime` settles it, so drain cannot complete early; drain cutoff with detached work closes the acquisition; inspection enabled with concurrent calls, reversed responses, distinct sinks and `traceparent`s, overflow, saturation; `gateway_load_test.exs` includes an MCP tool. |
+| 2c | Gateway event log (design 8) | 2b | Each record kind is produced by a deterministic trigger: startup success and failure after artifact-root validation (with the internal reason class), transport kill (readiness and transport records naming tool and provider), busy, detached, and settlement-timeout counters. With `stderr` off, a server printing sentinel secrets and paths leaves no trace of them in the log; with it on, they appear only in `stderr_tail`. Rotation and retention bounds enforced; a read-only gateway can log; a write failure or full queue drops records, emits `dropped_events`, and leaves readiness unchanged. Health bodies and startup stderr are unchanged. |
 | 3 | Pins from the executable | 2b for MCP pins | Packaged-command tests: no-provider, LLM, decision, and MCP tools match serving startup; stale or missing pins accepted only in discovery; OAuth refused before acquisition; missing bearer credential does not fail discovery; a missing selected credential does; the environment is restored; no listener, audit, or artifact path is created; failure prints nothing and cleans up. |
 | 4 | Example, docs, landing page | 1, 2b, 3 | Example runs offline in CI from the binary path; the model step passes a live `:scheduled_e2e` run; ExDoc and `mix ptc.verify_docs` pass. |
+| 5 | Debug tools by configuration (design 9) | 1, 3 | A served cold tool selecting `ptc_trace_snapshot` sees a run completed after gateway startup; concurrent calls each get their own capture; capture cost measured on a directory of 1,000 traces and recorded; the facade's functions are called through the served tool; a mixed snapshot and model or MCP tool is refused with `provider_source_unsupported`; private snapshot sources are refused the same way; snapshot sites are absent from `provider_snapshot_pins` in discovery and startup, missing or stale installation pins refuse startup, an invalid trace directory refuses startup before the listener binds, and calls succeed after trace contents change; the analysis-eval tool answers a query offline over the example's traces; a debug tool writing to a separate artifact root does not see its own runs. |
 
-Slices 1 and 2a are independent and may land first.
+Slices 1 and 2a are independent and may land first. Slice 5 does not need
+shared MCP transports and may land before slice 2b.
 
 ## Non-goals
 
 - OAuth-protected MCP servers in the gateway.
-- Per-call or pooled upstream processes (options A, C, D).
+- Per-call or pooled upstream processes (options A, C, D). Per-call
+  acquisition is used only for cold tools whose providers are all trace
+  snapshots (design 9), which spawn no upstream OS process.
+- A served debugger agent that runs its own model over traces. It needs one
+  tool to mix per-call snapshot acquisition with warm model acquisition,
+  which is not designed here; the analysis-eval tool covers the case where the
+  client's model does the debugging.
+- Serving private traces or inspection records over the endpoint.
+- A built-in debug endpoint; debug tools are ordinary served workflows.
 - Gateway-wide sharing of one installation across tools.
 - Automatic transport replacement, re-pinning, or per-tool fencing.
 - Changing the `unknown` effect of model calls.
@@ -308,5 +419,6 @@ Slices 1 and 2a are independent and may land first.
 ## Open questions
 
 1. Whether the in-flight cap becomes an installation ceiling (slice 2b).
-2. Where the bounded per-transport stderr buffer is exposed, if anywhere, to
-   the gateway's private artifacts (slice 2b).
+2. Whether a served tool may ever return private evidence (private traces,
+   inspection records, `debug.nav`). That needs an explicit per-tool opt-in
+   that the gateway refuses today; decide before extending slice 5.
