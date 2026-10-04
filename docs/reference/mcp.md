@@ -21,6 +21,29 @@ It is a demo server, not a release payload. A separately cloned project should
 install that package at a pinned version; the PtcRunner release does not add
 Node.js.
 
+## Concurrent requests and cleanup
+
+Each acquired MCP transport admits at most 128 in-flight requests, for both
+stdio and HTTP. A full transport refuses a request before writing any bytes
+with `mcp_transport_busy`. This refusal is retryable for both read and write
+mappings and carries `not_dispatched` provenance; it does not make a write's
+mutation state indeterminate. MCP requests do not consume LLM provider slots.
+
+Cancellation, caller expiry, and caller death discard queued requests without
+sending a request or cancellation. A stdio frame already being written finishes
+under a separate write-settlement deadline bounded by the selected installation
+`timeout_ms`. Once sent, an abandoned request receives
+`notifications/cancelled`; its slot stays occupied until that notification's
+write is acknowledged, and late responses are dropped. A write-settlement
+expiry or another transport fault fails all pending stdio requests. An HTTP
+socket worker closes its own connection and retains its slot until it exits.
+
+Cleanup seals request admission before waiting for local settlement within
+`provider_cleanup_timeout_ms`, including requests whose callers already left.
+This proves local transport cleanup, not remote completion. A server that ignores
+cancellation may continue remote work; an abandoned dispatched write remains
+indeterminate.
+
 ## Protocol compatibility
 
 PtcRunner implements the final MCP `2026-07-28` profile. Acquisition starts

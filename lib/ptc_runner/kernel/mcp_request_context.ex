@@ -4,8 +4,10 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
   use GenServer
   use PtcRunner.Kernel.OwnerStatusRedaction
 
+  alias PtcRunner.Kernel.MCPBorrowToken
   alias PtcRunner.Kernel.MCPOAuth.ManagerCleanup
   alias PtcRunner.Kernel.MCPOAuth.TokenManager
+  alias PtcRunner.Kernel.MCPSettlement
   alias PtcRunner.Kernel.ResourceRegistrar
 
   @release_timeout_ms 5_000
@@ -13,7 +15,7 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
   @maximum_release_retry_ms 30_000
 
   @enforce_keys [:pid]
-  defstruct [:pid, :authorization, :resource_registrar]
+  defstruct [:pid, :authorization, :resource_registrar, :borrow_token]
 
   @type t :: %__MODULE__{
           pid: pid(),
@@ -40,6 +42,7 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
         {:ok,
          %__MODULE__{
            pid: pid,
+           borrow_token: MCPBorrowToken.new(),
            authorization: authorization,
            resource_registrar: registrar
          }}
@@ -50,9 +53,10 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
   end
 
   @spec begin_request(t()) ::
-          {:ok, map()} | {:error, :closed | :timeout | :mcp_authorization_required}
-  def begin_request(%__MODULE__{pid: pid}) do
-    case safe_call(pid, :begin_request, :infinity) do
+          {:ok, map()}
+          | {:error, :closed | :timeout | :mcp_authorization_required | :mcp_transport_busy}
+  def begin_request(%__MODULE__{pid: pid, borrow_token: token}) do
+    case safe_call(pid, {:borrow_request, token}, :infinity) do
       {:ok, request} ->
         {:ok, request}
 
@@ -80,6 +84,22 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
         fence_request_worker()
     end
   end
+
+  @doc false
+  def with_borrow(%__MODULE__{} = handle, %MCPBorrowToken{} = token),
+    do: %{handle | borrow_token: token}
+
+  @doc false
+  def settle(%__MODULE__{pid: pid, borrow_token: token}, deadline),
+    do: MCPSettlement.seal_and_wait(pid, token, deadline)
+
+  @doc false
+  def cancel_borrow(%__MODULE__{pid: pid, borrow_token: token}),
+    do: safe_call(pid, {:cancel_borrow, token})
+
+  @doc false
+  def register_worker(%__MODULE__{pid: pid}, id, worker),
+    do: safe_call(pid, {:register_worker, id, worker})
 
   @spec close(t()) :: :ok | {:error, :mcp_transport_error}
   def close(%__MODULE__{
@@ -146,6 +166,8 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
            authorization: authorization,
            resource_registrar: registrar,
            next_id: 1,
+           settlement: MCPSettlement.new(),
+           admission_token: nil,
            active: %{},
            release_workers: %{},
            closing: nil
@@ -157,9 +179,50 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
   end
 
   @impl GenServer
+  def handle_call({:cancel_borrow, token}, _from, state) do
+    state = %{state | settlement: MCPSettlement.seal(state.settlement, token)}
+
+    for {caller, entry} <- state.active,
+        entry.borrow_token == token,
+        do: Process.exit(caller, :kill)
+
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:seal_borrow, token}, _from, state),
+    do: MCPSettlement.seal_reply(state, token)
+
+  def handle_call({:await_borrow, token, deadline}, from, state),
+    do: MCPSettlement.await_reply(state, token, deadline, from)
+
+  def handle_call({:borrow_request, token}, from, state) do
+    if MCPSettlement.sealed?(token),
+      do: {:reply, {:error, :closed}, state},
+      else: handle_call(:begin_request, from, %{state | admission_token: token})
+  end
+
+  def handle_call({:register_worker, id, worker}, _from, state) do
+    case Enum.find(state.active, fn {_caller, entry} -> entry.id == id end) do
+      {caller, %{caller_down: false} = entry} ->
+        ref = Process.monitor(worker)
+        {:reply, :ok, put_in(state.active[caller], %{entry | worker: worker, worker_ref: ref})}
+
+      _missing ->
+        {:reply, {:error, :closed}, state}
+    end
+  end
+
   def handle_call(:begin_request, _from, %{closing: closing} = state)
       when not is_nil(closing),
       do: {:reply, {:error, :closed}, state}
+
+  def handle_call(:begin_request, _from, %{active: active} = state)
+      when map_size(active) >= 128,
+      do: {:reply, {:error, :mcp_transport_busy}, state}
+
+  def handle_call(:begin_request, {caller, _tag}, %{active: active} = state)
+      when is_map_key(active, caller),
+      do: {:reply, {:error, :mcp_transport_busy}, state}
 
   def handle_call(:begin_request, {caller, _tag} = from, state) do
     deadline_ms = System.monotonic_time(:millisecond) + state.timeout_ms
@@ -170,10 +233,15 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
       timeout_ms: state.timeout_ms,
       deadline_ms: deadline_ms,
       authorization_manager: state.authorization,
+      request_context: %__MODULE__{pid: self()},
       id: state.next_id
     }
 
     entry = %{
+      borrow_token: state.admission_token,
+      worker: nil,
+      worker_ref: nil,
+      finish_from: nil,
       ref: Process.monitor(caller),
       id: state.next_id,
       issued: nil,
@@ -183,7 +251,12 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
       caller_down: false
     }
 
-    state = %{state | next_id: state.next_id + 1, active: Map.put(state.active, caller, entry)}
+    state = %{
+      state
+      | next_id: state.next_id + 1,
+        active: Map.put(state.active, caller, entry),
+        settlement: MCPSettlement.admit(state.settlement, entry.id, entry.borrow_token)
+    }
 
     case state.authorization do
       nil ->
@@ -208,14 +281,13 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
     end
   end
 
-  def handle_call(:finish_request, {caller, _tag}, state) do
-    case {state.authorization, Map.get(state.active, caller)} do
-      {%TokenManager{}, %{id: id, issued: %{release: release}}} ->
-        {:reply, {:release, release, id}, state}
+  def handle_call(:finish_request, {caller, _tag} = from, state) do
+    case Map.get(state.active, caller) do
+      %{worker_ref: ref} when is_reference(ref) ->
+        {:noreply, put_in(state.active[caller].finish_from, from)}
 
-      _none ->
-        {_active, state} = pop_active(state, caller)
-        finish_or_continue(state, :ok)
+      _entry ->
+        finish_request_reply(caller, state)
     end
   end
 
@@ -285,6 +357,10 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
 
         {:noreply, state}
 
+      %{^pid => %{ref: ^ref, worker_ref: worker_ref} = entry} when is_reference(worker_ref) ->
+        send(entry.worker, :mcp_cancel)
+        {:noreply, put_in(state.active[pid], %{entry | ref: nil, caller_down: true})}
+
       %{^pid => %{ref: ^ref, issued: %{release: release}} = entry} ->
         state
         |> put_in([:active, pid], %{entry | ref: nil})
@@ -295,7 +371,7 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
 
       _active ->
         case handle_authorization_worker_down(state, ref) do
-          :not_authorization_worker -> handle_release_worker_down(state, ref)
+          :not_authorization_worker -> handle_socket_worker_down(state, ref)
           result -> result
         end
     end
@@ -352,7 +428,52 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
     end
   end
 
+  def handle_info({:settlement_timeout, ref}, state),
+    do: {:noreply, %{state | settlement: MCPSettlement.timeout(state.settlement, ref)}}
+
   def handle_info(_message, state), do: {:noreply, state}
+
+  defp handle_socket_worker_down(state, ref) do
+    case Enum.find(state.active, fn {_caller, entry} -> entry.worker_ref == ref end) do
+      {caller, %{caller_down: true, issued: %{release: release}} = entry} ->
+        state
+        |> put_in([:active, caller, :worker_ref], nil)
+        |> start_detached_release(caller, entry.id, release, @initial_release_retry_ms)
+
+      {caller, %{caller_down: true}} ->
+        state |> release_active(caller, false) |> close_or_continue()
+
+      {caller, %{finish_from: from}} when not is_nil(from) ->
+        state = put_in(state.active[caller].worker_ref, nil)
+
+        case finish_request_reply(caller, state) do
+          {:reply, reply, state} ->
+            GenServer.reply(from, reply)
+            {:noreply, state}
+
+          {:stop, reason, reply, state} ->
+            GenServer.reply(from, reply)
+            {:stop, reason, state}
+        end
+
+      {caller, _entry} ->
+        {:noreply, put_in(state.active[caller].worker_ref, nil)}
+
+      nil ->
+        handle_release_worker_down(state, ref)
+    end
+  end
+
+  defp finish_request_reply(caller, state) do
+    case {state.authorization, Map.get(state.active, caller)} do
+      {%TokenManager{}, %{id: id, issued: %{release: release}}} ->
+        {:reply, {:release, release, id}, state}
+
+      _none ->
+        {_active, state} = pop_active(state, caller)
+        finish_or_continue(state, :ok)
+    end
+  end
 
   defp safe_call(pid, request, timeout \\ 5_000) do
     GenServer.call(pid, request, timeout)
@@ -371,7 +492,11 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
     {entry, active} = Map.pop(state.active, caller)
     ref = if is_map(entry), do: entry.ref, else: nil
     if demonitor? and is_reference(ref), do: Process.demonitor(ref, [:flush])
-    %{state | active: active}
+
+    ledger =
+      if entry, do: MCPSettlement.release(state.settlement, entry.id), else: state.settlement
+
+    %{state | active: active, settlement: ledger}
   end
 
   defp pop_active(state, caller) do

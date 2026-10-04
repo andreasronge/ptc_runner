@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
 
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.MCPBorrowToken
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.Context
   alias PtcRunner.Kernel.MCPOAuth.Store
@@ -13,6 +14,92 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Test.MCPOAuthRecordingStore
+  alias PtcRunner.TestSupport.Eventually
+
+  test "HTTP admission refuses the 129th request before dispatch and recovers slots" do
+    {:ok, context} = context(self())
+    parent = self()
+
+    callers =
+      for _ <- 1..128 do
+        spawn(fn ->
+          send(parent, {:admitted, self(), MCPRequestContext.begin_request(context)})
+
+          receive do
+            :finish -> MCPRequestContext.finish_request(context)
+          end
+        end)
+      end
+
+    for caller <- callers, do: assert_receive({:admitted, ^caller, {:ok, _}})
+    assert {:error, :mcp_transport_busy} = MCPRequestContext.begin_request(context)
+
+    for caller <- callers do
+      ref = Process.monitor(caller)
+      send(caller, :finish)
+      assert_receive {:DOWN, ^ref, :process, ^caller, :normal}
+    end
+
+    assert {:ok, _} = MCPRequestContext.begin_request(context)
+    assert :ok = MCPRequestContext.finish_request(context)
+    assert :ok = MCPRequestContext.close(context)
+  end
+
+  test "borrow settlement waits for a detached socket worker and refuses sealed requests" do
+    {:ok, context} = context(self())
+    borrowed = MCPRequestContext.with_borrow(context, MCPBorrowToken.new())
+    parent = self()
+
+    worker =
+      spawn(fn ->
+        receive do
+          :mcp_cancel ->
+            send(parent, :socket_cancelled)
+            receive do: (:finish -> :ok)
+        end
+      end)
+
+    caller =
+      spawn(fn ->
+        {:ok, request} = MCPRequestContext.begin_request(borrowed)
+        assert :ok = MCPRequestContext.register_worker(borrowed, request.id, worker)
+        send(parent, :socket_registered)
+        receive do: (:never -> :ok)
+      end)
+
+    assert_receive :socket_registered
+    Process.exit(caller, :kill)
+    assert_receive :socket_cancelled
+
+    assert {:error, :provider_cleanup_failed} =
+             MCPRequestContext.settle(borrowed, System.monotonic_time(:millisecond) + 100)
+
+    assert map_size(:sys.get_state(context.pid).settlement.entries) == 1
+
+    settlement =
+      Task.async(fn ->
+        MCPRequestContext.settle(borrowed, System.monotonic_time(:millisecond) + 10_000)
+      end)
+
+    Eventually.assert_eventually(fn ->
+      MCPBorrowToken.sealed?(borrowed.borrow_token)
+    end)
+
+    Eventually.assert_eventually(fn ->
+      map_size(:sys.get_state(context.pid).settlement.waiters) > 0
+    end)
+
+    assert {:error, :closed} = MCPRequestContext.begin_request(borrowed)
+    refute Task.yield(settlement, 0)
+    # Another borrow remains usable while the detached socket owns its slot.
+    assert {:ok, _} = MCPRequestContext.begin_request(context)
+    assert :ok = MCPRequestContext.finish_request(context)
+    assert :ok = MCPRequestContext.settle(context, System.monotonic_time(:millisecond) + 10_000)
+    send(worker, :finish)
+    assert :ok = Task.await(settlement)
+    assert :sys.get_state(context.pid).settlement.entries == %{}
+    assert :ok = MCPRequestContext.close(context)
+  end
 
   test "owner death closes the credential context" do
     owner = spawn(fn -> receive do: (:stop -> :ok) end)
