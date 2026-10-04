@@ -16,6 +16,7 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.TestSupport.HostBoundFixture
+  alias PtcRunner.TestSupport.ProviderSessionFixture
 
   @deadline_ms 5_000
 
@@ -464,7 +465,7 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
 
     runner =
       spawn(fn ->
-        {:ok, session} = ProviderSession.start_active(limits, prepared.attestation)
+        {:ok, session} = ProviderSessionFixture.start_active(limits, prepared.attestation)
         {:ok, session} = ProviderSession.begin_operation(session, :run)
         send(parent, {:session, ProviderSession.worker_cancel_target(session)})
 
@@ -670,7 +671,7 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
 
   defp expired_session(prepared, attempt \\ 1) do
     limits = prepared.request.package.limits
-    {:ok, session} = ProviderSession.start_active(limits, prepared.attestation)
+    {:ok, session} = ProviderSessionFixture.start_active(limits, prepared.attestation)
     on_exit(fn -> ProviderSession.close(session) end)
 
     case ProviderSession.begin_operation(session, :run) do
@@ -738,7 +739,7 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
   # be owned by. Building a real one is the point: a fake would not abort.
   defp session(prepared) do
     limits = prepared.request.package.limits
-    {:ok, session} = ProviderSession.start_active(limits, prepared.attestation)
+    {:ok, session} = ProviderSessionFixture.start_active(limits, prepared.attestation)
     on_exit(fn -> ProviderSession.close(session) end)
     {:ok, session} = ProviderSession.begin_operation(session, :run)
     session

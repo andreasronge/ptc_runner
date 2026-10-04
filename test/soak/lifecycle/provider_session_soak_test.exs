@@ -11,16 +11,15 @@ defmodule PtcRunner.Soak.ProviderSessionSoakTest do
 
   | resource | creator | owner | authorized user | closer |
   |---|---|---|---|---|
-  | `ProviderSession` process | `start_active/2` | itself | its `creator`, or its `lifecycle_owner` when owned | `close/1`, or its `:DOWN` on the lifecycle owner |
+  | `ProviderSession` process | `start_active_owned/4` | itself | its `creator`, or its `lifecycle_owner` when owned | `close/1`, or its `:DOWN` on the lifecycle owner |
   | scope (controller, root, reaper) | `open_registrar/1` | the session | the registrar handle | `commit/2`'s closer at session close, or `abort/1` |
   | committed closer | `commit/2` | the session | nobody | session close, in reverse commit order, once |
   | `ProviderTaskTracker` process | `start/1` | itself | the run state | its `:DOWN` on the run state |
 
   Behavior on termination:
 
-    * **caller death** — an unowned session's creator is its authority; a
-      session whose creator dies cannot be closed by anyone else, which is why
-      the owned variant exists.
+    * **caller death** — fixture sessions bind their creator as lifecycle
+      owner, so its death must reap the session and its committed scopes.
     * **owner death** — `start_active_owned/4` binds a lifecycle owner; its
       `:DOWN` must take the session and every committed closer with it.
     * **deadline expiry** — the operation budget is anchored at
@@ -47,6 +46,7 @@ defmodule PtcRunner.Soak.ProviderSessionSoakTest do
   alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.TestSupport.LifecycleSoak
   alias PtcRunner.TestSupport.MemorySoak
+  alias PtcRunner.TestSupport.ProviderSessionFixture
 
   @threshold_bytes_per_cycle 2_048
 
@@ -58,7 +58,7 @@ defmodule PtcRunner.Soak.ProviderSessionSoakTest do
           threshold_bytes_per_cycle: @threshold_bytes_per_cycle
         ],
         fn _cycle ->
-          {:ok, session} = ProviderSession.start_active(limits(), unique_operation())
+          {:ok, session} = ProviderSessionFixture.start_active(limits(), unique_operation())
           {:ok, session} = ProviderSession.begin_operation(session, :run)
 
           {closed, scopes} = commit_scopes(session, 2)
@@ -77,7 +77,7 @@ defmodule PtcRunner.Soak.ProviderSessionSoakTest do
           threshold_bytes_per_cycle: @threshold_bytes_per_cycle
         ],
         fn _cycle ->
-          {:ok, session} = ProviderSession.start_active(limits(), unique_operation())
+          {:ok, session} = ProviderSessionFixture.start_active(limits(), unique_operation())
           {:ok, session} = ProviderSession.begin_operation(session, :run)
 
           {:ok, registrar} = ProviderSession.open_registrar(session)
@@ -185,7 +185,7 @@ defmodule PtcRunner.Soak.ProviderSessionSoakTest do
           # 50 ms survives scheduling while still expiring far inside the 5 s
           # cleanup allowance, so the variant still tests what it claims.
           {:ok, limits} = Limits.installed(%{run_duration_ms: 50})
-          {:ok, session} = ProviderSession.start_active(limits, unique_operation())
+          {:ok, session} = ProviderSessionFixture.start_active(limits, unique_operation())
           {:ok, session} = ProviderSession.begin_operation(session, :run)
 
           {closed, scopes} = commit_scopes(session, 1)

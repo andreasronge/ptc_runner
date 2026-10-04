@@ -19,14 +19,4 @@ defmodule PtcRunner.TestSupport.LLM do
       error -> error
     end
   end
-
-  @doc """
-  Check if a provider is available.
-  """
-  defdelegate available?(model), to: ReqLLMAdapter
-
-  @doc """
-  Check if the model requires an API key.
-  """
-  defdelegate requires_api_key?(model), to: ReqLLMAdapter
 end

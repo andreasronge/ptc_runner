@@ -391,17 +391,6 @@ if Code.ensure_loaded?(ReqLLM) do
     end
 
     @doc """
-    Generate text, raising on error.
-    """
-    @spec generate_text!(String.t(), [map()], keyword()) :: PtcRunner.LLM.response()
-    def generate_text!(model, messages, opts \\ []) do
-      case generate_text(model, messages, opts) do
-        {:ok, response} -> response
-        {:error, reason} -> raise "LLM error: #{inspect(reason)}"
-      end
-    end
-
-    @doc """
     Generate a structured JSON object from an LLM.
 
     Supported for ReqLLM providers whose sealed mode is attested and direct
@@ -456,17 +445,6 @@ if Code.ensure_loaded?(ReqLLM) do
     end
 
     @doc """
-    Generate a structured JSON object, raising on error.
-    """
-    @spec generate_object!(String.t(), [map()], map(), keyword()) :: map()
-    def generate_object!(model, messages, schema, opts \\ []) do
-      case generate_object(model, messages, schema, opts) do
-        {:ok, response} -> response
-        {:error, reason} -> raise "LLM structured output error: #{inspect(reason)}"
-      end
-    end
-
-    @doc """
     Generate text with tool definitions.
 
     Passes tools to the LLM provider. If the LLM returns tool calls,
@@ -503,71 +481,6 @@ if Code.ensure_loaded?(ReqLLM) do
         {:req_llm, model_id} ->
           with {:ok, prepared, _status} <- prepare_req_llm_model(model_id),
                do: call_req_llm_with_tools(prepared, messages, tools, opts)
-      end
-    end
-
-    @doc """
-    Generate embeddings for text input.
-
-    ## Returns
-    - `{:ok, [float()]}` for single input
-    - `{:ok, [[float()]]}` for batch input
-    """
-    @spec embed(String.t(), String.t() | [String.t()], keyword()) ::
-            {:ok, [float()] | [[float()]]} | {:error, term()}
-    def embed(model, input, opts \\ []) do
-      case parse_provider(model) do
-        {:ollama, model_name} ->
-          call_ollama_embed(model_name, input, opts)
-
-        {:openai_compat, base_url, model_name} ->
-          call_openai_compat_embed(base_url, model_name, input, opts)
-
-        {:req_llm, model_id} ->
-          ReqLLM.Embedding.embed(model_id, input, opts)
-      end
-    end
-
-    @doc """
-    Generate embeddings, raising on error.
-    """
-    @spec embed!(String.t(), String.t() | [String.t()], keyword()) :: [float()] | [[float()]]
-    def embed!(model, input, opts \\ []) do
-      case embed(model, input, opts) do
-        {:ok, result} -> result
-        {:error, reason} -> raise "Embedding error: #{inspect(reason)}"
-      end
-    end
-
-    @doc """
-    Check if a provider is available.
-
-    For Ollama, checks if the server is reachable.
-    For ReqLLM providers, checks if the required API key is set.
-    """
-    @spec available?(String.t()) :: boolean()
-    def available?(model) do
-      case parse_provider(model) do
-        {:ollama, _} ->
-          check_ollama_available()
-
-        {:openai_compat, base_url, _} ->
-          check_openai_compat_available(base_url)
-
-        {:req_llm, model_id} ->
-          check_req_llm_available(model_id)
-      end
-    end
-
-    @doc """
-    Check if the model requires an API key.
-    """
-    @spec requires_api_key?(String.t()) :: boolean()
-    def requires_api_key?(model) do
-      case parse_provider(model) do
-        {:ollama, _} -> false
-        {:openai_compat, _, _} -> false
-        {:req_llm, _} -> true
       end
     end
 
@@ -1054,64 +967,6 @@ if Code.ensure_loaded?(ReqLLM) do
 
       {:ok, tool} = ReqLLM.Tool.new(tool_opts)
       tool
-    end
-
-    # --- Embeddings ---
-
-    defp call_ollama_embed(model, input, opts) do
-      base_url = Keyword.get(opts, :ollama_base_url, @ollama_base_url)
-      timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
-
-      case Req.post("#{base_url}/api/embed",
-             json: %{model: model, input: input},
-             receive_timeout: timeout
-           ) do
-        {:ok, %{status: 200, body: %{"embeddings" => [embedding]}}} when is_binary(input) ->
-          {:ok, embedding}
-
-        {:ok, %{status: 200, body: %{"embeddings" => embeddings}}} ->
-          {:ok, embeddings}
-
-        {:ok, %{status: status, body: body}} ->
-          {:error, %{status: status, body: body}}
-
-        {:error, %{reason: :econnrefused}} ->
-          {:error, "Ollama is unavailable. Start it with: ollama serve"}
-
-        {:error, reason} ->
-          {:error, reason}
-      end
-    end
-
-    defp call_openai_compat_embed(base_url, model, input, opts) do
-      timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
-
-      case CompatHTTP.request(
-             :post,
-             base_url,
-             "/embeddings",
-             [json: %{model: model, input: input}, receive_timeout: timeout] ++
-               Keyword.get(opts, :req_http_options, []),
-             Keyword.get(opts, :api_key)
-           ) do
-        {:ok, %{status: 200, body: %{"data" => [%{"embedding" => embedding}]}}}
-        when is_binary(input) ->
-          {:ok, embedding}
-
-        {:ok, %{status: 200, body: %{"data" => data}}} when is_list(data) ->
-          embeddings =
-            data
-            |> Enum.sort_by(& &1["index"])
-            |> Enum.map(& &1["embedding"])
-
-          {:ok, embeddings}
-
-        {:ok, %{status: status, body: body}} ->
-          {:error, %{status: status, body: body}}
-
-        {:error, reason} ->
-          {:error, reason}
-      end
     end
 
     # --- Message Building ---
@@ -2771,12 +2626,6 @@ if Code.ensure_loaded?(ReqLLM) do
       |> maybe_put_total_cost(usage, provider_meta)
     end
 
-    @doc false
-    def build_stream_done_chunk(usage) do
-      provider_meta = %{@usage_observation_key => :reported}
-      %{done: true, tokens: build_tokens_from_req_llm_response(usage, provider_meta)}
-    end
-
     defp maybe_put_observed_token_usage(tokens, usage, provider_meta) do
       if observed_token_usage?(provider_meta) do
         tokens
@@ -2825,48 +2674,6 @@ if Code.ensure_loaded?(ReqLLM) do
         get_in(meta, [:usage, :prompt_tokens_details, :cache_write_tokens]) ||
         get_in(meta, ["prompt_tokens_details", "cache_write_tokens"]) ||
         0
-    end
-
-    # --- Availability Checks ---
-
-    defp check_ollama_available do
-      case Req.get("#{@ollama_base_url}/api/tags", receive_timeout: 2_000) do
-        {:ok, %{status: 200}} -> true
-        _ -> false
-      end
-    end
-
-    defp check_openai_compat_available(base_url) do
-      case CompatHTTP.request(:get, base_url, "/models", receive_timeout: 2_000) do
-        {:ok, %{status: 200}} -> true
-        _ -> false
-      end
-    end
-
-    defp check_req_llm_available(model) do
-      cond do
-        String.starts_with?(model, "openrouter:") ->
-          System.get_env("OPENROUTER_API_KEY") != nil
-
-        String.starts_with?(model, "anthropic:") ->
-          System.get_env("ANTHROPIC_API_KEY") != nil
-
-        String.starts_with?(model, "openai:") ->
-          System.get_env("OPENAI_API_KEY") != nil
-
-        String.starts_with?(model, "google:") ->
-          System.get_env("GOOGLE_API_KEY") != nil
-
-        String.starts_with?(model, "groq:") ->
-          System.get_env("GROQ_API_KEY") != nil
-
-        String.starts_with?(model, "bedrock:") or String.starts_with?(model, "amazon_bedrock:") ->
-          System.get_env("AWS_ACCESS_KEY_ID") != nil or
-            System.get_env("AWS_SESSION_TOKEN") != nil
-
-        true ->
-          true
-      end
     end
   end
 end

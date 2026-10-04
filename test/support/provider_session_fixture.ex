@@ -5,6 +5,10 @@ defmodule PtcRunner.TestSupport.ProviderSessionFixture do
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ResourceRegistrar
 
+  def start_active(limits, operation_identity) do
+    ProviderSession.start_active_owned(limits, operation_identity, self(), fn _ -> :ok end)
+  end
+
   def start(resources, %Limits{} = limits) when is_list(resources) do
     {:ok, session} = ProviderSession.start(limits)
 

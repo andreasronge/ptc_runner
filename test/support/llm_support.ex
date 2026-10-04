@@ -11,7 +11,6 @@ defmodule PtcRunner.TestSupport.LLMSupport do
 
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.ProviderApplicationGate
-  alias PtcRunner.LLM.ReqLLMAdapter
   alias PtcRunner.LLM.Requirements
 
   @default_model "openrouter:deepseek/deepseek-v4-flash"
@@ -196,7 +195,7 @@ defmodule PtcRunner.TestSupport.LLMSupport do
 
     current_model = model || model()
 
-    if ReqLLMAdapter.requires_api_key?(current_model) and
+    if not String.starts_with?(current_model, ["ollama:", "openai-compat:"]) and
          is_nil(System.get_env("OPENROUTER_API_KEY")) do
       raise """
       OPENROUTER_API_KEY not set.

@@ -8,9 +8,9 @@ defmodule PtcRunner.Kernel.LLMBudgetTest do
     "total_tokens" => %{
       "state" => "available",
       "limit" => 100,
-      "reserved" => 20,
+      "reserved" => 0,
       "charged" => 30,
-      "remaining" => 50,
+      "remaining" => 70,
       "refused" => 1
     },
     "cost" => %{
@@ -24,21 +24,27 @@ defmodule PtcRunner.Kernel.LLMBudgetTest do
     }
   }
 
-  test "accepts exact disabled and runtime projections" do
+  test "accepts exact disabled and terminal projections" do
     assert {:ok, %{"total_tokens" => nil, "cost" => nil}} =
-             LLMBudget.validate_projection(%{"total_tokens" => nil, "cost" => nil})
+             LLMBudget.validate_terminal_projection(%{"total_tokens" => nil, "cost" => nil})
 
-    assert {:ok, @available} = LLMBudget.validate_projection(@available)
+    assert {:ok, @available} = LLMBudget.validate_terminal_projection(@available)
   end
 
   test "terminal projections reject outstanding reservations" do
-    assert {:error, :invalid_llm_budget} = LLMBudget.validate_terminal_projection(@available)
+    assert {:error, :invalid_llm_budget} =
+             LLMBudget.validate_terminal_projection(
+               @available
+               |> put_in(["total_tokens", "reserved"], 20)
+               |> put_in(["total_tokens", "remaining"], 50)
+             )
 
-    terminal =
-      put_in(@available, ["total_tokens", "reserved"], 0)
-      |> put_in(["total_tokens", "remaining"], 70)
-
-    assert {:ok, ^terminal} = LLMBudget.validate_terminal_projection(terminal)
+    assert {:error, :invalid_llm_budget} =
+             LLMBudget.validate_terminal_projection(
+               @available
+               |> put_in(["cost", "reserved_microusd"], 20)
+               |> put_in(["cost", "remaining_microusd"], 280)
+             )
   end
 
   test "overrun clamps remaining even when charged has not exhausted the aggregate limit" do
@@ -63,7 +69,7 @@ defmodule PtcRunner.Kernel.LLMBudgetTest do
     ]
 
     for projection <- invalid do
-      assert {:error, :invalid_llm_budget} = LLMBudget.validate_projection(projection)
+      assert {:error, :invalid_llm_budget} = LLMBudget.validate_terminal_projection(projection)
     end
   end
 

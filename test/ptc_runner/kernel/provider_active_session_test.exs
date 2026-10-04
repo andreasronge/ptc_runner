@@ -24,6 +24,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
   alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.TestSupport.ProviderSessionFixture
 
   test "active validators run in declaration order after activity is marked" do
     parent = self()
@@ -741,7 +742,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     other_limits = %{limits | run_duration_ms: limits.run_duration_ms + 1}
 
     assert {:ok, wrong_session} =
-             ProviderSession.start_active(other_limits, prepared.attestation)
+             ProviderSessionFixture.start_active(other_limits, prepared.attestation)
 
     assert {:ok, wrong_session} =
              ProviderSession.begin_operation(wrong_session, :run)
