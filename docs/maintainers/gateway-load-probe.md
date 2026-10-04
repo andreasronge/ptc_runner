@@ -96,48 +96,25 @@ the owner that queues — `RequestAdmission` stays near zero throughout.
 Numbers are machine- and scheduler-specific, so a comparison is only meaningful
 against another run on the same machine. There is no committed baseline.
 
-## Private-audit group commit comparison
+## Private-audit group commit
 
-The original implementation synced each record separately while retaining run
-admission. On the original ten-scheduler darwin/arm64 measurement, goodput fell
-from 931 to 727 calls/s between concurrency 8 and 64, with 78% refusals and an
-audit mailbox mean of 54 at the final level (#1987).
+The private audit batches durable writes. Pending records share one sync after
+at most 2 ms, 64 records, or 64 KiB of encoded JSONL (also bounded by the
+configured file size); a larger valid record is synced alone. Each call keeps
+its run admission until its batch is durable, so admission bounds the callers
+waiting on the audit. The [gateway reference](../reference/gateway.md#private-audit-directory)
+owns the durability contract.
 
-Issue #2025 replaces that serialization with bounded group commit. The same
-`mix run bench/gateway_load.exs` sweep before and after the change on this
-four-scheduler Linux host, 200 calls per level and unchanged admission limits,
-produced the following write results. Latency is client-observed p50/p95/p99 in
-milliseconds for accepted calls; mailbox depth is peak/mean. HTTP publication
-can precede audit completion, so client latency does not measure the full time
-run admission remains held.
-
-| Concurrency | Before goodput/s | After goodput/s | Before refused | After refused | Before latency | After latency | Before audit mailbox | After audit mailbox |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 119 | 119 | 6.5% | 0% | 6.86/12.21/13.09 | 7.59/11.45/13.74 | 63/34.75 | 1/0.02 |
-| 2 | 83 | 279 | 90% | 0% | 7.27/11.74/12.67 | 5.75/10.06/10.99 | 63/62.40 | 2/0.07 |
-| 4 | 80 | 600 | 96% | 0% | 7.07/9.82/9.82 | 5.36/8.23/10.41 | 63/62.37 | 2/0.17 |
-| 8 | 81 | 696 | 95.5% | 0% | 9.28/10.46/10.46 | 10.06/13.33/17.24 | 63/62.38 | 7/0.60 |
-| 16 | 99 | 605 | 96% | 0% | 13.14/18.16/18.16 | 22.25/38.53/43.78 | 63/62.07 | 3/0.42 |
-| 32 | 96 | 582 | 97% | 0% | 17.12/22.97/22.97 | 46.75/69.95/76.13 | 63/61.75 | 8/0.65 |
-| 64 | 84 | 521 | 96.5% | 0% | 30.21/35.19/35.19 | 106.53/136.25/141.06 | 62/61.50 | 32/2.50 |
-
-The baseline reached the 64-run admission ceiling even at low client
-concurrency because published calls retained admission while queued for audit.
-Batching eliminated refusals in this sweep. High-concurrency latency increased
-because those calls now execute rather than being refused; the baseline's few
-accepted calls are not an equivalent latency population. Both runs finished
-with zero request leases and the same process count before and after the leak
-probe. These are observations on one host, not a portable performance gate.
-
-The mailbox sampler excludes records already collected into the current
-batch. The audit tests separately enforce the record/byte bounds, light-traffic
-flush, ordered batches, shutdown flush, and the sync barrier under success and
-failure. The HTTP integration checks that admission stays held at that barrier.
-The chosen bounds and durability contract belong to the
-[gateway reference](../reference/gateway.md#private-audit-directory).
+To compare a change to this path, run `mix run bench/gateway_load.exs` before
+and after on the same host, with the same scheduler count and the same number
+of calls per level, then compare goodput, refusals, and audit mailbox depth on
+the write path. Mailbox depth is peak/mean and excludes records already
+collected into the current batch. HTTP publication can precede audit
+completion, so client latency does not measure how long run admission stays
+held; do not read it as the cost of the write path.
 
 Read offered load carefully: it counts cheap refusals. Only goodput reports
-successful work. An isolated append now includes the batching delay and cannot
+successful work. An isolated append includes the batching delay and cannot
 predict the throughput of concurrent calls sharing a sync.
 
 ## Other operational properties
