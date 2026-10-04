@@ -2,7 +2,100 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapterTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.MCPHTTPAdapter
+  alias PtcRunner.TestSupport.Eventually
   alias PtcRunner.TestSupport.TLSFixture
+
+  test "caller death cancels request transmission under socket backpressure" do
+    {caller, owner} = start_backpressured_request(30_000, 0)
+    socket = Eventually.assert_eventually(fn -> backpressured_socket(owner) end)
+    owner_ref = Process.monitor(owner)
+    socket_ref = :erlang.monitor(:port, socket)
+    Process.exit(caller.pid, :kill)
+    assert_receive {:DOWN, ^owner_ref, :process, ^owner, _}, 1_000
+    assert_receive {:DOWN, ^socket_ref, :port, ^socket, _}, 1_000
+  end
+
+  test "request transmission uses the remaining deadline after peer verification" do
+    {caller, owner} = start_backpressured_request(1_000, 700)
+    owner_ref = Process.monitor(owner)
+    assert {:ok, {:error, :timeout, :possibly_dispatched}} = Task.yield(caller, 1_300)
+    assert_receive {:DOWN, ^owner_ref, :process, ^owner, _}, 1_000
+  end
+
+  defp start_backpressured_request(timeout_ms, peer_delay_ms) do
+    parent = self()
+
+    {:ok, listener} =
+      :gen_tcp.listen(0, [
+        :binary,
+        active: false,
+        reuseaddr: true,
+        recbuf: 1_024,
+        ip: {127, 0, 0, 1}
+      ])
+
+    {:ok, {_, port}} = :inet.sockname(listener)
+
+    server =
+      Task.async(fn ->
+        {:ok, socket} = :gen_tcp.accept(listener, 1_000)
+
+        receive do
+          :stop -> :gen_tcp.close(socket)
+        end
+      end)
+
+    caller =
+      Task.async(fn ->
+        MCPHTTPAdapter.request(
+          method: :post,
+          url: "http://127.0.0.1:#{port}/",
+          body: :binary.copy("x", 64 * 1_024 * 1_024),
+          timeout_ms: timeout_ms,
+          connected_peer: fn _ ->
+            {:links, [owner]} = Process.info(self(), :links)
+            send(parent, {:transmitting, owner})
+
+            if peer_delay_ms > 0 do
+              Process.send_after(self(), :release_peer, peer_delay_ms)
+
+              receive do
+                :release_peer -> :ok
+              end
+            end
+
+            :ok
+          end
+        )
+      end)
+
+    Process.unlink(caller.pid)
+
+    on_exit(fn ->
+      Process.exit(caller.pid, :kill)
+      Process.exit(server.pid, :kill)
+      :gen_tcp.close(listener)
+    end)
+
+    assert_receive {:transmitting, owner}, 1_000
+    on_exit(fn -> Process.exit(owner, :kill) end)
+    {caller, owner}
+  end
+
+  defp backpressured_socket(owner) do
+    case Process.info(owner, :links) do
+      {:links, links} ->
+        Enum.find(Enum.filter(links, &is_port/1), fn socket ->
+          case :inet.getstat(socket, [:send_pend]) do
+            {:ok, [send_pend: bytes]} -> bytes > 0
+            _ -> false
+          end
+        end)
+
+      nil ->
+        false
+    end
+  end
 
   test "a blocking peer callback cannot outlive the request deadline" do
     parent = self()

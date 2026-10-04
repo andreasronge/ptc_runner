@@ -13,7 +13,9 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
   `request/1` accepts optional `:on_status`, `:on_headers`, and `:on_data`
   callbacks for bounded streaming. Callbacks execute in separate helpers,
   under the same absolute request deadline, so cancellation can close the
-  socket even when a callback blocks. The status callback receives the response
+  socket even when a callback blocks. Request transmission uses the same
+  cancellable helper boundary, so socket backpressure cannot extend the
+  deadline or delay caller-death cleanup. The status callback receives the response
   as soon as a status line is parsed, the header callback receives it after
   each header block, and the data callback receives the current response and
   one data chunk. Each returns either `{:cont, response}` or
@@ -290,7 +292,7 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
       if Process.alive?(caller) do
         safe_perform(connection, request)
       else
-        close(connection)
+        close(connection, request.scheme)
         {:error, :transport_error, :not_dispatched}
       end
     else
@@ -670,13 +672,13 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
         receive do
           {^ref, :adopt, ^parent} ->
             result = transfer_connection(connection, request.scheme, parent)
-            if result != :ok, do: close(connection)
+            if result != :ok, do: close(connection, request.scheme)
             send(parent, {ref, :adopted, self(), result})
 
           {^ref, :reject, ^parent} ->
-            close(connection)
+            close(connection, request.scheme)
         after
-          max(remaining_ms(request), 1) -> close(connection)
+          max(remaining_ms(request), 1) -> close(connection, request.scheme)
         end
 
       {:error, reason} ->
@@ -720,7 +722,7 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
       receive do
         :mcp_cancel ->
           terminate_race(state)
-          close(connection)
+          close(connection, request.scheme)
           flush_race_messages(ref)
           {:error, :timeout}
 
@@ -740,12 +742,12 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
       after
         remaining ->
           terminate_race(state)
-          close(connection)
+          close(connection, request.scheme)
           {:error, collapse_connect_failures([:timeout | race_failures(state)])}
       end
     else
       terminate_race(state)
-      close(connection)
+      close(connection, request.scheme)
       {:error, collapse_connect_failures([:timeout | race_failures(state)])}
     end
   end
@@ -860,7 +862,7 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
       {:ok, connection}
     else
       {:error, reason} ->
-        close(connection)
+        close(connection, request.scheme)
         {:error, if(reason == :timeout, do: :timeout, else: :transport_error)}
     end
   end
@@ -935,7 +937,7 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
   defp verify_connected_peer(connection, request) do
     case socket_peername(connection, request.scheme) do
       {:ok, address} ->
-        case run_callback(request, fn -> request.connected_peer.(address) end) do
+        case run_bounded_operation(request, fn -> request.connected_peer.(address) end) do
           {:ok, :ok} -> :ok
           {:error, :timeout} = error -> error
           _rejected -> {:error, :peer_rejected}
@@ -964,14 +966,16 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
     result =
       with false <- cancelled?(),
            remaining when remaining > 0 <- remaining_ms(request),
-           {:ok, connection, ref} <-
-             Mint.HTTP.request(
-               connection,
-               request.method,
-               request.path,
-               request.headers,
-               request.body
-             ) do
+           {:ok, {:ok, connection, ref}} <-
+             run_bounded_operation(request, fn ->
+               Mint.HTTP.request(
+                 connection,
+                 request.method,
+                 request.path,
+                 request.headers,
+                 request.body
+               )
+             end) do
         receive_response(connection, ref, request, nil, 0)
       else
         true ->
@@ -980,8 +984,11 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
         remaining when is_integer(remaining) and remaining <= 0 ->
           {:error, :timeout, :not_dispatched}
 
-        {:error, connection, reason} ->
-          close(connection)
+        {:error, reason} ->
+          {:error, reason, :possibly_dispatched}
+
+        {:ok, {:error, connection, reason}} ->
+          close(connection, request.scheme)
 
           if timeout_reason?(reason),
             do: {:error, :timeout, :possibly_dispatched},
@@ -990,15 +997,15 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
 
     case result do
       {:ok, response, connection} ->
-        close(connection)
+        close(connection, request.scheme)
         {:ok, response}
 
       {:error, reason, provenance, connection} ->
-        close(connection)
+        close(connection, request.scheme)
         {:error, reason, provenance}
 
       other ->
-        close(connection)
+        close(connection, request.scheme)
         other
     end
   end
@@ -1007,11 +1014,11 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
     perform(connection, request)
   rescue
     _exception ->
-      close(connection)
+      close(connection, request.scheme)
       {:error, :transport_error, :possibly_dispatched}
   catch
     _kind, _reason ->
-      close(connection)
+      close(connection, request.scheme)
       {:error, :transport_error, :possibly_dispatched}
   end
 
@@ -1217,7 +1224,7 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
   end
 
   defp apply_headers(request, callback, state) do
-    case run_callback(request, fn -> callback.(strip_counters(state)) end) do
+    case run_bounded_operation(request, fn -> callback.(strip_counters(state)) end) do
       {:ok, {:cont, response}} when is_map(response) ->
         {:cont, restore_counters(response, state)}
 
@@ -1244,7 +1251,7 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
     if received_body_bytes > request.max_body_bytes do
       {:error, :response_exceeded}
     else
-      case run_callback(request, fn -> request.on_data.(state, data) end) do
+      case run_bounded_operation(request, fn -> request.on_data.(state, data) end) do
         {:ok, {:cont, response}} when is_map(response) ->
           {:cont,
            response
@@ -1267,9 +1274,9 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
     _kind, _reason -> {:error, :transport_error}
   end
 
-  # Callbacks never own the socket. Keep its owner responsive to cancellation
-  # and the absolute deadline while caller-supplied code runs.
-  defp run_callback(request, callback) do
+  # Helpers never own the socket. Keep its owner responsive to cancellation
+  # and the absolute deadline while callbacks or socket sends block.
+  defp run_bounded_operation(request, operation) do
     parent = self()
     ref = make_ref()
 
@@ -1277,7 +1284,7 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
       spawn_link(fn ->
         result =
           try do
-            {:ok, callback.()}
+            {:ok, operation.()}
           rescue
             _exception -> {:error, :transport_error}
           catch
@@ -1367,8 +1374,17 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
 
   defp response_exceeded_reason?(_reason), do: false
 
-  defp close(connection) do
-    _ = Mint.HTTP.close(connection)
+  defp close(connection, scheme) do
+    socket = Mint.HTTP.get_socket(connection)
+    # gen_tcp.close otherwise waits up to three minutes for queued output.
+    # These connections are never reused; abandoned output must be discarded.
+    _ = socket_module(scheme).setopts(socket, linger: {true, 0})
+
+    case scheme do
+      :http -> _ = Mint.HTTP.close(connection)
+      :https -> _ = :ssl.close(socket, 0)
+    end
+
     :ok
   rescue
     _exception -> :ok
