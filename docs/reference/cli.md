@@ -901,7 +901,10 @@ differently there than in a plain terminal reader:
 
 A direct session keeps its submitted lines between runs, under
 `ptc/repl-history` in the user cache directory, so the previous session's
-expressions are one arrow key away. A manifest session can carry a private
+expressions are one arrow key away. Disk history is enabled only when that
+directory is owned by the current user and its mode is verified as 0700 after
+setting permissions. If creation, permission setting, or verification fails,
+the session keeps only in-memory history. A manifest session can carry a private
 event policy, so it edits and recalls within the session but writes nothing to
 disk.
 

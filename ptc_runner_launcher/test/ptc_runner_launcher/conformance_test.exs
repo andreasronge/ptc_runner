@@ -646,12 +646,54 @@ defmodule PtcRunnerLauncher.ConformanceTest do
   end
 
   @tag :tmp_dir
+  test "an in-place overwrite with restored mtime never reaches path exec", %{tmp_dir: dir} do
+    authorized = Path.join(dir, "server")
+    impostor = Path.join(dir, "impostor")
+    marker = Path.join(dir, "overwritten")
+    fixture = Path.join(dir, "overwrite-launcher")
+
+    for {path, output} <- [{authorized, "AUTHORIZED"}, {impostor, "UNAPPROVED"}] do
+      File.write!(path, "#!/bin/sh\nprintf '#{output}\\n'\nread _ || true\n")
+      File.chmod!(path, 0o700)
+    end
+
+    frozen = executable_sha256(authorized)
+    before = File.stat!(authorized)
+
+    compile_hash_race_fixture!(fixture, authorized, impostor, marker, [
+      "-DPTC_TEST_PATH_EXEC",
+      "-DPTC_RACE_IN_PLACE"
+    ])
+
+    result =
+      MCPStdioLauncher.open(
+        executable: authorized,
+        launcher_path: fixture,
+        executable_sha256: frozen,
+        cwd: dir,
+        args: [],
+        env: %{},
+        inherit_environment: false,
+        start_timeout_ms: 30_000
+      )
+
+    # Always close a successful spawn, including the vulnerable implementation.
+    if match?({:ok, _}, result), do: MCPStdioLauncher.close(elem(result, 1), 5_000)
+    assert File.read!(marker) == "during-hash"
+    after_write = File.stat!(authorized)
+
+    assert {before.inode, before.size, before.mtime} ==
+             {after_write.inode, after_write.size, after_write.mtime}
+
+    assert {:error, :mcp_stdio_spawn_failed} = result
+  end
+
+  @tag :tmp_dir
   test "a replacement landing during the identity hash never reaches exec", %{tmp_dir: dir} do
     authorized = Path.join(dir, "server")
     impostor = Path.join(dir, "impostor")
     marker = Path.join(dir, "swapped")
     fixture = Path.join(dir, "hash-race-launcher")
-    compiler = System.find_executable("cc") || flunk("C compiler is unavailable")
 
     for {path, output} <- [{authorized, "AUTHORIZED-EXECUTED"}, {impostor, "IMPOSTOR-EXECUTED"}] do
       File.write!(path, "#!/bin/sh\nprintf '#{output}\\n'\nread _ || true\n")
@@ -663,26 +705,7 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     # Compile the actual launcher with read interposed only in this fixture.
     # The replacement happens after the first executable read, so neither CPU
     # speed nor interpreter startup can move the swap outside the hash window.
-    assert {_, 0} =
-             System.cmd(
-               compiler,
-               [
-                 "-D_GNU_SOURCE",
-                 "-D_DARWIN_C_SOURCE",
-                 "-std=c11",
-                 "-Wall",
-                 "-Wextra",
-                 "-Werror",
-                 "-Wpedantic",
-                 "-DPTC_RACE_TARGET=#{inspect(authorized)}",
-                 "-DPTC_RACE_IMPOSTOR=#{inspect(impostor)}",
-                 "-DPTC_RACE_MARKER=#{inspect(marker)}",
-                 "-o",
-                 fixture,
-                 @hash_race_fixture
-               ],
-               stderr_to_stdout: true
-             )
+    compile_hash_race_fixture!(fixture, authorized, impostor, marker)
 
     result =
       MCPStdioLauncher.open(
@@ -936,6 +959,28 @@ defmodule PtcRunnerLauncher.ConformanceTest do
       )
 
     launcher
+  end
+
+  defp compile_hash_race_fixture!(fixture, authorized, impostor, marker, flags \\ []) do
+    compiler = System.find_executable("cc") || flunk("C compiler is unavailable")
+
+    assert {_, 0} =
+             System.cmd(
+               compiler,
+               [
+                 "-D_GNU_SOURCE",
+                 "-D_DARWIN_C_SOURCE",
+                 "-std=c11",
+                 "-Wall",
+                 "-Wextra",
+                 "-Werror",
+                 "-Wpedantic",
+                 "-DPTC_RACE_TARGET=#{inspect(authorized)}",
+                 "-DPTC_RACE_IMPOSTOR=#{inspect(impostor)}",
+                 "-DPTC_RACE_MARKER=#{inspect(marker)}"
+               ] ++ flags ++ ["-o", fixture, @hash_race_fixture],
+               stderr_to_stdout: true
+             )
   end
 
   defp executable_sha256(executable) do

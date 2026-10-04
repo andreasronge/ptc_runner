@@ -27,6 +27,7 @@ defmodule PtcRunner.ReplLineEditor do
   # Every other outcome leaves the plain reader in place.
 
   alias PtcRunner.Kernel.AnalysisTerminal
+  alias PtcRunner.Kernel.PrivateDirectory
 
   @history_directory "ptc"
   @history_bytes 512 * 1024
@@ -131,9 +132,18 @@ defmodule PtcRunner.ReplLineEditor do
     history(mode)
   end
 
-  defp history(mode) do
+  @doc false
+  @spec history(mode()) :: :ok
+  def history(mode) do
+    path = Path.join(:filename.basedir(:user_cache, @history_directory), "repl-history")
+    history(mode, path)
+  end
+
+  @doc false
+  @spec history(mode(), binary()) :: :ok
+  def history(mode, path) do
     with true <- persists_history?(mode),
-         {:ok, path} <- history_path() do
+         {:ok, path} <- history_path(path) do
       Application.put_env(:kernel, :shell_history, :enabled)
       Application.put_env(:kernel, :shell_history_path, String.to_charlist(path))
       Application.put_env(:kernel, :shell_history_file_bytes, @history_bytes)
@@ -157,16 +167,17 @@ defmodule PtcRunner.ReplLineEditor do
 
   # Owner-only, and PtcRunner-owned rather than the shared Erlang shell
   # history: the file holds REPL transcript lines.
-  defp history_path do
-    path = Path.join(:filename.basedir(:user_cache, @history_directory), "repl-history")
-
-    case File.mkdir_p(path) do
-      :ok ->
-        _ = File.chmod(path, 0o700)
-        {:ok, path}
-
-      {:error, _reason} ->
-        :error
+  defp history_path(path) do
+    with :ok <- File.mkdir_p(Path.dirname(path)),
+         {:ok, uid} <- PrivateDirectory.preflight_owner(path),
+         :ok <- File.mkdir_p(path),
+         {:ok, %File.Stat{type: :directory, uid: ^uid}} <- File.lstat(path),
+         :ok <- File.chmod(path, 0o700),
+         {:ok, %File.Stat{type: :directory, uid: ^uid, mode: mode}} <- File.lstat(path),
+         true <- Bitwise.band(mode, 0o7777) == 0o700 do
+      {:ok, path}
+    else
+      _unverifiable -> :error
     end
   end
 end

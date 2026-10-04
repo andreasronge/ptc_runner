@@ -9,20 +9,21 @@ defmodule Mix.Tasks.Ptc.InstallBabashka do
 
       mix ptc.install_babashka
       mix ptc.install_babashka --force     # Reinstall even if present
-      mix ptc.install_babashka --version 1.4.192  # Specific version
+      mix ptc.install_babashka --version 1.4.192  # Must have committed checksum pins
 
   ## Supported Platforms
 
   - macOS (Apple Silicon and Intel)
-  - Linux (x86_64)
+  - Linux (x86_64 and aarch64)
 
   ## What This Does
 
   1. Detects your OS and architecture
   2. Downloads the appropriate Babashka binary from GitHub releases
-  3. Extracts and places it at `_build/tools/bb`
-  4. Makes the binary executable
-  5. Verifies the installation
+  3. Verifies the archive against the platform digest pinned in `PtcRunner.Lisp.Java.Oracle.Config`
+  4. Extracts and places it at `_build/tools/bb`
+  5. Makes the binary executable
+  6. Verifies the installation
   """
 
   use Mix.Task
@@ -53,6 +54,8 @@ defmodule Mix.Tasks.Ptc.InstallBabashka do
     version = Keyword.get(opts, :version, Config.versions().babashka)
 
     validate_version!(version)
+    {os, arch} = detect_platform()
+    checksum = pinned_checksum!(version, {os, arch})
 
     # Check if already installed
     if File.exists?(@bb_path) and not force do
@@ -61,21 +64,18 @@ defmodule Mix.Tasks.Ptc.InstallBabashka do
       verify_installation()
       :ok
     else
-      install_babashka(version)
+      install_babashka(version, os, arch, checksum)
     end
   end
 
-  defp install_babashka(version) do
+  defp install_babashka(version, os, arch, checksum) do
     Mix.shell().info("Installing Babashka v#{version}...")
 
-    # Detect OS and architecture
-    {os, arch} = detect_platform()
     Mix.shell().info("Detected platform: #{os}/#{arch}")
 
     # Build download URL
     filename = build_filename(os, arch, version)
     url = "#{@download_base}/v#{version}/#{filename}"
-    checksum_url = "#{url}.sha256"
     Mix.shell().info("Downloading from: #{url}")
 
     # Create install directory
@@ -83,13 +83,10 @@ defmodule Mix.Tasks.Ptc.InstallBabashka do
 
     # Download
     archive_path = Path.join(@install_dir, filename)
-    checksum_path = "#{archive_path}.sha256"
 
-    with :ok <- download_file(checksum_url, checksum_path),
-         :ok <- download_file(url, archive_path),
-         :ok <- verify_checksum(archive_path, checksum_path) do
+    with :ok <- download_file(url, archive_path),
+         :ok <- verify_checksum(archive_path, checksum) do
       Mix.shell().info("Downloaded successfully")
-      File.rm(checksum_path)
 
       # Extract
       extract_archive(archive_path, @install_dir)
@@ -102,6 +99,7 @@ defmodule Mix.Tasks.Ptc.InstallBabashka do
       verify_installation()
     else
       {:error, reason} ->
+        File.rm(archive_path)
         Mix.raise("Failed to download Babashka: #{reason}")
     end
   end
@@ -111,6 +109,13 @@ defmodule Mix.Tasks.Ptc.InstallBabashka do
       :ok
     else
       Mix.raise("Invalid Babashka version #{inspect(version)}. Expected MAJOR.MINOR.PATCH.")
+    end
+  end
+
+  defp pinned_checksum!(version, platform) do
+    case Config.babashka_checksum(version, platform) do
+      {:ok, checksum} -> checksum
+      :error -> Mix.raise("No pinned Babashka checksum for #{version} on #{inspect(platform)}")
     end
   end
 
@@ -205,7 +210,9 @@ defmodule Mix.Tasks.Ptc.InstallBabashka do
 
   defp curl_download(url, dest_path) do
     # Download the already-resolved HTTPS URL without following additional redirects.
-    case System.cmd("curl", ["-o", dest_path, "-f", "--silent", "--show-error", url],
+    case System.cmd(
+           "curl",
+           ["--proto", "=https", "-o", dest_path, "-f", "--silent", "--show-error", url],
            stderr_to_stdout: true
          ) do
       {_, 0} ->
@@ -216,24 +223,13 @@ defmodule Mix.Tasks.Ptc.InstallBabashka do
     end
   end
 
-  defp verify_checksum(archive_path, checksum_path) do
-    with {:ok, expected} <- read_expected_checksum(checksum_path),
-         {:ok, actual} <- sha256_file(archive_path) do
+  defp verify_checksum(archive_path, expected) do
+    with {:ok, actual} <- sha256_file(archive_path) do
       if expected == actual do
         :ok
       else
         {:error, "SHA-256 mismatch for #{archive_path}"}
       end
-    end
-  end
-
-  defp read_expected_checksum(checksum_path) do
-    with {:ok, content} <- File.read(checksum_path),
-         [checksum] <- Regex.run(~r/\b[0-9a-fA-F]{64}\b/, content) do
-      {:ok, String.downcase(checksum)}
-    else
-      {:error, reason} -> {:error, "failed to read checksum file: #{inspect(reason)}"}
-      _ -> {:error, "checksum file did not contain a SHA-256 digest"}
     end
   end
 

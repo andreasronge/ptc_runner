@@ -501,7 +501,10 @@ instead of ending input, because the editor binds it that way and offers no
 end-of-input binding to rebind it to.</li><li><code class="inline">Ctrl+C</code> opens the BEAM break menu, as it does in <code class="inline">iex</code>. Press <code class="inline">c</code> to return
 to the prompt or <code class="inline">a</code> to abort the command.</li></ul><p>A direct session keeps its submitted lines between runs, under
 <code class="inline">ptc/repl-history</code> in the user cache directory, so the previous session's
-expressions are one arrow key away. A manifest session can carry a private
+expressions are one arrow key away. Disk history is enabled only when that
+directory is owned by the current user and its mode is verified as 0700 after
+setting permissions. If creation, permission setting, or verification fails,
+the session keeps only in-memory history. A manifest session can carry a private
 event policy, so it edits and recalls within the session but writes nothing to
 disk.</p><p>Analysis profile sessions (<code class="inline">--profile</code>) read under the source limit that mode
 enforces, which the line editor cannot drive. They keep the plain reader, and
