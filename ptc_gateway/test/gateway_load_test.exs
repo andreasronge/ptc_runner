@@ -365,6 +365,31 @@ defmodule PtcGatewayLoadTest do
     end
 
     @tag :tmp_dir
+    test "pipelined calls publish in order and return every slot", %{tmp_dir: dir} do
+      {owner, config} = start_gateway(dir, max_inflight_requests: 1, max_concurrent_runs: 1)
+
+      for method <- ["tools/list", "tools/call"] do
+        replies = GatewayLoad.pipelined(config, 16, method: method)
+        assert Enum.map(replies, & &1.status) == List.duplicate(200, 16)
+        assert Enum.map(replies, & &1.result["id"]) == Enum.to_list(1..16)
+
+        for reply <- replies do
+          refute Map.has_key?(reply.result, "error")
+
+          if method == "tools/call" do
+            assert reply.result["result"]["structuredContent"] == %{}
+            assert reply.result["result"]["isError"] == false
+          else
+            assert Enum.map(reply.result["result"]["tools"], & &1["name"]) == ["a", "z"]
+          end
+        end
+
+        assert GatewayLoad.await_leases(owner, 0) == 0
+        assert GatewayLoad.await_run_capacity(owner, 0) == 0
+      end
+    end
+
+    @tag :tmp_dir
     test "saturation refuses without consuming a slot", %{tmp_dir: dir} do
       {owner, config} = start_gateway(dir, max_inflight_requests: 2, max_concurrent_runs: 2)
 
@@ -491,6 +516,91 @@ defmodule PtcGatewayLoadTest do
 
       Enum.each(sockets, &GatewayLoad.close_abruptly/1)
       assert GatewayLoad.await_leases(owner, 0) == 0
+    end
+  end
+
+  @tag :tmp_dir
+  test "idle sockets exhaust the transport ceiling without consuming admission", %{tmp_dir: dir} do
+    {owner, config} = start_gateway(dir, max_inflight_requests: 2, max_concurrent_runs: 2)
+    state = :sys.get_state(owner)
+    {:ok, reservation} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
+    {:ok, port} = :inet.port(reservation)
+    :gen_tcp.close(reservation)
+    config = put_in(config, ["listen", "port"], port)
+
+    {:ok, listener} =
+      Bandit.start_link(
+        plug:
+          {PtcGateway.Router,
+           listen: config["listen"],
+           warm: state.warm,
+           tools: state.metadata,
+           tool_entries: state.tools,
+           run_admission: state.run_admission,
+           audit: state.audit,
+           request_admission: state.request_admission},
+        ip: {127, 0, 0, 1},
+        port: port,
+        startup_log: false,
+        http_2_options: [enabled: false],
+        thousand_island_options: [num_acceptors: 2, num_connections: 4]
+      )
+
+    on_exit(fn -> stop(listener) end)
+    {:ok, {_, port}} = ThousandIsland.listener_info(listener)
+
+    sockets = for _ <- 1..12, do: open_socket(port)
+    on_exit(fn -> Enum.each(sockets, &:gen_tcp.close/1) end)
+    assert await_connections(listener, 8, System.monotonic_time(:millisecond) + 2_000) == 8
+
+    # Complete health exchanges turn accepted connections into idle keep-alive
+    # sockets. The excess TCP handshakes succeed but have no handler yet.
+    Enum.each(sockets, &send_health(&1, port))
+    readings = Enum.map(sockets, &:gen_tcp.recv(&1, 0, 100))
+    assert Enum.count(readings, &match?({:ok, "HTTP/1.1 404" <> _}, &1)) == 8
+    assert Enum.count(readings, &(&1 == {:error, :timeout})) == 4
+    assert GatewayLoad.inflight_leases(owner) == 0
+    assert GatewayLoad.run_capacity_in_use(owner) == 0
+
+    health = open_socket(port)
+    on_exit(fn -> :gen_tcp.close(health) end)
+    send_health(health, port)
+    assert {:error, :timeout} = :gen_tcp.recv(health, 0, 100)
+
+    report("socket ceiling: 2 acceptors x 4 connections, 12 idle sockets", %{
+      "served / queued / refused" => "8 (HTTP 404) / 4 / 0 (100 ms per socket)",
+      "health on a new socket" => "TCP connected, HTTP timed out",
+      "inflight leases / run capacity" => "0 / 0"
+    })
+
+    Enum.each(sockets, &:gen_tcp.close/1)
+    assert {:ok, "HTTP/1.1 404" <> _} = :gen_tcp.recv(health, 0, 5_000)
+    :gen_tcp.close(health)
+    assert await_connections(listener, 0, System.monotonic_time(:millisecond) + 5_000) == 0
+    assert response(config, "/health").status == 404
+    assert response(config, "/health/ready").status == 200
+    assert %{status: 200} = GatewayLoad.call(config)
+    assert GatewayLoad.await_leases(owner, 0) == 0
+    assert GatewayLoad.await_run_capacity(owner, 0) == 0
+  end
+
+  defp open_socket(port) do
+    {:ok, socket} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false], 1_000)
+    socket
+  end
+
+  defp send_health(socket, port) do
+    :ok = :gen_tcp.send(socket, "GET /health HTTP/1.1\r\nhost: 127.0.0.1:#{port}\r\n\r\n")
+  end
+
+  defp await_connections(listener, expected, deadline) do
+    {:ok, pids} = ThousandIsland.connection_pids(listener)
+    count = length(pids)
+
+    if count == expected or System.monotonic_time(:millisecond) >= deadline do
+      count
+    else
+      await_connections(listener, expected, deadline)
     end
   end
 

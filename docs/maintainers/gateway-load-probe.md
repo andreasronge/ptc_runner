@@ -147,3 +147,43 @@ The gateway itself is not the expensive part. A trivial `tools/call` spends
 in-process through `ServingTemplate.call/3`, with no HTTP at all, costs 3.79 ms.
 `tools/list`, which is the whole request path minus the run, completes in
 0.47 ms and sustains ~6,700 per second.
+
+## Transport coverage
+
+`GatewayLoad.pipelined/3` writes all requests before reading any reply. The
+soak gate checks consecutive JSON-RPC IDs in wire order for both `tools/list`
+(content-length framing) and `tools/call` (chunked SSE), with one in-flight
+slot and one run slot. Every reply must succeed and both capacities must return
+to zero. Reads consume exactly one response, retaining any coalesced bytes for
+the next reply.
+
+The socket probe starts Bandit directly over the live router state with two
+acceptors and four connections per acceptor. The effective ceiling is eight;
+`num_connections` is per acceptor, so the dependency defaults of 100 and 16,384
+mean 1,638,400 connections, not 16,384. The probe opens twelve idle keep-alive
+sockets, reports queued versus refused exchanges and health reachability on a
+new socket, and checks recovery after closing them. Request leases and run
+capacity must stay zero while only idle sockets consume the transport. It does
+not change `Domain.listen/2`; listener policy belongs to #2026.
+
+Measured on Linux with the dependency defaults for retry timing: all twelve
+TCP handshakes succeeded; eight `/health` exchanges returned HTTP 404, and four
+had no response during a 100 ms read per socket. A thirteenth socket also
+connected but its health request timed out. Both application counters stayed
+zero. Closing the twelve sockets let the pending health request return within
+the five-second recovery budget, followed by successful readiness and MCP calls.
+This is transport queuing, not application admission refusal. Some excess
+sockets are accepted by an acceptor waiting to create a handler, while the rest
+wait in the listen backlog; the wire observation does not distinguish those
+locations. The observation ends before the dependency's five one-second
+retries can exhaust, so it does not claim excess sockets remain queued forever.
+
+For measurements with a separate client process, see
+[the optional oha benchmark](https://github.com/andreasronge/ptc_runner/blob/main/ptc_gateway/bench/README.md). The existing
+in-process client's scheduler competition inflates latency and reduces
+throughput, so its absolute figures should not be read as server capacity.
+
+The raw-socket clients connect to the numeric loopback tuple directly. Resolving
+its textual address lazily starts two persistent resolver processes on the
+first call, which otherwise makes the exact process-count gate depend on test
+order. Those processes belong to the client, not to the gateway.
