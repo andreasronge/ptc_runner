@@ -78,7 +78,13 @@ defmodule PtcRunner.Kernel.DecisionDistributionTest do
     {:ok, capability} = DecisionCapability.new(requester: fn _, _ -> {:ok, %{}} end)
     metadata = Capability.metadata(capability)
     {:ok, _, compiled} = JSONSchema.compile(metadata.output_schema)
-    response = %{"model" => "fixture", "answers" => valid_answers(), "usage" => %{}}
+
+    response = %{
+      "model" => "fixture",
+      "answers" => valid_answers(),
+      "usage" => %{"input_tokens" => 0, "output_tokens" => 0}
+    }
+
     assert JSONSchema.valid?(compiled, response)
 
     for value <- [true, false, nil] do

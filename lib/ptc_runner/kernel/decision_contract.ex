@@ -1,8 +1,41 @@
 defmodule PtcRunner.Kernel.DecisionContract do
   @moduledoc false
   alias PtcRunner.Kernel.LLMUsage
+  @question_types ["boolean", "choice", "score"]
+  @question_keys ["type", "instructions", "criteria"]
   @rounding_tolerance 0.01
   @float_epsilon 1.0e-12
+  @doc false
+  @spec question_schema() :: map()
+  def question_schema do
+    %{
+      "type" => "object",
+      "description" =>
+        "Named boolean, choice or score question. Criteria shape and bounds for each type are validated at runtime.",
+      "properties" => %{
+        "type" => %{"type" => "string", "enum" => @question_types},
+        "instructions" => %{"type" => "string", "minLength" => 1}
+      },
+      "required" => ["type", "instructions"],
+      "propertyNames" => %{"type" => "string", "enum" => @question_keys},
+      "additionalProperties" => true
+    }
+  end
+
+  @doc false
+  @spec usage_schema() :: map()
+  def usage_schema do
+    tokens = %{"type" => "integer", "minimum" => 0}
+
+    %{
+      "type" => "object",
+      "description" => "Reported token counts. Optional cost is validated at runtime.",
+      "properties" => %{"input_tokens" => tokens, "output_tokens" => tokens},
+      "required" => ["input_tokens", "output_tokens"],
+      "additionalProperties" => true
+    }
+  end
+
   @doc false
   @spec answer_schema() :: map()
   def answer_schema do
@@ -13,7 +46,7 @@ defmodule PtcRunner.Kernel.DecisionContract do
       "description" =>
         "Boolean, choice or score answer. Fields required for each type and request-dependent consistency are validated at runtime.",
       "properties" => %{
-        "type" => %{"type" => "string", "enum" => ["boolean", "choice", "score"]},
+        "type" => %{"type" => "string", "enum" => @question_types},
         "value" => %{
           "type" => ["boolean", "null"],
           "description" =>
@@ -45,10 +78,10 @@ defmodule PtcRunner.Kernel.DecisionContract do
   def validate_request(_request), do: {:error, "questions must not be empty"}
 
   defp valid_question?({name, %{"type" => type, "instructions" => instructions} = question})
-       when is_binary(name) and type in ["choice", "score", "boolean"] and
+       when is_binary(name) and type in @question_types and
               is_binary(instructions) do
     byte_size(name) > 0 and byte_size(instructions) > 0 and
-      Map.keys(question) -- ["type", "instructions", "criteria"] == [] and
+      Map.keys(question) -- @question_keys == [] and
       valid_criteria?(type, Map.get(question, "criteria"))
   end
 
