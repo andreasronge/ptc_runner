@@ -567,6 +567,160 @@ defmodule PtcGatewayTest do
   end
 
   @tag :tmp_dir
+  test "concurrent private audit callers share a sync and wait for durability", %{tmp_dir: dir} do
+    config = %{audit_config(Path.join(dir, "audit")) | "max_file_bytes" => 1_048_576}
+    assert {:ok, owner} = PtcGateway.PrivateAudit.start_link(config)
+    state = block_audit_sync(owner)
+    :sys.suspend(owner)
+    callers = for index <- 1..65, do: queue_audit(owner, audit_record(index))
+    for _ <- callers, do: assert_receive(:queued)
+    :sys.resume(owner)
+    assert_receive {:sync_waiting, ^owner}, 1_000
+    lines = String.split(File.read!(state.path), "\n", trim: true)
+    assert length(lines) == 64
+    first_ids = MapSet.new(lines, &Jason.decode!(&1)["call_id"])
+
+    {first_batch, [{last, _}]} =
+      callers
+      |> Enum.with_index(1)
+      |> Enum.split_with(fn {_, index} -> MapSet.member?(first_ids, "call-#{index}") end)
+
+    assert Enum.all?(callers, &(Task.yield(&1, 0) == nil))
+    send(owner, {:finish_sync, :ok})
+    for {caller, _} <- first_batch, do: assert(Task.await(caller) == :ok)
+    assert_receive {:sync_waiting, ^owner}, 1_000
+    assert length(String.split(File.read!(state.path), "\n", trim: true)) == 65
+    assert Task.yield(last, 0) == nil
+    send(owner, {:finish_sync, :ok})
+    assert Task.await(last) == :ok
+    GenServer.stop(owner)
+  end
+
+  @tag :tmp_dir
+  test "failed batch sync refuses all concurrent callers", %{tmp_dir: dir} do
+    config = %{audit_config(Path.join(dir, "audit")) | "max_file_bytes" => 1_048_576}
+    assert {:ok, owner} = PtcGateway.PrivateAudit.start_link(config)
+    block_audit_sync(owner)
+    monitor = Process.monitor(owner)
+    :sys.suspend(owner)
+    callers = for index <- 1..64, do: queue_audit(owner, audit_record(index))
+    for _ <- callers, do: assert_receive(:queued)
+    :sys.resume(owner)
+    assert_receive {:sync_waiting, ^owner}, 1_000
+    assert Enum.all?(callers, &(Task.yield(&1, 0) == nil))
+    send(owner, {:finish_sync, :error})
+    for caller <- callers, do: assert(Task.await(caller) == {:error, :audit_unavailable})
+    assert_receive {:DOWN, ^monitor, :process, ^owner, :audit_unavailable}
+  end
+
+  @tag :tmp_dir
+  test "failed batch write refuses all concurrent callers without syncing", %{tmp_dir: dir} do
+    config = %{audit_config(Path.join(dir, "audit")) | "max_file_bytes" => 1_048_576}
+    assert {:ok, owner} = PtcGateway.PrivateAudit.start_link(config)
+    block_audit_sync(owner)
+
+    :sys.replace_state(owner, fn state ->
+      :ok = File.close(state.io)
+      state
+    end)
+
+    monitor = Process.monitor(owner)
+    :sys.suspend(owner)
+    callers = for index <- 1..64, do: queue_audit(owner, audit_record(index))
+    for _ <- callers, do: assert_receive(:queued)
+    :sys.resume(owner)
+    for caller <- callers, do: assert(Task.await(caller) == {:error, :audit_unavailable})
+    assert_receive {:DOWN, ^monitor, :process, ^owner, :audit_unavailable}
+    refute_received {:sync_waiting, ^owner}
+  end
+
+  @tag :tmp_dir
+  test "light traffic flushes without a full batch", %{tmp_dir: dir} do
+    assert {:ok, owner} =
+             PtcGateway.PrivateAudit.start_link(audit_config(Path.join(dir, "audit")))
+
+    block_audit_sync(owner)
+    caller = Task.async(fn -> PtcGateway.PrivateAudit.append(owner, audit_record(1)) end)
+    assert_receive {:sync_waiting, ^owner}, 100
+    assert Task.yield(caller, 0) == nil
+    send(owner, {:finish_sync, :ok})
+    assert Task.await(caller) == :ok
+
+    :sys.suspend(owner)
+    caller = queue_audit(owner, audit_record(2))
+    assert_receive :queued
+    :sys.resume(owner)
+    assert_receive {:sync_waiting, ^owner}, 100
+    send(owner, {:finish_sync, :ok})
+    assert Task.await(caller) == :ok
+    GenServer.stop(owner)
+  end
+
+  @tag :tmp_dir
+  test "batch byte bound splits ordered records and permits a bounded larger singleton", %{
+    tmp_dir: dir
+  } do
+    config = %{audit_config(Path.join(dir, "audit")) | "max_file_bytes" => 1_048_576}
+    assert {:ok, owner} = PtcGateway.PrivateAudit.start_link(config)
+    state = block_audit_sync(owner)
+    :sys.suspend(owner)
+
+    refs =
+      for index <- 1..3 do
+        ref = make_ref()
+
+        record =
+          Map.put(
+            audit_record(index),
+            "tool_name",
+            String.duplicate("t", if(index == 3, do: 70_000, else: 40_000))
+          )
+
+        send(owner, {:"$gen_call", {self(), ref}, {:append, record}})
+        ref
+      end
+
+    :sys.resume(owner)
+
+    for {ref, index} <- Enum.with_index(refs, 1) do
+      assert_receive {:sync_waiting, ^owner}, 1_000
+      lines = String.split(File.read!(state.path), "\n", trim: true)
+      assert length(lines) == index
+      assert Jason.decode!(List.last(lines))["call_id"] == "call-#{index}"
+      refute_received {^ref, :ok}
+      send(owner, {:finish_sync, :ok})
+      assert_receive {^ref, :ok}
+    end
+
+    GenServer.stop(owner)
+  end
+
+  @tag :tmp_dir
+  test "orderly audit shutdown flushes a pending batch before replying", %{tmp_dir: dir} do
+    assert {:ok, owner} =
+             PtcGateway.PrivateAudit.start_link(audit_config(Path.join(dir, "audit")))
+
+    block_audit_sync(owner)
+    # Hold the timer beyond the test so shutdown owns the flush deterministically.
+    :sys.replace_state(owner, fn state ->
+      token = make_ref()
+      timer = Process.send_after(owner, {:flush, token}, 60_000)
+      %{state | timer: {timer, token}}
+    end)
+
+    ref = make_ref()
+    send(owner, {:"$gen_call", {self(), ref}, {:append, audit_record(1)}})
+    assert :sys.get_state(owner).count == 1
+    stopper = Task.async(fn -> GenServer.stop(owner) end)
+    assert_receive {:sync_waiting, ^owner}, 1_000
+    refute_received {^ref, :ok}
+    assert Task.yield(stopper, 0) == nil
+    send(owner, {:finish_sync, :ok})
+    assert_receive {^ref, :ok}
+    assert Task.await(stopper) == :ok
+  end
+
+  @tag :tmp_dir
   test "write permission, audit readiness loss, and deterministic metadata", %{tmp_dir: dir} do
     {path, config} = fixture(dir, :write)
     assert {:error, :write_forbidden} = PtcGateway.start_link(path)
@@ -1031,10 +1185,21 @@ defmodule PtcGatewayTest do
     on_exit(fn -> stop(owner) end)
     run_admission = :sys.get_state(owner).run_admission
 
-    assert mcp(config, "tools/call", 10,
-             params: %{"name" => "a"},
-             headers: [{"mcp-name", "a"}]
-           ).status == 200
+    audit = :sys.get_state(owner).audit
+    block_audit_sync(audit)
+
+    caller =
+      Task.async(fn ->
+        mcp(config, "tools/call", 10,
+          params: %{"name" => "a"},
+          headers: [{"mcp-name", "a"}]
+        )
+      end)
+
+    assert_receive {:sync_waiting, ^audit}, 2_000
+    assert {:ok, %{in_use: 1}} = PtcRunner.Kernel.RunAdmission.snapshot(run_admission)
+    send(audit, {:finish_sync, :ok})
+    assert Task.await(caller).status == 200
 
     assert :ok = await_run_release(run_admission, 100)
 
@@ -1731,6 +1896,32 @@ defmodule PtcGatewayTest do
 
     on_exit(fn -> stop(listener) end)
     {listener, config}
+  end
+
+  defp block_audit_sync(owner) do
+    parent = self()
+
+    :sys.replace_state(owner, fn state ->
+      Map.put(state, :sync, fn io ->
+        send(parent, {:sync_waiting, self()})
+
+        receive do
+          {:finish_sync, :ok} -> :file.sync(io)
+          {:finish_sync, :error} -> {:error, :eio}
+        end
+      end)
+    end)
+  end
+
+  defp queue_audit(owner, record) do
+    parent = self()
+
+    Task.async(fn ->
+      ref = make_ref()
+      send(owner, {:"$gen_call", {self(), ref}, {:append, record}})
+      send(parent, :queued)
+      receive do: ({^ref, result} -> result)
+    end)
   end
 
   defp audit_config(directory) do

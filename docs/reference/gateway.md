@@ -100,6 +100,17 @@ bounded record before run admission is released. It contains only the call ID,
 tool name, start/end times, closed outcome and dispatch state, write uncertainty,
 disconnect flag, and cleanup status.
 
+Pending records use bounded group commit: flush after at most 2 ms of batching,
+64 records, or 64 KiB of encoded JSONL, whichever comes first. The byte limit
+also cannot exceed `max_file_bytes`. A single larger record that fits
+`max_file_bytes` is flushed alone. These are batching bounds; disk sync and
+scheduler delays can extend the time a call waits. Light traffic flushes without
+waiting for a full batch. Records retain arrival order across batches and file
+rotation. Each call retains run admission until its batch is durable; a failed
+write or sync never acknowledges any affected record as durable and makes the
+gateway unavailable. Orderly shutdown drains admitted calls through the same
+durability barrier. Admission bounds the callers waiting for the audit.
+
 ## Health
 
 | Request | Response |
