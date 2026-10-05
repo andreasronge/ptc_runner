@@ -64,6 +64,86 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   end
 
   @tag :tmp_dir
+  test "serving exchanges capture reversed responses independently and retain bounded stderr", %{
+    tmp_dir: tmp_dir
+  } do
+    transport =
+      start_test_launcher(tmp_dir, "fake-manual-ack", serving_mode: true, stderr_bytes: 8)
+
+    first = Task.async(fn -> exchange(transport, "first", "first-trace") end)
+    assert_eventually(fn -> unacknowledged_request?(transport) end)
+    first_id = acknowledge_write(transport)
+    second = Task.async(fn -> exchange(transport, "second", "second-trace") end)
+    assert_eventually(fn -> unacknowledged_request?(transport) end)
+    second_id = acknowledge_write(transport)
+    port = safe_state(transport.pid).port
+    send(transport.pid, {port, {:data, "Eabcdefghijkl"}})
+    respond(transport, second_id)
+
+    assert {:ok, %{request: second_request, response: %{"id" => ^second_id}} = captured} =
+             Task.await(second)
+
+    assert captured.stderr == ""
+    assert captured.stderr_truncated? == false
+    assert second_request["params"]["_meta"]["traceparent"] == "second-trace"
+    assert Task.yield(first, 0) == nil
+    respond(transport, first_id)
+
+    assert {:ok, %{request: first_request, stderr: "", stderr_truncated?: false}} =
+             Task.await(first)
+
+    assert first_request["params"]["_meta"]["traceparent"] == "first-trace"
+
+    assert %{stderr: "efghijkl", stderr_truncated?: true} =
+             MCPStdioTransport.cleanup_snapshot(transport)
+
+    assert :ok = MCPStdioTransport.close(transport)
+  end
+
+  @tag :tmp_dir
+  test "serving exchange overflow leaves another captured exchange intact", %{tmp_dir: tmp_dir} do
+    transport = start_test_launcher(tmp_dir, "fake-manual-ack", serving_mode: true)
+    first = Task.async(fn -> exchange(transport, "first", "trace", 1) end)
+    assert_eventually(fn -> unacknowledged_request?(transport) end)
+    first_id = acknowledge_write(transport)
+    second = Task.async(fn -> exchange(transport, "second", "trace") end)
+    assert_eventually(fn -> unacknowledged_request?(transport) end)
+    second_id = acknowledge_write(transport)
+    respond(transport, first_id)
+    assert {:error, :mcp_response_exceeded} = Task.await(first)
+    respond(transport, second_id)
+    assert {:ok, %{stderr: ""}} = Task.await(second)
+    assert :ok = MCPStdioTransport.close(transport)
+  end
+
+  @tag :tmp_dir
+  test "serving exchanges share the cap and queued deadlines", %{tmp_dir: tmp_dir} do
+    transport = start_test_launcher(tmp_dir, "fake-manual-ack", serving_mode: true)
+    first = Task.async(fn -> exchange(transport, "first", "trace") end)
+    assert_eventually(fn -> unacknowledged_request?(transport) end)
+
+    assert {:error, :mcp_timeout} =
+             MCPStdioTransport.request_exchange(transport, "expired", %{}, %{}, 8192, 25)
+
+    requests = for _ <- 1..127, do: Task.async(fn -> exchange(transport, "queued", "trace") end)
+    assert_eventually(fn -> map_size(safe_state(transport.pid).pending) == 128 end)
+    assert {:error, :mcp_transport_busy} = exchange(transport, "overflow", "trace")
+    assert MCPStdioTransport.close(transport) == {:error, :mcp_transport_error}
+    for task <- [first | requests], do: assert({:error, :mcp_transport_error} == Task.await(task))
+  end
+
+  defp exchange(transport, method, traceparent, max_bytes \\ 8192),
+    do:
+      MCPStdioTransport.request_exchange(
+        transport,
+        method,
+        %{},
+        %{"traceparent" => traceparent},
+        max_bytes,
+        @settle_timeout_ms
+      )
+
+  @tag :tmp_dir
   test "returns accumulated child stderr with a captured exchange", %{tmp_dir: tmp_dir} do
     transport = start_transport(tmp_dir)
     port = safe_state(transport.pid).port
@@ -449,15 +529,19 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     assert :ok = MCPStdioTransport.close(transport)
   end
 
-  for phase <- [:queued, :writing, :sent], event <- [:cancel, :death, :expiry] do
+  for phase <- [:queued, :writing, :sent],
+      event <- [:cancel, :death, :expiry],
+      serving_mode <- [false, true] do
     @tag :tmp_dir
-    test "#{event} of a #{phase} caller preserves another in-flight request", %{tmp_dir: tmp_dir} do
-      assert_shared_detachment(tmp_dir, unquote(phase), unquote(event))
+    test "#{event} of a #{phase} caller preserves another request (serving: #{serving_mode})", %{
+      tmp_dir: tmp_dir
+    } do
+      assert_shared_detachment(tmp_dir, unquote(phase), unquote(event), unquote(serving_mode))
     end
   end
 
-  defp assert_shared_detachment(tmp_dir, phase, event) do
-    transport = start_test_launcher(tmp_dir, "fake-manual-ack")
+  defp assert_shared_detachment(tmp_dir, phase, event, serving_mode) do
+    transport = start_test_launcher(tmp_dir, "fake-manual-ack", serving_mode: serving_mode)
     other = Task.async(fn -> request(transport, "other") end)
     assert_eventually(fn -> unacknowledged_request?(transport) end)
     other_id = acknowledge_write(transport)
@@ -470,7 +554,13 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
       end
 
     target_handle = MCPStdioTransport.with_borrow(transport, MCPBorrowToken.new())
-    target = Task.async(fn -> request(target_handle, "target") end)
+
+    target =
+      Task.async(fn ->
+        if serving_mode,
+          do: exchange(target_handle, "target", "trace"),
+          else: request(target_handle, "target")
+      end)
 
     assert_eventually(fn ->
       Enum.any?(safe_state(transport.pid).pending, fn {_id, entry} ->
@@ -1050,7 +1140,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     :ok
   end
 
-  defp start_test_launcher(tmp_dir, mode) do
+  defp start_test_launcher(tmp_dir, mode, opts \\ []) do
     launcher = Path.join(tmp_dir, "mcp-stdio-test-launcher")
     interpreter = System.find_executable("elixir")
 
@@ -1071,6 +1161,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
       |> MCPStdioTransportHelpers.launch_options()
       |> Keyword.put(:launcher, launcher)
       |> Keyword.put(:args, [mode])
+      |> Keyword.merge(opts)
 
     assert {:ok, transport} = MCPStdioTransport.start(options)
     transport

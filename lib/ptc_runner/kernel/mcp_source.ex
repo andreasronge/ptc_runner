@@ -15,8 +15,11 @@ defmodule PtcRunner.Kernel.MCPSource do
   trace and capability-attempt identities. When private inspection is
   explicitly enabled, version 2 inspection records retain paired exact decoded
   JSON-RPC request and response bodies correlated to that attempt. Stdio
-  sessions also retain bounded child-stderr records on that same correlation;
-  captured stdio exchanges are serialized so those bytes belong to one request.
+  per-run sessions also retain bounded child-stderr records on that same
+  correlation; captured per-run exchanges are serialized so those bytes belong
+  to one request. Serving transports capture concurrent exchanges independently
+  by request id and never include shared stderr in call inspection. Stderr stays
+  in a bounded per-transport buffer available through the cleanup snapshot.
   A launcher truncation frame marks the capture `truncated`. Those bytes can
   name host paths, so they stay owner-only. Transport
   credentials and environment values are never part of those bodies or
@@ -394,7 +397,8 @@ defmodule PtcRunner.Kernel.MCPSource do
   defp installed_transport({:stdio, opts}) when is_list(opts) do
     with true <- Keyword.keyword?(opts),
          true <- Enum.uniq(Keyword.keys(opts)) == Keyword.keys(opts),
-         true <- :launcher_protocol_version not in Keyword.keys(opts),
+         true <-
+           Enum.all?([:launcher_protocol_version, :serving_mode], &(&1 not in Keyword.keys(opts))),
          {:ok, opts} <- freeze_launcher_override(opts),
          validation_options =
            opts
@@ -654,6 +658,7 @@ defmodule PtcRunner.Kernel.MCPSource do
          options =
            options
            |> Keyword.put(:write_timeout_ms, selected.timeout_ms)
+           |> Keyword.put(:serving_mode, Map.get(context, :serving_mode, false))
            |> Keyword.put(:launcher, staged.path)
            |> Keyword.put(:launcher_protocol_version, MCPLauncher.protocol_version())
            |> Keyword.update(

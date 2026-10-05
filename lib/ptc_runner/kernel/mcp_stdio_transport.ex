@@ -209,6 +209,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
          port: port,
          owner_ref: owner_ref,
          write_timeout_ms: config.write_timeout_ms,
+         serving_mode: config.serving_mode,
          next_id: 1,
          next_ack_id: 1,
          settlement: MCPSettlement.new(),
@@ -494,10 +495,12 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
       :grace_ms,
       :stderr_bytes,
       :start_timeout_ms,
-      :write_timeout_ms
+      :write_timeout_ms,
+      :serving_mode
     ]
 
     with true <- Keyword.keyword?(opts),
+         serving_mode when is_boolean(serving_mode) <- Keyword.get(opts, :serving_mode, false),
          keys = Keyword.keys(opts),
          true <- keys -- allowed == [] and Enum.uniq(keys) == keys,
          launcher when is_binary(launcher) <- Keyword.get(opts, :launcher),
@@ -539,7 +542,8 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
          grace_ms: grace_ms,
          stderr_bytes: stderr_bytes,
          start_timeout_ms: start_timeout_ms,
-         write_timeout_ms: write_timeout_ms
+         write_timeout_ms: write_timeout_ms,
+         serving_mode: serving_mode
        }}
     else
       _reason -> {:error, :invalid_mcp_stdio_launch}
@@ -864,7 +868,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
               {{:error, :mcp_response_exceeded}, state}
 
             pending.exchange? ->
-              {stderr, truncated?, state} = drain_stderr(state)
+              {stderr, truncated?, state} = exchange_stderr(state)
 
               {{:ok,
                 %{
@@ -1222,6 +1226,9 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     ArgumentError -> state
   end
 
+  defp exchange_stderr(%{serving_mode: true} = state), do: {"", false, state}
+  defp exchange_stderr(state), do: drain_stderr(state)
+
   defp drain_stderr(%{stderr_truncated?: true} = state) do
     text = Utf8.sanitize(state.stderr)
 
@@ -1257,7 +1264,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
       {caller, _tag} = from
       monitor = Process.monitor(caller)
       timer = Process.send_after(self(), {:request_timeout, id}, remaining)
-      deferred? = exchange? and exchange_in_flight?(state)
+      deferred? = exchange? and not state.serving_mode and exchange_in_flight?(state)
 
       pending = %{
         borrow_token: state.admission_token,
@@ -1297,6 +1304,8 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   defp exchange_in_flight?(state) do
     Enum.any?(state.pending, fn {_id, pending} -> pending.exchange? and not pending.deferred? end)
   end
+
+  defp start_next_exchange(%{serving_mode: true} = state), do: state
 
   defp start_next_exchange(state) do
     if exchange_in_flight?(state) do
