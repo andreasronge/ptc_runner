@@ -296,18 +296,38 @@ defmodule PtcGateway.EventLogTest do
   } do
     script = Path.expand("../../test/support/mcp_stdio_source_fixture.sh", __DIR__)
 
+    stderr = "EARLY_STDERR_SENTINEL " <> String.duplicate("x", 10_000)
+    wrapper = Path.join(dir, "server.sh")
+
+    File.write!(
+      wrapper,
+      "#!/bin/sh\nprintf '%s' '#{stderr}' >&2\nexec /bin/sh '#{script}' \"$@\"\n"
+    )
+
     transport = %{
       "type" => "stdio",
       "command" => "/bin/sh",
-      "args" => [script, Path.join(dir, "marker")]
+      "args" => [wrapper, Path.join(dir, "marker")]
     }
 
     {path, config} = mcp_fixture(dir, transport, upstream_tool: "structured")
-    config = with_events(path, config)
+
+    config =
+      with_events(path, config, %{
+        "max_file_bytes" => 65_536,
+        "max_retained_files" => 10,
+        "stderr" => true
+      })
+
     assert {:ok, gateway} = PtcGateway.start_link(path)
     on_exit(fn -> stop(gateway) end)
     runtime = :sys.get_state(:sys.get_state(gateway).warm).runtimes["a"]
     [handle] = :sys.get_state(runtime).opened.providers.mcp_transports
+
+    Eventually.assert_eventually(fn ->
+      PtcRunner.Kernel.MCPStdioTransport.cleanup_snapshot(handle)[:stderr] == stderr
+    end)
+
     send(handle.pid, :close_timeout)
 
     Eventually.assert_eventually(fn ->
@@ -317,6 +337,15 @@ defmodule PtcGateway.EventLogTest do
     assert Enum.any?(records(dir), fn record ->
              record["kind"] == "transport" and record["fault"] == "close_timeout" and
                record["tool"] == "a" and record["provider"] == "remote"
+           end)
+
+    Eventually.assert_eventually(fn ->
+      Enum.any?(records(dir), &(&1["kind"] == "stderr_tail"))
+    end)
+
+    assert Enum.any?(records(dir), fn record ->
+             record["kind"] == "stderr_tail" and record["text"] == stderr and
+               record["truncated"] == false
            end)
 
     assert response(config, "/health/ready").body == %{"status" => "not_ready"}

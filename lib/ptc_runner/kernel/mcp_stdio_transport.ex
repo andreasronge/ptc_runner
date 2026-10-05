@@ -92,7 +92,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
 
     cleanup_snapshot(handle)
     |> Map.merge(finish)
-    |> Map.merge(cleanup)
+    |> Map.merge(Map.take(cleanup, [:finish_reason, :exit_status]))
     |> Map.put(:failed?, outcome_status(outcome) == @outcome_failed)
   rescue
     ArgumentError -> %{}

@@ -291,7 +291,8 @@ the sequence is a 20-digit increasing number. Rotation opens a new file and
 removes the oldest closed files to enforce retention, including across restarts.
 A record never crosses files or exceeds the configured file bound. Transport
 faults retain recorded cleanup failures even when the transport process exits
-normally; an unclassified failed cleanup is `transport_error`.
+normally; an unclassified failed cleanup is `transport_error`. Cleanup diagnostics
+do not shorten the captured per-transport stderr buffer.
 
 Each line is an object with `kind` and an ISO 8601 UTC `timestamp`.
 The following fields complete each record:
