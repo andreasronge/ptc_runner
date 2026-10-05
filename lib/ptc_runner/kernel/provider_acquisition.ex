@@ -146,7 +146,14 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
          {:ok, occurrences} <- sealed_occurrences(prepared, catalog),
          {:ok, closure} <- sealed_closure(occurrences, targets, prepared, catalog),
          {:ok, preparations} <-
-           prepare_providers(package, registry, session, max_heap_words, closure),
+           prepare_providers(
+             package,
+             registry,
+             session,
+             max_heap_words,
+             closure,
+             match?(%PtcRunner.Kernel.ServingRequest{}, prepared.request)
+           ),
          :ok <- declarations_honored(preparations, closure, session) do
       complete_acquisition(
         preparations,
@@ -438,7 +445,14 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
 
   defp sort_snapshots(snapshots), do: Enum.sort_by(snapshots, &Map.get(&1, "provider", ""))
 
-  defp prepare_providers(package, registry, session, max_heap_words, closure) do
+  defp prepare_providers(
+         package,
+         registry,
+         session,
+         max_heap_words,
+         closure,
+         serving_mode \\ false
+       ) do
     package
     |> provider_specs()
     |> selected_specs(closure)
@@ -452,7 +466,8 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
             registrar,
             {destination, spec, index},
             preparations,
-            max_heap_words
+            max_heap_words,
+            serving_mode
           )
 
         # Past the operation deadline the session refuses to open a scope. That
@@ -472,7 +487,8 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
          registrar,
          {destination, spec, index},
          preparations,
-         max_heap_words
+         max_heap_words,
+         serving_mode
        ) do
     context =
       session
@@ -480,6 +496,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
       |> Map.merge(%{
         application_content_digest: package.application_content_digest,
         destination: destination,
+        serving_mode: serving_mode,
         owner: ResourceRegistrar.owner(registrar),
         resource_registrar: registrar,
         limits: package.limits,

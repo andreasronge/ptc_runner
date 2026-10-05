@@ -32,6 +32,10 @@ defmodule PtcRunner.TestSupport.MCPStdioFixture do
     |> System.halt()
   end
 
+  def main([marker, "mcp-serving"]) do
+    marker |> mcp_loop(:serving) |> System.halt()
+  end
+
   def main([marker, "mcp-unicode"]) do
     marker
     |> mcp_loop(:valid)
@@ -72,6 +76,33 @@ defmodule PtcRunner.TestSupport.MCPStdioFixture do
       :stdio,
       ~s({"jsonrpc":"2.0","id":#{id},"result":{"resultType":"complete","supportedVersions":["2026-07-28"],"capabilities":{"tools":{}},"_meta":{"io.modelcontextprotocol/serverInfo":{"name":"unicode-fixture","version":"1.0"}},"ttlMs":0,"cacheScope":"private"}}\n)
     )
+  end
+
+  defp handle_mcp_request(id, "tools/list", _marker, :serving) do
+    IO.write(
+      :stdio,
+      ~s({"jsonrpc":"2.0","id":#{id},"result":{"resultType":"complete","tools":[{"name":"echo","inputSchema":{"type":"object","properties":{"query":{"type":"string"}}}}],"ttlMs":0,"cacheScope":"private"}}\n)
+    )
+  end
+
+  defp handle_mcp_request(id, "tools/call", marker, :serving) do
+    IO.write(:stderr, "private upstream sentinel\n")
+    File.write!(marker, "tools/call\n", [:append])
+
+    case Process.get(:first_call) do
+      nil ->
+        Process.put(:first_call, id)
+
+      first ->
+        for {request_id, query} <- [{id, "two"}, {first, "one"}] do
+          IO.write(
+            :stdio,
+            ~s({"jsonrpc":"2.0","id":#{request_id},"result":{"resultType":"complete","content":[{"type":"text","text":"#{query}"}]}}\n)
+          )
+        end
+
+        Process.delete(:first_call)
+    end
   end
 
   defp handle_mcp_request(id, "tools/list", marker, :valid) when is_integer(id) do

@@ -2,11 +2,100 @@ defmodule PtcRunner.Kernel.WarmMCPTest do
   use ExUnit.Case, async: false
   import ExUnit.CaptureIO
   alias PtcRunner.Kernel.{MCPRequestContext, ProviderRuntime}
-  alias PtcRunner.TestSupport.{Eventually, MCPTLSProxy, WarmMCPFixture}
+  alias PtcRunner.TestSupport.{Eventually, MCPTLSProxy, StreamingInspection, WarmMCPFixture}
 
   setup do
     Process.flag(:trap_exit, true)
     :ok
+  end
+
+  @tag :tmp_dir
+  test "warm stdio captures concurrent calls into distinct sinks without stderr", %{tmp_dir: dir} do
+    executable = System.find_executable("elixir")
+    marker = Path.join(dir, "calls")
+
+    transport = %{
+      "type" => "stdio",
+      "command" => executable,
+      "cwd" => dir,
+      "args" => [
+        Path.expand("../../support/mcp_stdio_fixture.exs", __DIR__),
+        marker,
+        "mcp-serving"
+      ],
+      "stderr_bytes" => 8
+    }
+
+    {template, services} = WarmMCPFixture.application(dir, transport)
+    pins = WarmMCPFixture.pins(template, services)
+
+    {:ok, runtime} =
+      ProviderRuntime.start_link(
+        template: template,
+        services: services,
+        pins: %{
+          installation_config_pins: pins["installation_config_pins"],
+          provider_snapshot_pins: pins["provider_snapshot_pins"]
+        }
+      )
+
+    on_exit(fn -> if Process.alive?(runtime), do: GenServer.stop(runtime) end)
+
+    sinks =
+      for name <- ["one", "two"] do
+        {:ok, sink} =
+          StreamingInspection.start(run_id: name, trace_id: name)
+
+        sink
+      end
+
+    call = fn query, sink ->
+      Task.async(fn ->
+        {:ok, borrow} = ProviderRuntime.borrow(runtime, deadline())
+        [capability] = borrow.providers.mission.capabilities
+
+        result =
+          capability.callback.(%{"query" => query}, %{
+            inspection_sink: sink,
+            traceparent: traceparent(query),
+            capability_id: "remote.echo"
+          })
+
+        assert :ok = ProviderRuntime.return(borrow)
+        result
+      end)
+    end
+
+    [first_sink, second_sink] = sinks
+    first = call.("one", first_sink)
+
+    Eventually.assert_eventually(fn ->
+      case File.read(marker) do
+        {:ok, bytes} -> String.contains?(bytes, "tools/call")
+        _ -> false
+      end
+    end)
+
+    second = call.("two", second_sink)
+    assert {:ok, %{"text" => ["two"]}} = Task.await(second, 15_000)
+    assert {:ok, %{"text" => ["one"]}} = Task.await(first, 15_000)
+
+    for {sink, query} <- Enum.zip(sinks, ["one", "two"]) do
+      assert {:ok, records} = StreamingInspection.records(sink)
+      assert Enum.map(records, & &1["record_type"]) == ["mcp-request", "mcp-response"]
+      [request, response] = records
+      assert request["correlation"] == response["correlation"]
+      assert request["payload"]["body"]["params"]["_meta"]["traceparent"] == traceparent(query)
+      assert request["payload"]["body"]["params"]["arguments"]["query"] == query
+
+      assert response["payload"]["body"]["result"]["content"] == [
+               %{"type" => "text", "text" => query}
+             ]
+
+      refute inspect(records) =~ "sentinel"
+    end
+
+    assert :ok = ProviderRuntime.drain(runtime, deadline())
   end
 
   @tag :tmp_dir
@@ -214,6 +303,11 @@ defmodule PtcRunner.Kernel.WarmMCPTest do
 
     on_exit(fn -> if Process.alive?(runtime), do: GenServer.stop(runtime) end)
     {runtime, template, server}
+  end
+
+  defp traceparent(query) do
+    digit = if query == "one", do: "1", else: "2"
+    "00-" <> String.duplicate(digit, 32) <> "-" <> String.duplicate(digit, 16) <> "-01"
   end
 
   defp deadline, do: System.monotonic_time(:millisecond) + 10_000

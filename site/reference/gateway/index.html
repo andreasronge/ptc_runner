@@ -128,7 +128,12 @@ leak between calls. The server must honor cancellation notifications; remote
 work that ignores cancellation may outlive an abandoned call. Each acquisition
 has a fixed bound of 128 in-flight requests, including detached requests still
 settling. The bound is not configurable. Capacity refusal is
-<code class="inline">mcp_transport_busy</code>, occurs before dispatch, and is retryable.</p><p>Selected OAuth installations and workflow <code class="inline">catalog: true</code> selections are
+<code class="inline">mcp_transport_busy</code>, occurs before dispatch, and is retryable.</p><p>With inspection enabled, shared stdio calls capture request and response bodies
+independently by request id, with each call's trace context and byte ceiling.
+Inspection uses the same in-flight cap, caller monitoring, and original deadline
+as ordinary requests, including time spent queued. Shared server stderr is
+retained in a bounded per-transport buffer and never enters a call's inspection
+record. Per-run stdio acquisitions retain their serialized stderr attribution.</p><p>Selected OAuth installations and workflow <code class="inline">catalog: true</code> selections are
 refused with <code class="inline">provider_source_unsupported</code> during tool construction, before
 credential capture, OAuth store access, or upstream acquisition. Unselected
 OAuth installations in the host document are ignored.</p><p>Transport-owner loss permanently fences readiness for the entire warm gateway

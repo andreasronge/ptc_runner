@@ -295,7 +295,7 @@ inspection then keeps arguments and requests but stores deterministic JSON
 identity metadata in place of responses and results the transport accepted. A
 response the transport rejects -- an MCP error, an `isError` result, or one
 that is oversized or malformed -- keeps its body, as do capability error
-envelopes, capability exceptions, and MCP stderr within `stderr_bytes`. A
+envelopes, capability exceptions, and per-run stdio stderr within `stderr_bytes`. A
 result rejected after that point -- tool-result normalization, retained-size
 admission, output validation -- keeps its full error envelope while the wire
 body remains an identity; the mapping is a read, so rerunning with full

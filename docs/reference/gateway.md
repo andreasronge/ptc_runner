@@ -93,6 +93,13 @@ has a fixed bound of 128 in-flight requests, including detached requests still
 settling. The bound is not configurable. Capacity refusal is
 `mcp_transport_busy`, occurs before dispatch, and is retryable.
 
+With inspection enabled, shared stdio calls capture request and response bodies
+independently by request id, with each call's trace context and byte ceiling.
+Inspection uses the same in-flight cap, caller monitoring, and original deadline
+as ordinary requests, including time spent queued. Shared server stderr is
+retained in a bounded per-transport buffer and never enters a call's inspection
+record. Per-run stdio acquisitions retain their serialized stderr attribution.
+
 Selected OAuth installations and workflow `catalog: true` selections are
 refused with `provider_source_unsupported` during tool construction, before
 credential capture, OAuth store access, or upstream acquisition. Unselected

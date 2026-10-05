@@ -98,6 +98,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           optional(:deadline) => Deadline.t(),
           optional(:deadline_ms) => integer(),
           optional(:resource_registrar) => ResourceRegistrar.t(),
+          optional(:serving_mode) => boolean(),
           application_content_digest: binary(),
           destination: :workflow | :mission,
           owner: pid(),
@@ -108,6 +109,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           optional(:deadline) => Deadline.t(),
           optional(:deadline_ms) => integer(),
           optional(:resource_registrar) => ResourceRegistrar.t(),
+          optional(:serving_mode) => boolean(),
           application_content_digest: binary(),
           destination: :workflow | :mission,
           owner: pid(),
@@ -371,6 +373,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
          context.application_content_digest =~ @application_content_digest and
          context.destination in [:workflow, :mission] and
          is_pid(context.owner) and
+         is_boolean(Map.get(context, :serving_mode, false)) and
          valid_context_deadline?(context) and
          valid_resource_registrar?(context) and
          match?(%Limits{}, context.limits) and
@@ -384,7 +387,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   defp validate_build_context(_context), do: {:error, :invalid_provider_context}
 
   defp valid_build_context_keys?(context) do
-    keys = Enum.sort(Map.keys(context))
+    keys = context |> Map.delete(:serving_mode) |> Map.keys() |> Enum.sort()
 
     Enum.any?(
       [
