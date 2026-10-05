@@ -106,15 +106,19 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
 
   def from_host_payload(_payload, _opts), do: {:error, :invalid_provider_runtime_services}
 
-  @doc "Replaces live credential lookup with a captured owner and one host admission domain."
-  @spec with_captured_credentials(t(), pid(), ProviderCallAdmission.t()) ::
+  @doc """
+  Replaces live credential lookup with a captured owner. Supplying admission
+  selects host-owned application mode; `nil` preserves the input mode for a
+  one-shot command without an admission domain.
+  """
+  @spec with_captured_credentials(t(), pid(), ProviderCallAdmission.t() | nil) ::
           {:ok, t()} | {:error, :invalid_provider_runtime_services}
   def with_captured_credentials(%__MODULE__{} = services, credentials, admission) do
     if valid?(services) and CapturedCredentials.ready?(credentials) do
       build(
         services.activation,
         fn names -> CapturedCredentials.resolve(credentials, names) end,
-        :host_owned,
+        if(is_nil(admission), do: services.provider_application_mode, else: :host_owned),
         services.oauth_mode,
         admission,
         services.runtime_binding,

@@ -62,15 +62,8 @@ defmodule PtcRunner.TestSupport.WarmMCPFixture do
     do: %{"type" => "streamable_http", "endpoint" => endpoint, "allow_insecure_loopback" => true}
 
   def pins(template, services) do
-    output =
-      ExUnit.CaptureIO.capture_io(fn ->
-        {:ok, runtime} =
-          ProviderRuntime.start_link(template: template, services: services, pins: :discover)
-
-        GenServer.stop(runtime)
-      end)
-
-    Jason.decode!(output)
+    {:ok, pins} = ProviderRuntime.discover(template, services)
+    Map.new(pins, fn {key, value} -> {Atom.to_string(key), value} end)
   end
 
   def application(dir, transport, opts \\ []) do

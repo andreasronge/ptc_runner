@@ -9,8 +9,9 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   retain nothing. Closed pin failures are `:installation_pin_mismatch`,
   `:provider_pin_mismatch` and `:provider_pin_unavailable`.
 
-  `pins: :discover` performs real acquisition, prints the two safe pin maps and
-  closes the resources; it never becomes ready. Borrowing takes an absolute
+  `pins: :discover` performs real acquisition, retains the two safe pin maps and
+  closes the resources; it never becomes ready. `discover/2` returns those maps
+  and stops the discovery owner without printing. Borrowing takes an absolute
   monotonic admission deadline, creates a caller-monitored non-owning token,
   and shares only capabilities. Return the token after execution; caller exit
   also seals and settles it. An executing borrow remains counted against its execution
@@ -35,7 +36,6 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   use GenServer
   use PtcRunner.Kernel.OwnerStatusRedaction
 
-  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.InstallationConfigDigest
   alias PtcRunner.Kernel.MCPBorrowToken
   alias PtcRunner.Kernel.MCPWarmAcquisition
@@ -246,23 +246,35 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   end
 
   defp discover_closed(actual, prepared) do
-    {:ok, encoded} =
-      DeterministicJSON.encode(%{
-        "installation_config_pins" => actual.installation_config_pins,
-        "provider_snapshot_pins" => actual.provider_snapshot_pins
-      })
-
-    IO.puts(encoded)
-
     {:ok,
      %{
        status: {:not_ready, :provider_runtime_required},
+       discovered_pins: actual,
        opened: nil,
        borrows: %{},
        monitors: [],
        draining: nil,
        identity: plan_identity(prepared)
      }}
+  end
+
+  @doc "Acquires and closes a template, returning safe pin maps without printing."
+  @spec discover(ServingTemplate.t(), ProviderRuntimeServices.t()) ::
+          {:ok, map()} | {:error, term()}
+  def discover(template, services) do
+    # Discovery retains no live acquisition. An initialization refusal must
+    # return data rather than send a linked exit to the command caller.
+    case GenServer.start(__MODULE__, template: template, services: services, pins: :discover) do
+      {:ok, runtime} ->
+        try do
+          {:ok, GenServer.call(runtime, :discovered_pins)}
+        after
+          GenServer.stop(runtime)
+        end
+
+      error ->
+        error
+    end
   end
 
   defp registry_monitor(registry) do
@@ -316,6 +328,9 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   end
 
   @impl true
+  def handle_call(:discovered_pins, _from, state),
+    do: {:reply, Map.fetch!(state, :discovered_pins), state}
+
   def handle_call(:status, _from, state), do: {:reply, state.status, state}
 
   def handle_call({:matches_template, identity}, _from, state),

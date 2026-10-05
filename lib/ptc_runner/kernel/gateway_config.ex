@@ -4,7 +4,8 @@ defmodule PtcRunner.Kernel.GatewayConfig do
 
   `schema/0` owns the generated gateway schema. `load/1` rejects duplicate and
   unknown keys, validates structural bounds, then semantic origin, name and
-  audit rules. Paths are anchored to the gateway document directory; nested
+  audit rules. `load/2` in `:discover` mode permits absent pin fields while
+  retaining their structural validation. Paths are anchored to the gateway document directory; nested
   host paths remain owned by the host loader. No credentials are read here.
   """
   alias PtcRunner.Kernel.{ConfinedFile, SchemaViolation, StrictJSON}
@@ -15,12 +16,16 @@ defmodule PtcRunner.Kernel.GatewayConfig do
   @digest "^sha256:[0-9a-f]{64}$"
 
   @spec load(binary()) :: {:ok, map()} | {:error, atom()}
-  def load(path) when is_binary(path) do
+  def load(path), do: load(path, :serve)
+
+  @doc "Loads discovery configuration with optional, structurally validated pin fields."
+  @spec load(binary(), :serve | :discover) :: {:ok, map()} | {:error, atom()}
+  def load(path, mode) when is_binary(path) and mode in [:serve, :discover] do
     path = Path.expand(path)
 
     with {:ok, bytes} <- ConfinedFile.read(Path.dirname(path), Path.basename(path), @max_bytes),
          {:ok, value} <- StrictJSON.decode(bytes),
-         :ok <- structural(value),
+         :ok <- structural(value, mode),
          :ok <- semantics(value) do
       {:ok, anchor(value, Path.dirname(path))}
     else
@@ -36,13 +41,24 @@ defmodule PtcRunner.Kernel.GatewayConfig do
     end
   end
 
-  def load(_), do: {:error, :config_unavailable}
+  def load(_, _), do: {:error, :config_unavailable}
 
-  defp structural(value) do
-    case SchemaViolation.validate(value, schema()) do
-      :ok -> if byte_bounds?(value, schema()), do: :ok, else: {:error, :config_invalid}
+  defp structural(value, mode) do
+    schema = validation_schema(mode)
+
+    case SchemaViolation.validate(value, schema) do
+      :ok -> if byte_bounds?(value, schema), do: :ok, else: {:error, :config_invalid}
       _ -> {:error, :config_invalid}
     end
+  end
+
+  defp validation_schema(:serve), do: schema()
+
+  defp validation_schema(:discover) do
+    update_in(schema(), ["properties", "tools", "items", "required"], fn required ->
+      required --
+        ~w(expected_application_content_digest installation_config_pins provider_snapshot_pins)
+    end)
   end
 
   defp byte_bounds?(value, schema) when is_binary(value),
