@@ -109,6 +109,50 @@ defmodule PtcGateway.TestSupport.GatewayFixture do
     {path, config}
   end
 
+  @doc "A pinned deployment selecting a shared MCP acquisition per tool."
+  def mcp_fixture(dir, transport, opts \\ []) do
+    {path, config} = fixture(dir, :write)
+
+    schema = %{
+      "type" => "object",
+      "properties" => %{
+        "program" => %{"type" => "string"},
+        "text" => %{"type" => "array", "items" => %{"type" => "string"}},
+        "value" => %{"type" => "integer"}
+      }
+    }
+
+    {template, services} =
+      PtcRunner.TestSupport.WarmMCPFixture.application(
+        dir,
+        transport,
+        [
+          schema: schema,
+          source:
+            ~S|(ns app) (defn run {:effect :write :requires ["tool:kernel-eval"]} [input] (return (get-in (tool/kernel-eval {"mission" "default" "kind" :source "source" (get input "program")}) [:value :value :value])))|
+        ] ++ opts
+      )
+
+    pins = PtcRunner.TestSupport.WarmMCPFixture.pins(template, services)
+
+    config =
+      config
+      |> with_write_audit()
+      |> update_in(["tools"], fn tools ->
+        Enum.map(tools, fn tool ->
+          tool
+          |> Map.merge(pins)
+          |> Map.put(
+            "expected_application_content_digest",
+            ServingTemplate.application_content_digest(template)
+          )
+        end)
+      end)
+
+    File.write!(path, Jason.encode!(config))
+    {path, config}
+  end
+
   @doc "One HTTP request against the fixture's listener. `opts` are `Req.request!/1` options."
   def response(config, path, opts \\ []) do
     Req.request!(

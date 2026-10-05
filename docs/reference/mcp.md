@@ -23,6 +23,10 @@ Node.js.
 
 ## Concurrent requests and cleanup
 
+When serving through the gateway, acquisitions are shared per served tool.
+See [shared MCP providers](gateway.md#shared-mcp-providers) for trusted-server
+requirements, OAuth and workflow catalog refusal, and readiness loss fencing.
+
 Each acquired MCP transport admits at most 128 in-flight requests, for both
 stdio and HTTP. A full transport refuses a request before writing any bytes
 with `mcp_transport_busy`. This refusal is retryable for both read and write

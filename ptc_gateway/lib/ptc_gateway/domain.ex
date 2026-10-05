@@ -211,6 +211,9 @@ defmodule PtcGateway.Domain do
       {:error, %{code: :application_content_digest_mismatch}} ->
         {:error, :application_content_digest_mismatch}
 
+      {:error, :provider_runtime_unsupported} ->
+        {:error, :provider_source_unsupported}
+
       {:error, :application_content_digest_mismatch} ->
         {:error, :application_content_digest_mismatch}
 

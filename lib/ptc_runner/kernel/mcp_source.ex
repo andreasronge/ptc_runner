@@ -65,6 +65,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   alias PtcRunner.Kernel.MCPRequestContext
   alias PtcRunner.Kernel.MCPStdioTransport
   alias PtcRunner.Kernel.MCPTransportReason
+  alias PtcRunner.Kernel.MCPWarmAcquisition
   alias PtcRunner.Kernel.ModelCapabilities
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderRegistry
@@ -545,6 +546,7 @@ defmodule PtcRunner.Kernel.MCPSource do
            %{
              capabilities: capabilities,
              snapshot: snapshot,
+             mcp_transport: transport.handle,
              cleanup_context: cleanup_context(installed.transport),
              cleanup_snapshot: fn -> cleanup_snapshot(transport) end,
              close: fn -> settle_and_close_transport(transport, context) end
@@ -1216,6 +1218,8 @@ defmodule PtcRunner.Kernel.MCPSource do
          selected
        ) do
     fn arguments, context ->
+      transport = MCPWarmAcquisition.bind_transport(transport, context)
+
       case invocation_rpc(
              transport,
              "tools/call",

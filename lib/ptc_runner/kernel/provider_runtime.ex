@@ -2,8 +2,8 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   @moduledoc """
   Host-owned acquire-once runtime for a provider-bearing serving template.
 
-  Start with `template:`, `services:` and `pins:` only. Chat and decision installations
-  are shareable (`:provider_runtime_unsupported` otherwise). Acquisition uses
+  Start with `template:`, `services:` and `pins:` only. Chat, decision and
+  non-OAuth mission MCP installations are shareable (`:provider_runtime_unsupported` otherwise). Acquisition uses
   the active provider pipeline. Exact installation pins and destination/name
   snapshot pins are checked before readiness; failures close everything and
   retain nothing. Closed pin failures are `:installation_pin_mismatch`,
@@ -13,7 +13,7 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   closes the resources; it never becomes ready. Borrowing takes an absolute
   monotonic admission deadline, creates a caller-monitored non-owning token,
   and shares only capabilities. Return the token after execution; caller exit
-  also returns it. An executing borrow remains counted against its execution
+  also seals and settles it. An executing borrow remains counted against its execution
   owner until per-call task cleanup settles, including cancellation and caller
   death. A return during execution cannot release it early. Draining refuses
   new borrows, waits until the supplied
@@ -26,7 +26,7 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   `:provider_runtime_lost`. Cleanup failure is `:provider_cleanup_failed` and
   outranks an earlier acquisition or pin refusal.
 
-  Session or registry authority loss permanently marks readiness
+  Session, registry authority or MCP transport-owner loss permanently marks readiness
   `{:not_ready, :provider_runtime_lost}`. There is no reacquisition or re-pin.
   ServingCall borrows this acquisition with its reservation deadline.
   WarmProviderRuntime owns captured credentials, provider applications and
@@ -37,6 +37,8 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
 
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.InstallationConfigDigest
+  alias PtcRunner.Kernel.MCPBorrowToken
+  alias PtcRunner.Kernel.MCPWarmAcquisition
   alias PtcRunner.Kernel.ProviderRuntimeOpening
 
   alias PtcRunner.Kernel.{
@@ -77,13 +79,17 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   def borrow(_runtime, _deadline), do: {:error, :invalid_provider_runtime}
   @spec return(Borrow.t()) :: :ok | {:error, atom()}
   def return(%Borrow{caller: caller} = borrow) when caller == self(),
-    do: safe_call(borrow.runtime, {:return, borrow}, {:error, :provider_runtime_lost})
+    do: safe_call(borrow.runtime, {:return, borrow}, {:error, :provider_runtime_lost}, :infinity)
 
   def return(_borrow), do: {:error, :invalid_provider_runtime}
   @doc false
   @spec release_borrow(Borrow.t()) :: :ok | {:error, atom()}
   def release_borrow(%Borrow{} = borrow),
-    do: safe_call(borrow.runtime, {:release, borrow}, {:error, :provider_runtime_lost})
+    do: safe_call(borrow.runtime, {:release, borrow}, {:error, :provider_runtime_lost}, :infinity)
+
+  @doc false
+  def settle_borrow(%Borrow{} = borrow),
+    do: safe_call(borrow.runtime, {:settle, borrow}, {:error, :provider_runtime_lost}, :infinity)
 
   @doc false
   def hold_borrow(%Borrow{} = borrow),
@@ -173,14 +179,21 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
     _kind, _reason -> {:stop, :invalid_provider_runtime}
   end
 
-  defp supported(retained) do
-    if Enum.all?(retained.metadata.provider_declarations, fn declaration ->
-         retained.catalog.descriptors[declaration.name].source in [
-           :llm,
-           :decision,
-           :decision_replay
-         ]
-       end), do: :ok, else: {:error, :provider_runtime_unsupported}
+  @doc false
+  def supported(retained) do
+    if Enum.all?(
+         retained.metadata.provider_declarations,
+         &supported_source?(&1, retained.catalog)
+       ),
+       do: :ok,
+       else: {:error, :provider_runtime_unsupported}
+  end
+
+  defp supported_source?(declaration, catalog) do
+    source = catalog.descriptors[declaration.name].source
+
+    source in [:llm, :decision, :decision_replay, :mcp] and
+      MCPWarmAcquisition.supported?(declaration, catalog)
   end
 
   defp open(prepared, execution, pins) do
@@ -200,7 +213,7 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
           {:ok, _actual} ->
             monitors = [
               Process.monitor(ProviderSession.worker_cancel_target(opened.session))
-              | registry_monitor(opened.registry)
+              | registry_monitor(opened.registry) ++ MCPWarmAcquisition.monitors(opened.providers)
             ]
 
             {:ok,
@@ -211,6 +224,7 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
                monitors: monitors,
                draining: nil,
                execution: execution,
+               cleanup_timeout_ms: prepared.request.package.limits.provider_cleanup_timeout_ms,
                identity: plan_identity(prepared)
              }}
 
@@ -321,12 +335,15 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
       {:ok, session} ->
         monitor = Process.monitor(caller)
 
+        token = MCPBorrowToken.new()
+
         borrow = %Borrow{
           runtime: self(),
           caller: caller,
           monitor: monitor,
           session: session,
-          providers: state.opened.providers,
+          providers: MCPWarmAcquisition.bind(state.opened.providers, token),
+          mcp_token: token,
           registry: state.opened.registry,
           plan_identity: state.identity,
           execution: state.execution,
@@ -339,7 +356,15 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
               Attestation.attest(Borrow, Map.delete(Map.from_struct(borrow), :attestation))
         }
 
-        {:reply, {:ok, borrow}, put_in(state.borrows[monitor], %{caller: caller, owner: nil})}
+        {:reply, {:ok, borrow},
+         put_in(state.borrows[monitor], %{
+           caller: caller,
+           owner: nil,
+           token: token,
+           settling: nil,
+           waiters: [],
+           release?: false
+         })}
 
       _lost ->
         {:reply, {:error, :provider_runtime_lost},
@@ -350,15 +375,23 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   def handle_call({:borrow, _deadline}, _from, state),
     do: {:reply, {:error, :provider_runtime_unavailable}, state}
 
-  def handle_call({:return, %Borrow{caller: caller} = borrow}, {caller, _tag}, state) do
-    release(borrow, state, caller)
+  def handle_call({:return, %Borrow{caller: caller} = borrow}, {caller, tag}, state) do
+    release(borrow, state, {caller, tag})
   end
 
-  def handle_call({:release, borrow}, from, state), do: release(borrow, state, elem(from, 0))
+  def handle_call({:release, borrow}, from, state), do: release(borrow, state, from)
+
+  def handle_call({:settle, borrow}, {owner, _} = from, state) do
+    if valid_token?(borrow) and match?(%{owner: {^owner, _}}, state.borrows[borrow.monitor]) do
+      {:noreply, settle_borrow(state, borrow.monitor, from, false)}
+    else
+      {:reply, {:error, :invalid_provider_runtime}, state}
+    end
+  end
 
   def handle_call({:hold, borrow}, {owner, _}, state) do
     if valid_token?(borrow) and match?(%{owner: nil}, state.borrows[borrow.monitor]) do
-      entry = %{caller: borrow.caller, owner: {owner, Process.monitor(owner)}}
+      entry = %{state.borrows[borrow.monitor] | owner: {owner, Process.monitor(owner)}}
       {:reply, :ok, put_in(state.borrows[borrow.monitor], entry)}
     else
       {:reply, {:error, :invalid_provider_runtime}, state}
@@ -384,14 +417,47 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
     ) and borrow.runtime == self()
   end
 
-  defp release(borrow, state, caller) do
+  defp release(borrow, state, {caller, _} = from) do
     if valid_token?(borrow) do
       case state.borrows[borrow.monitor] do
         %{owner: {owner, _}} when owner != caller -> {:reply, :ok, state}
-        _ -> {:reply, :ok, maybe_finish(remove_borrow(state, borrow.monitor))}
+        nil -> {:reply, :ok, state}
+        _ -> {:noreply, settle_borrow(state, borrow.monitor, from)}
       end
     else
       {:reply, {:error, :invalid_provider_runtime}, state}
+    end
+  end
+
+  defp settle_borrow(state, key, from, release? \\ true) do
+    entry = state.borrows[key]
+    entry = %{entry | release?: entry.release? or release?}
+    waiters = if from, do: [from | entry.waiters], else: entry.waiters
+
+    case entry.settling do
+      nil ->
+        runtime = self()
+        providers = state.opened.providers
+        deadline = System.monotonic_time(:millisecond) + state.cleanup_timeout_ms
+
+        {pid, ref} =
+          spawn_monitor(fn ->
+            result = MCPWarmAcquisition.settle(providers, entry.token, deadline)
+            send(runtime, {:borrow_settled, key, result})
+          end)
+
+        put_in(state.borrows[key], %{entry | settling: {pid, ref}, waiters: waiters})
+
+      :settled ->
+        if from, do: GenServer.reply(from, :ok)
+        if entry.release?, do: maybe_finish(remove_borrow(state, key)), else: state
+
+      :failed ->
+        if from, do: GenServer.reply(from, {:error, :provider_cleanup_failed})
+        state
+
+      _ ->
+        put_in(state.borrows[key], %{entry | waiters: waiters})
     end
   end
 
@@ -413,18 +479,57 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
         {:noreply, %{state | status: {:not_ready, :provider_runtime_lost}}}
 
       match?(%{owner: nil}, state.borrows[monitor]) ->
-        {:noreply, maybe_finish(remove_borrow(state, monitor))}
+        {:noreply, settle_borrow(state, monitor, nil)}
 
       true ->
+        settlement =
+          Enum.find(state.borrows, fn {_key, entry} ->
+            match?({_pid, ^monitor}, entry.settling)
+          end)
+
+        if settlement do
+          {key, _} = settlement
+          send(self(), {:borrow_settled, key, {:error, :provider_cleanup_failed}})
+        end
+
         owned =
           Enum.find(state.borrows, fn {_key, entry} ->
             match?({_owner, ^monitor}, entry.owner)
           end)
 
         case owned do
-          {key, _} -> {:noreply, maybe_finish(remove_borrow(state, key))}
+          {key, _} -> {:noreply, settle_borrow(state, key, nil)}
           nil -> {:noreply, state}
         end
+    end
+  end
+
+  def handle_info({:borrow_settled, key, result}, state) do
+    case state.borrows[key] do
+      %{settling: {_pid, ref}, waiters: waiters} ->
+        Process.demonitor(ref, [:flush])
+        Enum.each(waiters, &GenServer.reply(&1, result))
+
+        if result == :ok do
+          if state.borrows[key].release? do
+            {:noreply, maybe_finish(remove_borrow(state, key))}
+          else
+            entry = %{state.borrows[key] | settling: :settled, waiters: []}
+            {:noreply, put_in(state.borrows[key], entry)}
+          end
+        else
+          entry = %{state.borrows[key] | settling: :failed, waiters: []}
+
+          {:noreply,
+           %{
+             state
+             | borrows: Map.put(state.borrows, key, entry),
+               status: {:not_ready, :provider_cleanup_failed}
+           }}
+        end
+
+      _ ->
+        {:noreply, state}
     end
   end
 
@@ -453,6 +558,20 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
     {from, timer, _deadline} = state.draining
     Process.cancel_timer(timer)
     Enum.each(state.monitors, &Process.demonitor(&1, [:flush]))
+
+    Enum.each(state.borrows, fn {_key, entry} ->
+      case entry.settling do
+        {pid, ref} ->
+          Process.demonitor(ref, [:flush])
+          Process.exit(pid, :kill)
+
+        _ ->
+          :ok
+      end
+
+      Enum.each(entry.waiters, &GenServer.reply(&1, {:error, :provider_cleanup_failed}))
+    end)
+
     result = cleanup(state.opened)
 
     reply =
@@ -461,7 +580,8 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
         else: result
 
     GenServer.reply(from, reply)
-    %{state | opened: nil, monitors: [], draining: nil, status: :draining}
+    Enum.each(Map.keys(state.borrows), &remove_borrow(state, &1))
+    %{state | opened: nil, borrows: %{}, monitors: [], draining: nil, status: :draining}
   end
 
   defp cleanup(nil), do: :ok
