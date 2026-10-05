@@ -539,6 +539,8 @@ if grep -q 'provider_application_unavailable' "$release_tmp_dir/provider.stderr"
   exit 1
 fi
 
+python3 "$project_root/scripts/verify_gateway_pins.py" "$command_bin" "$release_tmp_dir/pin-discovery"
+
 # Exercise the gateway through the packaged command, rather than through a
 # source-tree Mix task. This verifies the load-only companion boundary, health,
 # an SSE write call, durable private audit, and clean signal-driven shutdown.
@@ -748,20 +750,8 @@ gateway_provider_digest="$("$release_root/bin/ptc_runner" eval '
   IO.write(PtcRunner.Kernel.ServingTemplate.application_content_digest(template))
 ' "$gateway_app/provider-ptc.json" "$gateway_root/host.json")"
 
-mix run -e '
-  [manifest, host, env_file, output] = System.argv()
-  {:ok, io} = File.open(output, [:write])
-  Process.group_leader(self(), io)
-  Mix.Tasks.Ptc.ProviderPins.run([manifest, "--host", host, "--env-file", env_file])
-  File.close(io)
-' -- "$gateway_app/provider-ptc.json" "$gateway_root/host.json" \
-  "$gateway_root/credentials.env" "$release_tmp_dir/provider-pins.json"
-gateway_installation_pins="$(python3 -c \
-  'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["installation_config_pins"],separators=(",",":")))' \
-  "$release_tmp_dir/provider-pins.json")"
-gateway_snapshot_pins="$(python3 -c \
-  'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["provider_snapshot_pins"],separators=(",",":")))' \
-  "$release_tmp_dir/provider-pins.json")"
+gateway_installation_pins="{}"
+gateway_snapshot_pins="{}"
 
 cat > "$gateway_root/gateway.json" <<EOF
 {
@@ -810,6 +800,31 @@ cat > "$gateway_root/gateway.json" <<EOF
   }]
 }
 EOF
+
+# Discover from the executable with absent pins and no inbound bearer value.
+python3 - "$gateway_root/gateway.json" "$gateway_root/discovery.json" <<'PYTHON'
+import json, sys
+config = json.load(open(sys.argv[1]))
+for tool in config["tools"]:
+    for key in ("expected_application_content_digest", "installation_config_pins", "provider_snapshot_pins"):
+        tool.pop(key)
+json.dump(config, open(sys.argv[2], "w"))
+PYTHON
+printf 'GATEWAY_PROVIDER_TOKEN=release-provider-token\n' > "$gateway_root/provider.env"
+"$command_bin" gateway "$gateway_root/discovery.json" --print-pins \
+  --env-file "$gateway_root/provider.env" > "$release_tmp_dir/provider-pins.json"
+test ! -e "$gateway_audit"
+python3 - "$gateway_root/gateway.json" "$release_tmp_dir/provider-pins.json" <<'PYTHON'
+import json, sys
+config = json.load(open(sys.argv[1]))
+pins = json.load(open(sys.argv[2]))
+assert set(pins) == {tool["name"] for tool in config["tools"]}
+for tool in config["tools"]:
+    discovered = pins[tool["name"]]
+    assert discovered["expected_application_content_digest"] == tool["expected_application_content_digest"]
+    tool.update(discovered)
+json.dump(config, open(sys.argv[1], "w"))
+PYTHON
 
 gateway_release_name="ptc_gateway_probe_$$"
 gateway_release_node="$gateway_release_name@127.0.0.1"

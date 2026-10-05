@@ -168,21 +168,11 @@ defmodule PtcRunner.Kernel.ProviderRuntimeTest do
 
     {:ok, applications, _} = WarmProviderApplications.start([:req_llm], 1)
 
-    output =
-      capture_io(fn ->
-        {:ok, discovery} =
-          ProviderRuntime.start_link(template: template, services: services, pins: :discover)
-
-        GenServer.stop(discovery)
-      end)
+    {:ok, discovered} = ProviderRuntime.discover(template, services)
 
     Enum.each(Enum.reverse(applications), &Application.stop/1)
-    discovered = Jason.decode!(output)
 
-    pins = %{
-      installation_config_pins: discovered["installation_config_pins"],
-      provider_snapshot_pins: discovered["provider_snapshot_pins"]
-    }
+    pins = discovered
 
     admission = start_supervised!({RunAdmission, max_concurrent_runs: 3})
 
@@ -818,13 +808,11 @@ defmodule PtcRunner.Kernel.ProviderRuntimeTest do
                  )
 
         assert ProviderRuntime.status(runtime) == {:not_ready, :provider_runtime_required}
+        assert GenServer.call(runtime, :discovered_pins) == pins
         GenServer.stop(runtime)
       end)
 
-    assert Jason.decode!(output) == %{
-             "installation_config_pins" => pins.installation_config_pins,
-             "provider_snapshot_pins" => pins.provider_snapshot_pins
-           }
+    assert output == ""
 
     assert :atomics.get(counts, 1) == :atomics.get(counts, 2)
   end
@@ -1184,24 +1172,9 @@ defmodule PtcRunner.Kernel.ProviderRuntimeTest do
         providers: catalog
       )
 
-    output =
-      capture_io(fn ->
-        {:ok, discovery} =
-          ProviderRuntime.start_link(
-            template: template,
-            services: services,
-            pins: :discover
-          )
+    {:ok, discovered} = ProviderRuntime.discover(template, services)
 
-        GenServer.stop(discovery)
-      end)
-
-    discovered = Jason.decode!(output)
-
-    pins = %{
-      installation_config_pins: discovered["installation_config_pins"],
-      provider_snapshot_pins: discovered["provider_snapshot_pins"]
-    }
+    pins = discovered
 
     {:ok, runtime} =
       ProviderRuntime.start_link(template: template, services: services, pins: pins)

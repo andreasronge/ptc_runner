@@ -1,6 +1,5 @@
 defmodule PtcRunner.Kernel.WarmMCPTest do
   use ExUnit.Case, async: false
-  import ExUnit.CaptureIO
   alias PtcRunner.Kernel.{MCPRequestContext, ProviderRuntime}
   alias PtcRunner.TestSupport.{Eventually, MCPTLSProxy, StreamingInspection, WarmMCPFixture}
 
@@ -113,28 +112,13 @@ defmodule PtcRunner.Kernel.WarmMCPTest do
 
     {template, services} = WarmMCPFixture.application(dir, transport)
 
-    output =
-      capture_io(fn ->
-        assert {:ok, runtime} =
-                 ProviderRuntime.start_link(
-                   template: template,
-                   services: services,
-                   pins: :discover
-                 )
-
-        GenServer.stop(runtime)
-      end)
-
-    pins = Jason.decode!(output)
+    {:ok, pins} = ProviderRuntime.discover(template, services)
 
     assert {:ok, runtime} =
              ProviderRuntime.start_link(
                template: template,
                services: services,
-               pins: %{
-                 installation_config_pins: pins["installation_config_pins"],
-                 provider_snapshot_pins: pins["provider_snapshot_pins"]
-               }
+               pins: pins
              )
 
     on_exit(fn -> if Process.alive?(runtime), do: GenServer.stop(runtime) end)
@@ -281,24 +265,13 @@ defmodule PtcRunner.Kernel.WarmMCPTest do
     {template, services} =
       WarmMCPFixture.application(dir, WarmMCPFixture.http_transport(server.endpoint), opts)
 
-    output =
-      capture_io(fn ->
-        {:ok, discovery} =
-          ProviderRuntime.start_link(template: template, services: services, pins: :discover)
-
-        GenServer.stop(discovery)
-      end)
-
-    pins = Jason.decode!(output)
+    {:ok, pins} = ProviderRuntime.discover(template, services)
 
     {:ok, runtime} =
       ProviderRuntime.start_link(
         template: template,
         services: services,
-        pins: %{
-          installation_config_pins: pins["installation_config_pins"],
-          provider_snapshot_pins: pins["provider_snapshot_pins"]
-        }
+        pins: pins
       )
 
     on_exit(fn -> if Process.alive?(runtime), do: GenServer.stop(runtime) end)

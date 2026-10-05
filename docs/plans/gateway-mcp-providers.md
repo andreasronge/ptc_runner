@@ -43,7 +43,7 @@ HTTP servers), and fast (no per-call process start).
   (`warm_provider_runtime.ex:321-333`), so two tools that select the same
   installation acquire it twice. Any unhealthy runtime fences the whole warm
   domain (`:426-435, 465-466`).
-- Gateway pins come only from `mix ptc.provider_pins`, a source-checkout task.
+- Gateway pins are printed by `ptc gateway CONFIG --print-pins`.
 - A read-declared workflow that calls `kernel/eval*` is refused as `unknown`
   (#2201): the early `DeclaredReadEffectValidator` omits implicit workflow
   routes. Every MCP-backed served tool must therefore be declared write, set
@@ -257,16 +257,15 @@ with `expected_application_content_digest`, `installation_config_pins`, and
   optional `--env-file` anchored at the invocation directory, read once, and
   restored before exit. The inbound bearer binding is neither required nor
   read.
-- Provider applications run in command-VM mode, as `mix ptc.provider_pins`
-  does today. No listener, private audit directory, or artifact root is
+- Provider applications run in command-VM mode. No listener, private audit directory, or artifact root is
   created or touched.
 - Tools are acquired in name order. Output is written only after every tool
   succeeds; any failure prints nothing on stdout, exits nonzero, and closes
   every acquisition.
 
 Serving validation is unchanged: pins stay required at startup.
-`mix ptc.provider_pins` is deleted. The exact command spelling follows
-`docs/reference/cli.md` conventions.
+The command is `ptc gateway CONFIG --print-pins`, documented in
+`docs/reference/cli.md`.
 
 ### 8. Gateway event log
 

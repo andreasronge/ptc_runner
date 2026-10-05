@@ -189,6 +189,7 @@ defmodule PtcGatewayMCPTest do
 
     File.write!(path, Jason.encode!(config))
     assert {:error, :provider_source_unsupported} = PtcGateway.start_link(path)
+    assert {:error, :provider_source_unsupported} = PtcGateway.PinDiscovery.discover(path)
     refute_received {:upstream, _, _}
     manifest = Path.join(dir, "app.json") |> File.read!() |> Jason.decode!()
 
@@ -226,6 +227,7 @@ defmodule PtcGatewayMCPTest do
 
     File.write!(path, Jason.encode!(config))
     assert {:error, :provider_source_unsupported} = PtcGateway.start_link(path)
+    assert {:error, :provider_source_unsupported} = PtcGateway.PinDiscovery.discover(path)
 
     assert PtcGateway.StartupError.normalize(:provider_runtime_unsupported) ==
              :provider_source_unsupported

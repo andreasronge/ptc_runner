@@ -1,6 +1,5 @@
 defmodule PtcRunner.Kernel.DecisionWarmRuntimeTest do
   use ExUnit.Case, async: false
-  import ExUnit.CaptureIO
 
   alias PtcRunner.TestSupport.DecisionHTTPFixture
 
@@ -93,19 +92,9 @@ defmodule PtcRunner.Kernel.DecisionWarmRuntimeTest do
           providers: catalog
         )
 
-      discovery =
-        capture_io(fn ->
-          {:ok, runtime} =
-            ProviderRuntime.start_link(template: template, services: services, pins: :discover)
+      {:ok, discovery} = ProviderRuntime.discover(template, services)
 
-          GenServer.stop(runtime)
-        end)
-        |> Jason.decode!()
-
-      pins = %{
-        installation_config_pins: discovery["installation_config_pins"],
-        provider_snapshot_pins: discovery["provider_snapshot_pins"]
-      }
+      pins = discovery
 
       admission = start_supervised!({RunAdmission, max_concurrent_runs: 2})
 

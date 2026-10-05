@@ -47,34 +47,36 @@ There is no implicit configuration search or implicit environment-file search.
 
 ## Pins
 
-From the root project, obtain the two provider pin maps using the existing safe
-command. It never runs the workflow and prints no credential or volatile
-provider content:
+Print every tool's startup pins from the gateway document:
 
 ```sh
-mix ptc.provider_pins /absolute/path/app.json --host /absolute/path/host.json --env-file /absolute/path/credentials.env
+ptc gateway /absolute/path/ptc-gateway.json --print-pins --env-file credentials.env
 ```
 
-An application without providers prints exactly:
+The command prints one JSON object keyed by tool name. Each value contains
+`expected_application_content_digest`, `installation_config_pins` keyed by
+installation name, and `provider_snapshot_pins` keyed by `workflow/name` or
+`mission/name`. Digests are qualified SHA-256 values. Tools without providers have
+empty pin maps. Copy all three fields into each tool's configuration.
 
-```json
-{"installation_config_pins":{},"provider_snapshot_pins":{}}
-```
+Discovery accepts missing or stale pin fields; supplied fields still follow
+the schema. Serving requires all pins and checks exact matches. Discovery
+validates every template, including selected OAuth and workflow catalog
+refusals, before acquiring tools in name order. Selected command-VM applications are
+admitted once for all tools and reused within discovery. It never executes a
+workflow.
+Only selected provider credentials are captured once before acquisition; empty
+values are refused. The inbound bearer binding is neither required in the host
+nor read. The optional environment file resolves
+from the invocation directory, is read once, and its temporary values are
+restored before exit, including on failure.
 
-Provider-bearing output uses the same keys and `sha256:<64 lowercase hex>`
-values. Copy both complete maps into that tool's configuration. Obtain the
-application content pin without running the workflow or resolving credentials:
-
-```sh
-ptc validate /absolute/path/app.json --host-config /absolute/path/host.json
-```
-
-The command prints one JSON object whose `application_content_digest` is that
-manifest's `sha256:<64 lowercase hex>` pin. Copy it into
-`expected_application_content_digest`. The value covers the application bytes
-alone, so it is stable across runtime versions, unlike the
-`effective_application_digest` printed beside it. Omit `--host-config` when the
-manifest selects no provider.
+Discovery creates no listener, audit directory, or artifact root and does not
+check their filesystem paths. Every acquisition closes before output. Success
+exits 0; failure prints one closed JSON error on stderr, nothing on stdout,
+and exits 78. Credentials and volatile provider content are absent from output.
+Update pins and restart after changing applications, installations, or
+acquisition identities; a fenced serving domain never re-pins automatically.
 
 ## Shared MCP providers
 

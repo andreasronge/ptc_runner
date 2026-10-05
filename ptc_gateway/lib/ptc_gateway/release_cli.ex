@@ -3,12 +3,42 @@ defmodule PtcGateway.ReleaseCLI do
 
   @spec main([binary()]) :: no_return()
   def main(arguments) do
-    reference = install_signal_handler()
-    {opts, paths, invalid} = OptionParser.parse(arguments, strict: [env_file: :string])
+    PtcRunner.CLILogger.install_stderr_handler()
+
+    {opts, paths, invalid} =
+      OptionParser.parse(arguments, strict: [env_file: :string, print_pins: :boolean])
 
     case {paths, invalid} do
-      {[path], []} -> run(path, opts, reference)
-      _ -> fail(:config_invalid)
+      {[path], []} ->
+        if length(opts) != length(Enum.uniq_by(opts, &elem(&1, 0))) do
+          fail(:config_invalid)
+        else
+          dispatch(path, opts)
+        end
+
+      _ ->
+        fail(:config_invalid)
+    end
+  end
+
+  defp dispatch(path, opts) do
+    if opts[:print_pins] do
+      case PtcGateway.PinDiscovery.discover(path, Keyword.take(opts, [:env_file])) do
+        {:ok, pins} ->
+          case PtcRunner.Kernel.DeterministicJSON.encode(pins) do
+            {:ok, json} ->
+              IO.puts(json)
+              System.halt(0)
+
+            _ ->
+              fail(:internal_error)
+          end
+
+        {:error, code} ->
+          fail(code)
+      end
+    else
+      run(path, Keyword.take(opts, [:env_file]), install_signal_handler())
     end
   end
 

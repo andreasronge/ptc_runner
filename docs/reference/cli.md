@@ -26,6 +26,8 @@ grammar for each frontend.
 | `ptc repl` | Open a direct, manifest-backed, or analysis session |
 | `ptc viewer PROJECT.json` | Browse a project's captured traces in a local web UI |
 | `ptc viewer PROJECT.json --env-file FILE` | Use one exact dotenv file for Viewer-started workflows and missions |
+| `ptc gateway GATEWAY.json` | Serve configured tools over loopback MCP |
+| `ptc gateway GATEWAY.json --print-pins` | Discover every tool's startup pins without serving |
 | `ptc materialize MANIFEST or PROJECT` | Export installed component source, or publish a gated candidate |
 
 Help is generated from the same declarations as the strict parser, so use the
@@ -60,8 +62,7 @@ a snapshot of a pruned run; reading it then can fail as `unstable` or
 `unreadable`. An interrupted deletion is recovered by the next real prune;
 `--dry-run` returns an error while recovery is pending so it changes no files.
 
-Pruning does not remove append-lock files. The separate lock-root retention
-work is tracked in [issue #2076](https://github.com/andreasronge/ptc_runner/issues/2076).
+Pruning does not remove append-lock files.
 
 A provider-bearing manifest needs a host configuration. A project document can
 remember that path and its environment file. Before running it, active provider
@@ -580,6 +581,7 @@ that leaves a partial private record, which no shipped command reads.
 | 7 | the run produced no usable artifact: a destination, result, or publication failure | `destination`, `execution`, `result_cleanup`, `publication` |
 | 70 | the command failed internally | `internal` |
 | 74 | the requested envelope could not be published, so no envelope describes this failure | — |
+| 78 | gateway startup or pin discovery was refused | gateway |
 
 Every classified diagnostic and the status it exits with:
 
@@ -1157,18 +1159,15 @@ path; the [Quickstart](../guides/quickstart.md) keeps one deliberately small liv
 - [Building agents](../guides/building-agents.md) explains the agent policy producing
   the runs.
 
-## Warm-provider pins from a source checkout
+## Gateway serving and pin discovery
 
-`mix ptc.provider_pins ptc.json --host ptc-host.json --env-file credentials.env`
-acquires the selected LLM installations without executing the workflow and
-prints one JSON object containing `installation_config_pins` and
-`provider_snapshot_pins`. The first map uses installation names; the second
-uses `workflow/name` and `mission/name`. Both contain qualified SHA-256 values.
-The environment file is optional, is read once, and its temporary values are
-restored before the command exits. Manifests without providers print two empty maps.
+`ptc gateway GATEWAY.json [--env-file FILE]` serves the configured loopback
+MCP endpoint. `ptc gateway GATEWAY.json --print-pins [--env-file FILE]` prints
+one JSON object keyed by tool name with the three startup pin fields, without
+executing workflows or starting a listener. Missing or stale pins are accepted
+only for discovery. See [Gateway configuration](gateway.md#pins) for credential,
+validation, cleanup, and artifact behavior.
 
-Copy both exact maps into the tool configuration. Missing, extra, or mismatched
-entries refuse warm-runtime readiness. Credentials and provider-volatile content
-are absent from the output. Update pins and restart after changing installations,
-credentials, or acquisition identities; the warm runtime never automatically
-reacquires, re-pins, or replaces a fenced domain.
+Gateway success exits `0`; startup or discovery refusal exits `78` with one
+closed JSON error on stderr and no stdout. An uncertain serving shutdown exits
+`70`. Serving emits no stdout; discovery emits output only after all tools succeed.

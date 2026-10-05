@@ -206,7 +206,7 @@ defmodule PtcRunner.TestSupport.ProviderExecutionOAuthFixtures do
     payload =
       {services.activation, services.credential_resolver, services.provider_application_mode,
        services.oauth_mode, services.provider_call_admission, services.runtime_binding,
-       services.host_payload}
+       services.host_payload, services.command_applications}
 
     %{services | attestation: Attestation.attest(ProviderRuntimeServices, payload)}
   end

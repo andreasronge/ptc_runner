@@ -527,7 +527,8 @@ defmodule Mix.Tasks.Ptc.GenDocs do
        [
          {CommandFrontend.envelope_failure_exit_status(),
           "the requested envelope could not be published, so no envelope describes this failure",
-          "—"}
+          "—"},
+         {78, "gateway startup or pin discovery was refused", "gateway"}
        ])
     |> Enum.map_join("\n", fn {status, meaning, phases} ->
       "| #{status} | #{meaning} | #{phases} |"
