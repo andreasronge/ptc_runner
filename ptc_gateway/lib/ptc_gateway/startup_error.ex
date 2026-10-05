@@ -17,6 +17,32 @@ defmodule PtcGateway.StartupError do
   def normalize(:provider_runtime_unsupported), do: :provider_source_unsupported
   def normalize(code) when code in @codes, do: code
   def normalize(_), do: :internal_error
+  @doc false
+  def reason_class(reason) when reason in @codes, do: reason
+
+  def reason_class(reason)
+      when reason in [
+             :provider_runtime_unsupported,
+             :invalid_provider_runtime,
+             :provider_cleanup_failed,
+             :invalid_provider_runtime_services,
+             :invalid_warm_provider_runtime,
+             :provider_unavailable,
+             :provider_acquisition_timeout,
+             :provider_protocol_error,
+             :provider_protocol_version_unsupported,
+             :provider_tool_missing,
+             :provider_policy_changed,
+             :mcp_protocol_error,
+             :mcp_transport_error,
+             :mcp_timeout,
+             :mcp_authentication_failed,
+             :mcp_stdio_launcher_unavailable,
+             :unsupported_mcp_stdio_platform
+           ],
+      do: reason
+
+  def reason_class(_), do: :other
   @spec encode(term()) :: binary()
   def encode(code), do: Jason.encode!(%{error: normalize(code)})
   @spec exit_status() :: 78

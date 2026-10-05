@@ -36,7 +36,7 @@ There is no implicit configuration search or implicit environment-file search.
 | Tools | 1–128 entries, unique names matching `[a-zA-Z0-9_.-]{1,128}`, validated in UTF-8 name-byte order. Titles require 1–256 bytes; descriptions 1–4096. Each normalized schema is at most 64 KiB and the encoded static catalog at most 4 MiB. |
 | Application | `application.manifest` names one manifest file, at most 1024 bytes. The serving constructor requires object input/output contracts and a validated read/write effect. |
 | Event policy | `events.policy` must be `normal`, which is what an omitted `events` section or field already means. A `private` policy refuses the constructor ahead of the content-digest and write-permission checks and is reported as `template_invalid`. Gateway `artifacts` configuration may authorize normal trace and inspection destinations; holding the endpoint or setting `allow_write` never grants a private-result override. To serve such an application, set its manifest policy to `normal` and record the new content pin. |
-| Artifacts | Optional `artifacts` has `root` and optional `trace` and `inspection` booleans (both default false). The root resolves from the gateway document directory and must pass the project artifact root's private-directory checks at startup. Enabled traces go to `traces/<run_ref>.jsonl` and inspection records to `inspection/<run_ref>.ptcins` under that root. Reservation failure refuses the call before execution. Omit the section to record no artifacts. Point a `ptc-project.json` `artifacts.root` at the same directory to browse served runs with `ptc viewer` or `ptc repl`. |
+| Artifacts | Optional `artifacts` has `root` and optional `trace` and `inspection` booleans (both default false), and an optional `events` object. The root resolves from the gateway document directory and must pass the project artifact root's private-directory checks at startup. Enabled traces go to `traces/<run_ref>.jsonl` and inspection records to `inspection/<run_ref>.ptcins` under that root. Reservation failure refuses the call before execution. Omit the section to record no artifacts. Point a `ptc-project.json` `artifacts.root` at the same directory to browse served runs with `ptc viewer` or `ptc repl`. |
 | Write permission | `allow_write` defaults to false. A compiled write effect requires true; permission never changes the compiled effect. |
 | Content pin | Required `expected_application_content_digest`, exactly `sha256:` plus 64 lowercase hex characters; effective application identity is not interchangeable. |
 | Installation pins | Required exact map `installation_config_pins`, keyed by installation name. Missing, extra, stale or mismatched values refuse startup. |
@@ -266,6 +266,63 @@ header duplicate and the exact parser and application header ceilings.
 Integration boundaries also exercise exact and excessive body,
 metadata, JSON depth/node, ID, normalized-schema, static-catalog, and encoded
 response sizes.
+
+## Event log
+
+Set `artifacts.events` to enable a private, bounded JSON Lines log independently
+of traces, inspection, and `private_audit`. Read-only tools can log without an
+audit directory:
+
+```json
+{"artifacts":{"root":"artifacts","events":{"max_file_bytes":1048576,"max_retained_files":8,"stderr":false}}}
+```
+
+`max_file_bytes` is required (1024–67108864 bytes), as is
+`max_retained_files` (2–128, including the active file). `stderr` defaults to
+false. The log directory is owner-only (0700), files are owner-only (0600), and
+linked directories, linked files, foreign owners, and unexpected filenames are
+refused. The directory is exclusively locked for the gateway's lifetime.
+Files are `events/<gateway_start_ref>-<sequence>.jsonl` under the validated
+artifact root. The start reference is 32 lowercase hexadecimal characters;
+the sequence is a 20-digit increasing number. Rotation opens a new file and
+removes the oldest closed files to enforce retention, including across restarts.
+A record never crosses files or exceeds the configured file bound.
+
+Each line is an object with `kind` and an ISO 8601 UTC `timestamp`.
+The following fields complete each record:
+
+| `kind` | Fields |
+| --- | --- |
+| `startup_stage` | `stage`: `artifact_root`, `templates`, `audit`, `run_admission`, `warm_providers`, or `listener`; `outcome`: `started` or `ready`. |
+| `startup_failed` | `code`: the public startup catalog code; `reason_class`: the closed internal failure class, before public normalization. Unknown classes use `other`. |
+| `readiness` | `transition`: `ready` or `not_ready`; `tool`, `provider`; `cause`: `startup`, `provider_runtime_lost`, or `provider_cleanup_failed`. Startup has null tool and provider. |
+| `transport` | `tool`, `provider`; `fault`: `close`, `server_exit`, `owner_eof`, `launcher_signal`, `protocol_error`, `close_timeout`, `killed`, `normal`, `shutdown`, or `transport_error`; `exit_status`: an integer when reported by the transport, otherwise null. |
+| `busy`, `detached`, `settlement_timeout`, `dropped_events` | `tool`, `provider`, positive `count`, and `interval_ms` (1000). Gateway-wide drops have null tool and provider. Only nonzero counters are written. |
+| `stderr_tail` | `tool`, `provider`, `text`, and boolean `truncated`. Only emitted when `stderr` is true. |
+
+Internal failure classes include the public startup codes, provider acquisition,
+protocol, policy, runtime-validation and cleanup classes, and MCP transport,
+timeout, authentication and launcher classes. They contain no exception text.
+All records except `stderr_tail` contain only configured tool/provider names,
+closed classes, timestamps, and numeric or boolean metadata. Arguments,
+results, credentials, endpoints, and paths are excluded.
+
+With `stderr: true`, transport loss and shutdown additionally write the bounded
+per-transport stderr tail. This is raw private upstream evidence: it may
+contain secrets or paths printed by the server. The tail is shortened further
+when necessary to fit the file bound. It is never part of a served tool result
+or a call's inspection record. HTTP transports have no stderr tail.
+
+Events begin after artifact-root validation. Failure to create or validate the
+event directory reports `artifact_root_unavailable`. Earlier failures produce
+only the existing startup diagnostic. Logging uses a queue capped at 256
+records; counters use fixed registered tool/provider slots. A full queue or an
+open/write failure drops records and reports them in the next writable
+`dropped_events` interval. Failed counter reports retain their counts for a
+later interval. Logging failures never change serving readiness. Health
+bodies, startup stderr, and MCP error envelopes retain their existing formats.
+Read the files directly; no served tool, REPL profile, or Viewer page reads this
+log.
 
 ## Startup failures
 

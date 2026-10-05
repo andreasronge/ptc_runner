@@ -194,7 +194,16 @@ defmodule PtcRunner.Kernel.GatewayConfig do
             %{
               "root" => path(),
               "trace" => %{"type" => "boolean", "default" => false},
-              "inspection" => %{"type" => "boolean", "default" => false}
+              "inspection" => %{"type" => "boolean", "default" => false},
+              "events" =>
+                object(
+                  %{
+                    "max_file_bytes" => count(1024, 67_108_864),
+                    "max_retained_files" => count(2, 128),
+                    "stderr" => %{"type" => "boolean", "default" => false}
+                  },
+                  ~w(max_file_bytes max_retained_files)
+                )
             },
             ["root"]
           )

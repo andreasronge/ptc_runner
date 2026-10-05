@@ -9,13 +9,14 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
   alias PtcRunner.Kernel.MCPOAuth.TokenManager
   alias PtcRunner.Kernel.MCPSettlement
   alias PtcRunner.Kernel.ResourceRegistrar
+  alias PtcRunner.Kernel.ServingEvents
 
   @release_timeout_ms 5_000
   @initial_release_retry_ms 250
   @maximum_release_retry_ms 30_000
 
   @enforce_keys [:pid]
-  defstruct [:pid, :authorization, :resource_registrar, :borrow_token]
+  defstruct [:provider_name, :pid, :authorization, :resource_registrar, :borrow_token]
 
   @type t :: %__MODULE__{
           pid: pid(),
@@ -166,6 +167,7 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
            authorization: authorization,
            resource_registrar: registrar,
            next_id: 1,
+           events: nil,
            settlement: MCPSettlement.new(),
            admission_token: nil,
            active: %{},
@@ -179,6 +181,9 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
   end
 
   @impl GenServer
+  def handle_call({:events, events}, _from, state),
+    do: {:reply, :ok, %{state | events: events}}
+
   def handle_call({:cancel_borrow, token}, _from, state) do
     state = %{state | settlement: MCPSettlement.seal(state.settlement, token)}
 
@@ -218,11 +223,11 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
 
   def handle_call(:begin_request, _from, %{active: active} = state)
       when map_size(active) >= 128,
-      do: {:reply, {:error, :mcp_transport_busy}, state}
+      do: {:reply, {:error, :mcp_transport_busy}, ServingEvents.count(state, :busy)}
 
   def handle_call(:begin_request, {caller, _tag}, %{active: active} = state)
       when is_map_key(active, caller),
-      do: {:reply, {:error, :mcp_transport_busy}, state}
+      do: {:reply, {:error, :mcp_transport_busy}, ServingEvents.count(state, :busy)}
 
   def handle_call(:begin_request, {caller, _tag} = from, state) do
     deadline_ms = System.monotonic_time(:millisecond) + state.timeout_ms
@@ -349,6 +354,8 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
     case state.active do
       %{^pid => %{ref: ^ref, authorization_ref: authorization_ref} = entry}
       when is_reference(authorization_ref) ->
+        state = ServingEvents.count(state, :detached)
+
         state =
           put_in(
             state.active[pid],
@@ -358,16 +365,21 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
         {:noreply, state}
 
       %{^pid => %{ref: ^ref, worker_ref: worker_ref} = entry} when is_reference(worker_ref) ->
+        ServingEvents.counter(state.events, :detached)
         send(entry.worker, :mcp_cancel)
         {:noreply, put_in(state.active[pid], %{entry | ref: nil, caller_down: true})}
 
       %{^pid => %{ref: ^ref, issued: %{release: release}} = entry} ->
         state
+        |> ServingEvents.count(:detached)
         |> put_in([:active, pid], %{entry | ref: nil})
         |> start_detached_release(pid, entry.id, release, @initial_release_retry_ms)
 
       %{^pid => %{ref: ^ref}} ->
-        state |> release_active(pid, false) |> close_or_continue()
+        state
+        |> ServingEvents.count(:detached)
+        |> release_active(pid, false)
+        |> close_or_continue()
 
       _active ->
         case handle_authorization_worker_down(state, ref) do
@@ -429,7 +441,9 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
   end
 
   def handle_info({:settlement_timeout, ref}, state),
-    do: {:noreply, %{state | settlement: MCPSettlement.timeout(state.settlement, ref)}}
+    do:
+      {:noreply,
+       %{state | settlement: MCPSettlement.timeout(state.settlement, ref, state.events)}}
 
   def handle_info(_message, state), do: {:noreply, state}
 

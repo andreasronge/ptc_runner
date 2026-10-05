@@ -704,7 +704,10 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
               | &1
             ]
           )
-          |> Map.update!(:mcp_transports, &maybe_append(&1, built.mcp_transport))
+          |> Map.update!(
+            :mcp_transports,
+            &maybe_append(&1, event_transport(built.mcp_transport, provider.provider))
+          )
           |> Map.update!(:warnings, &(&1 ++ built.warnings))
           |> Map.update!(:exports, &merge_provider_exports(&1, provider.provider, built.exports))
 
@@ -1113,4 +1116,6 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
 
   defp maybe_append(values, nil), do: values
   defp maybe_append(values, value), do: values ++ [value]
+  defp event_transport(nil, _name), do: nil
+  defp event_transport(handle, name), do: Map.put(handle, :provider_name, name)
 end

@@ -40,6 +40,7 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   alias PtcRunner.Kernel.MCPBorrowToken
   alias PtcRunner.Kernel.MCPWarmAcquisition
   alias PtcRunner.Kernel.ProviderRuntimeOpening
+  alias PtcRunner.Kernel.ServingEvents
 
   alias PtcRunner.Kernel.{
     Attestation,
@@ -61,7 +62,9 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) when is_list(opts) do
-    if Keyword.keyword?(opts) and Enum.sort(Keyword.keys(opts)) == [:pins, :services, :template] do
+    if Keyword.keyword?(opts) and length(opts) == MapSet.size(MapSet.new(Keyword.keys(opts))) and
+         Keyword.keys(opts) -- [:pins, :services, :template, :events] == [] and
+         Enum.all?([:pins, :services, :template], &Keyword.has_key?(opts, &1)) do
       GenServer.start_link(__MODULE__, opts)
     else
       {:error, :invalid_provider_runtime}
@@ -168,7 +171,7 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
                retained.metadata
              )
            end) do
-      open(prepared, execution, opts[:pins])
+      open(prepared, execution, opts[:pins], opts[:events])
     else
       {:error, code} -> {:stop, code}
       _invalid -> {:stop, :invalid_provider_runtime}
@@ -196,7 +199,7 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
       MCPWarmAcquisition.supported?(declaration, catalog)
   end
 
-  defp open(prepared, execution, pins) do
+  defp open(prepared, execution, pins, events) do
     case ProviderRuntimeOpening.open(
            prepared,
            execution,
@@ -211,6 +214,11 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
             end
 
           {:ok, _actual} ->
+            ServingEvents.observe(
+              events,
+              Map.get(opened.providers, :mcp_transports, [])
+            )
+
             monitors = [
               Process.monitor(ProviderSession.worker_cancel_target(opened.session))
               | registry_monitor(opened.registry) ++ MCPWarmAcquisition.monitors(opened.providers)
@@ -218,6 +226,7 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
 
             {:ok,
              %{
+               events: events,
                status: :ready,
                opened: opened,
                borrows: %{},
@@ -518,6 +527,15 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
             {:noreply, put_in(state.borrows[key], entry)}
           end
         else
+          Enum.each(Map.get(state.opened.providers, :mcp_transports, []), fn transport ->
+            ServingEvents.emit(state.events, %{
+              kind: :readiness,
+              provider: transport.provider_name,
+              transition: :not_ready,
+              cause: :provider_cleanup_failed
+            })
+          end)
+
           entry = %{state.borrows[key] | settling: :failed, waiters: []}
 
           {:noreply,
