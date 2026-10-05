@@ -34,9 +34,9 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
     :host_payload,
     :provider_call_admission
   ]
-  defstruct @enforce_keys ++ [attestation: nil]
+  defstruct @enforce_keys ++ [attestation: nil, command_applications: []]
   @context_heap_words 100_000
-  @field_keys Enum.sort([:__struct__, :attestation | @enforce_keys])
+  @field_keys Enum.sort([:__struct__, :attestation, :command_applications | @enforce_keys])
 
   @type credential_resolver ::
           ([binary()] -> {:ok, %{binary() => binary()}} | {:error, term()})
@@ -52,6 +52,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
           runtime_binding: binary() | nil,
           host_payload: struct() | nil,
           provider_call_admission: ProviderCallAdmission.t() | nil,
+          command_applications: [atom()],
           attestation: binary() | nil
         }
 
@@ -122,8 +123,27 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
         services.oauth_mode,
         admission,
         services.runtime_binding,
-        services.host_payload
+        services.host_payload,
+        services.command_applications
       )
+    else
+      {:error, :invalid_provider_runtime_services}
+    end
+  end
+
+  @doc false
+  @spec with_command_applications(t(), [atom()]) ::
+          {:ok, t()} | {:error, :invalid_provider_runtime_services}
+  def with_command_applications(
+        %__MODULE__{provider_application_mode: :command_vm} = services,
+        applications
+      ) do
+    running = Application.started_applications() |> MapSet.new(&elem(&1, 0))
+
+    if valid?(services) and valid_command_applications?(applications) and
+         Enum.all?(applications, &MapSet.member?(running, &1)) do
+      updated = %{services | command_applications: applications}
+      {:ok, %{updated | attestation: Attestation.attest(__MODULE__, payload(updated))}}
     else
       {:error, :invalid_provider_runtime_services}
     end
@@ -310,7 +330,8 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
          end},
         services.provider_call_admission,
         services.runtime_binding,
-        services.host_payload
+        services.host_payload,
+        services.command_applications
       )
     else
       {:error, :invalid_provider_runtime_services}
@@ -386,7 +407,8 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
          oauth_mode,
          provider_call_admission,
          runtime_binding,
-         host_payload
+         host_payload,
+         command_applications \\ []
        ) do
     services = %__MODULE__{
       activation: activation,
@@ -395,7 +417,8 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
       oauth_mode: oauth_mode,
       provider_call_admission: provider_call_admission,
       runtime_binding: runtime_binding,
-      host_payload: host_payload
+      host_payload: host_payload,
+      command_applications: command_applications
     }
 
     if fields_valid?(services) do
@@ -410,6 +433,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
       is_function(services.activation, 0) and
         is_function(services.credential_resolver, 1) and
         services.provider_application_mode in [:host_owned, :command_vm] and
+        valid_command_applications?(services.command_applications) and
         valid_oauth_mode?(services.oauth_mode) and
         valid_provider_call_admission?(services.provider_call_admission) and
         valid_runtime_binding?(services.runtime_binding, services.host_payload)
@@ -420,9 +444,15 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
         is_function(services.activation, 0) and
         is_function(services.credential_resolver, 1) and
         services.provider_application_mode in [:host_owned, :command_vm] and
+        valid_command_applications?(services.command_applications) and
         valid_oauth_mode?(services.oauth_mode) and
         valid_runtime_binding?(services.runtime_binding, services.host_payload) and
         Attestation.valid?(__MODULE__, payload(services), attestation)
+
+  defp valid_command_applications?(applications),
+    do:
+      is_list(applications) and Enum.all?(applications, &is_atom/1) and
+        applications == Enum.uniq(applications)
 
   defp valid_provider_call_admission?(nil), do: true
   defp valid_provider_call_admission?(admission), do: ProviderCallAdmission.valid?(admission)
@@ -445,5 +475,5 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
     do:
       {services.activation, services.credential_resolver, services.provider_application_mode,
        services.oauth_mode, services.provider_call_admission, services.runtime_binding,
-       services.host_payload}
+       services.host_payload, services.command_applications}
 end

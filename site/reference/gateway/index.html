@@ -115,7 +115,9 @@ installation name, and <code class="inline">provider_snapshot_pins</code> keyed 
 empty pin maps. Copy all three fields into each tool's configuration.</p><p>Discovery accepts missing or stale pin fields; supplied fields still follow
 the schema. Serving requires all pins and checks exact matches. Discovery
 validates every template, including selected OAuth and workflow catalog
-refusals, before acquiring tools in name order. It never executes a workflow.
+refusals, before acquiring tools in name order. Selected command-VM applications are
+admitted once for all tools and reused within discovery. It never executes a
+workflow.
 Only selected provider credentials are captured once before acquisition; empty
 values are refused. The inbound bearer binding is neither required in the host
 nor read. The optional environment file resolves

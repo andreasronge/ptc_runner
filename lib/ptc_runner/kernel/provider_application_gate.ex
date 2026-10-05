@@ -11,7 +11,9 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
   limit does not resize that VM-lifetime pool. Explicit ReqLLM Finch pools or a
   non-HTTP/1 protocol configuration retain their dependency-defined precedence.
   The command VM owns
-  the resulting application processes until VM shutdown. Once selected
+  the resulting application processes until VM shutdown. Multi-template commands
+  admit their union once and seal that set into runtime services, so subsequent
+  acquisitions reuse only applications this command admitted. Once selected
   applications are admitted, adapter-owned VM-global metadata is warmed before
   the run clock begins, so its one-time load does not consume a bounded provider
   worker's heap.
@@ -34,6 +36,7 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
   alias PtcRunner.Kernel.MissionReplTarget
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderRuntimeServices
+  alias PtcRunner.Kernel.ServingTemplate
 
   @spec admit(PreparedRun.t(), InstallationCatalog.t(), ProviderRuntimeServices.t()) ::
           :ok | {:error, CommandDiagnostic.t()}
@@ -50,7 +53,7 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
 
       case admit_requirements(
              requirements,
-             services.provider_application_mode,
+             application_mode(services, requirements),
              catalog.installed_limits
            ) do
         :ok -> warm_requirements(requirements)
@@ -82,7 +85,7 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
 
       case admit_requirements(
              requirements,
-             services.provider_application_mode,
+             application_mode(services, requirements),
              catalog.installed_limits
            ) do
         :ok -> warm_requirements(requirements)
@@ -144,6 +147,62 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
     |> Enum.reverse()
     |> Enum.uniq_by(&elem(&1, 1))
   end
+
+  @doc "Admits the union of a command's templates once, retaining command-VM ownership."
+  @spec admit_command_templates(
+          [ServingTemplate.t()],
+          InstallationCatalog.t(),
+          ProviderRuntimeServices.t()
+        ) ::
+          {:ok, ProviderRuntimeServices.t()} | {:error, atom()}
+  def admit_command_templates(
+        templates,
+        catalog,
+        %ProviderRuntimeServices{provider_application_mode: :command_vm} = services
+      ) do
+    if InstallationCatalog.valid?(catalog) and
+         ProviderRuntimeServices.bound_to?(services, catalog.runtime_binding) do
+      selected =
+        templates
+        |> Enum.flat_map(fn template ->
+          case ServingTemplate.provider_plan(template) do
+            {:ok, plan} -> requirements(plan.metadata.provider_declarations, plan.catalog)
+            {:error, _} -> []
+          end
+        end)
+        |> Enum.uniq_by(&elem(&1, 1))
+
+      with :ok <- admit_requirements(selected, :command_vm, catalog.installed_limits),
+           :ok <- warm_requirements(selected) do
+        ProviderRuntimeServices.with_command_applications(
+          services,
+          Enum.map(selected, &elem(&1, 1))
+        )
+      else
+        _ -> {:error, :provider_application_unavailable}
+      end
+    else
+      {:error, :invalid_provider_runtime_services}
+    end
+  rescue
+    _ -> {:error, :internal_error}
+  catch
+    _, _ -> {:error, :internal_error}
+  end
+
+  defp application_mode(
+         %ProviderRuntimeServices{
+           provider_application_mode: :command_vm,
+           command_applications: applications
+         },
+         requirements
+       ) do
+    if Enum.all?(requirements, fn {_, app} -> app in applications end),
+      do: :host_owned,
+      else: :command_vm
+  end
+
+  defp application_mode(services, _requirements), do: services.provider_application_mode
 
   defp admit_requirements([], _mode, _installed_limits), do: :ok
 

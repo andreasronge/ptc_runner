@@ -103,6 +103,7 @@ try:
         write(name + ".json", manifest)
         tools.append({"name": name, "title": name, "description": name,
                       "application": {"manifest": name + ".json"}, "allow_write": True})
+    tools.append(dict(tools[1], name="second-model"))
     config = {"version": 1, "host": {"path": "host.json"}, "tools": tools,
               "authentication": {"bearer": {"binding": "gateway"}},
               "listen": {"address": "127.0.0.1", "port": port, "path": "/mcp"},
@@ -111,10 +112,10 @@ try:
               "private_audit": {"directory": "audit", "max_file_bytes": 1024, "max_retained_files": 2},
               "artifacts": {"root": "artifacts", "trace": True, "inspection": True}}
     pins = invoke(config)
-    assert set(pins) == {"remote", "model", "decision", "empty"}
+    assert set(pins) == {"remote", "model", "second-model", "decision", "empty"}
     for name, value in pins.items():
         assert set(value) == {"expected_application_content_digest", "installation_config_pins", "provider_snapshot_pins"}
-        assert set(value["installation_config_pins"]) == (set() if name == "empty" else {name})
+        assert set(value["installation_config_pins"]) == (set() if name == "empty" else {"model" if name == "second-model" else name})
     # Inspect restoration in the packaged VM, where the one-shot API returns.
     (root / "failure.env").write_text("GATEWAY_PIN_SELECTED=\nGATEWAY_PIN_EXTRA=temporary\n")
     eval_code = """
@@ -128,6 +129,9 @@ try:
         {:error, code} -> raise "Environment capture discovery failed: #{code}"
       end
       "original" = System.get_env("GATEWAY_PIN_SELECTED")
+      {:error, :internal_error} = PtcGateway.PinDiscovery.discover(path, env_file: env_file)
+      "original" = System.get_env("GATEWAY_PIN_SELECTED")
+      nil = System.get_env("GATEWAY_PIN_EXTRA")
       {:error, :credential_unavailable} = PtcGateway.PinDiscovery.discover(path, env_file: failure_file)
       "original" = System.get_env("GATEWAY_PIN_SELECTED")
       nil = System.get_env("GATEWAY_PIN_EXTRA")

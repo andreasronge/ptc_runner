@@ -12,6 +12,7 @@ defmodule PtcGateway.PinDiscovery do
     GatewayConfig,
     HostInstallation,
     InstallationCatalog,
+    ProviderApplicationGate,
     ProviderRuntime,
     ProviderRuntimeServices,
     ServingTemplate
@@ -33,7 +34,7 @@ defmodule PtcGateway.PinDiscovery do
              :ok <- PtcGateway.ToolTemplates.validate_catalog(metadata),
              {:ok, services} <-
                HostInstallation.runtime_services(host, provider_application_mode: :command_vm) do
-          PtcRunner.Dotenv.with_loaded_file(env_file, fn -> capture(tools, services) end)
+          PtcRunner.Dotenv.with_loaded_file(env_file, fn -> capture(tools, catalog, services) end)
         end
       after
         InstallationCatalog.close(catalog)
@@ -46,7 +47,7 @@ defmodule PtcGateway.PinDiscovery do
     _, _ -> {:error, :internal_error}
   end
 
-  defp capture(tools, services) do
+  defp capture(tools, catalog, services) do
     names =
       tools
       |> Enum.flat_map(fn {_, tool} -> ServingTemplate.credential_names(tool.template) end)
@@ -56,8 +57,16 @@ defmodule PtcGateway.PinDiscovery do
     with {:ok, credentials} <- CapturedCredentials.start(services.credential_resolver, names) do
       try do
         with {:ok, captured} <-
-               ProviderRuntimeServices.with_captured_credentials(services, credentials, nil) do
-          acquire(tools, captured)
+               ProviderRuntimeServices.with_captured_credentials(services, credentials, nil),
+             {:ok, admitted} <-
+               ProviderApplicationGate.admit_command_templates(
+                 tools
+                 |> Enum.sort_by(&elem(&1, 0))
+                 |> Enum.map(fn {_, tool} -> tool.template end),
+                 catalog,
+                 captured
+               ) do
+          acquire(tools, admitted)
         end
       after
         GenServer.stop(credentials)
