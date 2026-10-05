@@ -576,6 +576,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
       mission: %{capabilities: []},
       snapshots: [],
       snapshot_sites: [],
+      mcp_transports: [],
       warnings: [],
       exports: %{},
       data_class: effective_class
@@ -686,6 +687,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
               | &1
             ]
           )
+          |> Map.update!(:mcp_transports, &maybe_append(&1, built.mcp_transport))
           |> Map.update!(:warnings, &(&1 ++ built.warnings))
           |> Map.update!(:exports, &merge_provider_exports(&1, provider.provider, built.exports))
 

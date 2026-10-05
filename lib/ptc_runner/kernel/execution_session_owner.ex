@@ -795,6 +795,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     state
     |> release([:worker])
     |> await_borrowed_tracker()
+    |> settle_borrowed()
     |> release([
       :session,
       :listener,
@@ -845,7 +846,20 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
   defp close_owned_inputs(state),
     do:
-      release(await_borrowed_tracker(state), [:session, :listener, :registry, :memory, :prepared])
+      release(state |> await_borrowed_tracker() |> settle_borrowed(), [
+        :session,
+        :listener,
+        :registry,
+        :memory,
+        :prepared
+      ])
+
+  defp settle_borrowed(%{borrowed: nil} = state), do: state
+
+  defp settle_borrowed(state) do
+    result = ProviderRuntime.settle_borrow(state.borrowed)
+    %{state | cleanup: merge_cleanup(state.cleanup, result)}
+  end
 
   defp hold_borrow(state, %ProviderExecution.Retained{borrow: borrow}) do
     case ProviderRuntime.hold_borrow(borrow) do

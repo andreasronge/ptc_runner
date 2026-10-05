@@ -2,7 +2,7 @@ defmodule PtcRunner.Kernel.ProviderRuntime.Borrow do
   @moduledoc """
   Caller-monitored token for retained provider capabilities.
 
-  Return it explicitly after the run finishes; caller death also releases it.
+  Return it explicitly after the run finishes; caller death seals and settles transport work before release.
   The session carries the absolute admission deadline. This token owns no
   provider and cannot extend runtime readiness or prevent a bounded drain.
   """
@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.ProviderRuntime.Borrow do
     :registry,
     :plan_identity,
     :execution,
+    :mcp_token,
     :attestation
   ]
   defstruct @enforce_keys
@@ -28,6 +29,7 @@ defmodule PtcRunner.Kernel.ProviderRuntime.Borrow do
           registry: PtcRunner.Kernel.ProviderRegistry.t(),
           plan_identity: tuple(),
           execution: PtcRunner.Kernel.ProviderExecution.t(),
+          mcp_token: struct(),
           attestation: binary()
         }
 end

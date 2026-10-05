@@ -3913,7 +3913,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     # Surrounding whitespace is not part of a secret, so the credential is the
     # same one the clean file would have supplied and the run reaches the
     # endpoint it was configured for.
-    assert error["phase"] == "active_preflight"
+    assert error["phase"] == "provider_acquisition"
+    assert error["code"] == "provider_endpoint_connection_refused"
   end
 
   @tag :tmp_dir

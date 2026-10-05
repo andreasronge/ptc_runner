@@ -70,6 +70,34 @@ defmodule PtcGatewayLoadTest do
     :ok
   end
 
+  @tag :tmp_dir
+  test "a warm MCP tool returns correct results under a burst", %{tmp_dir: dir} do
+    upstream = PtcRunner.TestSupport.WarmMCPFixture.http()
+    on_exit(upstream.close)
+
+    {path, config} =
+      mcp_fixture(dir, PtcRunner.TestSupport.WarmMCPFixture.http_transport(upstream.endpoint))
+
+    config = put_in(config, ["admission", "max_concurrent_runs"], @burst)
+    File.write!(path, Jason.encode!(config))
+    {:ok, owner} = PtcGateway.start_link(path)
+    on_exit(fn -> stop(owner) end)
+
+    results =
+      GatewayLoad.storm(config, @burst,
+        arguments: %{"program" => ~S|(return (tool/remote.echo {"query" "burst"}))|}
+      )
+
+    assert Map.keys(GatewayLoad.by_status(results)) -- [200, 429] == []
+    assert Map.get(GatewayLoad.by_status(results), 200, 0) > 0
+
+    for result <- results, result.status == 200 do
+      assert get_in(result.result, ["result", "structuredContent"]) == %{"text" => ["burst"]}
+    end
+
+    assert PtcRunner.Kernel.WarmProviderRuntime.snapshot(:sys.get_state(owner).warm).ready
+  end
+
   describe "ceilings under a burst" do
     @tag :tmp_dir
     test "the in-flight bound holds and every slot comes back", %{tmp_dir: dir} do

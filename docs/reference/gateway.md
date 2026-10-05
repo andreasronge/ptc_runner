@@ -76,6 +76,37 @@ alone, so it is stable across runtime versions, unlike the
 `effective_application_digest` printed beside it. Omit `--host-config` when the
 manifest selects no provider.
 
+## Shared MCP providers
+
+A served tool can select non-OAuth `mcp` installations as mission tool grants.
+Stdio and HTTP with static credential headers are supported. Each served tool
+acquires its own transports once at startup and shares them across all calls
+of that tool. Two tools selecting the same installation acquire separate
+transports; there is no gateway-wide sharing. Pin discovery uses the same
+acquisition path.
+
+Use trusted upstream servers: every call of one tool shares the server's
+in-memory state, so the server must not retain caller-sensitive state that can
+leak between calls. The server must honor cancellation notifications; remote
+work that ignores cancellation may outlive an abandoned call. Each acquisition
+has a fixed bound of 128 in-flight requests, including detached requests still
+settling. The bound is not configurable. Capacity refusal is
+`mcp_transport_busy`, occurs before dispatch, and is retryable.
+
+Selected OAuth installations and workflow `catalog: true` selections are
+refused with `provider_source_unsupported` during tool construction, before
+credential capture, OAuth store access, or upstream acquisition. Unselected
+OAuth installations in the host document are ignored.
+
+Transport-owner loss permanently fences readiness for the entire warm gateway
+domain, and new calls receive the existing unavailable response. A failed HTTP
+request alone does not fence readiness. Borrow cleanup seals further requests
+and waits for detached transport work; an execution owner's death does not
+release its borrow before settlement. Settlement expiry is a provider cleanup
+failure and also fences readiness. Recovery requires a gateway restart. Drain
+waits for outstanding borrows until its cutoff, then closes acquisitions even
+when detached work remains.
+
 ## Private audit directory
 
 Startup resolves the audit ancestry, and every resolved ancestor must be a
@@ -247,5 +278,5 @@ The finite catalog is `config_unavailable`, `duplicate_json_key`,
 `write_forbidden`, `audit_unavailable`, `artifact_root_unavailable`, `run_admission_unavailable`,
 `credential_unavailable`, `installation_pin_mismatch`, `provider_pin_mismatch`,
 `provider_pin_unavailable`, `provider_admission_unavailable`,
-`provider_runtime_unavailable`, `listener_unavailable`, and `internal_error`.
+`provider_runtime_unavailable`, `provider_source_unsupported`, `listener_unavailable`, and `internal_error`.
 Unrecognized internal failures map to `internal_error`.

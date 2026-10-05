@@ -22,6 +22,8 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   `:providers` catalog, valid and bound to the supplied installed limits; otherwise
   construction refuses with `:provider_runtime_required` or
   `:invalid_installation_catalog`. Provider-free packages ignore this option.
+  Selected OAuth MCP installations and workflow MCP catalog selections refuse
+  with `:provider_runtime_unsupported` before credential capture or acquisition.
 
   The required manifest input declaration is shape-validated, but its referenced
   file is never opened and its value is never contract-validated. Ordinary
@@ -119,7 +121,7 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   Errors contain only one atom, with no paths, payloads or private reasons:
   `:invalid_options`, `:invalid_installed_limits`, `:invalid_application`,
   `:contracts_required`, `:entry_invalid`, `:manifest_identity_forbidden`,
-  `:provider_runtime_required`, `:invalid_installation_catalog`,
+  `:provider_runtime_required`, `:provider_runtime_unsupported`, `:invalid_installation_catalog`,
   `:private_result_unservable`, `:application_content_digest_mismatch`,
   `:compilation_failed`, `:environment_invalid`, `:effect_declaration_required`,
   `:declared_read_effect_violation`, or `:internal_error`.
@@ -141,6 +143,7 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.InstallationConfigDigest
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.MCPWarmAcquisition
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderPlan
@@ -187,6 +190,7 @@ defmodule PtcRunner.Kernel.ServingTemplate do
           | :private_result_unservable
           | :invalid_installation_catalog
           | :provider_runtime_required
+          | :provider_runtime_unsupported
           | :application_content_digest_mismatch
           | :compilation_failed
           | :environment_invalid
@@ -562,36 +566,44 @@ defmodule PtcRunner.Kernel.ServingTemplate do
 
           entry = Enum.find(prepared.workflow_bundle.prelude.exports, &(&1.ref == package.entry))
 
-          if entry.declared_effect in [:read, :write] do
-            {:ok,
-             %__MODULE__{
-               package: package,
-               workflow: %{bundle: prepared.workflow_bundle},
-               missions:
-                 Map.new(prepared.mission_bundles, fn {name, bundle} ->
-                   {name, %{bundle: bundle}}
-                 end),
-               effect: entry.declared_effect,
-               effective_digest: prepared.effective_application_digest,
-               policy: %{
-                 input_authority_class: :normal,
-                 inspection_capture: inspection_capture,
-                 result_projection: :json,
-                 effective_event_policy: :normal,
-                 publication: :artifact_free,
-                 deadline: :absolute_from_reservation
-               },
-               installation_digests: prepared.installation_config_digests,
-               retained:
-                 retain(
-                   package,
-                   prepared.installation_config_digests,
-                   prepared.effective_application_digest,
-                   %{catalog: catalog, metadata: metadata, request: request}
-                 )
-             }}
-          else
-            {:error, :effect_declaration_required}
+          cond do
+            not Enum.all?(
+              metadata.provider_declarations,
+              &MCPWarmAcquisition.supported?(&1, catalog)
+            ) ->
+              {:error, :provider_runtime_unsupported}
+
+            entry.declared_effect in [:read, :write] ->
+              {:ok,
+               %__MODULE__{
+                 package: package,
+                 workflow: %{bundle: prepared.workflow_bundle},
+                 missions:
+                   Map.new(prepared.mission_bundles, fn {name, bundle} ->
+                     {name, %{bundle: bundle}}
+                   end),
+                 effect: entry.declared_effect,
+                 effective_digest: prepared.effective_application_digest,
+                 policy: %{
+                   input_authority_class: :normal,
+                   inspection_capture: inspection_capture,
+                   result_projection: :json,
+                   effective_event_policy: :normal,
+                   publication: :artifact_free,
+                   deadline: :absolute_from_reservation
+                 },
+                 installation_digests: prepared.installation_config_digests,
+                 retained:
+                   retain(
+                     package,
+                     prepared.installation_config_digests,
+                     prepared.effective_application_digest,
+                     %{catalog: catalog, metadata: metadata, request: request}
+                   )
+               }}
+
+            true ->
+              {:error, :effect_declaration_required}
           end
         after
           PreparedRun.close(prepared)

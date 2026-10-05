@@ -114,7 +114,9 @@ confined read/write filesystem server over live bytes. Pin it from a host
 document with <code class="inline">npx</code>; a hermetic spawn that does not inherit <code class="inline">PATH</code> must run
 absolute <code class="inline">node</code> against the installed <code class="inline">dist/cli.js</code>.</p><p>It is a demo server, not a release payload. A separately cloned project should
 install that package at a pinned version; the PtcRunner release does not add
-Node.js.</p><h2 id="concurrent-requests-and-cleanup">Concurrent requests and cleanup</h2><p>Each acquired MCP transport admits at most 128 in-flight requests, for both
+Node.js.</p><h2 id="concurrent-requests-and-cleanup">Concurrent requests and cleanup</h2><p>When serving through the gateway, acquisitions are shared per served tool.
+See <a href="/reference/gateway/#shared-mcp-providers">shared MCP providers</a> for trusted-server
+requirements, OAuth and workflow catalog refusal, and readiness loss fencing.</p><p>Each acquired MCP transport admits at most 128 in-flight requests, for both
 stdio and HTTP. A full transport refuses a request before writing any bytes
 with <code class="inline">mcp_transport_busy</code>. This refusal is retryable for both read and write
 mappings and carries <code class="inline">not_dispatched</code> provenance; it does not make a write's

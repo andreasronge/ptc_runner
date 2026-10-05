@@ -117,7 +117,28 @@ manifest's <code class="inline">sha256:&lt;64 lowercase hex&gt;</code> pin. Copy
 <code class="inline">expected_application_content_digest</code>. The value covers the application bytes
 alone, so it is stable across runtime versions, unlike the
 <code class="inline">effective_application_digest</code> printed beside it. Omit <code class="inline">--host-config</code> when the
-manifest selects no provider.</p><h2 id="private-audit-directory">Private audit directory</h2><p>Startup resolves the audit ancestry, and every resolved ancestor must be a
+manifest selects no provider.</p><h2 id="shared-mcp-providers">Shared MCP providers</h2><p>A served tool can select non-OAuth <code class="inline">mcp</code> installations as mission tool grants.
+Stdio and HTTP with static credential headers are supported. Each served tool
+acquires its own transports once at startup and shares them across all calls
+of that tool. Two tools selecting the same installation acquire separate
+transports; there is no gateway-wide sharing. Pin discovery uses the same
+acquisition path.</p><p>Use trusted upstream servers: every call of one tool shares the server's
+in-memory state, so the server must not retain caller-sensitive state that can
+leak between calls. The server must honor cancellation notifications; remote
+work that ignores cancellation may outlive an abandoned call. Each acquisition
+has a fixed bound of 128 in-flight requests, including detached requests still
+settling. The bound is not configurable. Capacity refusal is
+<code class="inline">mcp_transport_busy</code>, occurs before dispatch, and is retryable.</p><p>Selected OAuth installations and workflow <code class="inline">catalog: true</code> selections are
+refused with <code class="inline">provider_source_unsupported</code> during tool construction, before
+credential capture, OAuth store access, or upstream acquisition. Unselected
+OAuth installations in the host document are ignored.</p><p>Transport-owner loss permanently fences readiness for the entire warm gateway
+domain, and new calls receive the existing unavailable response. A failed HTTP
+request alone does not fence readiness. Borrow cleanup seals further requests
+and waits for detached transport work; an execution owner's death does not
+release its borrow before settlement. Settlement expiry is a provider cleanup
+failure and also fences readiness. Recovery requires a gateway restart. Drain
+waits for outstanding borrows until its cutoff, then closes acquisitions even
+when detached work remains.</p><h2 id="private-audit-directory">Private audit directory</h2><p>Startup resolves the audit ancestry, and every resolved ancestor must be a
 directory owned by you or root and not group- or world-writable unless
 sticky. This makes <code class="inline">/tmp</code> and the default <code class="inline">TMPDIR</code> usable locations. The audit
 directory itself must not be a symbolic link. Startup creates missing
@@ -236,7 +257,7 @@ credentials, causes or stack traces belong in startup diagnostics.</p><p>The fin
 <code class="inline">write_forbidden</code>, <code class="inline">audit_unavailable</code>, <code class="inline">artifact_root_unavailable</code>, <code class="inline">run_admission_unavailable</code>,
 <code class="inline">credential_unavailable</code>, <code class="inline">installation_pin_mismatch</code>, <code class="inline">provider_pin_mismatch</code>,
 <code class="inline">provider_pin_unavailable</code>, <code class="inline">provider_admission_unavailable</code>,
-<code class="inline">provider_runtime_unavailable</code>, <code class="inline">listener_unavailable</code>, and <code class="inline">internal_error</code>.
+<code class="inline">provider_runtime_unavailable</code>, <code class="inline">provider_source_unsupported</code>, <code class="inline">listener_unavailable</code>, and <code class="inline">internal_error</code>.
 Unrecognized internal failures map to <code class="inline">internal_error</code>.</p>
 </article>
 <nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/cli/">&larr; Command-line reference</a><a class="pager-next" href="/reference/viewer/">Viewer reference &rarr;</a></nav>

@@ -77,6 +77,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMRouter
+  alias PtcRunner.Kernel.MCPWarmAcquisition
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.ResourceRegistrar
 
@@ -128,6 +129,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           close: close() | nil,
           cleanup_snapshot: (-> map()) | nil,
           cleanup_context: map() | nil,
+          mcp_transport: struct() | nil,
           data_class: :normal | :private_inspection,
           accepts_data: [:normal | :private_inspection],
           exports: %{optional(atom()) => term()},
@@ -744,6 +746,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
          close: close,
          cleanup_snapshot: cleanup_snapshot,
          cleanup_context: cleanup_context,
+         mcp_transport: Map.get(built, :mcp_transport),
          data_class: data_class,
          accepts_data: accepts_data,
          exports: exports,
@@ -764,6 +767,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
       :close,
       :cleanup_snapshot,
       :cleanup_context,
+      :mcp_transport,
       :data_class,
       :accepts_data,
       :exports,
@@ -776,6 +780,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
       optional_zero_arity_function?(Map.get(built, :close)) and
       optional_zero_arity_function?(Map.get(built, :cleanup_snapshot)) and
       valid_cleanup_context?(Map.get(built, :cleanup_context)) and
+      MCPWarmAcquisition.valid?(Map.get(built, :mcp_transport)) and
       Map.get(built, :data_class, :normal) in [:normal, :private_inspection] and
       valid_accepts_data?(Map.get(built, :accepts_data, [:normal])) and
       valid_exports?(Map.get(built, :exports, %{}), provides) and

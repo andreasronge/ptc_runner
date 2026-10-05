@@ -9,11 +9,12 @@ defmodule PtcGateway.StartupError do
     audit_invalid host_invalid template_invalid catalog_too_large application_content_digest_mismatch write_forbidden
     audit_unavailable artifact_root_unavailable run_admission_unavailable credential_unavailable installation_pin_mismatch
     provider_pin_mismatch provider_pin_unavailable provider_admission_unavailable
-    provider_runtime_unavailable listener_unavailable internal_error)a
+    provider_runtime_unavailable provider_source_unsupported listener_unavailable internal_error)a
 
   @spec codes() :: [atom()]
   def codes, do: @codes
   @spec normalize(term()) :: atom()
+  def normalize(:provider_runtime_unsupported), do: :provider_source_unsupported
   def normalize(code) when code in @codes, do: code
   def normalize(_), do: :internal_error
   @spec encode(term()) :: binary()

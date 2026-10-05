@@ -2451,7 +2451,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
             :api_key -> {entry.header, secret}
           end
 
-        {:cont, {:ok, [header | headers]}}
+        {name, value} = header
+        {:cont, {:ok, [{String.downcase(name), value} | headers]}}
       else
         true -> {:halt, {:error, :mcp_authentication_failed}}
         _reason -> {:halt, {:error, :credential_unavailable}}

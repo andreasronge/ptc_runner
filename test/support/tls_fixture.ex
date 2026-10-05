@@ -38,13 +38,14 @@ defmodule PtcRunner.TestSupport.TLSFixture do
     end
   end
 
-  defp server_config do
+  @doc "Constructs an in-memory test certificate chain with optional peer extensions."
+  def server_config(extensions \\ []) do
     key = fn -> :public_key.generate_key({:rsa, 2048, 65_537}) end
 
     chain = %{
       root: [key: key.(), digest: :sha256],
       intermediates: [],
-      peer: [key: key.(), digest: :sha256]
+      peer: [key: key.(), digest: :sha256, extensions: extensions]
     }
 
     %{server_chain: chain, client_chain: chain}
