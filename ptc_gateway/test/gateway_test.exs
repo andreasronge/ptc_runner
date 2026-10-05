@@ -11,7 +11,6 @@ defmodule PtcGatewayTest do
     InspectionSnapshot,
     Limits,
     ProjectConfig,
-    ProviderRuntime,
     RunCatalog,
     RunCatalogProbe,
     ServingTemplate,
@@ -191,16 +190,8 @@ defmodule PtcGatewayTest do
 
     {:ok, applications, _} = WarmProviderApplications.start([:req_llm], 1)
 
-    pins_json =
-      ExUnit.CaptureIO.capture_io(fn ->
-        {:ok, discovery} =
-          ProviderRuntime.start_link(template: template, services: services, pins: :discover)
-
-        GenServer.stop(discovery)
-      end)
-
+    pins = PtcRunner.TestSupport.WarmMCPFixture.pins(template, services)
     Enum.each(Enum.reverse(applications), &Application.stop/1)
-    pins = Jason.decode!(pins_json)
 
     config =
       config
@@ -867,11 +858,11 @@ defmodule PtcGatewayTest do
 
     exact_catalog = sized_static_tools(4_194_304, :catalog)
     assert deterministic_size(exact_catalog) == 4_194_304
-    assert PtcGateway.Domain.within_static_limit?(exact_catalog)
+    assert PtcGateway.ToolTemplates.within_static_limit?(exact_catalog)
 
     over_catalog = sized_static_tools(4_194_305, :catalog)
     assert deterministic_size(over_catalog) == 4_194_305
-    refute PtcGateway.Domain.within_static_limit?(over_catalog)
+    refute PtcGateway.ToolTemplates.within_static_limit?(over_catalog)
   end
 
   @tag :slow

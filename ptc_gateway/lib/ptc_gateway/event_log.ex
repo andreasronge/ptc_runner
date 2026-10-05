@@ -68,7 +68,7 @@ defmodule PtcGateway.EventLog do
 
     with :ok <- ensure_directory(directory),
          {:ok, uid} <- directory_owner(directory),
-         {:ok, files} <- inventory(directory, uid),
+         {:ok, files} <- inventory(directory, uid, config["max_file_bytes"]),
          :ok <- PrivateDirectory.create(Path.join(directory, ".gateway-lock")) do
       counters = :ets.new(__MODULE__, [:set, :public, write_concurrency: true])
       slots = :atomics.new(1, signed: true)
@@ -121,15 +121,15 @@ defmodule PtcGateway.EventLog do
     end
   end
 
-  defp inventory(directory, uid) do
+  defp inventory(directory, uid, max_file_bytes) do
     with {:ok, names} <- File.ls(directory) do
       Enum.reduce_while(names -- [".gateway-lock"], {:ok, []}, fn name, {:ok, files} ->
         path = Path.join(directory, name)
 
         with true <- Regex.match?(~r/\A[0-9a-f]{32}-[0-9]{20}\.jsonl\z/, name),
-             {:ok, %{type: :regular, uid: ^uid, mode: mode, links: 1, mtime: _time}} <-
+             {:ok, %{type: :regular, uid: ^uid, mode: mode, links: 1, size: size}} <-
                File.lstat(path, time: :posix),
-             true <- band(mode, 0o777) == 0o600 do
+             true <- band(mode, 0o777) == 0o600 and size <= max_file_bytes do
           {:cont, {:ok, [{name, path} | files]}}
         else
           _ -> {:halt, {:error, :artifact_root_unavailable}}
@@ -188,7 +188,9 @@ defmodule PtcGateway.EventLog do
         snapshot = transport_snapshot(transport)
 
         classified =
-          if snapshot[:finish_reason], do: {:mcp_transport_error, snapshot}, else: reason
+          if snapshot[:finish_reason] || snapshot[:failed?],
+            do: {:mcp_transport_error, snapshot},
+            else: reason
 
         state =
           write_record(state, %{
@@ -305,7 +307,7 @@ defmodule PtcGateway.EventLog do
 
     with {:ok, uid} <- directory_owner(state.directory),
          true <- uid == state.uid,
-         {:ok, files} <- inventory(state.directory, state.uid),
+         {:ok, files} <- inventory(state.directory, state.uid, state.config["max_file_bytes"]),
          {:ok, io} <- File.open(path, [:raw, :binary, :append, :exclusive]) do
       next = %{state | sequence: sequence, io: io, path: path, size: 0}
 

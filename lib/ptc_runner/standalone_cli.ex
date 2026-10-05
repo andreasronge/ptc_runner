@@ -18,6 +18,8 @@ defmodule PtcRunner.StandaloneCLI do
   @doc false
   @spec main([binary()]) :: no_return()
   def main(["gateway" | arguments]) do
+    CLILogger.install_stderr_handler()
+
     case Application.ensure_all_started(:ptc_gateway) do
       # The companion is intentionally absent from Hex-only builds and present
       # only in assembled releases, so this call must remain dynamically bound.

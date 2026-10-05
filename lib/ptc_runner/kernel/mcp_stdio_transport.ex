@@ -84,7 +84,16 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
         _ -> %{}
       end
 
-    Map.merge(cleanup_snapshot(handle), finish)
+    cleanup =
+      case outcome_details(outcome) do
+        {:ok, details} -> details
+        :error -> %{}
+      end
+
+    cleanup_snapshot(handle)
+    |> Map.merge(finish)
+    |> Map.merge(cleanup)
+    |> Map.put(:failed?, outcome_status(outcome) == @outcome_failed)
   rescue
     ArgumentError -> %{}
   end

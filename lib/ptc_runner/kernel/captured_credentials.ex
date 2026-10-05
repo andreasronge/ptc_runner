@@ -17,6 +17,11 @@ defmodule PtcRunner.Kernel.CapturedCredentials do
       when is_function(resolver, 1) and is_list(provider_names) and is_binary(bearer_binding),
       do: GenServer.start_link(__MODULE__, {resolver, Enum.uniq(provider_names), bearer_binding})
 
+  @doc "Captures only selected provider bindings for a one-shot command, without a bearer."
+  @spec start((list(binary()) -> term()), list(binary())) :: GenServer.on_start()
+  def start(resolver, provider_names) when is_function(resolver, 1) and is_list(provider_names),
+    do: GenServer.start(__MODULE__, {resolver, Enum.uniq(provider_names), nil})
+
   @spec resolve(pid(), list(binary())) :: {:ok, map()} | {:error, :credential_unavailable}
   def resolve(owner, names), do: call(owner, {:resolve, names}, {:error, :credential_unavailable})
 
@@ -32,15 +37,13 @@ defmodule PtcRunner.Kernel.CapturedCredentials do
 
   @impl true
   def init({resolver, providers, bearer}) do
-    names = Enum.uniq([bearer | providers])
+    names = if is_nil(bearer), do: providers, else: Enum.uniq([bearer | providers])
 
     with {:ok, values} when is_map(values) <- resolver.(names),
          true <- Enum.sort(Map.keys(values)) == Enum.sort(names),
          true <-
            Enum.all?(values, fn {_name, value} -> is_binary(value) and byte_size(value) > 0 end),
-         token when is_binary(token) <- values[bearer],
-         true <-
-           byte_size(token) in 32..4096 and Regex.match?(~r/\A[A-Za-z0-9\-._~+\/]+=*\z/, token) do
+         true <- valid_bearer?(values, bearer) do
       {:ok, %{values: values, providers: MapSet.new(providers), bearer: bearer}}
     else
       _ -> {:stop, :credential_unavailable}
@@ -51,6 +54,15 @@ defmodule PtcRunner.Kernel.CapturedCredentials do
     _, _ -> {:stop, :credential_unavailable}
   end
 
+  defp valid_bearer?(_values, nil), do: true
+
+  defp valid_bearer?(values, bearer) do
+    token = values[bearer]
+
+    is_binary(token) and byte_size(token) in 32..4096 and
+      Regex.match?(~r/\A[A-Za-z0-9\-._~+\/]+=*\z/, token)
+  end
+
   @impl true
   def handle_call(:ready, _, state), do: {:reply, true, state}
 
@@ -59,6 +71,9 @@ defmodule PtcRunner.Kernel.CapturedCredentials do
       do: {:reply, {:ok, Map.take(state.values, names)}, state},
       else: {:reply, {:error, :credential_unavailable}, state}
   end
+
+  def handle_call({:authenticate, _candidate}, _, %{bearer: nil} = state),
+    do: {:reply, false, state}
 
   def handle_call({:authenticate, candidate}, _, state) do
     expected = :crypto.hash(:sha256, state.values[state.bearer])

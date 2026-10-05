@@ -241,16 +241,7 @@ defmodule PtcRunner.Kernel.WarmProviderRuntime do
   defp capture(opts, plans, state) do
     names =
       plans
-      |> Enum.flat_map(fn
-        {_, _, _, nil} ->
-          []
-
-        {_, _, _, plan} ->
-          Enum.flat_map(
-            plan.metadata.provider_declarations,
-            &plan.catalog.descriptors[&1.name].credential_names
-          )
-      end)
+      |> Enum.flat_map(fn {_, template, _, _} -> ServingTemplate.credential_names(template) end)
       |> Enum.uniq()
       |> Enum.sort()
 

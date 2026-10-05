@@ -270,6 +270,58 @@ defmodule PtcGateway.EventLogTest do
            )
   end
 
+  @tag :tmp_dir
+  test "restart refuses retained files above a reduced file limit", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    config = with_events(path, config)
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{token()}\n")
+    assert {:ok, gateway} = PtcGateway.start_link(path, env_file: env)
+    logger = :sys.get_state(gateway).events
+    handle = EventLog.handle(logger)
+
+    for _ <- 1..20,
+        do: EventLog.emit(handle, %{kind: :startup_stage, stage: :templates, outcome: :ready})
+
+    EventLog.checkpoint(logger)
+    stop(gateway)
+    assert Enum.any?(files(dir), &(File.stat!(&1).size > 1024))
+    with_events(path, config, %{"max_file_bytes" => 1024, "max_retained_files" => 2})
+    assert {:error, :artifact_root_unavailable} = PtcGateway.start_link(path, env_file: env)
+  end
+
+  @tag :tmp_dir
+  test "transport timeout records its failure class rather than its normal process exit", %{
+    tmp_dir: dir
+  } do
+    script = Path.expand("../../test/support/mcp_stdio_source_fixture.sh", __DIR__)
+
+    transport = %{
+      "type" => "stdio",
+      "command" => "/bin/sh",
+      "args" => [script, Path.join(dir, "marker")]
+    }
+
+    {path, config} = mcp_fixture(dir, transport, upstream_tool: "structured")
+    config = with_events(path, config)
+    assert {:ok, gateway} = PtcGateway.start_link(path)
+    on_exit(fn -> stop(gateway) end)
+    runtime = :sys.get_state(:sys.get_state(gateway).warm).runtimes["a"]
+    [handle] = :sys.get_state(runtime).opened.providers.mcp_transports
+    send(handle.pid, :close_timeout)
+
+    Eventually.assert_eventually(fn ->
+      Enum.any?(records(dir), &(&1["kind"] == "transport"))
+    end)
+
+    assert Enum.any?(records(dir), fn record ->
+             record["kind"] == "transport" and record["fault"] == "close_timeout" and
+               record["tool"] == "a" and record["provider"] == "remote"
+           end)
+
+    assert response(config, "/health/ready").body == %{"status" => "not_ready"}
+  end
+
   defp with_events(
          path,
          config,

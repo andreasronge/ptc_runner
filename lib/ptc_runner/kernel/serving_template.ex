@@ -508,6 +508,21 @@ defmodule PtcRunner.Kernel.ServingTemplate do
 
   def provider_plan(_template), do: {:error, :provider_runtime_required}
 
+  @doc false
+  @spec credential_names(t()) :: [binary()]
+  def credential_names(template) do
+    case provider_plan(template) do
+      {:ok, plan} ->
+        plan.metadata.provider_declarations
+        |> Enum.flat_map(&plan.catalog.descriptors[&1.name].credential_names)
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      {:error, _} ->
+        []
+    end
+  end
+
   defp retain(package, digests, effective_digest, state) do
     reader = fn -> state end
 
