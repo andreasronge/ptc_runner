@@ -16,6 +16,26 @@ defmodule PtcRunner.Lisp.Java.Oracle.Fixtures do
   @external_resource @cases_resource
   @external_resource @baseline_resource
 
+  # Closed decoding tables: `String.to_existing_atom/1` depended on which
+  # modules happened to be loaded first, so a test-order seed could fail it.
+  @expected_statuses Map.new([:ok, :error], &{Atom.to_string(&1), &1})
+  @expected_types Map.new(
+                    [
+                      :boolean,
+                      :date,
+                      :double,
+                      :duration,
+                      :error,
+                      :float,
+                      :instant,
+                      :int,
+                      :local_date,
+                      :long,
+                      :string
+                    ],
+                    &{Atom.to_string(&1), &1}
+                  )
+
   @doc "Returns the structured source cases after manifest validation."
   @spec cases() :: [map()]
   def cases do
@@ -333,8 +353,8 @@ defmodule PtcRunner.Lisp.Java.Oracle.Fixtures do
       overload_id: outcome["overload_id"],
       descriptor: outcome["descriptor"],
       expected: %{
-        status: String.to_existing_atom(get_in(outcome, ["expected", "status"])),
-        type: String.to_existing_atom(get_in(outcome, ["expected", "type"])),
+        status: Map.fetch!(@expected_statuses, get_in(outcome, ["expected", "status"])),
+        type: Map.fetch!(@expected_types, get_in(outcome, ["expected", "type"])),
         value: get_in(outcome, ["expected", "value"])
       }
     }
