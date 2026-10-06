@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.MCPSettlement do
   @moduledoc false
 
   alias PtcRunner.Kernel.MCPBorrowToken
+  alias PtcRunner.Kernel.ServingEvents
 
   def new, do: %{entries: %{}, waiters: %{}}
 
@@ -33,8 +34,14 @@ defmodule PtcRunner.Kernel.MCPSettlement do
 
   def await_reply(state, token, deadline, from) do
     case await(state.settlement, token, deadline, from) do
-      {:reply, result, ledger} -> {:reply, result, %{state | settlement: ledger}}
-      {:noreply, ledger} -> {:noreply, %{state | settlement: ledger}}
+      {:reply, result, ledger} ->
+        if result != :ok,
+          do: ServingEvents.counter(state.events, :settlement_timeout)
+
+        {:reply, result, %{state | settlement: ledger}}
+
+      {:noreply, ledger} ->
+        {:noreply, %{state | settlement: ledger}}
     end
   end
 
@@ -60,12 +67,13 @@ defmodule PtcRunner.Kernel.MCPSettlement do
     end
   end
 
-  def timeout(ledger, ref) do
+  def timeout(ledger, ref, events \\ nil) do
     case Map.pop(ledger.waiters, ref) do
       {nil, _} ->
         ledger
 
       {{_token, from, _timer}, waiters} ->
+        ServingEvents.counter(events, :settlement_timeout)
         GenServer.reply(from, {:error, :provider_cleanup_failed})
         %{ledger | waiters: waiters}
     end

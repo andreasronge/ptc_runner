@@ -1282,11 +1282,12 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
 
     # Dispatcher emits `capability-started` before invoking the adapter, so
     # receiving the blocked request is the synchronization that the start is
-    # already in the terminal batch. The evaluation is then killed while the
-    # provider worker is still blocked, leaving no matching stop. The workflow
-    # clock is the binding limit so that kill wins against the dispatcher's
-    # provider-await timer: when `run_duration_ms` is the tighter bound, that
-    # timer can emit a matched failed stop (`missing_usage_calls` stays 0).
+    # already in the terminal batch. The provider-await deadline is clamped to
+    # the workflow deadline, so the evaluation kill and the provider timeout
+    # fall on the same instant. Usually the kill wins and leaves no matching
+    # stop; under scheduler load the provider timeout can reach the program
+    # first, which returns its timeout value as the run result. Both shapes
+    # report the call as missing usage, so only the terminal status varies.
     # No sleep.
     task =
       Task.async(fn ->
@@ -1304,8 +1305,18 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
         flunk("did not observe the in-flight LLM request after capability-started")
     end
 
-    assert {:error, %CommandOutcome{} = outcome} = Task.await(task, 15_000)
-    assert outcome.envelope["error"]["code"] in ["run_timeout", "runtime_limit_exceeded"]
+    outcome =
+      case Task.await(task, 15_000) do
+        {:error, %CommandOutcome{} = outcome} ->
+          assert outcome.envelope["error"]["code"] in ["run_timeout", "runtime_limit_exceeded"]
+          outcome
+
+        {:ok, %CommandOutcome{} = outcome} ->
+          assert %{"kind" => "timeout", "reason" => "provider_timeout"} =
+                   outcome.envelope["result"]["value"]
+
+          outcome
+      end
 
     usage = outcome.envelope["execution"]["usage"]
     assert usage["llm_usage_state"] == "available"

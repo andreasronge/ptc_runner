@@ -656,15 +656,13 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     transport = start_transport(tmp_dir, nil, "no-read")
     ref = Process.monitor(transport.pid)
 
-    assert {:error, :mcp_timeout} =
-             MCPStdioTransport.request(
-               transport,
-               "blocked",
-               %{"payload" => String.duplicate("x", 900_000)},
-               %{},
-               1_000_000,
-               25
-             )
+    caller = Task.async(fn -> blocked_request(transport) end)
+    assert_eventually(fn -> unacknowledged_request?(transport) end)
+    id = safe_state(transport.pid).writing.request_id
+    # Trigger expiry only after dispatch: a short wall-clock budget can expire
+    # before admission under suite load and never exercise the wedged write.
+    send(transport.pid, {:request_timeout, id})
+    assert {:error, :mcp_timeout} = Task.await(caller, @settle_timeout_ms)
 
     assert_receive {:DOWN, ^ref, :process, _pid, :normal}, @settle_timeout_ms
     assert {:error, :closed} = request(transport, "after-timeout")

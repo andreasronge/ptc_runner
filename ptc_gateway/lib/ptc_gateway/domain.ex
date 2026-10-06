@@ -40,6 +40,8 @@ defmodule PtcGateway.Domain do
       request_admission: nil,
       run_admission: nil,
       audit: nil,
+      events: nil,
+      event_sink: nil,
       tools: %{},
       metadata: [],
       policy: nil
@@ -47,11 +49,27 @@ defmodule PtcGateway.Domain do
 
     case configure(path, env_file, state) do
       {:ok, ready} ->
+        event(ready, %{kind: :startup_stage, stage: :listener, outcome: :ready})
+
+        event(ready, %{
+          kind: :readiness,
+          transition: :ready,
+          tool: nil,
+          provider: nil,
+          cause: :startup
+        })
+
         {:ok, ready}
 
       {:error, code, partial} ->
+        event(partial, %{
+          kind: :startup_failed,
+          code: PtcGateway.StartupError.normalize(code),
+          reason_class: PtcGateway.StartupError.reason_class(code)
+        })
+
         cleanup(partial)
-        {:stop, code}
+        {:stop, PtcGateway.StartupError.normalize(code)}
     end
   end
 
@@ -67,11 +85,15 @@ defmodule PtcGateway.Domain do
       }
 
       with :ok <- artifact_root(config),
-           {:ok, tools, metadata} <-
-             PtcGateway.ToolTemplates.build(config["tools"], host, catalog, config["artifacts"]),
-           :ok <- PtcGateway.ToolTemplates.validate_catalog(metadata),
-           {:ok, services} <- HostInstallation.runtime_services(host) do
-        boot(config, tools, services, env_file, %{state | metadata: metadata})
+           {:ok, events} <- events(config) do
+        state = %{
+          child(state, events)
+          | events: events,
+            event_sink: if(events, do: PtcGateway.EventLog.handle(events))
+        }
+
+        event(state, %{kind: :startup_stage, stage: :artifact_root, outcome: :ready})
+        configure_tools(config, host, catalog, env_file, state)
       else
         {:error, code} -> {:error, code, state}
       end
@@ -79,6 +101,28 @@ defmodule PtcGateway.Domain do
       {:error, code} -> {:error, code, state}
     end
   end
+
+  defp configure_tools(config, host, catalog, env_file, state) do
+    event(state, %{kind: :startup_stage, stage: :templates, outcome: :started})
+
+    with {:ok, tools, metadata} <-
+           PtcGateway.ToolTemplates.build(config["tools"], host, catalog, config["artifacts"]),
+         :ok <- PtcGateway.ToolTemplates.validate_catalog(metadata),
+         {:ok, services} <- HostInstallation.runtime_services(host) do
+      event(state, %{kind: :startup_stage, stage: :templates, outcome: :ready})
+      boot(config, tools, services, env_file, %{state | metadata: metadata})
+    else
+      {:error, code} -> {:error, code, state}
+    end
+  end
+
+  defp events(%{"artifacts" => %{"root" => root, "events" => config}}),
+    do: PtcGateway.EventLog.start_link(Map.put(config, "directory", Path.join(root, "events")))
+
+  defp events(_), do: {:ok, nil}
+
+  defp event(state, record), do: PtcGateway.EventLog.emit(event_handle(state), record)
+  defp event_handle(state), do: state.event_sink
 
   defp artifact_root(%{"artifacts" => %{"root" => root}}) do
     with :ok <- artifact_root_parent(root),
@@ -120,8 +164,12 @@ defmodule PtcGateway.Domain do
   end
 
   defp boot(config, tools, services, env_file, state) do
+    event(state, %{kind: :startup_stage, stage: :audit, outcome: :started})
+
     case audit(config) do
       {:ok, audit} ->
+        event(state, %{kind: :startup_stage, stage: :audit, outcome: :ready})
+
         start_run(config, tools, services, env_file, %{
           child(state, audit)
           | audit: audit,
@@ -138,9 +186,12 @@ defmodule PtcGateway.Domain do
 
   defp start_run(config, tools, services, env_file, state) do
     admission = config["admission"]
+    event(state, %{kind: :startup_stage, stage: :run_admission, outcome: :started})
 
     case RunAdmission.start_link(max_concurrent_runs: admission["max_concurrent_runs"]) do
       {:ok, run} ->
+        event(state, %{kind: :startup_stage, stage: :run_admission, outcome: :ready})
+        event(state, %{kind: :startup_stage, stage: :warm_providers, outcome: :started})
         state = child(state, run)
 
         case WarmProviderRuntime.start_link(
@@ -150,9 +201,12 @@ defmodule PtcGateway.Domain do
                run_admission: run,
                max_active_provider_calls: admission["max_active_provider_calls"],
                max_waiting_provider_calls: admission["max_waiting_provider_calls"],
+               events: event_callbacks(state),
                env_file: env_file
              ) do
           {:ok, warm} ->
+            event(state, %{kind: :startup_stage, stage: :warm_providers, outcome: :ready})
+
             start_request_admission(config, %{
               child(state, warm)
               | warm: warm,
@@ -160,12 +214,19 @@ defmodule PtcGateway.Domain do
             })
 
           {:error, code} ->
-            {:error, PtcGateway.StartupError.normalize(code), state}
+            {:error, code, state}
         end
 
       _ ->
         {:error, :run_admission_unavailable, state}
     end
+  end
+
+  defp event_callbacks(%{events: nil}), do: nil
+
+  defp event_callbacks(state) do
+    handle = event_handle(state)
+    fn tool -> PtcGateway.EventLog.callbacks(handle, tool) end
   end
 
   defp start_request_admission(config, state) do
@@ -179,6 +240,7 @@ defmodule PtcGateway.Domain do
   end
 
   defp listen(config, state) do
+    event(state, %{kind: :startup_stage, stage: :listener, outcome: :started})
     listen = config["listen"]
     ip = if listen["address"] == "::1", do: {0, 0, 0, 0, 0, 0, 0, 1}, else: {127, 0, 0, 1}
 
@@ -233,6 +295,7 @@ defmodule PtcGateway.Domain do
     drained = wait_for_admission(state.run_admission, drain_deadline)
     if not drained, do: RunAdmission.cancel_all(state.run_admission)
 
+    checkpoint_events(state)
     cleanup_deadline = System.monotonic_time(:millisecond) + cleanup_ms
     providers_clean = WarmProviderRuntime.drain(state.warm, cleanup_deadline) == :ok
 
@@ -252,6 +315,9 @@ defmodule PtcGateway.Domain do
   def handle_info({:EXIT, pid, _}, %{listener: pid} = state),
     do: {:stop, :gateway_listener_failed, state}
 
+  def handle_info({:EXIT, pid, _reason}, %{events: pid} = state),
+    do: {:noreply, %{state | events: nil}}
+
   def handle_info({:EXIT, pid, _reason}, %{audit: pid} = state),
     do: {:stop, :gateway_child_failed, state}
 
@@ -268,12 +334,26 @@ defmodule PtcGateway.Domain do
   defp cleanup(state) do
     if is_pid(state.listener) and Process.alive?(state.listener), do: stop(state.listener)
 
+    checkpoint_events(state)
+
     if is_pid(state.warm),
       do: WarmProviderRuntime.drain(state.warm, System.monotonic_time(:millisecond))
 
-    for pid <- state.children, Process.alive?(pid), do: stop(pid)
+    for pid <- state.children, pid != state.events, Process.alive?(pid), do: stop(pid)
+
+    if is_pid(state.events) and Process.alive?(state.events),
+      do: PtcGateway.EventLog.close(state.events)
+
     if state.catalog, do: InstallationCatalog.close(state.catalog)
     :ok
+  end
+
+  defp checkpoint_events(%{events: nil}), do: :ok
+
+  defp checkpoint_events(state) do
+    if Process.alive?(state.events), do: PtcGateway.EventLog.shutdown(state.events)
+  catch
+    :exit, _ -> :ok
   end
 
   defp stop(pid) do

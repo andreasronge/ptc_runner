@@ -9,10 +9,11 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   alias PtcRunner.Kernel.MCPProtocol
   alias PtcRunner.Kernel.MCPSettlement
   alias PtcRunner.Kernel.ResourceRegistrar
+  alias PtcRunner.Kernel.ServingEvents
   alias PtcRunner.Utf8
 
   @enforce_keys [:pid, :outcome]
-  defstruct [:pid, :outcome, :borrow_token]
+  defstruct [:provider_name, :pid, :outcome, :borrow_token]
 
   @type t :: %__MODULE__{pid: pid(), outcome: map()}
 
@@ -71,6 +72,28 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
       [{:stderr, %{stderr: stderr} = details}] -> %{details | stderr: Utf8.sanitize(stderr)}
       [] -> %{}
     end
+  rescue
+    ArgumentError -> %{}
+  end
+
+  @doc false
+  def event_snapshot(%__MODULE__{outcome: outcome} = handle) do
+    finish =
+      case :ets.lookup(outcome.details, :event_finish) do
+        [{:event_finish, finish}] -> finish
+        _ -> %{}
+      end
+
+    cleanup =
+      case outcome_details(outcome) do
+        {:ok, details} -> details
+        :error -> %{}
+      end
+
+    cleanup_snapshot(handle)
+    |> Map.merge(finish)
+    |> Map.merge(Map.take(cleanup, [:finish_reason, :exit_status]))
+    |> Map.put(:failed?, outcome_status(outcome) == @outcome_failed)
   rescue
     ArgumentError -> %{}
   end
@@ -212,6 +235,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
          serving_mode: config.serving_mode,
          next_id: 1,
          next_ack_id: 1,
+         events: nil,
          settlement: MCPSettlement.new(),
          admission_token: nil,
          admission_deadline: nil,
@@ -238,6 +262,9 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   end
 
   @impl GenServer
+  def handle_call({:events, events}, _from, state),
+    do: {:reply, :ok, %{state | events: events}}
+
   def handle_call({:cancel_request, id}, _from, state) do
     state = cancel_request(state, id, :mcp_cancelled, true)
 
@@ -281,7 +308,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
         %{pending: pending} = state
       )
       when map_size(pending) >= @max_pending_requests,
-      do: {:reply, {:error, :mcp_transport_busy}, state}
+      do: {:reply, {:error, :mcp_transport_busy}, ServingEvents.count(state, :busy)}
 
   def handle_call(
         {:request, method, params, metadata, max_bytes, timeout_ms, exchange?},
@@ -473,7 +500,9 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   end
 
   def handle_info({:settlement_timeout, ref}, state),
-    do: {:noreply, %{state | settlement: MCPSettlement.timeout(state.settlement, ref)}}
+    do:
+      {:noreply,
+       %{state | settlement: MCPSettlement.timeout(state.settlement, ref, state.events)}}
 
   def handle_info(_message, state), do: {:noreply, state}
 
@@ -948,11 +977,12 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
         cond do
           pending.sent? ->
             state
+            |> ServingEvents.count(:detached)
             |> put_in([:pending, id, :detached?], true)
             |> enqueue_write({:cancel, id}, encode_cancellation(id), pending.write_timeout_ms)
 
           writing_request?(state, id) ->
-            put_in(state, [:pending, id, :detached?], true)
+            state |> ServingEvents.count(:detached) |> put_in([:pending, id, :detached?], true)
 
           true ->
             state
@@ -1086,14 +1116,30 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     {:stop, :normal, state}
   end
 
-  defp finish_transport(%{closing: waiters} = state, %{reason: :close})
+  defp finish_transport(state, finish) do
+    record_finish(state.outcome.details, finish)
+
+    finish_transport_recorded(state, finish)
+  end
+
+  defp record_finish(table, finish) do
+    :ets.insert(
+      table,
+      {:event_finish, %{finish_reason: finish.reason, exit_status: finish.exit_status}}
+    )
+  rescue
+    ArgumentError -> :ok
+  end
+
+  defp finish_transport_recorded(%{closing: waiters} = state, %{reason: :close})
        when is_list(waiters) do
     reply_close_waiters(waiters, :ok)
     record_outcome(state.outcome, @outcome_clean)
     {:stop, :normal, state}
   end
 
-  defp finish_transport(state, %{reason: reason}) when reason in @verified_cleanup_reasons do
+  defp finish_transport_recorded(state, %{reason: reason})
+       when reason in @verified_cleanup_reasons do
     state = fail_pending(state, :mcp_transport_error)
 
     if is_list(state.closing), do: reply_close_waiters(state.closing, :ok)
@@ -1103,7 +1149,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     {:stop, :normal, state}
   end
 
-  defp finish_transport(state, finish) do
+  defp finish_transport_recorded(state, finish) do
     {stderr, truncated?} = diagnostic_stderr(state)
 
     details = %{

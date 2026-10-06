@@ -5,7 +5,8 @@ defmodule PtcRunner.Kernel.WarmProviderRuntime do
   Start with `tools:` (a map from tool name to `%{template: template, pins: pins}`),
   `services:`, `bearer_binding:`, `run_admission:`,
   `max_active_provider_calls:` and `max_waiting_provider_calls:`. Optional
-  `env_file:` is an already anchored absolute path. Capture resolves the exact
+  `env_file:` is an already anchored absolute path. Optional `events:` builds
+  bounded internal diagnostic callbacks for each tool name. Capture resolves the exact
   union of selected credentials and the bearer binding once, inside one exact
   file snapshot scope. The environment and lock are restored before startup
   returns. Restart is required for credential rotation.
@@ -102,7 +103,7 @@ defmodule PtcRunner.Kernel.WarmProviderRuntime do
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) when is_list(opts) do
     if Keyword.keyword?(opts) and length(opts) == MapSet.size(MapSet.new(Keyword.keys(opts))) and
-         Keyword.keys(opts) -- (@required ++ [:env_file]) == [] and
+         Keyword.keys(opts) -- (@required ++ [:env_file, :events]) == [] and
          Enum.all?(@required, &Keyword.has_key?(opts, &1)),
        do: GenServer.start_link(__MODULE__, opts),
        else: {:error, :invalid_warm_provider_runtime}
@@ -150,6 +151,7 @@ defmodule PtcRunner.Kernel.WarmProviderRuntime do
       draining: false,
       monitors: [],
       connection: nil,
+      events: opts[:events],
       active_ceiling: opts[:max_active_provider_calls]
     }
 
@@ -316,7 +318,12 @@ defmodule PtcRunner.Kernel.WarmProviderRuntime do
         {:cont, {:ok, put_in(next.tools[name], bound)}}
 
       {name, template, pins, _}, {:ok, next} ->
-        case ProviderRuntime.start_link(template: template, services: services, pins: pins) do
+        case ProviderRuntime.start_link(
+               template: template,
+               services: services,
+               pins: pins,
+               events: if(state.events, do: state.events.(name))
+             ) do
           {:ok, runtime} ->
             {:ok, bound} = ServingTemplate.with_provider_runtime(template, runtime)
             bound = ServingTemplate.with_warm_runtime(bound, self())
