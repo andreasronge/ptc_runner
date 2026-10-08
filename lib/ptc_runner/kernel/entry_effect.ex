@@ -13,7 +13,9 @@ defmodule PtcRunner.Kernel.EntryEffect do
   every selectable mission; there is no reachability narrowing. The other
   reserved runtime and private diagnostic routes are read effects: their
   inspection and annotation affect only the run. An empty mission grant is
-  read. Unknown dominates write, which dominates read. Export resolution
+  read. The same route classification is used before acquisition with inert
+  declaration or preparation effects. Unknown dominates write, which dominates
+  read. Export resolution
   reuses the shared export resolver and `PtcRunner.Kernel.MissionInventory`.
   """
 
@@ -28,7 +30,7 @@ defmodule PtcRunner.Kernel.EntryEffect do
   def resolve(%{workflow: workflow, missions: missions}, entry) do
     grants = mission_grants(missions)
 
-    routes = capability_effects(workflow, grants)
+    routes = workflow_capability_effects(workflow, grants)
     own = ExportEffect.resolve(entry, routes)
 
     implicit_routes =
@@ -47,7 +49,12 @@ defmodule PtcRunner.Kernel.EntryEffect do
     }
   end
 
-  defp capability_effects(workflow, grants) do
+  @doc false
+  @spec capability_effects(map(), map()) :: map()
+  def capability_effects(workflow, missions),
+    do: workflow_capability_effects(workflow, mission_grants(missions))
+
+  defp workflow_capability_effects(workflow, grants) do
     routes =
       Map.new(Environment.implicit_capabilities(:workflow, workflow.private_capabilities), fn
         "kernel-eval" -> {"kernel-eval", join(Enum.map(grants, &elem(&1, 1)))}

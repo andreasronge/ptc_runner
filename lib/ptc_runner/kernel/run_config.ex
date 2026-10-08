@@ -25,7 +25,9 @@ defmodule PtcRunner.Kernel.RunConfig do
   environment and the limits. Each contains both the authoritative versioned
   structured inventory and a separately versioned compact model rendering,
   each with distinct hashes and byte counts. Hosts cannot supply mutable
-  inventory text.
+  inventory text. Declared-read workflow exports resolve against the complete
+  assembled mission grant for `kernel-eval` and read effects for other implicit
+  workflow routes. Mission inspection routes resolve as read.
 
   `provider_session` is the owner-backed provider cleanup boundary, or a
   non-owning borrowed value. A borrowed value supplies the absolute
@@ -69,6 +71,8 @@ defmodule PtcRunner.Kernel.RunConfig do
   alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.Deadline
+  alias PtcRunner.Kernel.DeclaredReadEffectValidator
+  alias PtcRunner.Kernel.EntryEffect
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.InspectionSink
@@ -179,10 +183,10 @@ defmodule PtcRunner.Kernel.RunConfig do
              [],
          %WorkflowEnvironment{} = workflow <- Keyword.get(opts, :workflow_environment),
          true <- WorkflowEnvironment.valid?(workflow),
-         :ok <- MissionInventory.validate_declared_read_effects(workflow),
          true <- JSONValue.map?(Keyword.get(opts, :input)),
          %Limits{} = limits <- Keyword.get(opts, :limits),
          {:ok, missions} <- build_missions(Keyword.get(opts, :missions), limits),
+         :ok <- validate_workflow_effects(workflow, missions),
          %EventSink{} = sink <- Keyword.get(opts, :event_sink),
          true <- valid_event_sink_contract?(sink, limits),
          true <- result_contract?(Keyword.get(opts, :result_contract)),
@@ -289,6 +293,18 @@ defmodule PtcRunner.Kernel.RunConfig do
       :error ->
         {:error, :invalid_run_config}
     end
+  end
+
+  defp validate_workflow_effects(%{inspect_only: true}, _missions), do: :ok
+
+  defp validate_workflow_effects(workflow, missions) do
+    environments = Map.new(missions, fn {name, mission} -> {name, mission.environment} end)
+
+    DeclaredReadEffectValidator.validate_assembled(
+      workflow,
+      environments,
+      EntryEffect.capability_effects(workflow, environments)
+    )
   end
 
   defp build_missions(environments, limits)
