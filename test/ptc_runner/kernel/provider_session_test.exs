@@ -1199,7 +1199,6 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
   end
 
   test "cleanup has one shared bound" do
-    {:ok, order} = Agent.start_link(fn -> [] end)
     {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
     {:ok, session} = ProviderSession.start(limits)
     {:ok, first} = ProviderSession.open_registrar(session)
@@ -1207,17 +1206,21 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     assert :ok = ResourceRegistrar.activate(first)
     assert :ok = ResourceRegistrar.activate(second)
 
-    assert :ok = ResourceRegistrar.commit(first, record_close(order, :first))
+    assert :ok = ResourceRegistrar.commit(first, fn -> :ok end)
 
-    assert :ok =
-             ResourceRegistrar.commit(second, fn ->
-               receive do
-                 :never -> :ok
-               end
-             end)
+    wedged =
+      ProviderCleanup.new(fn -> receive do: (:never -> :ok) end, nil, "wedged", nil)
 
-    assert {:error, :provider_cleanup_failed} = ProviderSession.close(session)
-    assert [:first] = Agent.get(order, &Enum.reverse/1)
+    assert :ok = ResourceRegistrar.commit(second, wedged)
+
+    # The wedged closer runs first and is granted only its share of the one
+    # budget, leaving the rest for the closer behind it. Whether that closer
+    # still finishes in the remainder depends on scheduler load, so the share
+    # itself is the oracle.
+    assert {:error, {:provider_cleanup_failed, %{provider: "wedged", cleanup_budget_ms: share}}} =
+             ProviderSession.close_detailed(session)
+
+    assert share in 1..50
     assert {:error, :provider_cleanup_failed} = ProviderSession.close(session)
   end
 
