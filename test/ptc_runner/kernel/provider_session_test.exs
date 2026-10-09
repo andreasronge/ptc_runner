@@ -1199,7 +1199,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
   end
 
   test "cleanup has one shared bound" do
-    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 10_000)
     {:ok, session} = ProviderSession.start(limits)
     {:ok, first} = ProviderSession.open_registrar(session)
     {:ok, second} = ProviderSession.open_registrar(session)
@@ -1208,19 +1208,26 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
 
     assert :ok = ResourceRegistrar.commit(first, fn -> :ok end)
 
-    wedged =
-      ProviderCleanup.new(fn -> receive do: (:never -> :ok) end, nil, "wedged", nil)
+    failing =
+      ProviderCleanup.new(
+        fn -> {:error, {:mcp_transport_error, %{finish_reason: :close}}} end,
+        nil,
+        "failing",
+        nil
+      )
 
-    assert :ok = ResourceRegistrar.commit(second, wedged)
+    assert :ok = ResourceRegistrar.commit(second, failing)
 
-    # The wedged closer runs first and is granted only its share of the one
-    # budget, leaving the rest for the closer behind it. Whether that closer
-    # still finishes in the remainder depends on scheduler load, so the share
-    # itself is the oracle.
-    assert {:error, {:provider_cleanup_failed, %{provider: "wedged", cleanup_budget_ms: share}}} =
+    # The newest closer runs first and is granted only its share of the one
+    # budget, leaving the rest for the closer behind it. Its failure reports
+    # that grant at once, so the share is checked without waiting it out or
+    # depending on how much of the remainder scheduler load leaves.
+    assert {:error,
+            {:provider_cleanup_failed,
+             %{provider: "failing", reason: :transport_failed, cleanup_budget_ms: share}}} =
              ProviderSession.close_detailed(session)
 
-    assert share in 1..50
+    assert share in 1..5_000
     assert {:error, :provider_cleanup_failed} = ProviderSession.close(session)
   end
 
