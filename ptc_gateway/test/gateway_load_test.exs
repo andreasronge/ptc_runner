@@ -577,6 +577,7 @@ defmodule PtcGatewayLoadTest do
     on_exit(fn -> stop(listener) end)
     {:ok, {_, port}} = ThousandIsland.listener_info(listener)
 
+    descriptors_before = descriptor_count()
     sockets = for _ <- 1..12, do: open_socket(port)
     on_exit(fn -> Enum.each(sockets, &:gen_tcp.close/1) end)
     assert await_connections(listener, 8, System.monotonic_time(:millisecond) + 2_000) == 8
@@ -595,7 +596,15 @@ defmodule PtcGatewayLoadTest do
     send_health(health, port)
     assert {:error, :timeout} = :gen_tcp.recv(health, 0, 100)
 
+    {:ok, handlers} = ThousandIsland.connection_pids(listener)
+    handler_bytes = Enum.map(handlers, fn pid -> elem(Process.info(pid, :memory), 1) end)
+    descriptors_after = descriptor_count()
+
     report("socket ceiling: 2 acceptors x 4 connections, 12 idle sockets", %{
+      "idle handler bytes min / mean / max" =>
+        "#{Enum.min(handler_bytes)} / #{div(Enum.sum(handler_bytes), 8)} / #{Enum.max(handler_bytes)}",
+      "BEAM descriptors baseline / peak including 13 client sockets" =>
+        inspect({descriptors_before, descriptors_after}),
       "served / queued / refused" => "8 (HTTP 404) / 4 / 0 (100 ms per socket)",
       "health on a new socket" => "TCP connected, HTTP timed out",
       "inflight leases / run capacity" => "0 / 0"
@@ -610,6 +619,34 @@ defmodule PtcGatewayLoadTest do
     assert %{status: 200} = GatewayLoad.call(config)
     assert GatewayLoad.await_leases(owner, 0) == 0
     assert GatewayLoad.await_run_capacity(owner, 0) == 0
+  end
+
+  defp descriptor_count do
+    case File.ls("/proc/self/fd") do
+      {:ok, descriptors} -> length(descriptors)
+      _ -> :unavailable
+    end
+  end
+
+  @tag :tmp_dir
+  test "derived listener ceiling queues idle sockets and recovers", %{tmp_dir: dir} do
+    {owner, config} = start_gateway(dir, max_inflight_requests: 2, max_concurrent_runs: 2)
+    listener = :sys.get_state(owner).listener
+    policy = PtcGateway.Domain.metadata(owner).listener_policy.transport
+    assert policy.handler_ceiling == 10
+    sockets = for _ <- 1..14, do: open_socket(config["listen"]["port"])
+    on_exit(fn -> Enum.each(sockets, &:gen_tcp.close/1) end)
+    Enum.each(sockets, &send_health(&1, config["listen"]["port"]))
+    readings = Enum.map(sockets, &:gen_tcp.recv(&1, 0, 100))
+    assert Enum.count(readings, &match?({:ok, "HTTP/1.1 404" <> _}, &1)) == 10
+    assert Enum.count(readings, &(&1 == {:error, :timeout})) == 4
+    assert await_connections(listener, 10, System.monotonic_time(:millisecond) + 2_000) == 10
+    assert GatewayLoad.inflight_leases(owner) == 0
+    assert GatewayLoad.run_capacity_in_use(owner) == 0
+    Enum.each(sockets, &:gen_tcp.close/1)
+    assert await_connections(listener, 0, System.monotonic_time(:millisecond) + 5_000) == 0
+    assert response(config, "/health/ready").status == 200
+    assert %{status: 200} = GatewayLoad.call(config)
   end
 
   defp open_socket(port) do

@@ -108,9 +108,15 @@ defmodule PtcGateway.Domain do
     with {:ok, tools, metadata} <-
            PtcGateway.ToolTemplates.build(config["tools"], host, catalog, config["artifacts"]),
          :ok <- PtcGateway.ToolTemplates.validate_catalog(metadata),
+         {:ok, transport} <- PtcGateway.ListenerPolicy.derive(config, host, tools),
          {:ok, services} <- HostInstallation.runtime_services(host) do
       event(state, %{kind: :startup_stage, stage: :templates, outcome: :ready})
-      boot(config, tools, services, env_file, %{state | metadata: metadata})
+
+      boot(config, tools, services, env_file, %{
+        state
+        | metadata: metadata,
+          policy: Map.put(state.policy, :transport, transport)
+      })
     else
       {:error, code} -> {:error, code, state}
     end
@@ -258,6 +264,10 @@ defmodule PtcGateway.Domain do
            ip: ip,
            port: listen["port"],
            startup_log: false,
+           thousand_island_options: [
+             num_acceptors: state.policy.transport.num_acceptors,
+             num_connections: state.policy.transport.num_connections
+           ],
            http_options: [
              log_protocol_errors: false,
              log_exceptions_with_status_codes: [],

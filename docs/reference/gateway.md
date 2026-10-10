@@ -47,6 +47,37 @@ There is no implicit configuration search or implicit environment-file search.
 
 ## Pins
 
+The listener derives one acceptor and `max_inflight_requests + 8` connections.
+The connection limit is per acceptor, so this is also the total handler ceiling.
+The eight extra handlers provide shared headroom for idle keep-alive and health
+sockets; they do not reserve health access. Idle sockets and incomplete headers
+consume transport capacity without consuming request admission. Once all handlers
+are occupied, new TCP connections can succeed while their HTTP exchanges wait;
+transport saturation does not produce an application admission refusal. Closing
+idle sockets lets pending exchanges proceed. Request and run limits still apply
+independently to admitted work.
+
+After validating tool templates and before starting audit or providers, startup
+checks the inherited process
+soft file-descriptor limit. The required budget is the handler ceiling, one
+additional socket held by the acceptor, and a reserve of 128 descriptors for the
+runtime, listener, audit/event files and transient operations, plus
+`max_active_provider_calls` for each host installation (including unused
+installations), plus four descriptors for each compiled provider declaration
+across all tools, plus two descriptors per concurrent run when artifacts are
+configured. Declarations are counted separately even when they select the same
+installation: each tool acquires its own transports. The provider allowance
+includes retained pools, transports and stdio pipes; the artifact allowance
+covers trace and inspection files.
+A budget above the soft limit refuses startup with `listener_capacity_exceeded`;
+an unreadable limit refuses with `listener_capacity_unavailable`. An unlimited
+soft limit passes. This check budgets gateway resources; unrelated application
+activity in the same process can still consume descriptors.
+
+`listener_policy.transport` reports `num_acceptors`, `num_connections`,
+`handler_ceiling`, `idle_headroom`, `descriptor_reserve`, and
+`soft_descriptor_limit`. There are no additional listener configuration keys.
+
 Print every tool's startup pins from the gateway document:
 
 ```sh
@@ -336,7 +367,8 @@ Only the first error is returned. Precedence is document read/JSON, structural
 schema and byte bounds, origins, duplicate tool names, audit presence, host,
 artifact-root validation, then each tool's constructor/pin and write permission in name order, audit
 filesystem probe, run admission, warm credential capture/provider pins, and
-listener binding. A stage must succeed before the next stage runs.
+listener binding. Listener capacity is checked after tool validation and before
+audit or provider startup. A stage must succeed before the next stage runs.
 
 The CLI writes one JSON object `{"error":"<code>"}` and newline to stderr,
 nothing to stdout, and exits 78. Successful startup is silent. No names, paths,
@@ -348,5 +380,6 @@ The finite catalog is `config_unavailable`, `duplicate_json_key`,
 `write_forbidden`, `audit_unavailable`, `artifact_root_unavailable`, `run_admission_unavailable`,
 `credential_unavailable`, `installation_pin_mismatch`, `provider_pin_mismatch`,
 `provider_pin_unavailable`, `provider_admission_unavailable`,
-`provider_runtime_unavailable`, `provider_source_unsupported`, `listener_unavailable`, and `internal_error`.
+`provider_runtime_unavailable`, `provider_source_unsupported`, `listener_capacity_exceeded`,
+`listener_capacity_unavailable`, `listener_unavailable`, and `internal_error`.
 Unrecognized internal failures map to `internal_error`.
