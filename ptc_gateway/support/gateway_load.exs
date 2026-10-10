@@ -204,6 +204,28 @@ defmodule PtcGateway.TestSupport.GatewayLoad do
     end
   end
 
+  @doc "Withholds reservation readiness until released, then answers normally."
+  def reservation_gate(observer) do
+    spawn(fn -> reservation_gate_loop(observer, [], false) end)
+  end
+
+  defp reservation_gate_loop(observer, pending, released?) do
+    receive do
+      {:"$gen_call", {caller, _} = from, :snapshot} ->
+        if released? do
+          GenServer.reply(from, %{ready: true})
+          reservation_gate_loop(observer, pending, true)
+        else
+          send(observer, {:reservation_waiting, caller})
+          reservation_gate_loop(observer, [from | pending], false)
+        end
+
+      :release ->
+        Enum.each(pending, &GenServer.reply(&1, %{ready: true}))
+        reservation_gate_loop(observer, [], true)
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # Readings
   # ---------------------------------------------------------------------------

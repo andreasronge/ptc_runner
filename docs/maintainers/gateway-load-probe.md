@@ -17,7 +17,8 @@ credential beyond the fixture's own token.
 raw-socket clients. `PtcGatewayTest` already covers the contract one request at
 a time; everything here needs requests to overlap.
 
-- **Ceilings.** `max_inflight_requests` and `max_concurrent_runs` are asserted
+- **Ceilings.** `max_inflight_requests`, `max_concurrent_runs`, `max_active_provider_calls`
+  and `max_waiting_provider_calls` are asserted
   at the peak of a burst that fills them.
 - **Slot return.** Every path that is not the happy one: saturation, a reset
   peer, a half-open peer, a reused connection, and a client that never finishes
@@ -35,6 +36,27 @@ a time; everything here needs requests to overlap.
   disk, with unique call IDs. Read back from the audit files rather than from
   the owner: a record the owner believes it wrote and a record that survives the
   process are different claims, and only the second is what an audit is for.
+
+## Runtime soak coverage
+
+Run `mix soak` from `ptc_gateway/`. The runtime cases exercise an offline LLM
+stub with two active calls and two FIFO waiters, eight streams held for twelve
+seconds with the production heartbeat interval, the five-second reservation
+cutoff, staged shutdown during publication, audit-acknowledgement failure
+fencing, and a 128-tool catalog near the 4 MiB bound using shared enum schemas. Timer cases deliberately wait for the production intervals; they do not accelerate the heartbeat.
+
+Error-path residue batches cover request-capacity refusals, committed-stream
+disconnects, incomplete-body deadline expiry and fenced admission. They use the
+same exact process-count and binary/ETS byte-slope gates as successful calls.
+Every case checks released request leases and run capacity; shutdown additionally
+checks its clean result and termination of both admission owners. The shutdown
+case invokes the staged domain API, rather than delivering an OS signal.
+
+`PTC_GATEWAY_SOAK_CYCLES` sets cycles per leak batch (default 250). A smaller
+value is useful while developing a case, but the full default is the residue
+measurement. Error-path cycles issue four requests; reported slopes divide
+by that count to retain the same 512-byte-per-call threshold. Clients and server share the BEAM, so these are lifecycle and
+capacity checks rather than absolute throughput measurements.
 
 ## Read a ceiling from the owner, never from the client
 
@@ -71,8 +93,7 @@ only checks the status will not notice. Declare the properties through
 
 A write deployment cannot put its audit directory under the system temporary
 directory on macOS: the private audit refuses a symbolic link anywhere in the
-hierarchy and `$TMPDIR` reaches the user's folder through `/var`, which is one
-(#1985). The benchmark uses a project-local scratch directory; the gate uses
+hierarchy and `$TMPDIR` reaches the user's folder through `/var`, which is one. The benchmark uses a project-local scratch directory; the gate uses
 ExUnit's `:tmp_dir`, which is already project-local.
 
 The default workflow returns its input unchanged, in microseconds. That is too
