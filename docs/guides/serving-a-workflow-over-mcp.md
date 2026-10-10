@@ -74,7 +74,7 @@ Then save the gateway document as `ptc-gateway.json`, pasting your pin into
 }
 ```
 
-A workflow that selects no model keeps both pin maps empty.
+A workflow that selects no providers keeps both pin maps empty.
 
 ## Start the gateway
 
@@ -121,8 +121,7 @@ data: {"id":1,"jsonrpc":"2.0","result":{"content":[{"text":"{\"order_count\":2,\
 `structuredContent` carries the workflow result, and the text block repeats it
 as JSON. Stop the gateway with Ctrl-C.
 
-Use the [gateway reference](../reference/gateway.md) for every configuration
-field, health response, and startup error. The
-[application-manifest reference](../reference/application-manifest.md) covers
-contracts and effects, and [Connect an MCP tool](connecting-tools-with-mcp.md)
-goes the other way, letting a workflow call someone else's MCP server.
+Use the [gateway reference](../reference/gateway.md) for configuration and
+errors, the [manifest reference](../reference/application-manifest.md) for
+contracts, or the [gateway MCP example](https://github.com/andreasronge/ptc_runner/tree/main/examples/gateway-mcp)
+to compose upstream servers.

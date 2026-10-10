@@ -115,6 +115,12 @@
       "blockers": 0,
       "tics": 0.0
     },
+    "docs/guides/serving-a-workflow-over-mcp.md": {
+      "words": 389,
+      "density": 3.0,
+      "blockers": 0,
+      "tics": 0.0
+    },
     "docs/guides/using-models.md": {
       "words": 323,
       "density": 3.2,

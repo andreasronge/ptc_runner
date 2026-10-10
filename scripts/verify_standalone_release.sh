@@ -539,6 +539,8 @@ if grep -q 'provider_application_unavailable' "$release_tmp_dir/provider.stderr"
   exit 1
 fi
 
+python3 "$project_root/scripts/verify_gateway_example.py" "$command_bin"
+
 python3 "$project_root/scripts/verify_gateway_pins.py" "$command_bin" "$release_tmp_dir/pin-discovery"
 
 # Exercise the gateway through the packaged command, rather than through a

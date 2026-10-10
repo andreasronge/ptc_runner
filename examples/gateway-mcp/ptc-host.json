@@ -1,0 +1,94 @@
+{
+  "credentials": {
+    "gateway": {
+      "env": "GATEWAY_TOKEN"
+    },
+    "openrouter_key": {
+      "env": "OPENROUTER_API_KEY"
+    }
+  },
+  "install": {
+    "notes": {
+      "source": "mcp",
+      "installation_revision": "ptc-fs-mcp-0.3.0",
+      "transport": {
+        "type": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "ptc-fs-mcp@0.3.0",
+          "--root",
+          "notes",
+          "--include",
+          "**"
+        ],
+        "cwd": ".",
+        "inherit_environment": true,
+        "env": {},
+        "start_timeout_ms": 60000
+      },
+      "tools": {
+        "read_text_file": {
+          "as": "notes.read",
+          "effect": "read"
+        }
+      },
+      "ceilings": {
+        "timeout_ms": 15000,
+        "max_catalog_tools": 8,
+        "max_result_bytes": 262144
+      }
+    },
+    "policy": {
+      "source": "mcp",
+      "installation_revision": "ptc-fs-mcp-0.3.0",
+      "transport": {
+        "type": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "ptc-fs-mcp@0.3.0",
+          "--root",
+          "policy",
+          "--include",
+          "**"
+        ],
+        "cwd": ".",
+        "inherit_environment": true,
+        "env": {},
+        "start_timeout_ms": 60000
+      },
+      "tools": {
+        "read_text_file": {
+          "as": "policy.read",
+          "effect": "read"
+        }
+      },
+      "ceilings": {
+        "timeout_ms": 15000,
+        "max_catalog_tools": 8,
+        "max_result_bytes": 262144
+      }
+    },
+    "history": {
+      "source": "ptc_trace_snapshot",
+      "installation_revision": "gateway-history-v1",
+      "directory": "artifacts/traces"
+    },
+    "deepseek": {
+      "source": "llm",
+      "structured_output_mode": "json_schema",
+      "usage_guarantees": {
+        "tokens": true,
+        "cost_currency": "USD"
+      },
+      "installation_revision": "tutorial-llm-v6",
+      "model": "openrouter:deepseek/deepseek-v4-flash",
+      "credential": "openrouter_key",
+      "cache": false,
+      "params": {
+        "max_tokens": 4096
+      }
+    }
+  }
+}
