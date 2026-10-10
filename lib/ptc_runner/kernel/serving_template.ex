@@ -58,7 +58,11 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   `call(template, json_object, admission_pid, deadline \\\\ :infinity)` reserves
   and activates immediately; use it when no transport commitment is needed.
   The host starts RunAdmission under its supervisor and bounds inbound workers.
-  Provider-bearing templates must first be bound with `with_provider_runtime/2`.
+  Warm provider-bearing templates must first be bound with `with_provider_runtime/2`.
+  Templates selecting only normal trace snapshots instead bind host-owned services
+  with `with_cold_services/2`; activation acquires and cleans up a fresh capture
+  for each run. Mixed snapshot/live selections and private snapshot sources are
+  refused with `:provider_runtime_unsupported` before acquisition.
 
   ## Safe metadata
 
@@ -145,7 +149,6 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.InstallationConfigDigest
   alias PtcRunner.Kernel.Limits
-  alias PtcRunner.Kernel.MCPWarmAcquisition
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderPlan
@@ -155,13 +158,20 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.ServingCall
   alias PtcRunner.Kernel.ServingOutcome
+  alias PtcRunner.Kernel.ServingProviderMode
   alias PtcRunner.Kernel.ServingRequest
   alias PtcRunner.Kernel.ValueContract
 
   @enforce_keys [:package, :workflow, :missions, :effect, :effective_digest, :policy]
   @derive {Inspect, only: [:effect, :effective_digest, :policy]}
   defstruct @enforce_keys ++
-              [retained: nil, installation_digests: %{}, provider_runtime: nil, warm_runtime: nil]
+              [
+                retained: nil,
+                installation_digests: %{},
+                provider_runtime: nil,
+                warm_runtime: nil,
+                cold_services: nil
+              ]
 
   @typedoc "An immutable compiled application with no owned execution resources."
   @opaque t :: %__MODULE__{
@@ -176,7 +186,8 @@ defmodule PtcRunner.Kernel.ServingTemplate do
             retained: map() | nil,
             installation_digests: map(),
             provider_runtime: pid() | nil,
-            warm_runtime: pid() | nil
+            warm_runtime: pid() | nil,
+            cold_services: PtcRunner.Kernel.ProviderRuntimeServices.t() | nil
           }
   @typedoc "Single-use capacity reservation owned by its calling worker."
   @type reservation :: ServingCall.reservation()
@@ -474,10 +485,31 @@ defmodule PtcRunner.Kernel.ServingTemplate do
     do: %{template | warm_runtime: runtime}
 
   @doc false
+  @spec cold?(term()) :: boolean()
+  def cold?(template) do
+    case provider_plan(template) do
+      {:ok, plan} ->
+        ServingProviderMode.classify(
+          plan.metadata.provider_declarations,
+          plan.catalog
+        ) == :cold
+
+      _ ->
+        false
+    end
+  end
+
+  @doc false
+  @spec with_cold_services(t(), PtcRunner.Kernel.ProviderRuntimeServices.t()) :: t()
+  def with_cold_services(template, services), do: %{template | cold_services: services}
+
+  @doc false
   @spec runtime_context(term()) :: map() | nil
   def runtime_context(%__MODULE__{} = template) do
     %{
       required?: not is_nil(template.retained),
+      cold?: cold?(template),
+      cold_services: template.cold_services,
       runtime: template.provider_runtime,
       warm_runtime: template.warm_runtime,
       identity: {template.effective_digest, template.installation_digests}
@@ -557,10 +589,22 @@ defmodule PtcRunner.Kernel.ServingTemplate do
     end
   end
 
+  defp validate_provider_sources(package, catalog) do
+    declarations =
+      Enum.flat_map(package.providers, fn {destination, selections} ->
+        Enum.map(selections, &%{name: &1["name"], destination: destination})
+      end)
+
+    if ServingProviderMode.classify(declarations, catalog) == :unsupported,
+      do: {:error, :provider_runtime_unsupported},
+      else: :ok
+  end
+
   defp construct_retained(package, catalog, inspection_capture) do
     if InstallationCatalog.valid?(catalog) and
          catalog.installed_limits == package.installed_limits do
-      with {:ok, policy} <-
+      with :ok <- validate_provider_sources(package, catalog),
+           {:ok, policy} <-
              ExecutionPolicy.new(
                event_policy: package.events.policy,
                result_projection: :json,
@@ -595,10 +639,8 @@ defmodule PtcRunner.Kernel.ServingTemplate do
           effect = validate_effect(workflow, missions, package.entry)
 
           cond do
-            not Enum.all?(
-              metadata.provider_declarations,
-              &MCPWarmAcquisition.supported?(&1, catalog)
-            ) ->
+            ServingProviderMode.classify(metadata.provider_declarations, catalog) ==
+                :unsupported ->
               {:error, :provider_runtime_unsupported}
 
             match?({:ok, _effect}, effect) ->
@@ -640,7 +682,8 @@ defmodule PtcRunner.Kernel.ServingTemplate do
         {:error, %CommandDiagnostic{} = diagnostic} ->
           {:error, preparation_build_code(diagnostic)}
 
-        {:error, :private_result_unservable} = error ->
+        {:error, code} = error
+        when code in [:private_result_unservable, :provider_runtime_unsupported] ->
           error
 
         _invalid ->

@@ -315,6 +315,7 @@ defmodule PtcRunner.Kernel.ServingCall do
 
     warm_ready and
       (not context.required? or
+         (context.cold? and context.cold_services != nil) or
          ProviderRuntime.matches_template?(context.runtime, template, deadline))
   end
 
@@ -324,6 +325,10 @@ defmodule PtcRunner.Kernel.ServingCall do
     cond do
       not runtime_ready?(template, deadline) ->
         {:error, :run_admission_unavailable}
+
+      context.cold? ->
+        {:ok, plan} = ServingTemplate.provider_plan(template)
+        RunAdmission.activate(lease, prepared, authority, plan.catalog, context.cold_services)
 
       context.required? ->
         activate_provider_execution(context.runtime, lease, prepared, authority, deadline)
