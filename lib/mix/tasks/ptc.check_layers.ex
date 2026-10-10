@@ -12,7 +12,8 @@ defmodule Mix.Tasks.Ptc.CheckLayers do
   and a removal `issue`. The gate has no baseline write or blessing mode.
 
   Classification uses module names, including protocol implementations, rather
-  than source directories. Unclassified modules fail closed. Infrastructure is
+  than source directories, including referenced targets compiled outside `lib/`.
+  Unclassified modules fail closed. Infrastructure is
   enumerated below; every outgoing edge must remain neutral, which enforces
   transitive neutrality without allowing a namespace exemption.
   """
@@ -49,7 +50,7 @@ defmodule Mix.Tasks.Ptc.CheckLayers do
           from <- source(entry, :modules),
           to <- references(entry),
           from != to,
-          forbidden?(layers[from], layers[to], to),
+          forbidden?(layers[from], classify(inspect(to)), to),
           into: MapSet.new(),
           do: {inspect(from), inspect(to)}
 

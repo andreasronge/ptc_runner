@@ -9,12 +9,13 @@ defmodule PtcRunner.Scripts.LayerGateTest do
   test "compiled compile, export and runtime edges obey the shrinking baseline" do
     root = Path.join(System.tmp_dir!(), "layer-gate-#{System.unique_integer([:positive])}")
     File.mkdir_p!(Path.join(root, "lib"))
+    File.mkdir_p!(Path.join(root, "dev"))
     on_exit(fn -> File.rm_rf!(root) end)
 
     File.write!(Path.join(root, "mix.exs"), """
     defmodule LayerFixture.MixProject do
       use Mix.Project
-      def project, do: [app: :layer_fixture, version: "0.1.0", deps: [{:jason, path: #{inspect(@jason)}}]]
+      def project, do: [app: :layer_fixture, version: "0.1.0", elixirc_paths: ["lib", "dev"], deps: [{:jason, path: #{inspect(@jason)}}]]
     end
     """)
 
@@ -126,6 +127,33 @@ defmodule PtcRunner.Scripts.LayerGateTest do
 
     assert {output, 1} = run(root, baseline)
     assert output =~ "unclassified module: PtcRunner.Utf8.NotInfrastructure"
+
+    File.rm!(Path.join(root, "lib/unknown.ex"))
+
+    File.write!(Path.join(root, "lib/identity.ex"), """
+    defmodule PtcRunner.BuildIdentity do
+      def run, do: :ok
+    end
+    """)
+
+    File.write!(Path.join(root, "dev/frontend.ex"), """
+    defmodule PtcRunner.SiteGuides.MarkdownHTML do
+      def run, do: :ok
+    end
+    """)
+
+    for caller <- ["Lisp", "Kernel"] do
+      File.write!(Path.join(root, "lib/#{String.downcase(caller)}.ex"), """
+      defmodule PtcRunner.#{caller}.GateFixture do
+        def run, do: PtcRunner.SiteGuides.MarkdownHTML.run()
+      end
+      """)
+
+      assert {output, 1} = run(root, baseline)
+
+      assert output =~
+               "new forbidden edge: PtcRunner.#{caller}.GateFixture -> PtcRunner.SiteGuides.MarkdownHTML"
+    end
   end
 
   defp run(root, baseline) do

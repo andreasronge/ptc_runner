@@ -67,7 +67,8 @@ Mix tasks, benchmark and site-generation modules, application startup, CLI,
 REPL, progress and Viewer modules belong to the frontend. The exact root-module
 inventory is in `Mix.Tasks.Ptc.CheckLayers`; an unclassified module fails the
 gate. Protocol implementations inherit the layer of their implemented type.
-Moving a file does not change its classification.
+Referenced targets use the same name-based classification even when compiled
+outside `lib/`. Moving a file does not change its classification.
 
 The infrastructure list is exactly `PtcRunner.BuildIdentity`,
 PtcRunner.ChildEnvironment, PtcRunner.HTTPEndpoint and `PtcRunner.Utf8`.
