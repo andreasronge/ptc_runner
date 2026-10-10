@@ -1,0 +1,147 @@
+[
+  {
+    "from": "PtcRunner.Kernel.CommandEngine",
+    "to": "PtcRunner.Dotenv",
+    "issue": 2233
+  },
+  {
+    "from": "PtcRunner.Kernel.CommandEngine",
+    "to": "PtcRunner.LiveStatus",
+    "issue": 2232
+  },
+  {
+    "from": "PtcRunner.Kernel.CommandRouter",
+    "to": "PtcRunner.CLIProgress",
+    "issue": 2232
+  },
+  {
+    "from": "PtcRunner.Kernel.CommandRouter",
+    "to": "PtcRunner.Dotenv",
+    "issue": 2233
+  },
+  {
+    "from": "PtcRunner.Kernel.CommandRouter",
+    "to": "PtcRunner.ReplFrontend",
+    "issue": 2233
+  },
+  {
+    "from": "PtcRunner.Kernel.CommandRouter",
+    "to": "PtcRunner.TranscriptFrontend",
+    "issue": 2233
+  },
+  {
+    "from": "PtcRunner.Kernel.CommandRouter",
+    "to": "PtcRunner.ViewerFrontend",
+    "issue": 2233
+  },
+  {
+    "from": "PtcRunner.Kernel.CommandRunDispatch",
+    "to": "PtcRunner.LiveStatus",
+    "issue": 2232
+  },
+  {
+    "from": "PtcRunner.Kernel.CommandRunDispatch",
+    "to": "PtcRunner.LiveStatus.Target",
+    "issue": 2232
+  },
+  {
+    "from": "PtcRunner.Kernel.CommandRuntime",
+    "to": "PtcRunner.LiveStatus.Target",
+    "issue": 2232
+  },
+  {
+    "from": "PtcRunner.Kernel.ExecutionSessionOwner",
+    "to": "PtcRunner.LiveStatus",
+    "issue": 2232
+  },
+  {
+    "from": "PtcRunner.Kernel.ExecutionSessionOwner",
+    "to": "PtcRunner.LiveStatus.Target",
+    "issue": 2232
+  },
+  {
+    "from": "PtcRunner.Kernel.ProjectViewerAdapter",
+    "to": "PtcRunner.ViewerSnapshotStore",
+    "issue": 2233
+  },
+  {
+    "from": "PtcRunner.Kernel.Runner",
+    "to": "PtcRunner.LiveStatus",
+    "issue": 2232
+  },
+  {
+    "from": "PtcRunner.Kernel.WarmProviderRuntime",
+    "to": "PtcRunner.Dotenv",
+    "issue": 2233
+  },
+  {
+    "from": "PtcRunner.Lisp",
+    "to": "PtcRunner.Kernel.Program",
+    "issue": 2230
+  },
+  {
+    "from": "PtcRunner.Lisp",
+    "to": "PtcRunner.Kernel.SafeMetadata",
+    "issue": 2231
+  },
+  {
+    "from": "PtcRunner.Lisp",
+    "to": "PtcRunner.Sandbox",
+    "issue": 2230
+  },
+  {
+    "from": "PtcRunner.Lisp.Analyze",
+    "to": "PtcRunner.Kernel.Program",
+    "issue": 2230
+  },
+  {
+    "from": "PtcRunner.Lisp.Eval.Helpers",
+    "to": "PtcRunner.Kernel.AgentConfigDiagnostic",
+    "issue": 2231
+  },
+  {
+    "from": "PtcRunner.Lisp.Eval.Helpers",
+    "to": "PtcRunner.Kernel.LLMReplayDiagnostic",
+    "issue": 2231
+  },
+  {
+    "from": "PtcRunner.Lisp.Eval.Helpers",
+    "to": "PtcRunner.Kernel.LimitCatalog",
+    "issue": 2231
+  },
+  {
+    "from": "PtcRunner.Lisp.Eval.Helpers",
+    "to": "PtcRunner.Kernel.RuntimeLimitDiagnostic",
+    "issue": 2231
+  },
+  {
+    "from": "PtcRunner.Lisp.Eval.Helpers",
+    "to": "PtcRunner.Kernel.SafeMetadata",
+    "issue": 2231
+  },
+  {
+    "from": "PtcRunner.Lisp.Eval.Helpers",
+    "to": "PtcRunner.LLM.OutputLimit",
+    "issue": 2231
+  },
+  {
+    "from": "PtcRunner.Lisp.Eval.Parallel",
+    "to": "PtcRunner.Kernel.SafeMetadata",
+    "issue": 2231
+  },
+  {
+    "from": "PtcRunner.Lisp.Java.Oracle.Runner",
+    "to": "PtcRunner.Kernel.PrivateDirectory",
+    "issue": 2230
+  },
+  {
+    "from": "PtcRunner.Lisp.NamespaceDiagnostic",
+    "to": "PtcRunner.Kernel.DiagnosticPattern",
+    "issue": 2230
+  },
+  {
+    "from": "PtcRunner.Lisp.Prelude.Compiler",
+    "to": "PtcRunner.Sandbox",
+    "issue": 2230
+  }
+]

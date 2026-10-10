@@ -206,6 +206,11 @@ while IFS= read -r path || [ -n "$path" ]; do
       mcp_filesystem=true
       ;;
 
+    .layer-baseline.json)
+      core=true
+      operator=true
+      ;;
+
     mix.exs)
       # The root project file carries the launcher's version requirement and
       # the Java oracle's Mix task wiring, so keep the fail-safe here.

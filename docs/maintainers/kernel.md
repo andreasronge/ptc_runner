@@ -51,6 +51,45 @@ projection. PTC-Lisp owns replaceable workflow policy such as prompts,
 planning, retries, feedback, and completion. Frontends own path acquisition,
 presentation, and host interaction.
 
+## Module dependency layers
+
+`mix ptc.check_layers`, also run by `mix precommit`, checks every compiled
+module under `lib/` using the compile, export and runtime references behind
+`mix xref graph`. The allowed direction is frontend → kernel → Lisp;
+Lisp must not depend on kernel or frontend modules, and kernel must not depend
+on frontend modules. Same-layer dependencies are allowed. This gate enforces
+directions, while the separate compile-connected cycle gate detects cycles.
+
+Classification follows module names, not file locations. `PtcRunner.Lisp`
+and its descendants belong to Lisp. `PtcRunner.Kernel`, `PtcRunner.LLM` and
+their descendants, `PtcRunner` and `PtcRunner.Sandbox` belong to the kernel.
+Mix tasks, benchmark and site-generation modules, application startup, CLI,
+REPL, progress and Viewer modules belong to the frontend. The exact root-module
+inventory is in `Mix.Tasks.Ptc.CheckLayers`; an unclassified module fails the
+gate. Protocol implementations inherit the layer of their implemented type.
+Moving a file does not change its classification.
+
+The infrastructure list is exactly `PtcRunner.BuildIdentity`,
+PtcRunner.ChildEnvironment, PtcRunner.HTTPEndpoint and `PtcRunner.Utf8`.
+Infrastructure may depend only on other entries in that list, OTP modules
+from the running Erlang installation (including preloaded modules), and the
+core Elixir applications `elixir` and `logger`. No external libraries are
+currently approved.
+Every outgoing infrastructure edge is checked, so neutrality is transitive;
+a namespace wildcard must never be added as infrastructure. Frontend callbacks
+and host catalogs cannot be exempted as neutral infrastructure.
+
+`.layer-baseline.json` records the existing forbidden dependencies as exact
+directed module pairs, each assigned a removal issue. New forbidden pairs and
+baseline pairs whose edges no longer exist both fail. Remove an entry together
+with the dependency it tracks; do not bless new dependencies into the baseline.
+
+Xref cannot see a module constructed from a string or other dynamic dispatch.
+Reviewers must check module-name strings, `Module.concat`, `apply` and equivalent
+indirect dispatch for the same dependency rules, including the catalog dispatch
+in Lisp introspection. An injected interface must be owned by the lower layer;
+string dispatch must not conceal a forbidden edge.
+
 ## Lifecycle
 
 The main path is:

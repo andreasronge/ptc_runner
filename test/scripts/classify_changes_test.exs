@@ -83,6 +83,7 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
            all_false() |> Map.put("core", "true") |> Map.put("docs", "true")},
           {"dev/mix/tasks/ptc.verify_docs.ex", operator_docs},
           {".duplication-baseline.json", core},
+          {".layer-baseline.json", operator_core},
           {".ex_dna.exs", core},
           {"conformance_inventory.json", core},
           {"bench/lisp_throughput.exs", operator_core},
