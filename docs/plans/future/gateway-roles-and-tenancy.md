@@ -2,7 +2,7 @@
 
 Status: planned, not scheduled. Tracking issue: #2206. Nothing below is current
 behavior unless it is cited as such. Builds on
-`docs/plans/gateway-mcp-providers.md` (shared upstream MCP providers, #2203).
+[shared upstream MCP providers](../../reference/gateway.md#shared-mcp-providers).
 
 ## Goal
 

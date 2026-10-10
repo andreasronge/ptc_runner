@@ -10,7 +10,9 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   `:provider_pin_mismatch` and `:provider_pin_unavailable`.
 
   `pins: :discover` performs real acquisition, retains the two safe pin maps and
-  closes the resources; it never becomes ready. `discover/2` returns those maps
+  closes the resources; it never becomes ready. Normal trace-snapshot-only
+  templates also support discovery, omitting volatile snapshot sites while
+  retaining installation pins; they cannot start a retained runtime. `discover/2` returns those maps
   and stops the discovery owner without printing. Borrowing takes an absolute
   monotonic admission deadline, creates a caller-monitored non-owning token,
   and shares only capabilities. Return the token after execution; caller exit
@@ -51,6 +53,7 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
     ProviderRegistry,
     ProviderRuntimeServices,
     ProviderSession,
+    ServingProviderMode,
     ServingTemplate
   }
 
@@ -157,7 +160,7 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   def init(opts) do
     with {:ok, retained} <- ServingTemplate.provider_plan(opts[:template]),
          true <- ProviderRuntimeServices.valid?(opts[:services]),
-         :ok <- supported(retained),
+         :ok <- supported_for_opening(retained, opts[:pins]),
          {:ok, execution} <- ProviderExecution.new(retained.catalog, opts[:services], []),
          {:ok, prepared} <-
            ProviderActivity.start_owned(fn activity ->
@@ -171,7 +174,7 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
                retained.metadata
              )
            end) do
-      open(prepared, execution, opts[:pins], opts[:events])
+      open(prepared, execution, retained.catalog, opts[:pins], opts[:events])
     else
       {:error, code} -> {:stop, code}
       _invalid -> {:stop, :invalid_provider_runtime}
@@ -181,6 +184,17 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   catch
     _kind, _reason -> {:stop, :invalid_provider_runtime}
   end
+
+  defp supported_for_opening(retained, :discover) do
+    if ServingProviderMode.classify(
+         retained.metadata.provider_declarations,
+         retained.catalog
+       ) == :cold,
+       do: :ok,
+       else: supported(retained)
+  end
+
+  defp supported_for_opening(retained, _pins), do: supported(retained)
 
   @doc false
   def supported(retained) do
@@ -199,14 +213,14 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
       MCPWarmAcquisition.supported?(declaration, catalog)
   end
 
-  defp open(prepared, execution, pins, events) do
+  defp open(prepared, execution, catalog, pins, events) do
     case ProviderRuntimeOpening.open(
            prepared,
            execution,
            Deadline.new(prepared.request.package.limits.run_duration_ms)
          ) do
       {:ok, opened} ->
-        case verify_pins(prepared, opened.snapshot_sites, pins) do
+        case verify_pins(prepared, catalog, opened.snapshot_sites, pins) do
           {:ok, actual} when pins == :discover ->
             case cleanup(opened) do
               :ok -> discover_closed(actual, prepared)
@@ -293,9 +307,14 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
     end
   end
 
-  defp verify_pins(prepared, sites, pins) do
+  defp verify_pins(prepared, catalog, sites, pins) do
     expected_names =
       prepared.provider_declarations |> Enum.map(& &1.name) |> Enum.uniq() |> Enum.sort()
+
+    sites =
+      Enum.reject(sites, fn site ->
+        catalog.descriptors[site.name].source == :ptc_trace_snapshot
+      end)
 
     if Enum.any?(sites, &unpinnable_site?/1) or
          Enum.sort(Map.keys(prepared.installation_config_digests)) != expected_names do
@@ -318,7 +337,9 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
 
   defp unpinnable_site?(_site), do: true
 
-  defp compare_pins(actual, pins) do
+  @doc false
+  @spec compare_pins(map(), map() | :discover) :: {:ok, map()} | {:error, atom()}
+  def compare_pins(actual, pins) do
     cond do
       pins == :discover ->
         {:ok, actual}

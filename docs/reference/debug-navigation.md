@@ -608,3 +608,59 @@ visited and the inputs validated; broader failures require their own checks.
   diagnostics, and the transcript command.
 - [Components and preludes](component-contracts.md) explains component
   identity, dependencies, and the shipped libraries.
+
+## Serving debug tools
+
+You can serve normal trace analysis as ordinary workflows through the
+[gateway](gateway.md#cold-trace-snapshot-tools). Install a `ptc_trace_snapshot`
+in `ptc-host.json` pointing at the trace directory, select it as a mission
+provider in the application's `ptc.json`, and grant that provider to the analysis
+mission. Every provider selected by that tool must be a normal trace snapshot.
+The gateway checks installation pins and directory access before listening;
+each call captures the current directory and owns its cleanup. Discovery omits
+snapshot sites from `provider_snapshot_pins`, while keeping
+`installation_config_pins`.
+
+An analysis-eval workflow accepts bounded PTC-Lisp source from the MCP client
+and passes it to `(kernel/eval-source "default" source)`. The client's model
+writes the queries; this workflow needs no model installation or network access.
+A second workflow can return `(kernel/mission-inventory "default")` to expose
+the mission's prompt-visible API. Both workflows can declare their entry effect
+as `:read` when every selectable mission export and grant is read-only. Declare
+input and result contracts for both served tools.
+
+The shipped `analysis` prelude uses the REPL's unnamed `tool/analysis-*`
+capabilities. An installed snapshot instead exposes `<alias>.runs`,
+`<alias>.open`, `<alias>.read`, and `<alias>.counters`. Use a small mission
+component over that alias, for example with an installation named `history`:
+
+```clojure
+(ns history {:visibility :prompt})
+(defn- unwrap {:effect :read} [response]
+  (if (= :ok (get response :status))
+    (get response :value)
+    (fail response)))
+(defn runs {:effect :read} [options]
+  (unwrap (tool/history.runs options)))
+(defn open {:effect :read} [options]
+  (unwrap (tool/history.open options)))
+(defn read {:effect :read} [options]
+  (unwrap (tool/history.read options)))
+(defn counters {:effect :read} [options]
+  (unwrap (tool/history.counters options)))
+```
+
+For example, `(return (count (get (history/runs {}) "items")))` counts the
+captured page. Use `history/open` to discover available collections and filters
+before calling `history/read`; pages and captures retain their existing bounds.
+
+Served debug tools expose normal operational data only. Private trace and
+inspection snapshots are refused with `provider_source_unsupported`: their exact
+prompts, model responses, generated source and capability payloads belong to
+private inspection, which the endpoint cannot return. A tool that combines a
+snapshot with a model or MCP installation is refused with the same code.
+
+Set the debug gateway's `artifacts.root` to a separate artifact root from the
+trace directory it reads. Otherwise its own analysis runs become input to later
+captures, causing the tool to analyse itself. A separate root preserves the
+original run cohort while still recording the debug tool's activity.

@@ -29,7 +29,11 @@ defmodule PtcRunner.Kernel.WarmProviderRuntime do
   input/policy identities, activity, task tracker, provider scope, sinks,
   publication authority and execution state. Acquisition is retained, with exact
   installation and destination/name snapshot pins checked before readiness.
-  No automatic reacquisition, re-pin or restart occurs. An acquisition replacement
+  Normal trace-snapshot-only tools retain no provider runtime: startup checks
+  their installation pins and directory through a closed discovery acquisition,
+  and each run acquires its own fresh snapshot with the captured host services.
+  Their snapshot pin map is empty; content changes need no re-pin.
+  No automatic reacquisition, re-pin or restart occurs for warm tools. An acquisition replacement
   requires draining and replacing the entire host domain with newly checked pins.
 
   One explicit ProviderCallAdmission domain governs installed live workflow,
@@ -318,23 +322,45 @@ defmodule PtcRunner.Kernel.WarmProviderRuntime do
         {:cont, {:ok, put_in(next.tools[name], bound)}}
 
       {name, template, pins, _}, {:ok, next} ->
-        case ProviderRuntime.start_link(
-               template: template,
-               services: services,
-               pins: pins,
-               events: if(state.events, do: state.events.(name))
-             ) do
-          {:ok, runtime} ->
-            {:ok, bound} = ServingTemplate.with_provider_runtime(template, runtime)
-            bound = ServingTemplate.with_warm_runtime(bound, self())
-            next = put_in(next.runtimes[name], runtime)
-            {:cont, {:ok, put_in(next.tools[name], bound)}}
-
-          {:error, code} ->
-            {:halt, {:error, code, next}}
+        if ServingTemplate.cold?(template) do
+          open_cold_tool(name, template, pins, services, next)
+        else
+          open_warm_tool(name, template, pins, services, next)
         end
     end)
     |> monitor_domains()
+  end
+
+  defp open_cold_tool(name, template, pins, services, state) do
+    with {:ok, actual} <- ProviderRuntime.discover(template, services),
+         {:ok, _} <- ProviderRuntime.compare_pins(actual, pins) do
+      bound =
+        template
+        |> ServingTemplate.with_cold_services(services)
+        |> ServingTemplate.with_warm_runtime(self())
+
+      {:cont, {:ok, put_in(state.tools[name], bound)}}
+    else
+      {:error, code} -> {:halt, {:error, code, state}}
+    end
+  end
+
+  defp open_warm_tool(name, template, pins, services, next) do
+    case ProviderRuntime.start_link(
+           template: template,
+           services: services,
+           pins: pins,
+           events: if(next.events, do: next.events.(name))
+         ) do
+      {:ok, runtime} ->
+        {:ok, bound} = ServingTemplate.with_provider_runtime(template, runtime)
+        bound = ServingTemplate.with_warm_runtime(bound, self())
+        next = put_in(next.runtimes[name], runtime)
+        {:cont, {:ok, put_in(next.tools[name], bound)}}
+
+      {:error, code} ->
+        {:halt, {:error, code, next}}
+    end
   end
 
   defp monitor_domains({:ok, state}) do

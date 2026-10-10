@@ -1,0 +1,6 @@
+*-pins.json
+pins.json
+artifacts/
+debug-artifacts/
+audit/
+*.stderr

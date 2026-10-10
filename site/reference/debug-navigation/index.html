@@ -417,7 +417,45 @@ interactive or unattended investigation of the same capture.</li><li><a href="ht
 every collection,
 filter, relationship, and completeness field.</li><li><a href="/reference/cli/">Running and debugging</a> documents artifacts,
 diagnostics, and the transcript command.</li><li><a href="/reference/component-contracts/">Components and preludes</a> explains component
-identity, dependencies, and the shipped libraries.</li></ul>
+identity, dependencies, and the shipped libraries.</li></ul><h2 id="serving-debug-tools">Serving debug tools</h2><p>You can serve normal trace analysis as ordinary workflows through the
+<a href="/reference/gateway/#cold-trace-snapshot-tools">gateway</a>. Install a <code class="inline">ptc_trace_snapshot</code>
+in <code class="inline">ptc-host.json</code> pointing at the trace directory, select it as a mission
+provider in the application's <code class="inline">ptc.json</code>, and grant that provider to the analysis
+mission. Every provider selected by that tool must be a normal trace snapshot.
+The gateway checks installation pins and directory access before listening;
+each call captures the current directory and owns its cleanup. Discovery omits
+snapshot sites from <code class="inline">provider_snapshot_pins</code>, while keeping
+<code class="inline">installation_config_pins</code>.</p><p>An analysis-eval workflow accepts bounded PTC-Lisp source from the MCP client
+and passes it to <code class="inline">(kernel/eval-source &quot;default&quot; source)</code>. The client's model
+writes the queries; this workflow needs no model installation or network access.
+A second workflow can return <code class="inline">(kernel/mission-inventory &quot;default&quot;)</code> to expose
+the mission's prompt-visible API. Both workflows can declare their entry effect
+as <code class="inline">:read</code> when every selectable mission export and grant is read-only. Declare
+input and result contracts for both served tools.</p><p>The shipped <code class="inline">analysis</code> prelude uses the REPL's unnamed <code class="inline">tool/analysis-*</code>
+capabilities. An installed snapshot instead exposes <code class="inline">&lt;alias&gt;.runs</code>,
+<code class="inline">&lt;alias&gt;.open</code>, <code class="inline">&lt;alias&gt;.read</code>, and <code class="inline">&lt;alias&gt;.counters</code>. Use a small mission
+component over that alias, for example with an installation named <code class="inline">history</code>:</p><pre><code class="clojure language-clojure">(ns history {:visibility :prompt})
+(defn- unwrap {:effect :read} [response]
+  (if (= :ok (get response :status))
+    (get response :value)
+    (fail response)))
+(defn runs {:effect :read} [options]
+  (unwrap (tool/history.runs options)))
+(defn open {:effect :read} [options]
+  (unwrap (tool/history.open options)))
+(defn read {:effect :read} [options]
+  (unwrap (tool/history.read options)))
+(defn counters {:effect :read} [options]
+  (unwrap (tool/history.counters options)))</code></pre><p>For example, <code class="inline">(return (count (get (history/runs {}) &quot;items&quot;)))</code> counts the
+captured page. Use <code class="inline">history/open</code> to discover available collections and filters
+before calling <code class="inline">history/read</code>; pages and captures retain their existing bounds.</p><p>Served debug tools expose normal operational data only. Private trace and
+inspection snapshots are refused with <code class="inline">provider_source_unsupported</code>: their exact
+prompts, model responses, generated source and capability payloads belong to
+private inspection, which the endpoint cannot return. A tool that combines a
+snapshot with a model or MCP installation is refused with the same code.</p><p>Set the debug gateway's <code class="inline">artifacts.root</code> to a separate artifact root from the
+trace directory it reads. Otherwise its own analysis runs become input to later
+captures, causing the tool to analyse itself. A separate root preserves the
+original run cohort while still recording the debug tool's activity.</p>
 </article>
 <nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/source-inspection/">&larr; Source-inspection reference</a></nav>
 <footer>

@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "id": "gateway.example",
+        "path": "api.clj",
+        "dependencies": [
+          "kernel"
+        ]
+      },
+      {
+        "library": "kernel"
+      }
+    ],
+    "entry": "gateway.example/run"
+  },
+  "input": {
+    "value": {}
+  },
+  "providers": {
+    "mission": [
+      {
+        "name": "history"
+      }
+    ]
+  },
+  "missions": {
+    "default": {
+      "components": [
+        {
+          "id": "history",
+          "path": "history.clj",
+          "dependencies": [
+            "response"
+          ]
+        },
+        {
+          "id": "response",
+          "path": "response.clj"
+        }
+      ],
+      "providers": [
+        "history"
+      ]
+    }
+  },
+  "contracts": {
+    "input_schema": {
+      "path": "input.schema.json"
+    },
+    "result_schema": {
+      "path": "result.schema.json"
+    }
+  }
+}
