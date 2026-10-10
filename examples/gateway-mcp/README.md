@@ -96,7 +96,7 @@ as read-only. Model output and availability can vary.
 
 ## Verification
 
-The release-package CI gate runs the offline example through `bin/ptc`, checks
+The core release CI gate runs the offline example through `bin/ptc`, checks
 the read-only annotation and exact result, and queries fresh traces using both
 debug tools. To repeat against an assembled release:
 
