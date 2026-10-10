@@ -34,6 +34,7 @@ defmodule PtcGatewayLoadTest do
   use ExUnit.Case, async: false
 
   import PtcGateway.TestSupport.GatewayFixture
+  import PtcRunner.TestSupport.Eventually
 
   alias PtcGateway.TestSupport.GatewayLoad
 
@@ -669,7 +670,416 @@ defmodule PtcGatewayLoadTest do
     end
   end
 
+  describe "runtime under load" do
+    @tag :tmp_dir
+    test "a twelve-second stream sends two production heartbeats and publishes", %{tmp_dir: dir} do
+      {owner, config} = start_gateway(dir, max_inflight_requests: 16, max_concurrent_runs: 8)
+      parent = self()
+
+      {_listener, config} =
+        serve_router(:sys.get_state(owner), config,
+          serving_hooks: %{
+            after_activation: fn _ ->
+              send(parent, {:held, self()})
+              receive do: (:release -> :ok)
+            end
+          }
+        )
+
+      storm = Task.async(fn -> GatewayLoad.storm(config, 8, timeout_ms: 30_000) end)
+
+      workers =
+        for _ <- 1..8 do
+          assert_receive {:held, worker}, 15_000
+          worker
+        end
+
+      assert GatewayLoad.await_run_capacity(owner, 8) == 8
+      # This intentionally outlives both five-second production heartbeat intervals.
+      receive do
+      after
+        12_000 -> :ok
+      end
+
+      Enum.each(workers, &send(&1, :release))
+      results = Task.await(storm, 30_000)
+
+      for result <- results do
+        assert result.status == 200
+        assert result.error == nil
+        assert length(Regex.scan(~r/: heartbeat/, result.body)) >= 2
+        assert result.result["result"]["structuredContent"] == %{}
+        assert result.result["result"]["isError"] == false
+      end
+
+      assert_drained(owner)
+    end
+
+    @tag :tmp_dir
+    test "reservation timeout refuses a burst and leaves no late reservations", %{tmp_dir: dir} do
+      {owner, config} = start_gateway(dir, max_inflight_requests: 16, max_concurrent_runs: 8)
+      warm = :sys.get_state(owner).warm
+      gate = GatewayLoad.reservation_gate(self())
+      on_exit(fn -> Process.exit(gate, :kill) end)
+      # Authentication and template lookup stay healthy. Only reservation readiness
+      # is withheld, so this reaches execute_sse's five-second receive cutoff.
+      :sys.replace_state(warm, fn state ->
+        %{
+          state
+          | tools:
+              Map.new(state.tools, fn {name, template} ->
+                {name, PtcRunner.Kernel.ServingTemplate.with_warm_runtime(template, gate)}
+              end)
+        }
+      end)
+
+      storm = Task.async(fn -> GatewayLoad.storm(config, 8, timeout_ms: 20_000) end)
+
+      monitors =
+        for _ <- 1..8 do
+          assert_receive {:reservation_waiting, worker}, 15_000
+          {worker, Process.monitor(worker)}
+        end
+
+      assert GatewayLoad.await_leases(owner, 8) == 8
+      results = Task.await(storm, 30_000)
+
+      for result <- results do
+        assert result.status == 503
+        assert result.accepted_at == nil
+        assert result.result["error"]["code"] == -31998
+        assert (result.closed_at - result.sent_at) / 1_000 >= 5_000
+      end
+
+      for {worker, monitor} <- monitors do
+        assert_receive {:DOWN, ^monitor, :process, ^worker, :killed}, 15_000
+      end
+
+      send(gate, :release)
+      assert_drained(owner)
+      assert response(config, "/health/ready").status == 200
+      assert Enum.all?(GatewayLoad.storm(config, 8), &(&1.status == 200))
+      assert_drained(owner)
+    end
+
+    @tag :tmp_dir
+    test "provider active and waiting ceilings saturate independently of run capacity", %{
+      tmp_dir: dir
+    } do
+      parent = self()
+
+      stub =
+        PtcRunner.TestSupport.MCPHTTPFixture.start(fn _ ->
+          send(parent, {:provider_entered, self()})
+          receive do: (:release -> :ok)
+
+          {:keep_alive, 200, [{"content-type", "application/json"}],
+           Jason.encode!(%{
+             "id" => "offline",
+             "model" => "google/gemma-2-27b-it",
+             "choices" => [
+               %{
+                 "index" => 0,
+                 "finish_reason" => "stop",
+                 "message" => %{"role" => "assistant", "content" => "ok"}
+               }
+             ],
+             "usage" => %{"prompt_tokens" => 1, "completion_tokens" => 1, "total_tokens" => 2}
+           })}
+        end)
+
+      on_exit(stub.close)
+      previous = Application.fetch_env(:req_llm, :openrouter)
+      Application.put_env(:req_llm, :openrouter, base_url: stub.endpoint)
+
+      on_exit(fn ->
+        case previous do
+          {:ok, value} -> Application.put_env(:req_llm, :openrouter, value)
+          :error -> Application.delete_env(:req_llm, :openrouter)
+        end
+      end)
+
+      {path, config} = llm_fixture(dir)
+
+      config =
+        Map.put(config, "admission", %{
+          "max_inflight_requests" => 32,
+          "max_concurrent_runs" => 16,
+          "max_active_provider_calls" => 2,
+          "max_waiting_provider_calls" => 2
+        })
+
+      File.write!(path, Jason.encode!(config))
+      {owner, config} = boot_gateway(path, config, dir)
+      admission = :sys.get_state(:sys.get_state(owner).warm).admission
+      active = GatewayLoad.peak_sampler(fn -> provider_snapshot(admission).active end)
+      waiting = GatewayLoad.peak_sampler(fn -> provider_snapshot(admission).waiting end)
+      storm = Task.async(fn -> GatewayLoad.storm(config, 12) end)
+
+      workers =
+        for _ <- 1..2 do
+          assert_receive {:provider_entered, worker}, 15_000
+          worker
+        end
+
+      assert_eventually(fn -> provider_snapshot(admission).waiting == 2 end)
+      assert provider_snapshot(admission).active == 2
+      assert response(config, "/health/ready").status == 200
+      # Overflow calls must finish while all four provider slots are still held.
+      assert_eventually(fn -> GatewayLoad.run_capacity_in_use(owner) == 4 end)
+      Enum.each(workers, &send(&1, :release))
+
+      for _ <- 1..2 do
+        assert_receive {:provider_entered, worker}, 15_000
+        send(worker, :release)
+      end
+
+      results = Task.await(storm, 30_000)
+      assert GatewayLoad.by_status(results) == %{200 => 12}
+      assert GatewayLoad.stop_peak_sampler(active).peak == 2
+      assert GatewayLoad.stop_peak_sampler(waiting).peak == 2
+      refute_receive {:provider_entered, _}, 100
+      assert_eventually(fn -> match?(%{active: 0, waiting: 0}, provider_snapshot(admission)) end)
+      assert_drained(owner)
+    end
+
+    @tag :tmp_dir
+    test "shutdown drains active calls during a burst and stops its owners normally", %{
+      tmp_dir: dir
+    } do
+      {owner, config} = start_gateway(dir, max_inflight_requests: 32, max_concurrent_runs: 8)
+      state = :sys.get_state(owner)
+      parent = self()
+
+      {listener, config} =
+        serve_router(state, config,
+          serving_hooks: %{
+            before_audit: fn _, _ ->
+              send(parent, {:auditing, self()})
+              receive do: (:release -> :ok)
+            end
+          }
+        )
+
+      results = GatewayLoad.storm(config, 8)
+      assert GatewayLoad.by_status(results) == %{200 => 8}
+
+      workers =
+        for _ <- 1..8 do
+          assert_receive {:auditing, worker}, 15_000
+          worker
+        end
+
+      assert GatewayLoad.await_run_capacity(owner, 8) == 8
+      assert GatewayLoad.await_leases(owner, 0) == 0
+      shutdown = Task.async(fn -> PtcGateway.Domain.shutdown(owner, 30_000, 30_000) end)
+
+      assert_eventually(fn ->
+        {:ok, snapshot} = PtcRunner.Kernel.RunAdmission.snapshot(state.run_admission)
+        snapshot.status == :unavailable
+      end)
+
+      refused = GatewayLoad.storm(config, 16)
+      assert GatewayLoad.by_status(refused) == %{503 => 16}
+      # Keep one publication held so the live counters can be read before teardown.
+      [last | others] = workers
+      Enum.each(others, &send(&1, :release))
+
+      assert_eventually(fn ->
+        {:ok, snapshot} = PtcRunner.Kernel.RunAdmission.snapshot(state.run_admission)
+        snapshot.in_use == 1
+      end)
+
+      assert map_size(:sys.get_state(state.request_admission).leases) == 0
+      # Pause the final provider drain so zero can be read from the live owners.
+      :ok = :sys.suspend(state.warm)
+      on_exit(fn -> if Process.alive?(state.warm), do: :sys.resume(state.warm) end)
+      monitor = Process.monitor(owner)
+      send(last, :release)
+
+      assert_eventually(fn ->
+        {:ok, snapshot} = PtcRunner.Kernel.RunAdmission.snapshot(state.run_admission)
+        snapshot.in_use == 0
+      end)
+
+      assert map_size(:sys.get_state(state.request_admission).leases) == 0
+      :ok = :sys.resume(state.warm)
+      assert Task.await(shutdown, 60_000) == :ok
+      assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}, 15_000
+      # shutdown's :ok requires zero run capacity; both admission owners must be gone.
+      for pid <- [state.run_admission, state.request_admission] do
+        refute Process.alive?(pid)
+      end
+
+      stop(listener)
+    end
+
+    @tag :tmp_dir
+    test "audit cleanup uncertainty fences a loaded domain permanently", %{tmp_dir: dir} do
+      {owner, config, _audit_dir} =
+        start_write_gateway(dir, max_inflight_requests: 32, max_concurrent_runs: 8)
+
+      parent = self()
+
+      {_listener, config} =
+        serve_router(:sys.get_state(owner), config,
+          serving_hooks: %{
+            before_audit: fn _, _ ->
+              send(parent, {:audit_waiting, self()})
+              receive do: (:fail_audit -> raise "injected audit acknowledgement failure")
+            end
+          }
+        )
+
+      results = GatewayLoad.storm(config, 8, arguments: @payload)
+      assert GatewayLoad.by_status(results) == %{200 => 8}
+
+      workers =
+        for _ <- 1..8 do
+          assert_receive {:audit_waiting, worker}, 15_000
+          worker
+        end
+
+      assert GatewayLoad.await_run_capacity(owner, 8) == 8
+      Enum.each(workers, &send(&1, :fail_audit))
+      assert_drained(owner)
+
+      # Warm Req's health connection before taking the exact process baseline.
+      assert response(config, "/health/ready").status == 503
+
+      report =
+        GatewayLoad.leak(@leak_batches, @leak_cycles, fn _ ->
+          assert response(config, "/health/ready").status == 503
+          assert GatewayLoad.by_status(GatewayLoad.storm(config, 4)) == %{503 => 4}
+          assert_drained(owner)
+        end)
+
+      assert_no_residue(report, 4)
+      assert response(config, "/health/live").status == 200
+    end
+
+    @tag :tmp_dir
+    test "tools/list publishes the complete 128-tool catalog under load", %{tmp_dir: dir} do
+      padding = for n <- 1..120, do: String.pad_leading(Integer.to_string(n), 128, "p")
+
+      schema = %{
+        "type" => "object",
+        "properties" => %{
+          "padding" => %{"type" => "string", "enum" => padding}
+        }
+      }
+
+      {path, config} = fixture(dir, :read, schema: schema)
+      tool = hd(config["tools"])
+
+      tools =
+        for n <- 1..128,
+            do:
+              Map.merge(tool, %{
+                "name" => "tool#{String.pad_leading(Integer.to_string(n), 3, "0")}",
+                "description" => "Catalog load fixture"
+              })
+
+      config =
+        config |> Map.put("tools", tools) |> put_in(["admission", "max_inflight_requests"], 32)
+
+      File.write!(path, Jason.encode!(config))
+      {owner, config} = boot_gateway(path, config, dir)
+      results = GatewayLoad.storm(config, 16, method: "tools/list", timeout_ms: 60_000)
+      assert GatewayLoad.by_status(results) == %{200 => 16}
+
+      for result <- results do
+        assert result.error == nil
+        catalog = result.result["result"]["tools"]
+        assert byte_size(Jason.encode!(result.result)) > 3_000_000
+        assert byte_size(Jason.encode!(result.result)) < 4_194_304
+        assert Enum.map(catalog, & &1["name"]) == Enum.map(tools, & &1["name"])
+        assert Enum.all?(catalog, &(&1["description"] == "Catalog load fixture"))
+      end
+
+      assert_drained(owner)
+    end
+  end
+
   describe "residue" do
+    @tag :tmp_dir
+    test "request-capacity refusal batches keep nothing", %{tmp_dir: dir} do
+      {owner, config} = start_gateway(dir, max_inflight_requests: 2, max_concurrent_runs: 2)
+
+      {_listener, config} =
+        serve_router(:sys.get_state(owner), config, body_read_timeout_ms: 120_000)
+
+      sockets =
+        for _ <- 1..2 do
+          {:ok, socket} = GatewayLoad.stall_body(config)
+          socket
+        end
+
+      on_exit(fn -> Enum.each(sockets, &GatewayLoad.close_abruptly/1) end)
+      assert GatewayLoad.await_leases(owner, 2) == 2
+
+      report =
+        GatewayLoad.leak(@leak_batches, @leak_cycles, fn _ ->
+          assert GatewayLoad.by_status(GatewayLoad.storm(config, 4)) == %{429 => 4}
+          assert GatewayLoad.inflight_leases(owner) == 2
+        end)
+
+      assert_no_residue(report, 4)
+      Enum.each(sockets, &GatewayLoad.close_abruptly/1)
+      assert_drained(owner)
+    end
+
+    @tag :tmp_dir
+    test "disconnect batches keep nothing", %{tmp_dir: dir} do
+      {owner, config} =
+        start_gateway(dir, [max_inflight_requests: 8, max_concurrent_runs: 4],
+          body: @slow_body,
+          schema: @schema
+        )
+
+      report =
+        GatewayLoad.leak(@leak_batches, @leak_cycles, fn _ ->
+          results =
+            1..4
+            |> Task.async_stream(fn _ -> GatewayLoad.disconnect_mid_run(config) end,
+              max_concurrency: 4,
+              timeout: :infinity
+            )
+            |> Enum.to_list()
+
+          assert results == List.duplicate({:ok, :accepted}, 4)
+          assert_drained(owner)
+        end)
+
+      assert_no_residue(report, 4)
+      assert_drained(owner)
+    end
+
+    @tag :tmp_dir
+    test "body-deadline batches keep nothing", %{tmp_dir: dir} do
+      {owner, config} = start_gateway(dir, max_inflight_requests: 8, max_concurrent_runs: 4)
+      {_listener, config} = serve_router(:sys.get_state(owner), config, body_read_timeout_ms: 10)
+
+      report =
+        GatewayLoad.leak(@leak_batches, @leak_cycles, fn _ ->
+          sockets =
+            for _ <- 1..4 do
+              {:ok, socket} = GatewayLoad.stall_body(config)
+              socket
+            end
+
+          for socket <- sockets do
+            assert {:closed, _, 408} = GatewayLoad.await_close(socket, 15_000)
+            :gen_tcp.close(socket)
+          end
+
+          assert_drained(owner)
+        end)
+
+      assert_no_residue(report, 4)
+      assert_drained(owner)
+    end
+
     @tag :tmp_dir
     test "a completed call keeps nothing", %{tmp_dir: dir} do
       {owner, config} = start_gateway(dir, max_inflight_requests: 8, max_concurrent_runs: 4)
@@ -684,27 +1094,8 @@ defmodule PtcGatewayLoadTest do
         "processes" => "#{report.processes.before} -> #{report.processes.after}"
       })
 
-      # Exact, and the gate that matters. A call creates a Bandit connection
-      # process, a serving worker, a request monitor and a run; all are
-      # transient, so a leaked one shows here with no noise at all. Across every
-      # run measured this returned to its starting value exactly.
-      assert report.processes.after == report.processes.before,
-             "process count moved #{report.processes.before} -> #{report.processes.after}"
+      assert_no_residue(report)
 
-      # Thresholded, on the two metrics quiet enough to carry a threshold: their
-      # fitted slope stayed within +-60 bytes per call across thirteen runs, so
-      # 512 leaves room for drift while still catching a retained binary.
-      for metric <- [:binary, :ets] do
-        assert report.slopes[metric] < 512,
-               "#{metric} grew #{Float.round(report.slopes[metric], 1)} bytes per call"
-      end
-
-      # `:processes` and `:total` are reported and gated on nothing. Their
-      # run-to-run spread on this workload is about 7,600 bytes per call --
-      # VM-wide process memory moves with whatever else the node is doing -- so
-      # any threshold stable enough not to flake would be far too coarse to
-      # catch a real leak. The exact process-count assertion above is what
-      # covers that failure instead.
       assert GatewayLoad.await_leases(owner, 0) == 0
       assert response(config, "/health/ready").status == 200
     end
@@ -724,6 +1115,10 @@ defmodule PtcGatewayLoadTest do
       end)
 
     File.write!(path, Jason.encode!(config))
+    boot_gateway(path, config, dir)
+  end
+
+  defp boot_gateway(path, config, dir) do
     env = Path.join(dir, "credentials.env")
     File.write!(env, "GATEWAY_TEST_TOKEN=#{token()}\n")
 
@@ -736,6 +1131,48 @@ defmodule PtcGatewayLoadTest do
     opts = Keyword.merge([effect: :write, schema: @schema, write: true], fixture_opts)
     {owner, config} = start_gateway(dir, admission, opts)
     {owner, config, Path.join(dir, "deployment/audit")}
+  end
+
+  defp assert_no_residue(report, calls_per_cycle \\ 1) do
+    slopes = Map.new(report.slopes, fn {metric, bytes} -> {metric, bytes / calls_per_cycle} end)
+
+    report("residue batches", %{
+      "bytes/call" =>
+        inspect(Map.new(slopes, fn {metric, bytes} -> {metric, Float.round(bytes, 1)} end)),
+      "processes" => "#{report.processes.before} -> #{report.processes.after}"
+    })
+
+    # Exact, and the gate that matters. A call creates a Bandit connection
+    # process, a serving worker, a request monitor and a run; all are
+    # transient, so a leaked one shows here with no noise at all. Across every
+    # run measured this returned to its starting value exactly.
+    assert report.processes.after == report.processes.before,
+           "process count moved #{report.processes.before} -> #{report.processes.after}"
+
+    # Thresholded, on the two metrics quiet enough to carry a threshold: their
+    # fitted slope stayed within +-60 bytes per call across thirteen runs, so
+    # 512 leaves room for drift while still catching a retained binary.
+    for metric <- [:binary, :ets] do
+      assert slopes[metric] < 512,
+             "#{metric} grew #{Float.round(slopes[metric], 1)} bytes per call"
+    end
+
+    # `:processes` and `:total` are reported and gated on nothing. Their
+    # run-to-run spread on this workload is about 7,600 bytes per call --
+    # VM-wide process memory moves with whatever else the node is doing -- so
+    # any threshold stable enough not to flake would be far too coarse to
+    # catch a real leak. The exact process-count assertion above is what
+    # covers that failure instead.
+  end
+
+  defp assert_drained(owner) do
+    assert GatewayLoad.await_run_capacity(owner, 0) == 0
+    assert GatewayLoad.await_leases(owner, 0) == 0
+  end
+
+  defp provider_snapshot(admission) do
+    {:ok, snapshot} = PtcRunner.Kernel.ProviderCallAdmission.snapshot(admission)
+    snapshot
   end
 
   defp report(title, rows) do
