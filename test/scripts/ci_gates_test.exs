@@ -60,6 +60,73 @@ defmodule PtcRunner.Scripts.CIGatesTest do
     refute script =~ "time.sleep(1)"
   end
 
+  @tag :tmp_dir
+  test "core release CI passes one assembled binary to standalone and example verification", %{
+    tmp_dir: directory
+  } do
+    File.mkdir_p!(Path.join(directory, "scripts/ci"))
+    File.mkdir_p!(Path.join(directory, "bin"))
+    marker = Path.join(directory, "calls")
+
+    for script <- ~w(core-release.sh _common.sh) do
+      File.cp!(
+        Path.join([@root, "scripts/ci", script]),
+        Path.join([directory, "scripts/ci", script])
+      )
+    end
+
+    for {path, body} <- [
+          {"scripts/verify_core_package.sh", "echo package >> \"$MIX_MARKER\""},
+          {"scripts/verify_standalone_release.sh",
+           """
+           test -x "$PTC_RELEASE_ROOT/bin/ptc"
+           test "$PTC_SKIP_PTY_GATE" = 1
+           echo "standalone $PTC_RELEASE_ROOT/bin/ptc" >> "$MIX_MARKER"
+           """},
+          {"bin/mix",
+           """
+           test "$MIX_ENV" = prod
+           test "$1" = release
+           while [ "$1" != --path ]; do shift; done
+           mkdir -p "$2/bin"
+           touch "$2/bin/ptc"
+           chmod +x "$2/bin/ptc"
+           echo "release $2/bin/ptc" >> "$MIX_MARKER"
+           """},
+          {"bin/python3",
+           """
+           test "$1" = scripts/verify_gateway_example.py
+           test -x "$2"
+           echo "example $2" >> "$MIX_MARKER"
+           """}
+        ] do
+      fixture = Path.join(directory, path)
+      File.write!(fixture, "#!/bin/sh\nset -eu\n" <> body <> "\n")
+      File.chmod!(fixture, 0o755)
+    end
+
+    {output, status} =
+      System.cmd(Path.join(directory, "scripts/ci/core-release.sh"), [],
+        env:
+          @git_env ++
+            [
+              {"PATH", Path.join(directory, "bin") <> ":" <> System.fetch_env!("PATH")},
+              {"MIX_MARKER", marker},
+              {"PTC_RELEASE_ROOT", nil}
+            ],
+        stderr_to_stdout: true
+      )
+
+    assert status == 0, output
+
+    assert ["package", "release " <> binary, standalone, example] =
+             marker |> File.read!() |> String.split("\n", trim: true)
+
+    assert standalone == "standalone " <> binary
+    assert example == "example " <> binary
+    refute File.exists?(Path.dirname(Path.dirname(binary)))
+  end
+
   test "core tests establish the CI contract without reducing native scheduler pressure" do
     %{marker: marker} = fake = fake_mix()
 

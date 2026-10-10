@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "listen": {
+    "address": "127.0.0.1",
+    "port": 8766,
+    "path": "/mcp"
+  },
+  "authentication": {
+    "bearer": {
+      "binding": "gateway"
+    }
+  },
+  "host": {
+    "path": "ptc-host.json"
+  },
+  "admission": {
+    "max_inflight_requests": 16,
+    "max_concurrent_runs": 4,
+    "max_active_provider_calls": 4,
+    "max_waiting_provider_calls": 0
+  },
+  "artifacts": {
+    "root": "debug-artifacts",
+    "trace": true,
+    "events": {
+      "max_file_bytes": 1048576,
+      "max_retained_files": 8,
+      "stderr": false
+    }
+  },
+  "tools": [
+    {
+      "name": "analysis_eval",
+      "title": "Analysis eval",
+      "description": "Evaluate bounded read-only source over canonical traces.",
+      "application": {
+        "manifest": "analysis.json"
+      }
+    },
+    {
+      "name": "analysis_api",
+      "title": "Analysis API",
+      "description": "Return the prompt-visible history API.",
+      "application": {
+        "manifest": "api.json"
+      }
+    }
+  ]
+}

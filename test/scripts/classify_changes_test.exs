@@ -90,6 +90,7 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
           {".dockerignore", core_release},
           {"rel/overlays/bin/ptc", core_release},
           {"examples/kernel-tutorial/03-file-agent/agent.clj", operator_core},
+          {"examples/gateway-mcp/workflow.clj", operator_core_release},
           {"test/ptc_runner/kernel/filesystem_mcp_e2e_test.exs", only(["mcp_filesystem"])},
           {"test/support/ptc_fs_mcp.ex", only(~w(mcp_filesystem operator))},
           {"examples/named-mission-reader-writer/ptc-host.json",

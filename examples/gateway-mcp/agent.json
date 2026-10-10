@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "id": "gateway.example",
+        "path": "agent.clj",
+        "dependencies": [
+          "agent.core"
+        ]
+      },
+      {
+        "library": "agent.core"
+      }
+    ],
+    "entry": "gateway.example/run"
+  },
+  "input": {
+    "value": {}
+  },
+  "providers": {
+    "mission": [
+      {
+        "name": "notes"
+      },
+      {
+        "name": "policy"
+      }
+    ],
+    "workflow": [
+      {
+        "name": "deepseek"
+      }
+    ]
+  },
+  "missions": {
+    "default": {
+      "components": [
+        {
+          "id": "files",
+          "path": "files.clj",
+          "dependencies": [
+            "response"
+          ]
+        },
+        {
+          "id": "response",
+          "path": "response.clj"
+        }
+      ],
+      "providers": [
+        "notes",
+        "policy"
+      ]
+    }
+  },
+  "contracts": {
+    "input_schema": {
+      "path": "input.schema.json"
+    },
+    "result_schema": {
+      "path": "result.schema.json"
+    }
+  }
+}

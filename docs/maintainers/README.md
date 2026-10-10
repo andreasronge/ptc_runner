@@ -15,6 +15,8 @@ runtime implementation, repository workflow, and host-integration view.
   a host application.
 - [Documentation guidelines](documentation.md) — audience and layer ownership,
   examples, generated pages, and verification.
+- [Gateway conformance](gateway-conformance.md) — the pinned MCP suite,
+  applicable scenarios, exclusions, and boundary checks.
 - [Gateway load probe](gateway-load-probe.md) — the MCP gateway's concurrency
   gate and its throughput/bottleneck benchmark.
 - [Coding-agent review](coding-agent-review.md) — independent review workflow.

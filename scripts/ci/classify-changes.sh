@@ -70,16 +70,16 @@ mark_operator() {
 
 # `release` is not a gate of its own either: it decides whether the release
 # verification gate runs on a pull request. That gate builds the Hex package
-# and assembles the standalone release from cold, and only the packaging
-# inputs below can change its verdict in a way the core suite does not already
-# catch. It stays unconditional on main and on a `release`-labelled pull
+# and assembles the standalone release from cold. The inputs below include
+# the gateway example exercised only through that packaged executable; they
+# can change its verdict beyond the core suite. It stays unconditional on main and on a `release`-labelled pull
 # request, so a pure `lib/` change is still verified before a tag.
 mark_release() {
   case "$1" in
     mix.exs|mix.lock|rel/*|priv/*|Dockerfile|.dockerignore|\
       scripts/verify_*.sh|scripts/package_standalone_release.sh|\
       scripts/build_container_image.sh|scripts/macho_closure.py|\
-      scripts/ci/core-release.sh)
+      scripts/ci/core-release.sh|examples/gateway-mcp/*)
       release=true
       ;;
   esac

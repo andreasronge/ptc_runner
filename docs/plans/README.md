@@ -19,12 +19,6 @@ belongs in guides or retained specifications.
   tracks the unfinished private-sink, overflow, real-pagination, and
   cache-usage journeys.
 
-## Gateway
-
-- [`gateway-mcp-providers.md`](gateway-mcp-providers.md) plans warm, shared
-  upstream MCP providers for served workflows, read-only effect derivation for
-  mission-driven workflows, and pin discovery from the shipped executable.
-
 ## Research direction
 
 - The retained [debug-efficiency program](../research/debug-efficiency.md)

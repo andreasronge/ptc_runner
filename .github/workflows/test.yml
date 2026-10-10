@@ -380,6 +380,11 @@ jobs:
           cache-plt: 'false'
           install-babashka: 'false'
 
+      - name: Setup pinned Node toolchain
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22.22.2'
+
       # The setup action's cache key carries MIX_ENV and this job runs as
       # `test`, so `_build/prod` is cold every run and the standalone release
       # recompiles every dependency. The package gate's own prod build happens
