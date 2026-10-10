@@ -40,7 +40,7 @@ There is no implicit configuration search or implicit environment-file search.
 | Write permission | `allow_write` defaults to false. A compiled write effect requires true; permission never changes the compiled effect. |
 | Content pin | Required `expected_application_content_digest`, exactly `sha256:` plus 64 lowercase hex characters; effective application identity is not interchangeable. |
 | Installation pins | Required exact map `installation_config_pins`, keyed by installation name. Missing, extra, stale or mismatched values refuse startup. |
-| Snapshot pins | Required exact map `provider_snapshot_pins`, keyed `workflow/name` or `mission/name`. Values pin acquisition identity, never volatile content. Tools without providers require both maps to be empty. |
+| Snapshot pins | Required exact map `provider_snapshot_pins`, keyed `workflow/name` or `mission/name`. Values pin acquisition identity. Normal trace snapshot sites are omitted because their content changes per call. Tools without providers require both maps to be empty. |
 | Paths | Host, application manifests, audit directory and artifact root resolve from the gateway document directory. Nested host-owned paths retain host-document-relative semantics. |
 | Environment file | Anchored once from the invocation directory. Warm startup captures the bearer and selected provider credentials in one scope, restoring environment and lock before listener binding, including on failure. |
 | Private audit | Required iff any tool sets `allow_write: true`; forbidden otherwise. Required fields: `directory`, `max_file_bytes` (1024–67108864), `max_retained_files` (2–128). |
@@ -77,6 +77,20 @@ exits 0; failure prints one closed JSON error on stderr, nothing on stdout,
 and exits 78. Credentials and volatile provider content are absent from output.
 Update pins and restart after changing applications, installations, or
 acquisition identities; a fenced serving domain never re-pins automatically.
+
+## Cold trace snapshot tools
+
+A tool selecting only `ptc_trace_snapshot` installations captures the directory
+anew for every call. Concurrent calls own separate captures and cleanup. Startup
+checks the exact installation configuration pins and validates the trace directory
+before binding the listener; it retains no snapshot. `provider_snapshot_pins`
+omits snapshot sites in both discovery and startup, so later trace content needs
+no re-pin. Startup requires the empty snapshot pin map for such a tool.
+
+Mixing a snapshot with a model or MCP provider, or selecting
+`ptc_private_trace_snapshot` or `ptc_inspection_snapshot`, is refused with
+`provider_source_unsupported`. See [serving debug tools](debug-navigation.md#serving-debug-tools)
+for the analysis workflow and artifact-root boundary.
 
 ## Shared MCP providers
 
