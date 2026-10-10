@@ -288,7 +288,9 @@ defmodule PtcRunner.Kernel.Environment do
   def implicit_capabilities(:mission, _private_capabilities),
     do: ~w(runtime-usage runtime-remaining cap-list cap-describe)
 
-  defp workflow_private_capabilities(bundle, authorization) do
+  @doc false
+  @spec workflow_private_capabilities(FrozenBundle.t(), map()) :: [binary()]
+  def workflow_private_capabilities(bundle, authorization) do
     if Library.shipped_or_verified_override_component?(bundle, "agent.core", authorization),
       do: @agent_core_private,
       else: []

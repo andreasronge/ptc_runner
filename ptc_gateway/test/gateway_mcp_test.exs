@@ -10,6 +10,71 @@ defmodule PtcGatewayMCPTest do
   end
 
   @tag :tmp_dir
+  test "read eval-source workflows are advertised read-only and execute", %{tmp_dir: dir} do
+    {path, config} =
+      fixture(dir, :read,
+        schema: %{"type" => "object", "properties" => %{"answer" => %{"type" => "integer"}}}
+      )
+
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{token()}\n")
+    manifest_path = Path.join(dir, "app.json")
+    manifest = manifest_path |> File.read!() |> Jason.decode!()
+
+    manifest =
+      manifest
+      |> put_in(["workflow", "components"], [
+        %{"id" => "app", "path" => "workflow.clj", "dependencies" => ["kernel"]},
+        %{"library" => "kernel"}
+      ])
+      |> Map.put("missions", %{"default" => %{"components" => []}})
+
+    File.write!(manifest_path, Jason.encode!(manifest))
+
+    File.write!(
+      Path.join(dir, "workflow.clj"),
+      ~S|(ns app) (defn run {:effect :read} [input] (return {"answer" (get (kernel/eval-source "default" "(return (+ 1 2))") :value)}))|
+    )
+
+    assert {:ok, template} =
+             ServingTemplate.from_directory(
+               manifest_path,
+               PtcRunner.Kernel.Limits.installed_defaults()
+             )
+
+    config =
+      update_in(config, ["tools"], fn tools ->
+        Enum.map(
+          tools,
+          &Map.put(
+            &1,
+            "expected_application_content_digest",
+            ServingTemplate.application_content_digest(template)
+          )
+        )
+      end)
+
+    File.write!(path, Jason.encode!(config))
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+    listing = mcp(config, "tools/list", 1)
+
+    assert Enum.all?(
+             listing.body["result"]["tools"],
+             &(&1["annotations"]["readOnlyHint"] == true)
+           )
+
+    result =
+      mcp(config, "tools/call", 2,
+        params: %{"name" => "a", "arguments" => %{}},
+        headers: [{"mcp-name", "a"}]
+      )
+      |> decode_call_response()
+
+    assert result.body["result"]["structuredContent"] == %{"answer" => 3}, inspect(result.body)
+  end
+
+  @tag :tmp_dir
   test "static-header HTTP acquisitions are shared per tool under concurrent gateway calls", %{
     tmp_dir: dir
   } do
@@ -245,6 +310,10 @@ defmodule PtcGatewayMCPTest do
         headers: [{"mcp-name", "a"}]
       )
 
+    decode_call_response(result)
+  end
+
+  defp decode_call_response(result) do
     if is_binary(result.body) do
       [_, event, ""] = String.split(result.body, "\n\n")
       ["event: message", "data: " <> payload] = String.split(event, "\n")

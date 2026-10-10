@@ -1,6 +1,8 @@
 defmodule PtcRunner.Kernel.DeclaredReadEffectValidator do
   @moduledoc false
 
+  alias PtcRunner.Kernel.EntryEffect
+  alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.ExportEffect
   alias PtcRunner.Kernel.MissionInventory
   alias PtcRunner.Kernel.ModelCapabilities
@@ -41,7 +43,7 @@ defmodule PtcRunner.Kernel.DeclaredReadEffectValidator do
   end
 
   @doc false
-  @spec validate_assembled(PtcRunner.Kernel.WorkflowEnvironment.t(), map(), map()) ::
+  @spec validate_assembled(map(), map(), map()) ::
           :ok | {:error, {:declared_read_effect_violation, binary(), :write | :unknown}}
   def validate_assembled(workflow, missions, workflow_effects) do
     with :ok <- validate_bundle(workflow.bundle, workflow_effects) do
@@ -56,19 +58,52 @@ defmodule PtcRunner.Kernel.DeclaredReadEffectValidator do
     end
   end
 
-  defp validate_with(workflow_bundle, mission_bundles, missions, effects_for) do
-    with :ok <- validate_bundle(workflow_bundle, effects_for.(:workflow, nil)) do
-      mission_bundles
-      |> Enum.sort_by(&elem(&1, 0))
-      |> Enum.reduce_while(:ok, fn {name, bundle}, :ok ->
-        occurrences = Map.fetch!(missions, name).provider_occurrences
+  @doc false
+  @spec declaration_environments(map(), map(), map(), [map()]) :: map()
+  def declaration_environments(workflow_bundle, mission_bundles, missions, declarations) do
+    environments(workflow_bundle, mission_bundles, missions, fn destination, occurrences ->
+      effects_for(declarations, destination, occurrences)
+    end)
+  end
 
-        case validate_bundle(bundle, effects_for.(:mission, occurrences)) do
-          :ok -> {:cont, :ok}
-          {:error, _reason} = error -> {:halt, error}
-        end
+  defp validate_with(workflow_bundle, mission_bundles, missions, effects_for) do
+    %{workflow: workflow, missions: mission_environments} =
+      environments(workflow_bundle, mission_bundles, missions, effects_for)
+
+    validate_assembled(
+      workflow,
+      mission_environments,
+      EntryEffect.capability_effects(workflow, mission_environments)
+    )
+  end
+
+  defp environments(workflow_bundle, mission_bundles, missions, effects_for) do
+    workflow = effect_environment(workflow_bundle, effects_for.(:workflow, nil))
+
+    workflow =
+      Map.put(
+        workflow,
+        :private_capabilities,
+        Environment.workflow_private_capabilities(workflow_bundle, %{})
+      )
+
+    mission_environments =
+      Map.new(mission_bundles, fn {name, bundle} ->
+        occurrences = Map.fetch!(missions, name).provider_occurrences
+        {name, effect_environment(bundle, effects_for.(:mission, occurrences))}
       end)
-    end
+
+    %{workflow: workflow, missions: mission_environments}
+  end
+
+  defp effect_environment(bundle, effects) do
+    %{
+      bundle: bundle,
+      capabilities:
+        Map.new(effects, fn {name, effect} ->
+          {name, %{effect: effect}}
+        end)
+    }
   end
 
   defp validate_bundle(nil, _capability_effects), do: :ok

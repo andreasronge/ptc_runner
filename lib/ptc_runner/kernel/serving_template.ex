@@ -107,7 +107,9 @@ defmodule PtcRunner.Kernel.ServingTemplate do
   Provider-bearing templates cache bundles without assembled environments;
   actual capabilities are required by environment validation, so assembly occurs
   when a borrowed run is built. The coordinator validates declared effects
-  during construction. Catalog implementations remain internal, excluded from
+  during construction, including the complete grant resolved from inert provider
+  declarations before acquisition. Catalog implementations remain internal,
+  excluded from
   inspection and the safe metadata API. Acquisition closes its temporary
   document source on success and failure and discards its placeholder input.
   `prepare_call/2` seals a real RunRequest from cached bundles and complete
@@ -579,7 +581,18 @@ defmodule PtcRunner.Kernel.ServingTemplate do
               :post_selection_context
             ])
 
-          entry = Enum.find(prepared.workflow_bundle.prelude.exports, &(&1.ref == package.entry))
+          %{workflow: workflow, missions: missions} =
+            DeclaredReadEffectValidator.declaration_environments(
+              prepared.workflow_bundle,
+              prepared.mission_bundles,
+              package.missions,
+              Enum.map(prepared.provider_declarations, fn declaration ->
+                {:ok, descriptor} = InstallationCatalog.fetch(catalog, declaration.name)
+                Map.put(declaration, :descriptor, descriptor)
+              end)
+            )
+
+          effect = validate_effect(workflow, missions, package.entry)
 
           cond do
             not Enum.all?(
@@ -588,7 +601,7 @@ defmodule PtcRunner.Kernel.ServingTemplate do
             ) ->
               {:error, :provider_runtime_unsupported}
 
-            entry.declared_effect in [:read, :write] ->
+            match?({:ok, _effect}, effect) ->
               {:ok,
                %__MODULE__{
                  package: package,
@@ -597,7 +610,7 @@ defmodule PtcRunner.Kernel.ServingTemplate do
                    Map.new(prepared.mission_bundles, fn {name, bundle} ->
                      {name, %{bundle: bundle}}
                    end),
-                 effect: entry.declared_effect,
+                 effect: elem(effect, 1),
                  effective_digest: prepared.effective_application_digest,
                  policy: %{
                    input_authority_class: :normal,
@@ -618,7 +631,7 @@ defmodule PtcRunner.Kernel.ServingTemplate do
                }}
 
             true ->
-              {:error, :effect_declaration_required}
+              effect
           end
         after
           PreparedRun.close(prepared)
