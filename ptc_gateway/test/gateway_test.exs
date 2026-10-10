@@ -28,6 +28,66 @@ defmodule PtcGatewayTest do
   end
 
   @tag :tmp_dir
+  test "listener capacity is derived from request admission", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    env = Path.join(dir, "credentials.env")
+    File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
+    assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
+    on_exit(fn -> stop(owner) end)
+    policy = PtcGateway.Domain.metadata(owner).listener_policy.transport
+    assert policy.num_acceptors == 1
+    assert policy.num_connections == config["admission"]["max_inflight_requests"] + 8
+    assert policy.handler_ceiling == policy.num_connections
+  end
+
+  @tag :nightly
+  @tag :tmp_dir
+  test "CLI refuses listener capacity above its soft descriptor limit", %{tmp_dir: dir} do
+    {path, config} = fixture(dir)
+    config = put_in(config, ["admission", "max_inflight_requests"], 120)
+    File.write!(path, Jason.encode!(config))
+    upstream = PtcRunner.TestSupport.WarmMCPFixture.http()
+    on_exit(upstream.close)
+
+    {provider_path, provider_config} =
+      mcp_fixture(
+        Path.join(dir, "providers"),
+        PtcRunner.TestSupport.WarmMCPFixture.http_transport(upstream.endpoint)
+      )
+
+    tool = hd(provider_config["tools"])
+
+    provider_config =
+      Map.put(provider_config, "tools", Enum.map(1..32, &Map.put(tool, "name", "tool#{&1}")))
+
+    for {document, deployment} <- [{path, config}, {provider_path, provider_config}] do
+      File.write!(document, Jason.encode!(deployment))
+      stdout = document <> ".stdout"
+      stderr = document <> ".stderr"
+
+      assert {"", 78} =
+               System.cmd(
+                 "sh",
+                 [
+                   "-c",
+                   ~S(ulimit -n 256; exec "$1" ptc.gateway "$2" >"$3" 2>"$4"),
+                   "--",
+                   System.find_executable("mix"),
+                   document,
+                   stdout,
+                   stderr
+                 ],
+                 env: [{"MIX_ENV", "test"}, {"GATEWAY_TEST_TOKEN", @token}]
+               )
+
+      assert File.read!(stdout) == ""
+      assert File.read!(stderr) == "{\"error\":\"listener_capacity_exceeded\"}\n"
+      assert {:ok, socket} = :gen_tcp.listen(deployment["listen"]["port"], ip: {127, 0, 0, 1})
+      :gen_tcp.close(socket)
+    end
+  end
+
+  @tag :tmp_dir
   test "configured artifacts record a served tool call", %{tmp_dir: dir} do
     {path, config} = fixture(dir)
     config = Map.put(config, "artifacts", %{"root" => "artifacts", "trace" => true})
