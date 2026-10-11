@@ -1,22 +1,12 @@
 [
   {
     "from": "PtcRunner.Kernel.CommandEngine",
-    "to": "PtcRunner.Dotenv",
-    "issue": 2233
-  },
-  {
-    "from": "PtcRunner.Kernel.CommandEngine",
     "to": "PtcRunner.LiveStatus",
     "issue": 2232
   },
   {
     "from": "PtcRunner.Kernel.CommandRouter",
     "to": "PtcRunner.CLIProgress",
-    "issue": 2232
-  },
-  {
-    "from": "PtcRunner.Kernel.CommandRouter",
-    "to": "PtcRunner.Dotenv",
     "issue": 2233
   },
   {
@@ -68,11 +58,6 @@
     "from": "PtcRunner.Kernel.Runner",
     "to": "PtcRunner.LiveStatus",
     "issue": 2232
-  },
-  {
-    "from": "PtcRunner.Kernel.WarmProviderRuntime",
-    "to": "PtcRunner.Dotenv",
-    "issue": 2233
   },
   {
     "from": "PtcRunner.Lisp",

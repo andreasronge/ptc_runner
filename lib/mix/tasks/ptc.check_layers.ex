@@ -19,8 +19,8 @@ defmodule Mix.Tasks.Ptc.CheckLayers do
   """
 
   @infrastructure ~w(PtcRunner.BuildIdentity PtcRunner.ChildEnvironment PtcRunner.HTTPEndpoint PtcRunner.Utf8)
-  @kernel ~w(PtcRunner PtcRunner.Kernel PtcRunner.LLM PtcRunner.Sandbox)
-  @frontend ~w(PtcRunner.Application PtcRunner.CLILogger PtcRunner.CLIProgress PtcRunner.Dotenv PtcRunner.LiveStatus PtcRunner.MixCommandAdapter PtcRunner.MixCommandRuntime PtcRunner.ProfileDiagnosticCatalog PtcRunner.ReplError PtcRunner.ReplFrontend PtcRunner.ReplLineEditor PtcRunner.ReplProfileRunner PtcRunner.ReplSessionRunner PtcRunner.ReplSupport PtcRunner.StandaloneCLI PtcRunner.StandaloneCommandRuntime PtcRunner.TranscriptFrontend PtcRunner.ViewerFrontend PtcRunner.ViewerLaunchAdapter PtcRunner.ViewerSnapshotStore)
+  @kernel ~w(PtcRunner PtcRunner.Dotenv PtcRunner.Kernel PtcRunner.LLM PtcRunner.Sandbox)
+  @frontend ~w(PtcRunner.Application PtcRunner.CLILogger PtcRunner.CLIProgress PtcRunner.LiveStatus PtcRunner.MixCommandAdapter PtcRunner.MixCommandRuntime PtcRunner.ProfileDiagnosticCatalog PtcRunner.ReplError PtcRunner.ReplFrontend PtcRunner.ReplLineEditor PtcRunner.ReplProfileRunner PtcRunner.ReplSessionRunner PtcRunner.ReplSupport PtcRunner.StandaloneCLI PtcRunner.StandaloneCommandRuntime PtcRunner.TranscriptFrontend PtcRunner.ViewerFrontend PtcRunner.ViewerLaunchAdapter PtcRunner.ViewerSnapshotStore)
   @elixir_apps [:elixir, :logger]
   @approved_external_apps []
   @removal_issues [2230, 2231, 2232, 2233, 2234]
