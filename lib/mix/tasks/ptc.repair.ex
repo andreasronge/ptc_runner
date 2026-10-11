@@ -37,11 +37,11 @@ defmodule Mix.Tasks.Ptc.Repair do
   use Mix.Task
 
   alias Mix.Tasks.Ptc.Materialize
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CandidateArtifact
   alias PtcRunner.Kernel.ComponentOverride
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.PrivateDirectory
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.StrictJSON
   alias PtcRunner.MixCommandAdapter
 
@@ -611,7 +611,7 @@ defmodule Mix.Tasks.Ptc.Repair do
   end
 
   defp application_digest(manifest) do
-    case ApplicationPackage.request_directory(manifest, result_projection: :native) do
+    case RunRequest.from_directory(manifest, result_projection: :native) do
       {:ok, request} -> {:ok, "sha256:" <> request.package.application_content_digest}
       {:error, reason} -> {:error, {:application_unavailable, reason}}
     end

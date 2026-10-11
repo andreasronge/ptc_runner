@@ -6,7 +6,6 @@ defmodule PtcRunner.TestSupport.ProviderExecutionOAuthFixtures do
 
   import ExUnit.Callbacks, only: [on_exit: 1]
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.HostConfig
@@ -17,6 +16,7 @@ defmodule PtcRunner.TestSupport.ProviderExecutionOAuthFixtures do
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.TestSupport.MCPHTTPFixture
 
   # Starts an execution owner from a spawned caller whose OAuth notifier blocks
@@ -84,7 +84,7 @@ defmodule PtcRunner.TestSupport.ProviderExecutionOAuthFixtures do
     }
 
     {:ok, request} =
-      ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+      RunRequest.from_memory("ptc.json", documents, result_projection: :json)
 
     {:ok, prepared} = RunCoordinator.prepare(request, catalog)
     on_exit(fn -> InstallationCatalog.close(catalog) end)

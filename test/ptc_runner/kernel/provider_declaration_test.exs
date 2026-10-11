@@ -1,7 +1,6 @@
 defmodule PtcRunner.Kernel.ProviderDeclarationTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandOutcome
@@ -28,6 +27,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
   alias PtcRunner.Kernel.ProviderSnapshot
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.Kernel.TypedCanonicalJSON
   alias PtcRunner.Test.MCPOAuthRecordingStore
@@ -1177,10 +1177,10 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     application = write_application(directory, "provider-free", documents)
 
     assert {:ok, directory_request} =
-             ApplicationPackage.request_directory(application, result_projection: :json)
+             RunRequest.from_directory(application, result_projection: :json)
 
     assert {:ok, memory_request} =
-             ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+             RunRequest.from_memory("ptc.json", documents, result_projection: :json)
 
     assert {:ok, catalog} = InstallationCatalog.new()
 
@@ -1246,19 +1246,13 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
       Map.put(documents(path_manifest), "private-input.json", ~s({"different":true}))
 
     assert {:ok, inline_a_request} =
-             ApplicationPackage.request_memory("ptc.json", documents(inline_a),
-               result_projection: :json
-             )
+             RunRequest.from_memory("ptc.json", documents(inline_a), result_projection: :json)
 
     assert {:ok, inline_b_request} =
-             ApplicationPackage.request_memory("ptc.json", documents(inline_b),
-               result_projection: :json
-             )
+             RunRequest.from_memory("ptc.json", documents(inline_b), result_projection: :json)
 
     assert {:ok, path_request} =
-             ApplicationPackage.request_memory("ptc.json", path_documents,
-               result_projection: :json
-             )
+             RunRequest.from_memory("ptc.json", path_documents, result_projection: :json)
 
     assert inline_a_request.package.application_content_digest ==
              inline_b_request.package.application_content_digest
@@ -1278,7 +1272,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
              path_prepared.effective_application_digest
 
     assert {:ok, private_request} =
-             ApplicationPackage.request_memory("ptc.json", documents(inline_a),
+             RunRequest.from_memory("ptc.json", documents(inline_a),
                input_authority: :private,
                result_projection: :json
              )
@@ -1290,15 +1284,13 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
              inline_a_prepared.effective_application_digest
 
     assert {:ok, inspected_request} =
-             ApplicationPackage.request_memory("ptc.json", documents(inline_a),
+             RunRequest.from_memory("ptc.json", documents(inline_a),
                inspection_capture: true,
                result_projection: :json
              )
 
     assert {:ok, native_request} =
-             ApplicationPackage.request_memory("ptc.json", documents(inline_a),
-               result_projection: :native
-             )
+             RunRequest.from_memory("ptc.json", documents(inline_a), result_projection: :native)
 
     assert {:ok, inspected} = RunCoordinator.prepare(inspected_request, catalog)
     assert {:ok, native} = RunCoordinator.prepare(native_request, catalog)
@@ -1503,7 +1495,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     documents = documents(private_manifest)
 
     assert {:ok, request} =
-             ApplicationPackage.request_memory("ptc.json", documents,
+             RunRequest.from_memory("ptc.json", documents,
                input_authority: :private,
                result_projection: :json
              )
@@ -2025,7 +2017,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
            }
 
     assert {:ok, request} =
-             ApplicationPackage.request_directory(application, result_projection: :json)
+             RunRequest.from_directory(application, result_projection: :json)
 
     parent = self()
 
@@ -2117,7 +2109,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     }
 
     assert {:ok, request} =
-             ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+             RunRequest.from_memory("ptc.json", documents, result_projection: :json)
 
     assert {:ok, prepared} = RunCoordinator.prepare(request, catalog)
     refute_receive :validation_provider_invoked
@@ -2136,7 +2128,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
 
   defp prepare_identity(manifest, catalog, opts \\ []) do
     with {:ok, request} <-
-           ApplicationPackage.request_memory(
+           RunRequest.from_memory(
              "ptc.json",
              documents(manifest),
              Keyword.put_new(opts, :result_projection, :json)

@@ -1,7 +1,6 @@
 defmodule PtcRunner.Kernel.DoctorPlanTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandResults
@@ -14,6 +13,7 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.TestSupport.HostBoundFixture
 
@@ -943,7 +943,7 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
     }
 
     {:ok, request} =
-      ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+      RunRequest.from_memory("ptc.json", documents, result_projection: :json)
 
     {:ok, prepared} = RunCoordinator.prepare(request, catalog)
     on_exit(fn -> PreparedRun.close(prepared) end)

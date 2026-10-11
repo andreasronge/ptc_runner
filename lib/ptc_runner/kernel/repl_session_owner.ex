@@ -7,7 +7,7 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.LLMBudget
-  alias PtcRunner.Kernel.ManifestReplOpening
+  alias PtcRunner.Kernel.ManifestReplLease
   alias PtcRunner.Kernel.ReplTerminalization
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
@@ -200,7 +200,7 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
       ) do
     if valid_adoption?(state, caller, config, run_state, opening, trace_path) and
          valid_mode?(mode, config) do
-      opening_pid = ManifestReplOpening.pid(opening)
+      opening_pid = ManifestReplLease.pid(opening)
       Process.link(run_state.pid)
 
       next =
@@ -325,7 +325,7 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
     safely(fn -> RunState.stop(state.run_state) end)
 
     if state.opening do
-      safely(fn -> ManifestReplOpening.release(state.opening) end)
+      safely(fn -> ManifestReplLease.release(state.opening) end)
     else
       if config.inspection_sink,
         do: safely(fn -> InspectionSink.stop(config.inspection_sink) end)
@@ -388,7 +388,7 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
     do: {:reply, {:error, :session_owner_mismatch}, state}
 
   defp valid_adoption?(state, caller, config, run_state, opening, trace_path) do
-    ManifestReplOpening.valid?(opening) and ManifestReplOpening.pid(opening) == caller and
+    ManifestReplLease.valid?(opening) and ManifestReplLease.pid(opening) == caller and
       RunState.repl_owner?(
         run_state,
         config.event_sink,
@@ -447,7 +447,7 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
   defp close_provider_session(%{provider_cleanup: nil} = state) do
     result =
       if state.opening,
-        do: ManifestReplOpening.close_provider_session(state.opening),
+        do: ManifestReplLease.close_provider_session(state.opening),
         else: RunConfig.close_provider_session(state.config)
 
     config = %{state.config | provider_session: nil}

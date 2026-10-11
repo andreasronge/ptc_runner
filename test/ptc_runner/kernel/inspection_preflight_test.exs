@@ -4,13 +4,13 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
   use ExUnit.Case, async: true
   @moduletag :operator
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ResultArtifact
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.TestSupport.RunLifecycle
   alias PtcRunner.TestSupport.StreamingInspection
@@ -137,9 +137,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
 
       assert {:error, {:inspection_preflight_failed, :inspection_destination_exists}} =
                manifest_path
-               |> ApplicationPackage.request_directory(
-                 request_options(registry, inspect: occupied)
-               )
+               |> RunRequest.from_directory(request_options(registry, inspect: occupied))
                |> RunLifecycle.build(registry,
                  trace_path: Path.join(dir, "run.jsonl"),
                  inspect: occupied
@@ -161,9 +159,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
 
       assert {:error, reason} =
                missing_manifest
-               |> ApplicationPackage.request_directory(
-                 request_options(registry, inspect: occupied)
-               )
+               |> RunRequest.from_directory(request_options(registry, inspect: occupied))
                |> RunLifecycle.build(registry, inspect: occupied)
                |> RunLifecycle.execute()
 
@@ -173,7 +169,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
 
       assert {:error, reason} =
                manifest_path
-               |> ApplicationPackage.request_directory(
+               |> RunRequest.from_directory(
                  request_options(registry,
                    input: "absent-override.json",
                    inspect: occupied
@@ -204,9 +200,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
 
       assert {:error, {:result_preflight_failed, :result_destination_exists}} =
                manifest_path
-               |> ApplicationPackage.request_directory(
-                 request_options(registry, output: occupied)
-               )
+               |> RunRequest.from_directory(request_options(registry, output: occupied))
                |> RunLifecycle.build(registry, output: occupied)
                |> RunLifecycle.execute()
 
@@ -234,9 +228,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
 
       assert {:error, {:result_preflight_failed, :invalid_result_destination}} =
                manifest_path
-               |> ApplicationPackage.request_directory(
-                 request_options(registry, output: destination)
-               )
+               |> RunRequest.from_directory(request_options(registry, output: destination))
                |> RunLifecycle.build(registry, output: destination)
                |> RunLifecycle.execute()
 
@@ -288,7 +280,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
           ] do
         assert {:error, {:artifact_preflight_failed, :conflicting_destinations}} =
                  manifest_path
-                 |> ApplicationPackage.request_directory(request_options(registry, options))
+                 |> RunRequest.from_directory(request_options(registry, options))
                  |> RunLifecycle.build(registry, options)
                  |> RunLifecycle.execute()
 
@@ -315,9 +307,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
 
       assert {:error, {:inspection_preflight_failed, :inspection_destination_unavailable}} =
                manifest_path
-               |> ApplicationPackage.request_directory(
-                 request_options(registry, inspect: destination)
-               )
+               |> RunRequest.from_directory(request_options(registry, inspect: destination))
                |> RunLifecycle.build(registry, inspect: destination)
                |> RunLifecycle.execute()
 
@@ -355,7 +345,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       for {options, reason} <- cases do
         assert {:error, ^reason} =
                  manifest_path
-                 |> ApplicationPackage.request_directory(request_options(registry, options))
+                 |> RunRequest.from_directory(request_options(registry, options))
                  |> RunLifecycle.build(registry, options)
                  |> RunLifecycle.execute()
 
@@ -379,7 +369,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
 
       assert {:error, {:trace_preflight_failed, :normal_trace_requires_normal_suffix}} =
                manifest_path
-               |> ApplicationPackage.request_directory(request_options(registry, []))
+               |> RunRequest.from_directory(request_options(registry, []))
                |> RunLifecycle.build(registry,
                  trace_path: Path.join(dir, "run.private.jsonl")
                )
@@ -414,7 +404,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
 
       assert {:error, {:trace_preflight_failed, :trace_destination_unavailable}} =
                manifest_path
-               |> ApplicationPackage.request_directory(request_options(registry, []))
+               |> RunRequest.from_directory(request_options(registry, []))
                |> RunLifecycle.build(registry, trace_path: missing_parent)
                |> RunLifecycle.execute()
 
@@ -423,7 +413,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       for destination <- [directory, symlink] do
         assert {:error, {:trace_preflight_failed, :invalid_trace_path}} =
                  manifest_path
-                 |> ApplicationPackage.request_directory(request_options(registry, []))
+                 |> RunRequest.from_directory(request_options(registry, []))
                  |> RunLifecycle.build(registry, trace_path: destination)
                  |> RunLifecycle.execute()
 
@@ -449,7 +439,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
         write_manifest(dir, %{"workflow" => [%{"name" => "probe", "config" => %{}}]})
 
       {:ok, request} =
-        ApplicationPackage.request_directory(manifest_path,
+        RunRequest.from_directory(manifest_path,
           inspection_capture: true,
           result_projection: :native
         )

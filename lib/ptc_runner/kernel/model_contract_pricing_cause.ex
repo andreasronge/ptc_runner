@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.ModelContractPricingCause do
   @moduledoc false
 
   alias PtcRunner.Kernel.Attestation
+  alias PtcRunner.LLM.PublicModel
 
   @enforce_keys [:public_model, :attestation]
   defstruct @enforce_keys
@@ -11,7 +12,7 @@ defmodule PtcRunner.Kernel.ModelContractPricingCause do
 
   @spec new(module(), binary()) :: t()
   def new(adapter, model) when is_atom(adapter) and is_binary(model) do
-    public_model = PtcRunner.LLM.attested_public_model(adapter, model)
+    public_model = PublicModel.attested(adapter, model)
 
     %__MODULE__{
       public_model: public_model,

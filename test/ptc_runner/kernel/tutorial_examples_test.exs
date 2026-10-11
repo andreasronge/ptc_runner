@@ -2,12 +2,12 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
   use ExUnit.Case, async: true
   @moduletag :operator
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.ProjectConfig
   alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.TestSupport.RunLifecycle
 
   @examples Path.expand("../../../examples/kernel-tutorial", __DIR__)
@@ -57,7 +57,7 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
     assert {:ok, result} =
              "05-signature-feedback"
              |> path()
-             |> ApplicationPackage.request_directory(
+             |> RunRequest.from_directory(
                installed_limits: registry.installed_limits,
                result_projection: :json
              )
@@ -148,7 +148,7 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
 
     directory
     |> Path.join("ptc.json")
-    |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+    |> RunRequest.from_directory(installed_limits: registry.installed_limits)
     |> RunLifecycle.build(registry)
     |> RunLifecycle.execute()
   end

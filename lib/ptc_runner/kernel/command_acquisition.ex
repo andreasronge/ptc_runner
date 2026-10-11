@@ -1,7 +1,6 @@
 defmodule PtcRunner.Kernel.CommandAcquisition do
   @moduledoc false
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandApplicationDiagnostic
   alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandDiagnostic
@@ -68,7 +67,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
           result_projection: :json
         )
 
-      ApplicationPackage.request_directory(application, options)
+      RunRequest.from_directory(application, options)
     else
       {:error, :invalid_application_options}
     end
@@ -315,7 +314,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
   defp prepare_repl_with_catalog(application, runtime, host, catalog, interactive_loop?) do
     result =
       with {:ok, request} <-
-             ApplicationPackage.request_repl_directory(
+             RunRequest.from_repl_directory(
                application,
                [
                  installed_limits: catalog.installed_limits,

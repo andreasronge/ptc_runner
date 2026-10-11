@@ -2,7 +2,6 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
   @moduledoc false
 
   alias PtcRunner.Examples.KernelInspectionLab.MCPFixture
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.LLMCapability
@@ -10,6 +9,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.Kernel.RunRequest
 
   @task "Use every available read-only fixture and return their results in one map."
   @ptc_fs_mcp_package "ptc-fs-mcp@0.3.0"
@@ -81,7 +81,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
          trace_path = Path.join(traces, run_ref <> ".jsonl"),
          inspection_path = Path.join(inspection, run_ref <> ".ptcins"),
          {:ok, request} <-
-           ApplicationPackage.request_directory(manifest_path,
+           RunRequest.from_directory(manifest_path,
              installed_limits: registry.installed_limits,
              inspection_capture: true,
              event_identity: run_ref

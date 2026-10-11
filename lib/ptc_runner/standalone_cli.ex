@@ -2,8 +2,8 @@ defmodule PtcRunner.StandaloneCLI do
   @moduledoc false
 
   alias PtcRunner.CLILogger
+  alias PtcRunner.CommandRouter
   alias PtcRunner.Kernel.CommandPresentation
-  alias PtcRunner.Kernel.CommandRouter
   alias PtcRunner.StandaloneCommandRuntime
 
   @doc false

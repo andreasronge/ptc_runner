@@ -54,6 +54,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   alias PtcRunner.Kernel.DecisionCapability
   alias PtcRunner.Kernel.HTTPDecisions
   alias PtcRunner.Kernel.OpenRouterDecisions
+  alias PtcRunner.LLM.PublicModel
 
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.BoundedWorker
@@ -859,7 +860,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
          {:ok, model, adapter} <- preflight_llm(installation.model),
          {:ok, requirements} <- live_llm_requirements(installation, context),
          {:ok, prepared_model} <- prepare_llm_model(model, requirements, adapter) do
-      public_model = PtcRunner.LLM.attested_public_model(adapter, model)
+      public_model = PublicModel.attested(adapter, model)
 
       {:ok,
        {:private_preflight,
@@ -1885,7 +1886,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
            PtcRunner.LLM.callback(prepared, %{credential: credential, cache: chat.cache}),
          true <-
            cancellation_witness_supported?(prepared, Map.get(context, :provider_call_admission)) do
-      public_model = PtcRunner.LLM.attested_public_model(adapter, model)
+      public_model = PublicModel.attested(adapter, model)
 
       chat_callback = fn request, context ->
         with :ok <- provider_application_ready(adapter, model), do: callback.(request, context)

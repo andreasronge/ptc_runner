@@ -440,10 +440,10 @@ defmodule PtcRunner.ViewerFrontend do
       open: project.viewer.open and callbacks.terminal_attached,
       trace_source: source,
       inspection_source: if(recorded?, do: source),
-      kernel_trace_adapter: PtcRunner.Kernel.ProjectViewerAdapter,
+      kernel_trace_adapter: PtcRunner.ProjectViewerAdapter,
       inspection_adapter:
         if(recorded?,
-          do: PtcRunner.Kernel.ProjectViewerAdapter
+          do: PtcRunner.ProjectViewerAdapter
         ),
       inspection_absence: inspection_absence(project, inspection?),
       live_token: Config.read().token,

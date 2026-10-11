@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
 
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.ManifestReplLease
   alias PtcRunner.Kernel.ManifestReplPreparation
   alias PtcRunner.Kernel.MCPOAuth.LoopbackListener
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
@@ -25,14 +26,9 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.RunState
 
-  @enforce_keys [:pid, :token]
-  defstruct @enforce_keys
-
-  @opaque t :: %__MODULE__{pid: pid(), token: reference()}
-
   @doc false
   @spec start(ManifestReplPreparation.t(), PublicationAuthority.t(), binary() | nil, pid()) ::
-          {:ok, t()} | {:error, term()}
+          {:ok, ManifestReplLease.t()} | {:error, term()}
   def start(preparation, authority, trace_path, caller) when is_pid(caller) do
     start(preparation, authority, trace_path, caller, :workflow)
   end
@@ -47,7 +43,7 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
           binary() | nil,
           pid(),
           :workflow | MissionReplTarget.t()
-        ) :: {:ok, t()} | {:error, term()}
+        ) :: {:ok, ManifestReplLease.t()} | {:error, term()}
   def start(preparation, authority, trace_path, caller, target) when is_pid(caller) do
     if ManifestReplPreparation.valid?(preparation) and
          PublicationAuthority.authorized?(authority) and
@@ -59,7 +55,7 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
              __MODULE__,
              {token, caller, preparation, authority, trace_path, target}
            ) do
-        {:ok, pid} -> {:ok, %__MODULE__{pid: pid, token: token}}
+        {:ok, pid} -> {:ok, ManifestReplLease.new(pid, token)}
         {:error, reason} -> {:error, reason}
       end
     else
@@ -69,41 +65,6 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
 
   def start(_preparation, _authority, _trace_path, _caller, _target),
     do: {:error, :invalid_manifest_repl}
-
-  @doc false
-  @spec await(t()) :: {:ok, pid(), reference()} | {:error, term()}
-  def await(%__MODULE__{pid: pid, token: token}) do
-    GenServer.call(pid, {token, :await}, :infinity)
-  catch
-    :exit, _reason -> {:error, :manifest_repl_unavailable}
-  end
-
-  @doc false
-  @spec close_provider_session(t()) :: :ok | {:error, :provider_cleanup_failed}
-  def close_provider_session(%__MODULE__{pid: pid, token: token}) do
-    GenServer.call(pid, {token, :close_provider_session}, :infinity)
-  catch
-    :exit, _reason -> {:error, :provider_cleanup_failed}
-  end
-
-  @doc false
-  @spec release(t()) :: :ok
-  def release(%__MODULE__{pid: pid, token: token}) do
-    GenServer.call(pid, {token, :release}, :infinity)
-  catch
-    :exit, _reason -> :ok
-  end
-
-  @doc false
-  @spec valid?(term()) :: boolean()
-  def valid?(%__MODULE__{pid: pid, token: token}),
-    do: is_pid(pid) and is_reference(token) and Process.alive?(pid)
-
-  def valid?(_opening), do: false
-
-  @doc false
-  @spec pid(t()) :: pid()
-  def pid(%__MODULE__{pid: pid}), do: pid
 
   @impl GenServer
   def init({token, caller, preparation, authority, trace_path, target}) do
@@ -382,7 +343,7 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
   end
 
   defp adopt_started_config(state, config, run_state) do
-    opening = %__MODULE__{pid: self(), token: state.token}
+    opening = ManifestReplLease.new(self(), state.token)
 
     result =
       with :ok <- EventSink.claim(config.event_sink, config.claim_id, config.run_started_metadata),

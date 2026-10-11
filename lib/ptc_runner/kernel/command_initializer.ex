@@ -11,7 +11,6 @@ defmodule PtcRunner.Kernel.CommandInitializer do
   """
 
   alias PtcRunner.Kernel.AgentsCard
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.ExampleLibrary
@@ -20,6 +19,7 @@ defmodule PtcRunner.Kernel.CommandInitializer do
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.ProjectConfig
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.StrictJSON
 
   @main_clj """
@@ -201,7 +201,7 @@ defmodule PtcRunner.Kernel.CommandInitializer do
   defp validate_scaffold_bundle(catalog) do
     result =
       with {:ok, request} <-
-             ApplicationPackage.request_memory(
+             RunRequest.from_memory(
                "ptc.json",
                Map.take(@documents, ["main.clj", "ptc.json"]),
                result_projection: :json

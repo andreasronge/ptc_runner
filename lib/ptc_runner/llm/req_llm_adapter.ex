@@ -8,6 +8,10 @@ if Code.ensure_loaded?(ReqLLM) do
     - `openai-compat:base_url|model` → Any OpenAI-compatible API
     - `*` → ReqLLM (OpenRouter, Anthropic, Google, Bedrock, etc.)
 
+    Requests enter through `prepare_model/2` and `call/2`. Generation helpers
+    accept only prepared targets; selector resolution and inference-control
+    attestation happen during preparation.
+
     Requires `{:req_llm, "~> 1.8"}` as a dependency.
 
     ## Failure classification
@@ -39,7 +43,9 @@ if Code.ensure_loaded?(ReqLLM) do
     alias PtcRunner.LLM.CompatHTTP
     alias PtcRunner.LLM.Invocation
     alias PtcRunner.LLM.OutputLimit
+    alias PtcRunner.LLM.ReqLLMErrors
     alias PtcRunner.LLM.ReqLLMPreparedModel
+    alias PtcRunner.LLM.ReqLLMUsage
     alias PtcRunner.LLM.Requirements
     alias ReqLLM.Message
     alias ReqLLM.Message.ContentPart
@@ -54,24 +60,6 @@ if Code.ensure_loaded?(ReqLLM) do
     @request_token_headroom 256
     @ollama_base_url "http://localhost:11434"
     @default_bedrock_region "eu-north-1"
-    @usage_observation_key :ptc_runner_usage_observation
-    @reported_total_cost_key :ptc_runner_reported_total_cost
-    @raw_input_usage_keys [
-      :input,
-      "input",
-      :prompt_tokens,
-      "prompt_tokens",
-      :input_tokens,
-      "input_tokens"
-    ]
-    @raw_output_usage_keys [
-      :output,
-      "output",
-      :completion_tokens,
-      "completion_tokens",
-      :output_tokens,
-      "output_tokens"
-    ]
     @req_llm_generation_options [
       :api_key,
       :frequency_penalty,
@@ -352,135 +340,49 @@ if Code.ensure_loaded?(ReqLLM) do
         not match?("google_vertex:" <> _, target.selector)
     end
 
-    # --- Public API ---
+    # Generation uses the sealed target; selector resolution belongs to preparation.
+    @doc false
+    @spec generate_text(ReqLLMPreparedModel.t(), [map()], keyword()) ::
+            {:ok, map()} | {:error, term()}
+    def generate_text(%ReqLLMPreparedModel{} = target, messages, opts \\ []) do
+      opts = merge_exact_options(target, opts)
 
-    @doc """
-    Generate text from an LLM.
-
-    ## Options
-    - `:receive_timeout` - HTTP receive timeout in ms (default: the remaining Kernel
-      request deadline, or #{@default_timeout} without a deadline). An explicit
-      value may shorten but never extend the Kernel deadline.
-    - `:ollama_base_url` - Override Ollama server URL
-    - `:cache` - Enable prompt caching for supported providers (default: false)
-    - `:max_tokens` - Output budget. ReqLLM-backed models default to at most
-      #{@default_max_tokens}, bounded by cataloged output and context limits.
-    """
-    @spec generate_text(String.t() | ReqLLMPreparedModel.t(), [map()], keyword()) ::
-            {:ok, PtcRunner.LLM.response()} | {:error, term()}
-    def generate_text(model, messages, opts \\ [])
-
-    def generate_text(%ReqLLMPreparedModel{model: %LLMDB.Model{}} = model, messages, opts),
-      do: call_req_llm(model, messages, merge_exact_options(model, opts))
-
-    def generate_text(%ReqLLMPreparedModel{selector: selector} = target, messages, opts),
-      do: generate_text(selector, messages, merge_exact_options(target, opts))
-
-    def generate_text(model, messages, opts) do
-      case parse_provider(model) do
-        {:ollama, model_name} ->
-          call_ollama(model_name, messages, opts)
-
-        {:openai_compat, base_url, model_name} ->
-          call_openai_compat(base_url, model_name, messages, opts)
-
-        {:req_llm, model_id} ->
-          with {:ok, prepared, _status} <- prepare_req_llm_model(model_id),
-               do: call_req_llm(prepared, messages, opts)
+      case route(target).transport do
+        {:req_llm, _selector} -> call_req_llm(target, messages, opts)
+        {:ollama, model} -> call_ollama(model, messages, opts)
+        {:openai_compat, base_url, model} -> call_openai_compat(base_url, model, messages, opts)
       end
     end
 
-    @doc """
-    Generate a structured JSON object from an LLM.
-
-    Supported for ReqLLM providers whose sealed mode is attested and direct
-    `openai-compat:` servers declared to support strict JSON schemas. The schema
-    is sent unchanged and the entire response content must decode to one object.
-    Direct `ollama:` routes return `{:error, :structured_output_not_supported}`.
-    """
-    @spec generate_object(String.t() | ReqLLMPreparedModel.t(), [map()], map(), keyword()) ::
+    @doc false
+    @spec generate_object(ReqLLMPreparedModel.t(), [map()], map(), keyword()) ::
             {:ok, map()} | {:error, term()}
-    def generate_object(model, messages, schema, opts \\ [])
+    def generate_object(%ReqLLMPreparedModel{} = target, messages, schema, opts \\ []) do
+      case generate_schema_candidate(target, messages, schema, opts) do
+        {:ok, %{object: _object}} = result ->
+          result
 
-    def generate_object(
-          %ReqLLMPreparedModel{model: %LLMDB.Model{}} = model,
-          messages,
-          schema,
-          opts
-        ),
-        do: call_req_llm_object(model, messages, schema, merge_exact_options(model, opts))
+        {:ok, _usage_only} ->
+          {:error,
+           ProviderError.new(:invalid_result, "LLM provider returned an invalid JSON object",
+             dispatch_provenance: :dispatched
+           )}
 
-    def generate_object(
-          %ReqLLMPreparedModel{selector: selector} = target,
-          messages,
-          schema,
-          opts
-        ),
-        do: generate_object(selector, messages, schema, merge_exact_options(target, opts))
-
-    def generate_object(model, messages, schema, opts) do
-      case parse_provider(model) do
-        {:ollama, _model_name} ->
-          {:error, :structured_output_not_supported}
-
-        {:openai_compat, base_url, model_name} ->
-          case call_openai_compat_object(base_url, model_name, messages, schema, opts) do
-            {:ok, %{object: _object}} = result ->
-              result
-
-            {:ok, _usage_only} ->
-              {:error,
-               ProviderError.new(:invalid_result, "LLM provider returned an invalid JSON object",
-                 dispatch_provenance: :dispatched
-               )}
-
-            error ->
-              error
-          end
-
-        {:req_llm, model_id} ->
-          with {:ok, prepared, _status} <- prepare_req_llm_model(model_id),
-               do: call_req_llm_object(prepared, messages, schema, opts)
+        error ->
+          error
       end
     end
 
-    @doc """
-    Generate text with tool definitions.
-
-    Passes tools to the LLM provider. If the LLM returns tool calls,
-    they are included in the response as `tool_calls`.
-    """
-    @spec generate_with_tools(String.t() | ReqLLMPreparedModel.t(), [map()], [map()], keyword()) ::
+    @doc false
+    @spec generate_with_tools(ReqLLMPreparedModel.t(), [map()], [map()], keyword()) ::
             {:ok, map()} | {:error, term()}
-    def generate_with_tools(model, messages, tools, opts \\ [])
+    def generate_with_tools(%ReqLLMPreparedModel{} = target, messages, tools, opts \\ []) do
+      case route(target).transport do
+        {:req_llm, _selector} ->
+          call_req_llm_with_tools(target, messages, tools, merge_exact_options(target, opts))
 
-    def generate_with_tools(
-          %ReqLLMPreparedModel{model: %LLMDB.Model{}} = model,
-          messages,
-          tools,
-          opts
-        ),
-        do: call_req_llm_with_tools(model, messages, tools, merge_exact_options(model, opts))
-
-    def generate_with_tools(
-          %ReqLLMPreparedModel{selector: selector} = target,
-          messages,
-          tools,
-          opts
-        ),
-        do: generate_with_tools(selector, messages, tools, merge_exact_options(target, opts))
-
-    def generate_with_tools(model, messages, tools, opts) do
-      case parse_provider(model) do
-        {:ollama, _model_name} ->
+        _direct ->
           {:error, :tool_calling_not_supported}
-
-        {:openai_compat, _base_url, _model_name} ->
-          {:error, :tool_calling_not_supported}
-
-        {:req_llm, model_id} ->
-          with {:ok, prepared, _status} <- prepare_req_llm_model(model_id),
-               do: call_req_llm_with_tools(prepared, messages, tools, opts)
       end
     end
 
@@ -509,7 +411,7 @@ if Code.ensure_loaded?(ReqLLM) do
 
       case Req.post("#{base_url}/api/generate", request_opts) do
         {:ok, %{status: 200, body: %{"response" => text} = body}} ->
-          tokens = extract_ollama_tokens(body) |> add_cache_fields()
+          tokens = ReqLLMUsage.extract_ollama_tokens(body) |> ReqLLMUsage.add_cache_fields()
           {:ok, %{content: text, tokens: tokens}}
 
         {:ok, %{status: status, body: body}} ->
@@ -596,10 +498,10 @@ if Code.ensure_loaded?(ReqLLM) do
 
           tokens =
             %{}
-            |> maybe_put_usage_field(:input, usage, "prompt_tokens")
-            |> maybe_put_usage_field(:output, usage, "completion_tokens")
-            |> maybe_put_usage_field(:total_cost, usage, "total_cost")
-            |> add_cache_fields()
+            |> ReqLLMUsage.maybe_put_usage_field(:input, usage, "prompt_tokens")
+            |> ReqLLMUsage.maybe_put_usage_field(:output, usage, "completion_tokens")
+            |> ReqLLMUsage.maybe_put_usage_field(:total_cost, usage, "total_cost")
+            |> ReqLLMUsage.add_cache_fields()
 
           {:ok, %{content: content, tokens: tokens}}
 
@@ -620,26 +522,55 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp openai_compat_content(_body), do: nil
 
-    defp call_req_llm(%ReqLLMPreparedModel{selector: model, model: req_llm_model}, messages, opts) do
-      http_opts = observed_usage_http_options(opts, req_llm_model)
-      cache_enabled = Keyword.get(opts, :cache, false)
+    defp build_req_opts(selector, model, payload, opts, mode_opts) do
+      http_opts = ReqLLMUsage.observed_usage_http_options(opts, model)
+      generation_opts = req_llm_generation_opts(opts, model, payload)
 
-      generation_opts = req_llm_generation_opts(opts, req_llm_model, messages)
+      {generation_opts, mode_opts} =
+        case mode_opts do
+          :json_schema -> {put_json_schema_native_mode(generation_opts, model), []}
+          tool_opts -> {generation_opts, tool_opts}
+        end
 
-      {messages, extra_opts} = apply_caching(model, messages, cache_enabled)
-      extra_opts = apply_bedrock_region(model, extra_opts)
+      messages =
+        case payload do
+          {messages, _extra} -> messages
+          messages -> messages
+        end
+
+      {messages, extra_opts} = apply_caching(selector, messages, Keyword.get(opts, :cache, false))
+      extra_opts = apply_bedrock_region(selector, extra_opts)
 
       req_opts =
         req_timeout_opts(opts)
         |> Keyword.put(:req_http_options, http_opts)
+        |> Keyword.merge(mode_opts)
         |> Keyword.merge(generation_opts)
         |> Keyword.merge(extra_opts)
+
+      {messages, req_opts}
+    end
+
+    defp tokens_from(response) do
+      ReqLLMUsage.build_tokens_from_req_llm_response(
+        ReqLLM.Response.usage(response) || %{},
+        response.provider_meta
+      )
+    end
+
+    @doc false
+    @spec normalize_provider_call(term(), atom()) :: {:ok, map()} | {:error, ProviderError.t()}
+    defdelegate normalize_provider_call(result, mode \\ :ordinary),
+      to: ReqLLMErrors,
+      as: :normalize_call_result
+
+    defp call_req_llm(%ReqLLMPreparedModel{selector: model, model: req_llm_model}, messages, opts) do
+      {messages, req_opts} = build_req_opts(model, req_llm_model, messages, opts, [])
 
       case ReqLLM.generate_text(req_llm_model, messages, req_opts) do
         {:ok, response} ->
           text = ReqLLM.Response.text(response) || ""
-          usage = ReqLLM.Response.usage(response) || %{}
-          tokens = build_tokens_from_req_llm_response(usage, response.provider_meta)
+          tokens = tokens_from(response)
 
           {:ok, %{content: text, tokens: tokens}}
 
@@ -649,33 +580,18 @@ if Code.ensure_loaded?(ReqLLM) do
     end
 
     defp call_req_llm_object(
-           %ReqLLMPreparedModel{selector: model, model: req_llm_model},
+           %ReqLLMPreparedModel{selector: model, model: req_llm_model} = target,
            messages,
            schema,
            opts
          ) do
-      if native_json_schema_model?(req_llm_model) do
-        http_opts = observed_usage_http_options(opts, req_llm_model)
-        cache_enabled = Keyword.get(opts, :cache, false)
-
-        generation_opts =
-          opts
-          |> req_llm_generation_opts(req_llm_model, {messages, schema})
-          |> put_json_schema_native_mode(req_llm_model)
-
-        {messages, extra_opts} = apply_caching(model, messages, cache_enabled)
-        extra_opts = apply_bedrock_region(model, extra_opts)
-
-        req_opts =
-          req_timeout_opts(opts)
-          |> Keyword.put(:req_http_options, http_opts)
-          |> Keyword.merge(generation_opts)
-          |> Keyword.merge(extra_opts)
+      if route(target).json_schema? do
+        {messages, req_opts} =
+          build_req_opts(model, req_llm_model, {messages, schema}, opts, :json_schema)
 
         case ReqLLM.generate_object(req_llm_model, messages, schema, req_opts) do
           {:ok, response} ->
-            usage = ReqLLM.Response.usage(response) || %{}
-            tokens = build_tokens_from_req_llm_response(usage, response.provider_meta)
+            tokens = tokens_from(response)
 
             {:ok, %{object: response.object, tokens: tokens}}
 
@@ -697,23 +613,11 @@ if Code.ensure_loaded?(ReqLLM) do
            tools,
            opts
          ) do
-      http_opts = observed_usage_http_options(opts, req_llm_model)
-      cache_enabled = Keyword.get(opts, :cache, false)
-
       request_payload = {messages, tools}
-      generation_opts = req_llm_generation_opts(opts, req_llm_model, request_payload)
-
-      {messages, extra_opts} = apply_caching(model, messages, cache_enabled)
-      extra_opts = apply_bedrock_region(model, extra_opts)
-
       req_llm_tools = Enum.map(tools, &to_req_llm_tool/1)
 
-      req_opts =
-        req_timeout_opts(opts)
-        |> Keyword.put(:req_http_options, http_opts)
-        |> Keyword.put(:tools, req_llm_tools)
-        |> Keyword.merge(generation_opts)
-        |> Keyword.merge(extra_opts)
+      {messages, req_opts} =
+        build_req_opts(model, req_llm_model, request_payload, opts, tools: req_llm_tools)
 
       output_limit =
         effective_output_limit_metadata(
@@ -728,8 +632,7 @@ if Code.ensure_loaded?(ReqLLM) do
       case ReqLLM.generate_text(req_llm_model, messages, req_opts) do
         {:ok, response} ->
           text = ReqLLM.Response.text(response)
-          usage = ReqLLM.Response.usage(response) || %{}
-          tokens = build_tokens_from_req_llm_response(usage, response.provider_meta)
+          tokens = tokens_from(response)
           raw_tool_calls = ReqLLM.Response.tool_calls(response)
 
           result =
@@ -745,203 +648,6 @@ if Code.ensure_loaded?(ReqLLM) do
           {:error, reason}
       end
     end
-
-    defp normalize_call_result(result, mode \\ :ordinary)
-
-    defp normalize_call_result({:error, reason}, mode), do: provider_failure(reason, mode)
-    defp normalize_call_result(result, _mode), do: result
-
-    @doc false
-    @spec normalize_provider_call(term(), atom()) :: {:ok, map()} | {:error, ProviderError.t()}
-    def normalize_provider_call(result, mode \\ :ordinary),
-      do: normalize_call_result(result, mode)
-
-    defp provider_failure(reason, mode), do: {:error, normalize_provider_error(reason, mode)}
-
-    defp normalize_provider_error(reason, :tools) do
-      case tool_calling_unsupported_details(reason) do
-        {:ok, details} -> ProviderError.new(:tool_calling_unsupported, details)
-        :error -> normalize_provider_error(reason)
-      end
-    end
-
-    defp normalize_provider_error(reason, _mode), do: normalize_provider_error(reason)
-
-    defp normalize_provider_error(%ProviderError{} = error), do: error
-
-    defp normalize_provider_error(%ReqLLM.Error.API.Timeout{} = error) do
-      ProviderError.new(:timeout, Exception.message(error), retryable?: true)
-    end
-
-    defp normalize_provider_error(%ReqLLM.Error.API.Request{status: status} = error)
-         when is_integer(status) do
-      ProviderError.new(
-        http_error_kind(status),
-        http_error_details(status, error.reason),
-        retryable?: http_retryable?(status, error.retryable),
-        dispatch_provenance: :dispatched
-      )
-    end
-
-    defp normalize_provider_error(%ReqLLM.Error.API.Request{} = error) do
-      ProviderError.new(
-        transport_error_kind(error.cause),
-        safe_error_details(error.reason, "LLM transport unavailable"),
-        retryable?: transport_retryable?(error.cause, error.retryable)
-      )
-    end
-
-    defp normalize_provider_error(%ReqLLM.Error.API.Response{status: status} = error)
-         when is_integer(status) do
-      ProviderError.new(
-        http_error_kind(status),
-        http_error_details(status, error.reason),
-        retryable?: http_retryable?(status, nil),
-        dispatch_provenance: :dispatched
-      )
-    end
-
-    defp normalize_provider_error(%ReqLLM.Error.API.Response{} = error) do
-      ProviderError.new(
-        :invalid_result,
-        safe_error_details(error.reason, "LLM provider returned an invalid response")
-      )
-    end
-
-    defp normalize_provider_error(%{status: status} = error) when is_integer(status) do
-      ProviderError.new(
-        http_error_kind(status),
-        direct_http_error_details(status, Map.get(error, :body)),
-        retryable?: http_retryable?(status, nil),
-        dispatch_provenance: :dispatched
-      )
-    end
-
-    defp normalize_provider_error(%Req.TransportError{reason: reason}) do
-      ProviderError.new(
-        transport_error_kind(reason),
-        transport_error_details(reason),
-        retryable?: retryable_transport_reason?(reason)
-      )
-    end
-
-    defp normalize_provider_error(:structured_output_not_supported),
-      do: ProviderError.new(:invalid_request, "LLM provider does not support structured output")
-
-    defp normalize_provider_error(:tool_calling_not_supported),
-      do:
-        ProviderError.new(:invalid_request, "LLM adapter route does not support tool calling",
-          dispatch_provenance: :not_dispatched
-        )
-
-    defp normalize_provider_error(_reason),
-      do: ProviderError.new(:unavailable, "LLM provider unavailable", retryable?: true)
-
-    defp http_error_kind(401), do: :authentication_failed
-    defp http_error_kind(402), do: :payment_required
-    defp http_error_kind(403), do: :denied
-    defp http_error_kind(404), do: :not_found
-    defp http_error_kind(408), do: :timeout
-    defp http_error_kind(429), do: :rate_limited
-    defp http_error_kind(status) when status in 400..499, do: :invalid_request
-    defp http_error_kind(status) when status in 500..599, do: :unavailable
-    defp http_error_kind(_status), do: :unavailable
-
-    defp http_retryable?(_status, retryable?) when is_boolean(retryable?), do: retryable?
-    defp http_retryable?(status, _retryable?) when status in [408, 409, 425, 429], do: true
-    defp http_retryable?(status, _retryable?) when status in 500..599, do: true
-    defp http_retryable?(_status, _retryable?), do: false
-
-    defp http_error_details(status, reason) when is_binary(reason),
-      do: safe_error_details("HTTP #{status}: #{reason}", "HTTP #{status}")
-
-    defp http_error_details(status, _reason), do: "HTTP #{status}"
-
-    defp direct_http_error_details(status, body) do
-      case provider_message(body) do
-        message when is_binary(message) -> http_error_details(status, message)
-        _missing -> "HTTP #{status}"
-      end
-    end
-
-    defp provider_message(%{"error" => %{"message" => message}}) when is_binary(message),
-      do: message
-
-    defp provider_message(%{"error" => message}) when is_binary(message), do: message
-    defp provider_message(%{"message" => message}) when is_binary(message), do: message
-    defp provider_message(_body), do: nil
-
-    defp tool_calling_unsupported_details(%ReqLLM.Error.API.Request{
-           status: 404,
-           reason: reason
-         })
-         when is_binary(reason),
-         do: known_tool_calling_rejection(reason, http_error_details(404, reason))
-
-    defp tool_calling_unsupported_details(%ReqLLM.Error.API.Response{
-           status: 404,
-           reason: reason
-         })
-         when is_binary(reason),
-         do: known_tool_calling_rejection(reason, http_error_details(404, reason))
-
-    defp tool_calling_unsupported_details(%{status: 404, body: body}) do
-      case provider_message(body) do
-        message when is_binary(message) ->
-          known_tool_calling_rejection(message, http_error_details(404, message))
-
-        _missing ->
-          :error
-      end
-    end
-
-    defp tool_calling_unsupported_details(_reason), do: :error
-
-    defp known_tool_calling_rejection(message, details) do
-      if message
-         |> String.downcase()
-         |> String.contains?("no endpoints found that support tool use") do
-        {:ok, details}
-      else
-        :error
-      end
-    end
-
-    defp safe_error_details(details, fallback) when is_binary(details) do
-      if String.valid?(details) and details != "", do: details, else: fallback
-    end
-
-    defp safe_error_details(_details, fallback), do: fallback
-
-    defp transport_error_kind(%Req.TransportError{reason: reason}),
-      do: transport_error_kind(reason)
-
-    defp transport_error_kind(%Finch.TransportError{reason: reason}),
-      do: transport_error_kind(reason)
-
-    defp transport_error_kind(%Mint.TransportError{reason: reason}),
-      do: transport_error_kind(reason)
-
-    defp transport_error_kind(:timeout), do: :timeout
-    defp transport_error_kind(_reason), do: :transport_error
-
-    defp transport_retryable?(_cause, retryable?) when is_boolean(retryable?), do: retryable?
-
-    defp transport_retryable?(cause, _retryable?),
-      do: cause |> transport_reason() |> retryable_transport_reason?()
-
-    defp transport_reason(%Req.TransportError{reason: reason}), do: reason
-    defp transport_reason(%Finch.TransportError{reason: reason}), do: reason
-    defp transport_reason(%Mint.TransportError{reason: reason}), do: reason
-    defp transport_reason(_cause), do: nil
-
-    defp retryable_transport_reason?(reason),
-      do: reason in [:closed, :timeout, :econnrefused, :pool_not_available]
-
-    defp transport_error_details(reason) when is_atom(reason),
-      do: "LLM transport error: #{reason}"
-
-    defp transport_error_details(_reason), do: "LLM transport unavailable"
 
     @doc false
     def normalize_tool_calls(raw_tool_calls) do
@@ -1169,19 +875,6 @@ if Code.ensure_loaded?(ReqLLM) do
         %{role: :assistant, content: content} -> "Assistant: #{content}"
       end)
       |> Kernel.<>("\n\nAssistant:")
-    end
-
-    defp extract_ollama_tokens(body) do
-      %{}
-      |> maybe_put_usage_field(:input, body, "prompt_eval_count")
-      |> maybe_put_usage_field(:output, body, "eval_count")
-    end
-
-    defp maybe_put_usage_field(tokens, target_key, source, source_key) do
-      case Map.fetch(source, source_key) do
-        {:ok, value} -> Map.put(tokens, target_key, value)
-        :error -> tokens
-      end
     end
 
     defp maybe_put_ollama_max_tokens(options, opts) do
@@ -1572,12 +1265,12 @@ if Code.ensure_loaded?(ReqLLM) do
           is_list(Map.get(request, :tools)) and request.tools != [] ->
             target
             |> generate_with_tools(messages, request.tools, opts)
-            |> normalize_call_result(:tools)
+            |> ReqLLMErrors.normalize_call_result(:tools)
 
           true ->
             target
             |> generate_text(messages, opts)
-            |> normalize_call_result()
+            |> ReqLLMErrors.normalize_call_result()
         end
       end
     end
@@ -1589,13 +1282,13 @@ if Code.ensure_loaded?(ReqLLM) do
           |> generate_schema_candidate(messages, schema, opts)
           |> case do
             {:ok, result} -> {:ok, result}
-            error -> normalize_call_result(error)
+            error -> ReqLLMErrors.normalize_call_result(error)
           end
 
         :json_object ->
           case generate_json(target, messages, opts) do
             {:ok, result} -> {:ok, result}
-            error -> normalize_call_result(error)
+            error -> ReqLLMErrors.normalize_call_result(error)
           end
 
         _unsupported ->
@@ -1603,54 +1296,33 @@ if Code.ensure_loaded?(ReqLLM) do
       end
     end
 
-    defp generate_schema_candidate(
-           %ReqLLMPreparedModel{model: nil} = target,
-           messages,
-           schema,
-           opts
-         ) do
-      case parse_provider(target.selector) do
+    defp generate_schema_candidate(%ReqLLMPreparedModel{} = target, messages, schema, opts) do
+      opts = merge_exact_options(target, opts)
+
+      case route(target).transport do
+        {:req_llm, _selector} ->
+          call_req_llm_object(target, messages, schema, opts)
+
         {:openai_compat, base_url, model} ->
-          call_openai_compat_object(
-            base_url,
-            model,
-            messages,
-            schema,
-            merge_exact_options(target, opts)
-          )
+          call_openai_compat_object(base_url, model, messages, schema, opts)
 
-        _route ->
-          generate_object(target, messages, schema, opts)
+        _unsupported ->
+          {:error, :structured_output_not_supported}
       end
     end
 
-    defp generate_schema_candidate(target, messages, schema, opts),
-      do: generate_object(target, messages, schema, opts)
+    defp generate_json(%ReqLLMPreparedModel{} = target, messages, opts) do
+      case route(target).transport do
+        {:req_llm, _selector} ->
+          call_req_llm_json(target, messages, merge_exact_options(target, opts))
 
-    defp generate_json(%ReqLLMPreparedModel{model: %LLMDB.Model{}} = model, messages, opts) do
-      call_req_llm_json(model, messages, merge_exact_options(model, opts))
-    end
-
-    defp generate_json(%ReqLLMPreparedModel{selector: selector} = target, messages, opts) do
-      generate_json(selector, messages, merge_exact_options(target, opts))
-    end
-
-    defp generate_json(model, messages, opts) when is_binary(model) do
-      case parse_provider(model) do
-        {:ollama, _model_name} ->
+        _unsupported ->
           {:error, :structured_output_not_supported}
-
-        {:openai_compat, _base_url, _model_name} ->
-          {:error, :structured_output_not_supported}
-
-        {:req_llm, model_id} ->
-          with {:ok, prepared, _status} <- prepare_req_llm_model(model_id),
-               do: call_req_llm_json(prepared, messages, opts)
       end
     end
 
-    defp call_req_llm_json(%ReqLLMPreparedModel{model: req_llm_model} = prepared, messages, opts) do
-      if native_json_object_model?(req_llm_model) do
+    defp call_req_llm_json(%ReqLLMPreparedModel{} = prepared, messages, opts) do
+      if route(prepared).json_object? do
         json_opts = put_json_object_format(opts)
 
         case call_req_llm(prepared, messages, json_opts) do
@@ -1661,7 +1333,7 @@ if Code.ensure_loaded?(ReqLLM) do
             {:ok, result}
 
           error ->
-            normalize_call_result(error)
+            ReqLLMErrors.normalize_call_result(error)
         end
       else
         {:error, :unsupported_model_option}
@@ -1816,103 +1488,6 @@ if Code.ensure_loaded?(ReqLLM) do
       end
     end
 
-    # ReqLLM's OpenAI decoder turns absent or partial usage into zero counts.
-    # Capture provider-specific raw usage before that decoder runs, then attach
-    # only the closed observation marker to the final response. A request step
-    # registers the projection step after the provider has assembled its own
-    # response pipeline, while the capture step remains before that pipeline.
-    defp observed_usage_http_options(opts, model) do
-      plugin = usage_observation_plugin(model)
-
-      opts
-      |> Keyword.get(:req_http_options, [])
-      |> Keyword.update(:plugins, [plugin], fn plugins -> [plugin | List.wrap(plugins)] end)
-    end
-
-    defp usage_observation_plugin(model) do
-      fn request ->
-        request
-        |> Req.Request.append_response_steps(
-          ptc_runner_capture_usage: fn request_response ->
-            capture_raw_usage(request_response, model)
-          end
-        )
-        |> Req.Request.append_request_steps(
-          ptc_runner_register_usage_projection: &register_usage_projection/1
-        )
-      end
-    end
-
-    defp capture_raw_usage({request, response}, model) do
-      {observation, total_cost} = raw_usage_observation(response.body, model)
-
-      private =
-        response.private
-        |> Map.put(@usage_observation_key, observation)
-        |> maybe_put_reported_total_cost(total_cost)
-
-      {request, %{response | private: private}}
-    end
-
-    defp register_usage_projection(request) do
-      Req.Request.append_response_steps(
-        request,
-        ptc_runner_project_usage: &project_usage_observation/1
-      )
-    end
-
-    defp project_usage_observation({request, %{body: %ReqLLM.Response{} = body} = response}) do
-      observation = Map.get(response.private, @usage_observation_key, :missing)
-
-      provider_meta =
-        body.provider_meta
-        |> Map.put(@usage_observation_key, observation)
-        |> maybe_put_reported_total_cost(Map.get(response.private, @reported_total_cost_key))
-
-      {request, %{response | body: %{body | provider_meta: provider_meta}}}
-    end
-
-    defp project_usage_observation(request_response), do: request_response
-
-    defp raw_usage_observation(body, model) do
-      with {:ok, provider} <- ReqLLM.provider(model.provider),
-           true <- function_exported?(provider, :extract_usage, 2),
-           {:ok, usage} when is_map(usage) <- provider.extract_usage(body, model) do
-        observation = if raw_token_pair?(usage), do: :reported, else: :missing
-        {observation, provider_reported_total_cost(model.provider, usage)}
-      else
-        _missing_or_invalid -> {:missing, nil}
-      end
-    rescue
-      _exception -> {:missing, nil}
-    catch
-      _kind, _reason -> {:missing, nil}
-    end
-
-    # OpenRouter's chat-completions response reports the charged USD amount as
-    # `usage.cost`. ReqLLM's normalized response currently preserves only a
-    # field already named `total_cost`, so retain this bounded provider fact
-    # before decoding and project it under PtcRunner's canonical name.
-    defp provider_reported_total_cost(:openrouter, usage) do
-      case fetch_usage(usage, :cost, "cost") do
-        {:ok, cost} when is_integer(cost) or is_float(cost) -> cost
-        {:ok, cost} when is_binary(cost) and byte_size(cost) <= 64 -> cost
-        _missing_or_invalid -> nil
-      end
-    end
-
-    defp provider_reported_total_cost(_provider, _usage), do: nil
-
-    defp maybe_put_reported_total_cost(map, nil), do: map
-
-    defp maybe_put_reported_total_cost(map, total_cost),
-      do: Map.put(map, @reported_total_cost_key, total_cost)
-
-    defp raw_token_pair?(usage) do
-      Enum.any?(@raw_input_usage_keys, &Map.has_key?(usage, &1)) and
-        Enum.any?(@raw_output_usage_keys, &Map.has_key?(usage, &1))
-    end
-
     defp merge_exact_options(%ReqLLMPreparedModel{} = target, opts) do
       exact_options =
         (target.request_options || target.exact_options)
@@ -1994,10 +1569,16 @@ if Code.ensure_loaded?(ReqLLM) do
          })
          when mode in [:json_schema, :json_object, :unsupported] and is_boolean(tokens) and
                 is_boolean(total_tokens?) and currency in ["USD", nil] do
-      case attest_structured_mode(model, mode) do
-        :ok -> attest_reservation_requirements(total_tokens?, tariff, tokens, currency)
-        {:error, _reason} = error -> error
-      end
+      supported? =
+        case mode do
+          :unsupported -> true
+          :json_schema -> route(model).json_schema?
+          :json_object -> route(model).json_object?
+        end
+
+      if supported?,
+        do: attest_reservation_requirements(total_tokens?, tariff, tokens, currency),
+        else: {:error, :unsupported_model_option}
     end
 
     defp attest_structured_requirements(_model, _requirements),
@@ -2018,33 +1599,32 @@ if Code.ensure_loaded?(ReqLLM) do
     defp attest_reservation_requirements(_total_tokens?, _tariff, _tokens, _currency),
       do: {:error, :unsupported_model_option}
 
-    defp attest_structured_mode(_model, :unsupported), do: :ok
-
-    defp attest_structured_mode(model, :json_object) do
-      case parse_provider(model) do
-        {:req_llm, selector} ->
-          if native_json_object_selector?(selector),
-            do: :ok,
-            else: {:error, :unsupported_model_option}
-
-        _unsupported_route ->
-          {:error, :unsupported_model_option}
-      end
+    defp route(%ReqLLMPreparedModel{selector: selector, model: %LLMDB.Model{} = model}) do
+      %{
+        transport: {:req_llm, selector},
+        json_schema?: native_json_schema_model?(model),
+        json_object?: native_json_object_model?(model)
+      }
     end
 
-    defp attest_structured_mode(model, :json_schema) do
-      case parse_provider(model) do
-        {:openai_compat, _base_url, _model_name} ->
-          :ok
+    defp route(%ReqLLMPreparedModel{selector: selector}), do: route(selector)
 
-        {:req_llm, selector} ->
-          if native_json_schema_selector?(selector),
-            do: :ok,
-            else: {:error, :unsupported_model_option}
+    defp route(selector) when is_binary(selector) do
+      transport = parse_provider(selector)
 
-        _unsupported_route ->
-          {:error, :unsupported_model_option}
-      end
+      {schema?, object?} =
+        case transport do
+          {:req_llm, model} ->
+            {native_json_schema_selector?(model), native_json_object_selector?(model)}
+
+          {:openai_compat, _base_url, _model} ->
+            {true, false}
+
+          {:ollama, _model} ->
+            {false, false}
+        end
+
+      %{transport: transport, json_schema?: schema?, json_object?: object?}
     end
 
     defp native_json_schema_selector?(selector) do
@@ -2127,14 +1707,14 @@ if Code.ensure_loaded?(ReqLLM) do
     defp attest_direct_reservation(%{cost_tariff: nil}), do: :ok
     defp attest_direct_reservation(_reservation), do: {:error, :unsupported_model_option}
 
-    defp attest_prepared_json_schema(%ReqLLMPreparedModel{model: model}, :json_schema) do
-      if native_json_schema_model?(model),
+    defp attest_prepared_json_schema(%ReqLLMPreparedModel{} = target, :json_schema) do
+      if route(target).json_schema?,
         do: :ok,
         else: {:error, :unsupported_model_option}
     end
 
-    defp attest_prepared_json_schema(%ReqLLMPreparedModel{model: model}, :json_object) do
-      if native_json_object_model?(model),
+    defp attest_prepared_json_schema(%ReqLLMPreparedModel{} = target, :json_object) do
+      if route(target).json_object?,
         do: :ok,
         else: {:error, :unsupported_model_option}
     end
@@ -2153,8 +1733,6 @@ if Code.ensure_loaded?(ReqLLM) do
     defp native_json_schema_model?(%LLMDB.Model{provider: provider}),
       do: provider in @native_json_schema_providers
 
-    defp native_json_schema_model?(_model), do: false
-
     defp native_json_object_model?(%LLMDB.Model{provider: :openai} = model),
       do: ModelHelpers.json_native?(model)
 
@@ -2169,8 +1747,6 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp native_json_object_model?(%LLMDB.Model{provider: provider}),
       do: provider in @native_json_object_providers
-
-    defp native_json_object_model?(_model), do: false
 
     defp azure_json_object_model?(%LLMDB.Model{} = model) do
       id = model.provider_model_id || model.id
@@ -2600,80 +2176,5 @@ if Code.ensure_loaded?(ReqLLM) do
     end
 
     defp token_limit_in?(_options), do: false
-
-    defp add_cache_fields(tokens) do
-      Map.merge(tokens, %{cache_creation: 0, cache_read: 0})
-    end
-
-    @doc false
-    def build_tokens_from_req_llm_response(usage, provider_meta) do
-      cache_write_from_meta = extract_cache_write_tokens(provider_meta)
-
-      cache_read =
-        usage[:cache_read_input_tokens] || usage[:cached_tokens] ||
-          usage["cache_read_input_tokens"] || usage["cached_tokens"] || 0
-
-      cache_creation =
-        usage[:cache_creation_input_tokens] || usage[:cache_creation_tokens] ||
-          usage["cache_creation_input_tokens"] || usage["cache_creation_tokens"] ||
-          cache_write_from_meta
-
-      %{
-        cache_creation: cache_creation,
-        cache_read: cache_read
-      }
-      |> maybe_put_observed_token_usage(usage, provider_meta)
-      |> maybe_put_total_cost(usage, provider_meta)
-    end
-
-    defp maybe_put_observed_token_usage(tokens, usage, provider_meta) do
-      if observed_token_usage?(provider_meta) do
-        tokens
-        |> maybe_put_req_llm_usage(:input, usage, :input_tokens, "input_tokens")
-        |> maybe_put_req_llm_usage(:output, usage, :output_tokens, "output_tokens")
-      else
-        tokens
-      end
-    end
-
-    defp observed_token_usage?(provider_meta) do
-      Map.get(provider_meta, @usage_observation_key) == :reported or
-        Map.get(provider_meta, :response_cache_hit) == true or
-        Map.get(provider_meta, "response_cache_hit") == true
-    end
-
-    defp maybe_put_total_cost(tokens, usage, provider_meta) do
-      case Map.fetch(provider_meta, @reported_total_cost_key) do
-        {:ok, total_cost} ->
-          Map.put(tokens, :total_cost, total_cost)
-
-        :error ->
-          case fetch_usage(usage, :total_cost, "total_cost") do
-            {:ok, total_cost} -> Map.put(tokens, :total_cost, total_cost)
-            :error -> tokens
-          end
-      end
-    end
-
-    defp maybe_put_req_llm_usage(tokens, target_key, usage, atom_key, string_key) do
-      case fetch_usage(usage, atom_key, string_key) do
-        {:ok, value} -> Map.put(tokens, target_key, value)
-        :error -> tokens
-      end
-    end
-
-    defp fetch_usage(usage, atom_key, string_key) do
-      case Map.fetch(usage, atom_key) do
-        {:ok, value} -> {:ok, value}
-        :error -> Map.fetch(usage, string_key)
-      end
-    end
-
-    defp extract_cache_write_tokens(%{} = meta) do
-      get_in(meta, ["usage", "prompt_tokens_details", "cache_write_tokens"]) ||
-        get_in(meta, [:usage, :prompt_tokens_details, :cache_write_tokens]) ||
-        get_in(meta, ["prompt_tokens_details", "cache_write_tokens"]) ||
-        0
-    end
   end
 end

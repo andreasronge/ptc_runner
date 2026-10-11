@@ -82,8 +82,8 @@ dependencies. `resolve_components/1` returns the closed component set that
 
 ## Prefer the manifest acquisition path
 
-Use `PtcRunner.Kernel.ApplicationPackage.request_directory/2` or
-`request_memory/3` when an embedded frontend should accept the same strict
+Use `PtcRunner.Kernel.RunRequest.from_directory/2` or
+`from_memory/3` when an embedded frontend should accept the same strict
 manifest contract as the CLI. Each returns a sealed, path-free
 `PtcRunner.Kernel.RunRequest`; pass it to
 `PtcRunner.Kernel.RunBuilder.build/3` with a trusted provider registry.

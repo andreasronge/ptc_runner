@@ -5,7 +5,6 @@ defmodule PtcRunner.TestSupport.ProviderActiveSessionFixtures do
 
   import ExUnit.Assertions
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.PreparedRun
@@ -16,6 +15,7 @@ defmodule PtcRunner.TestSupport.ProviderActiveSessionFixtures do
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SelectionRules
 
   def fixture(
@@ -100,7 +100,7 @@ defmodule PtcRunner.TestSupport.ProviderActiveSessionFixtures do
     }
 
     with {:ok, request} <-
-           ApplicationPackage.request_memory("ptc.json", documents,
+           RunRequest.from_memory("ptc.json", documents,
              installed_limits: limits,
              result_projection: :json
            ),

@@ -5,7 +5,6 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
 
   import PtcRunner.TestSupport.TestHelpers, only: [long_running_body: 0]
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.InstallationCatalog
@@ -14,6 +13,7 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.TestSupport.StreamingInspection
 
@@ -232,7 +232,7 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
     }
 
     {:ok, request} =
-      ApplicationPackage.request_memory("ptc.json", documents, input_authority: :private)
+      RunRequest.from_memory("ptc.json", documents, input_authority: :private)
 
     {:ok, catalog} = InstallationCatalog.new()
     {:ok, prepared} = RunCoordinator.prepare(request, catalog)

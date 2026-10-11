@@ -16,8 +16,10 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
   alias PtcRunner.Kernel.LimitConfigurationDiagnostic
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.ManifestRepl
+  alias PtcRunner.Kernel.ManifestReplLease
   alias PtcRunner.Kernel.ManifestReplOpening
   alias PtcRunner.Kernel.ManifestReplPreparation
+  alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.ReplSessionOwner
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
@@ -36,6 +38,34 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
            |> ManifestReplPreparation.valid?()
 
     assert :ok = ManifestReplPreparation.close(preparation)
+  end
+
+  @tag :tmp_dir
+  test "opening leases reject cleanup outside the adopted owner and retain the session", %{
+    tmp_dir: directory
+  } do
+    manifest = write_provider_free_application(directory, :normal)
+    {:ok, runtime} = CommandRuntime.new(provider_application_mode: :host_owned)
+    assert {:ok, preparation} = CommandAcquisition.prepare_repl(manifest, nil, runtime, true)
+    assert {:ok, authority} = PublicationAuthority.new([])
+    assert {:ok, opening} = ManifestReplOpening.start(preparation, authority, nil, self())
+    assert {:ok, owner, token} = ManifestReplLease.await(opening)
+    on_exit(fn -> ReplSessionOwner.release(owner, token) end)
+
+    assert ManifestReplLease.valid?(opening)
+    assert {:error, :manifest_repl_unavailable} = ManifestReplLease.release(opening)
+
+    assert {:error, :manifest_repl_unavailable} =
+             ManifestReplLease.close_provider_session(opening)
+
+    assert {:error, :manifest_repl_unavailable} =
+             ManifestReplLease.release(%{opening | token: make_ref()})
+
+    assert {:ok, _config, _run_state} = ReplSessionOwner.resources(owner, token)
+    opening_ref = Process.monitor(ManifestReplLease.pid(opening))
+    assert :ok = ReplSessionOwner.release(owner, token)
+    assert_receive {:DOWN, ^opening_ref, :process, _pid, :normal}, 5_000
+    refute ManifestReplLease.valid?(opening)
   end
 
   @tag :tmp_dir

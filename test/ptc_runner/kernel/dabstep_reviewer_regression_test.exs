@@ -7,10 +7,10 @@ defmodule PtcRunner.Kernel.DabstepReviewerRegressionTest do
   @moduletag :nightly
   @moduletag timeout: 600_000
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.TestSupport.RunLifecycle
 
   @example Path.expand("../../../examples/dabstep-fraud", __DIR__)
@@ -152,7 +152,7 @@ defmodule PtcRunner.Kernel.DabstepReviewerRegressionTest do
       |> then(fn {:ok, catalog} -> HostInstallation.runtime_registry(host, catalog) end)
 
     application
-    |> ApplicationPackage.request_directory(
+    |> RunRequest.from_directory(
       installed_limits: registry.installed_limits,
       input: Path.join([@example, "inputs", input_name])
     )

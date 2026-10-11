@@ -6,9 +6,9 @@ defmodule PtcRunner.Kernel.SupportTriageE2ETest do
   @moduletag :scheduled_e2e
   @moduletag timeout: 300_000
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.TestSupport.RunLifecycle
 
@@ -76,7 +76,7 @@ defmodule PtcRunner.Kernel.SupportTriageE2ETest do
   defp run(step, registry) do
     [@examples, step, "ptc.json"]
     |> Path.join()
-    |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+    |> RunRequest.from_directory(installed_limits: registry.installed_limits)
     |> RunLifecycle.build(registry)
     |> RunLifecycle.execute()
   end

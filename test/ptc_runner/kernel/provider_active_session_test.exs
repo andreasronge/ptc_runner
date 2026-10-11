@@ -5,7 +5,6 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
 
   import PtcRunner.TestSupport.ProviderActiveSessionFixtures
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.Deadline
@@ -24,6 +23,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
   alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.TestSupport.ProviderSessionFixture
 
   test "active validators run in declaration order after activity is marked" do
@@ -1106,7 +1106,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     }
 
     with {:ok, request} <-
-           ApplicationPackage.request_memory("ptc.json", documents,
+           RunRequest.from_memory("ptc.json", documents,
              installed_limits: limits,
              result_projection: :json
            ),

@@ -8,12 +8,12 @@ defmodule PtcRunner.Kernel.InspectionPreflightGlobalStateTest do
   import PtcRunner.TestSupport.CommandEngineFixtures,
     only: [valid_manifest: 1, write_application: 4]
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ResultArtifact
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.TestSupport.RunLifecycle
   alias PtcRunner.TestSupport.StreamingInspection
@@ -49,7 +49,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightGlobalStateTest do
 
       assert {:error, {:trace_preflight_failed, :source_unavailable}} =
                manifest_path
-               |> ApplicationPackage.request_directory(
+               |> RunRequest.from_directory(
                  installed_limits: registry.installed_limits,
                  inspection_capture: false
                )
@@ -87,7 +87,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightGlobalStateTest do
 
       assert {:ok, %{value: 42}} =
                manifest_path
-               |> ApplicationPackage.request_directory(
+               |> RunRequest.from_directory(
                  installed_limits: registry.installed_limits,
                  inspection_capture: false
                )
@@ -126,7 +126,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightGlobalStateTest do
 
       assert {:ok, %{value: 42}} =
                manifest_path
-               |> ApplicationPackage.request_directory(
+               |> RunRequest.from_directory(
                  installed_limits: registry.installed_limits,
                  inspection_capture: true
                )

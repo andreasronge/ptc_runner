@@ -177,9 +177,9 @@ grants to the viewer:
 {:ok, pid} =
   PtcViewer.start(
     trace_source: {:trace_snapshot, trace_snapshot},
-    kernel_trace_adapter: PtcRunner.Kernel.ProjectViewerAdapter,
+    kernel_trace_adapter: PtcRunner.ProjectViewerAdapter,
     inspection_source: {:inspection_snapshot, inspection_snapshot},
-    inspection_adapter: PtcRunner.Kernel.ProjectViewerAdapter,
+    inspection_adapter: PtcRunner.ProjectViewerAdapter,
     open: false
   )
 

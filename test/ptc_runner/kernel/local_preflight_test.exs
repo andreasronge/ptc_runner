@@ -1,7 +1,6 @@
 defmodule PtcRunner.Kernel.LocalPreflightTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.Deadline
@@ -14,6 +13,7 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.TestSupport.HostBoundFixture
   alias PtcRunner.TestSupport.ProviderSessionFixture
@@ -920,7 +920,7 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     }
 
     {:ok, request} =
-      ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+      RunRequest.from_memory("ptc.json", documents, result_projection: :json)
 
     {:ok, prepared} = RunCoordinator.prepare(request, catalog)
     on_exit(fn -> PreparedRun.close(prepared) end)
