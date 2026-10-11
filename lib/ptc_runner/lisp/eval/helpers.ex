@@ -5,16 +5,12 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   Provides type error formatting and type description utilities.
   """
 
-  alias PtcRunner.Kernel.AgentConfigDiagnostic
-  alias PtcRunner.Kernel.LimitCatalog
-  alias PtcRunner.Kernel.LLMReplayDiagnostic
-  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
-  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.EvaluatorError
   alias PtcRunner.Lisp.Format.SymbolRef
+  alias PtcRunner.Lisp.HostErrorPolicy
   alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
   alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
   alias PtcRunner.Lisp.Java.Time.Duration, as: JavaDuration
@@ -23,25 +19,8 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   alias PtcRunner.Lisp.Java.Util.Date, as: JavaDate
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.SpecialBuiltin
-  alias PtcRunner.LLM.OutputLimit
 
   @stable_parallel_errors [:memory_exceeded, :timeout, :parallel_capacity_exceeded]
-  @result_contract_constraints [
-    :additionalProperties,
-    :boolean_schema,
-    :const,
-    :enum,
-    :format,
-    :json_value,
-    :maximum,
-    :maxItems,
-    :maxLength,
-    :minimum,
-    :minItems,
-    :minLength,
-    :required,
-    :type
-  ]
   @parallel_run_deadline_message "the run deadline expired during a parallel operation"
   @safe_type_names [
     "boolean",
@@ -431,155 +410,6 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
       when is_integer(index) and is_map(taxonomy),
       do: sanitize_private_parallel_failure(:pcalls_error, index, taxonomy)
 
-  def sanitize_private_error(
-        {:runtime_limit_exceeded, _message,
-         %{limit: :subordinate_evaluations, limit_value: limit}} = reason
-      ) do
-    with {:ok, row} <- LimitCatalog.fetch(:subordinate_evaluations),
-         true <- LimitCatalog.valid_value?(row, limit) do
-      reason
-    else
-      _invalid -> {:private_prelude_error, "private prelude evaluation failed"}
-    end
-  end
-
-  def sanitize_private_error(
-        {:runtime_limit_exceeded, _message,
-         %{limit: :agent_turns, limit_value: limit, limit_reason: limit_reason}} = reason
-      )
-      when limit in 1..128 do
-    if RuntimeLimitDiagnostic.agent_turns_reason?(limit_reason),
-      do: reason,
-      else: {:private_prelude_error, "private prelude evaluation failed"}
-  end
-
-  def sanitize_private_error(
-        {:runtime_limit_exceeded, _message, %{limit: :max_transcript_chars, limit_value: limit}} =
-          reason
-      )
-      when limit in 1..1_000_000,
-      do: reason
-
-  def sanitize_private_error(
-        {:model_output_truncated, _message,
-         %{
-           limit: :max_tokens,
-           limit_value: value,
-           limit_bindings: bindings,
-           alias: alias_name
-         }} = reason
-      ) do
-    with {:ok, _limit} <-
-           OutputLimit.normalize(%{name: :max_tokens, value: value, bindings: bindings}),
-         true <- OutputLimit.valid_alias?(alias_name) do
-      reason
-    else
-      _invalid -> {:private_prelude_error, "private prelude evaluation failed"}
-    end
-  end
-
-  def sanitize_private_error({:model_output_truncated, _message, %{alias: alias_name}} = reason) do
-    if OutputLimit.valid_alias?(alias_name),
-      do: reason,
-      else: {:private_prelude_error, "private prelude evaluation failed"}
-  end
-
-  def sanitize_private_error(
-        {:llm_provider_failed, _message, %{failure_kind: "llm-provider-error"} = details}
-      ) do
-    case SafeMetadata.retain_llm_provider_failure_fields(details) do
-      retained when map_size(retained) == 2 ->
-        details =
-          retained
-          |> Map.put(:failure_kind, "llm-provider-error")
-          |> Map.merge(LLMReplayDiagnostic.retain_candidate_metadata(details))
-
-        {:llm_provider_failed, "LLM provider request failed", details}
-
-      %{} ->
-        {:private_prelude_error, "private prelude evaluation failed"}
-    end
-  end
-
-  def sanitize_private_error(
-        {:result_contract_failed, message,
-         %{
-           agent_turns: turns,
-           constraint: constraint,
-           contract_authority: authority,
-           violations: violations
-         } = details}
-      )
-      when is_binary(message) and turns in 1..128 and
-             constraint in @result_contract_constraints and is_map(authority) and
-             is_list(violations) do
-    source = Map.get(details, :contract_source)
-
-    if (is_nil(source) or is_binary(source)) and
-         result_contract_violations?(violations, constraint) do
-      retained =
-        details
-        |> Map.take([
-          :agent_turns,
-          :constraint,
-          :contract_authority,
-          :contract_source,
-          :violations
-        ])
-
-      {:result_contract_failed, message, retained}
-    else
-      {:private_prelude_error, "private prelude evaluation failed"}
-    end
-  end
-
-  def sanitize_private_error(
-        {:phase_return_contract_failed, message,
-         %{
-           completion: :invalid_return,
-           phase_index: 1,
-           mission: mission,
-           contract: contract,
-           max_turns: turns,
-           constraint: constraint,
-           contract_authority: authority,
-           violations: violations
-         } = details}
-      )
-      when is_binary(message) and is_binary(mission) and is_binary(contract) and
-             turns in 1..128 and constraint in @result_contract_constraints and
-             is_map(authority) and is_list(violations) do
-    source = Map.get(details, :contract_source)
-
-    if identifier?(mission) and identifier?(contract) and
-         (is_nil(source) or is_binary(source)) and
-         result_contract_violations?(violations, constraint) do
-      retained =
-        Map.take(details, [
-          :completion,
-          :phase_index,
-          :mission,
-          :contract,
-          :max_turns,
-          :constraint,
-          :contract_authority,
-          :contract_source,
-          :violations
-        ])
-
-      {:phase_return_contract_failed, message, retained}
-    else
-      {:private_prelude_error, "private prelude evaluation failed"}
-    end
-  end
-
-  def sanitize_private_error({:invalid_agent_config, message, details} = reason)
-      when is_binary(message) do
-    if AgentConfigDiagnostic.valid_error?(message, details),
-      do: reason,
-      else: {:private_prelude_error, "private prelude evaluation failed"}
-  end
-
   def sanitize_private_error({:loop_limit_exceeded, limit}) when is_integer(limit),
     do: {:loop_limit_exceeded, limit}
 
@@ -635,20 +465,6 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
       :error -> {:private_prelude_error, "private prelude evaluation failed"}
     end
   end
-
-  defp result_contract_violations?([], :json_value), do: true
-
-  defp result_contract_violations?([%{kind: constraint, path: path} = violation], constraint)
-       when is_map(path) do
-    Enum.all?(Map.keys(violation), &(&1 in [:kind, :path, :missing_required]))
-  end
-
-  defp result_contract_violations?(_violations, _constraint), do: false
-
-  defp identifier?(value),
-    do:
-      byte_size(value) in 1..128 and
-        Regex.match?(~r/\A[a-z][a-z0-9._-]*\z/, value)
 
   @doc false
   @spec sanitize_private_error(term(), term()) :: term()
@@ -716,6 +532,33 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
 
   def sanitize_private_error(reason, _origin), do: sanitize_private_error(reason)
 
+  @doc false
+  @spec sanitize_private_error(term(), term(), module() | nil) :: term()
+  def sanitize_private_error({:pmap_error, _message, taxonomy}, _origin, policy)
+      when is_map(taxonomy) do
+    retained = HostErrorPolicy.project_failure_metadata(policy, taxonomy, :retain)
+    private_parallel_failure(:pmap_error, nil, retained)
+  end
+
+  def sanitize_private_error({:pcalls_error, index, _message, taxonomy}, _origin, policy)
+      when is_integer(index) and is_map(taxonomy) do
+    retained = HostErrorPolicy.project_failure_metadata(policy, taxonomy, :retain)
+    private_parallel_failure(:pcalls_error, index, retained)
+  end
+
+  def sanitize_private_error({:private_prelude_error, _message} = reason, origin, _policy),
+    do: sanitize_private_error(reason, origin)
+
+  def sanitize_private_error(reason, origin, policy) do
+    case sanitize_private_error(reason, origin) do
+      {:private_prelude_error, _message} ->
+        HostErrorPolicy.sanitize_error(policy, reason)
+
+      retained ->
+        retained
+    end
+  end
+
   defp diagnostic_prefix(%{ref: ref}) when is_binary(ref) do
     if CoreAST.valid_prelude_ref?(ref), do: ref <> ": ", else: ""
   end
@@ -743,8 +586,12 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
     do: "the parallel worker budget is exhausted; reduce nesting or collection size"
 
   defp sanitize_private_parallel_failure(reason, index, taxonomy) do
-    retained = SafeMetadata.retain_failure_metadata(taxonomy)
+    retained = HostErrorPolicy.project_failure_metadata(nil, taxonomy, :retain)
 
+    private_parallel_failure(reason, index, retained)
+  end
+
+  defp private_parallel_failure(reason, index, retained) do
     case retained do
       retained when map_size(retained) > 0 ->
         message = "fail called inside #{if(reason == :pmap_error, do: "pmap", else: "pcalls")}"

@@ -115,6 +115,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
     missing_data_params_message: nil,
     # Selected Kernel environment component catalog. `nil` for direct Lisp.run/2.
     component_catalog: nil,
+    host_error_policy: nil,
     # When true, tool/Kernel/provider routes fail with inspect_only_unavailable.
     inspect_only: false,
     # When true, session-authored code may only name prelude namespaces that
@@ -221,6 +222,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           data_grants: [String.t()] | nil,
           missing_data_params_message: String.t() | nil,
           component_catalog: term() | nil,
+          host_error_policy: module() | nil,
           inspect_only: boolean(),
           strict_transitive_calls: boolean(),
           private_tool_authority?: boolean(),
@@ -312,6 +314,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       missing_data_params_message:
         normalize_missing_params_message(Keyword.get(opts, :missing_data_params_message)),
       component_catalog: Keyword.get(opts, :component_catalog),
+      host_error_policy: Keyword.get(opts, :host_error_policy),
       inspect_only: Keyword.get(opts, :inspect_only, false),
       strict_transitive_calls: Keyword.get(opts, :strict_transitive_calls, false),
       private_tool_authority?: Keyword.get(opts, :private_tool_authority?, false),

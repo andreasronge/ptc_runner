@@ -144,7 +144,7 @@ defmodule PtcGatewayMCPTest do
       WarmMCPFixture.http(
         on_call: fn _ ->
           send(parent, {:upstream_blocked, self()})
-          receive do: (:release -> :ok)
+          receive do: (:release -> send(parent, {:upstream_released, self()}))
         end
       )
 
@@ -176,11 +176,17 @@ defmodule PtcGatewayMCPTest do
         )
       end)
 
+    PtcRunner.TestSupport.Eventually.assert_eventually(fn ->
+      :sys.get_state(runtime).draining != nil
+    end)
+
     assert Task.yield(draining, 0) == nil
+    assert map_size(:sys.get_state(runtime).borrows) == 1
+    send(upstream_worker, :release)
+    assert_receive {:upstream_released, ^upstream_worker}, 5_000
     :sys.resume(transport.pid)
     assert :ok = Task.await(draining, 15_000)
     assert map_size(:sys.get_state(runtime).borrows) == 0
-    send(upstream_worker, :release)
     _response = Task.await(caller, 15_000)
   end
 

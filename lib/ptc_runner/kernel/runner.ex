@@ -266,6 +266,7 @@ defmodule PtcRunner.Kernel.Runner do
       loop_limit: config.limits.workflow_loop_iterations,
       filter_context: false,
       caller: :kernel,
+      host_error_policy: PtcRunner.Kernel.HostErrorPolicy,
       link: true,
       telemetry_run: state.pid,
       strict_data: true,

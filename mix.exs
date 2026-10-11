@@ -520,6 +520,7 @@ defmodule PtcRunner.MixProject do
           PtcRunner.Lisp,
           PtcRunner.Lisp.ComponentCatalog,
           PtcRunner.Lisp.Context,
+          PtcRunner.Lisp.HostErrorPolicy,
           PtcRunner.Lisp.Parser,
           PtcRunner.Lisp.Registry,
           PtcRunner.Lisp.Result,
