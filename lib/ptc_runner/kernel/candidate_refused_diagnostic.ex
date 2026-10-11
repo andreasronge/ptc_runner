@@ -1,7 +1,7 @@
 defmodule PtcRunner.Kernel.CandidateRefusedDiagnostic do
   @moduledoc false
 
-  alias PtcRunner.Kernel.DiagnosticPattern
+  alias PtcRunner.Lisp.DiagnosticPattern
 
   @fallback "the candidate was refused by the promotion gate"
   @ids ~w(G1 G2 G3 G4)

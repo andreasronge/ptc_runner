@@ -12,7 +12,7 @@ defmodule PtcRunner do
   |-----------|---------|
   | `PtcRunner.Kernel` | Bounded workflow owner and public execution boundary |
   | `PtcRunner.Lisp` | PTC-Lisp interpreter |
-  | `PtcRunner.Sandbox` | Isolated execution with timeout/memory limits |
+  | `PtcRunner.Lisp.Sandbox` | Isolated execution with timeout/memory limits |
   | `PtcRunner.Kernel.RunBuilder` | Manifest-backed environment assembly |
   | `PtcRunner.Kernel.ReplSession` | Stateful bounded evaluator continuation |
 

@@ -7,7 +7,7 @@ defmodule PtcRunner.Kernel.SelectionRulesDiagnostic do
   installation aliases never cross this boundary.
   """
 
-  alias PtcRunner.Kernel.DiagnosticPattern
+  alias PtcRunner.Lisp.DiagnosticPattern
 
   @field "[a-z][a-z0-9._-]{0,127}"
   @unknown_property "the provider selection contains an unknown property"

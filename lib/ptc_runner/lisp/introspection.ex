@@ -89,6 +89,7 @@ defmodule PtcRunner.Lisp.Introspection do
   without the index also retain the ordinary miss.
   """
 
+  alias PtcRunner.Lisp.ComponentCatalog
   alias PtcRunner.Utf8
 
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
@@ -606,52 +607,33 @@ defmodule PtcRunner.Lisp.Introspection do
   end
 
   defp component_ids(catalog) when is_map(catalog) do
-    case catalog_mod(catalog) do
-      nil -> []
-      mod -> mod.ids(catalog)
-    end
+    ComponentCatalog.ids(catalog)
   end
 
   defp component_ids(_catalog), do: []
 
   defp component_entry(catalog, id) when is_map(catalog) and is_binary(id) do
-    case catalog_mod(catalog) do
-      nil ->
+    case ComponentCatalog.fetch(catalog, id) do
+      {:ok,
+       %{
+         id: ^id,
+         dependencies: dependencies,
+         namespaces: namespaces,
+         source_hash: source_hash,
+         source: source
+       }} ->
+        %{
+          :id => id,
+          :dependencies => dependencies,
+          :namespaces => namespaces,
+          :"source-hash" => source_hash,
+          :source => source
+        }
+
+      _missing ->
         nil
-
-      mod ->
-        case mod.fetch(catalog, id) do
-          {:ok,
-           %{
-             id: ^id,
-             dependencies: dependencies,
-             namespaces: namespaces,
-             source_hash: source_hash,
-             source: source
-           }} ->
-            %{
-              :id => id,
-              :dependencies => dependencies,
-              :namespaces => namespaces,
-              :"source-hash" => source_hash,
-              :source => source
-            }
-
-          _missing ->
-            nil
-        end
     end
   end
 
   defp component_entry(_catalog, _id), do: nil
-
-  # Compare the struct module name as a string so this Lisp module does not
-  # compile-connect to `PtcRunner.Kernel.ComponentCatalog`.
-  defp catalog_mod(%{__struct__: mod}) when is_atom(mod) do
-    if Atom.to_string(mod) == "Elixir.PtcRunner.Kernel.ComponentCatalog",
-      do: mod,
-      else: nil
-  end
-
-  defp catalog_mod(_catalog), do: nil
 end

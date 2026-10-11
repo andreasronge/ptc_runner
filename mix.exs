@@ -505,7 +505,6 @@ defmodule PtcRunner.MixProject do
           PtcRunner.Kernel.JSONValue,
           PtcRunner.Kernel.JSONSchema,
           PtcRunner.Kernel.MCPProtocol,
-          PtcRunner.Kernel.Program,
           PtcRunner.Kernel.PublicationAuthority,
           PtcRunner.Kernel.RunState,
           PtcRunner.Kernel.RunState.LlmBudget,
@@ -519,14 +518,17 @@ defmodule PtcRunner.MixProject do
         ],
         "PTC-Lisp": [
           PtcRunner.Lisp,
+          PtcRunner.Lisp.ComponentCatalog,
           PtcRunner.Lisp.Context,
           PtcRunner.Lisp.Parser,
           PtcRunner.Lisp.Registry,
           PtcRunner.Lisp.Result,
           PtcRunner.Lisp.Signature,
           PtcRunner.Lisp.Signature.Validator,
+          PtcRunner.Lisp.TemporaryDirectory,
           PtcRunner.Lisp.TypeExtractor,
-          PtcRunner.Sandbox
+          PtcRunner.Lisp.Program,
+          PtcRunner.Lisp.Sandbox
         ],
         LLM: [
           PtcRunner.LLM,

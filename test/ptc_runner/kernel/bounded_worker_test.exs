@@ -120,21 +120,25 @@ defmodule PtcRunner.Kernel.BoundedWorkerTest do
 
   test "completion after the absolute deadline cannot win from the mailbox" do
     test = self()
+    timeout_ms = 500
 
     caller =
       spawn(fn ->
+        owner = self()
+
         result =
           BoundedWorker.run(
             fn ->
+              # Pause the owner before notifying the test, so scheduler latency
+              # cannot let the owner time out and kill this worker first.
+              true = :erlang.suspend_process(owner)
               send(test, {:late_worker_ready, self()})
 
               receive do
-                :finish ->
-                  send(test, {:late_worker_finished, self()})
-                  :late
+                :finish -> :late
               end
             end,
-            timeout_ms: 10,
+            timeout_ms: timeout_ms,
             max_heap_words: 10_000,
             cancel_with_caller: true
           )
@@ -142,14 +146,20 @@ defmodule PtcRunner.Kernel.BoundedWorkerTest do
         send(test, {:late_worker_result, result})
       end)
 
-    assert_receive {:late_worker_ready, worker}
-    assert true = :erlang.suspend_process(caller)
-    timer = :erlang.start_timer(20, self(), :deadline_elapsed)
-    assert_receive {:timeout, ^timer, :deadline_elapsed}
-    send(worker, :finish)
-    assert_receive {:late_worker_finished, ^worker}
-    assert true = :erlang.resume_process(caller)
-    assert_receive {:late_worker_result, {:error, :timeout}}
+    try do
+      assert_receive {:late_worker_ready, worker}
+      worker_ref = Process.monitor(worker)
+      timer = :erlang.start_timer(timeout_ms + 25, self(), :deadline_elapsed)
+      assert_receive {:timeout, ^timer, :deadline_elapsed}
+      send(worker, :finish)
+      # Exit proves the timestamped result was sent into the paused owner's
+      # mailbox, rather than racing owner resumption against callback return.
+      assert_receive {:DOWN, ^worker_ref, :process, ^worker, :normal}
+      # Worker exit automatically releases its suspension of the owner.
+      assert_receive {:late_worker_result, {:error, :timeout}}
+    after
+      if Process.alive?(caller), do: Process.exit(caller, :kill)
+    end
   end
 
   test "a worker delayed past startup deadline never invokes the callback" do

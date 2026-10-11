@@ -10,7 +10,6 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
 
   import Bitwise
 
-  alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Lisp.ClojureValidator
   alias PtcRunner.Lisp.Java.Oracle.ClojureRuntime
   alias PtcRunner.Lisp.Java.Oracle.Config
@@ -22,6 +21,7 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
   alias PtcRunner.Lisp.Java.Time.Instant
   alias PtcRunner.Lisp.Java.Time.LocalDate
   alias PtcRunner.Lisp.Java.Util.Date, as: JavaDate
+  alias PtcRunner.Lisp.TemporaryDirectory
 
   @source_limit 256_000
   @expanded_string_limit 256_000
@@ -645,7 +645,7 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
   end
 
   defp create_temporary_directory(attempts) do
-    case PrivateDirectory.create_temp("ptc_java_oracle_", attempts) do
+    case TemporaryDirectory.create("ptc_java_oracle_", attempts) do
       {:ok, directory} ->
         directory
 

@@ -200,7 +200,7 @@ defmodule PtcRunner.TestSupport.TestHelpers do
   the margin is what separates a real regression from hardware variance.
 
   Prefer a shorter body on paths that do not pass `link: true` to
-  `PtcRunner.Sandbox` (notably `Runner.execute_workflow/4`): there, killing the
+  `PtcRunner.Lisp.Sandbox` (notably `Runner.execute_workflow/4`): there, killing the
   caller does not tear the sandbox process down, so an early test failure
   leaves this loop running unlinked until its own deadline.
   """

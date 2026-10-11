@@ -5,12 +5,12 @@ defmodule PtcRunner.InspectionRedactionTest do
   require Logger
 
   alias PtcRunner.Kernel.Limits
-  alias PtcRunner.Kernel.Program
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Lisp.Analyze
   alias PtcRunner.Lisp.Eval
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Parser
+  alias PtcRunner.Lisp.Program
   alias PtcRunner.Lisp.Result
   alias PtcRunner.Lisp.RuntimeCallable
 
@@ -36,7 +36,7 @@ defmodule PtcRunner.InspectionRedactionTest do
     assert rendered =~ "memory_entries: 1"
     assert rendered =~ "tool_calls: 1"
     assert rendered =~ "child_steps: 1"
-    assert rendered =~ "#PtcRunner.Kernel.Program<"
+    assert rendered =~ "#PtcRunner.Lisp.Program<"
     assert rendered =~ "byte_size:"
     assert rendered =~ program.digest
     assert rendered =~ "#PtcRunner.Lisp.RuntimeCallable<"
@@ -59,7 +59,7 @@ defmodule PtcRunner.InspectionRedactionTest do
       end)
 
     assert log =~ "#PtcRunner.Lisp.Result<"
-    assert log =~ "#PtcRunner.Kernel.Program<"
+    assert log =~ "#PtcRunner.Lisp.Program<"
     assert log =~ "#PtcRunner.Lisp.RuntimeCallable<"
     refute_sentinels(log)
   end

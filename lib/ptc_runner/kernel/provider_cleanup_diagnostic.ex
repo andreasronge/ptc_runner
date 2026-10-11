@@ -2,7 +2,7 @@ defmodule PtcRunner.Kernel.ProviderCleanupDiagnostic do
   @moduledoc false
 
   alias PtcRunner.Kernel.CommandSubject
-  alias PtcRunner.Kernel.DiagnosticPattern
+  alias PtcRunner.Lisp.DiagnosticPattern
 
   @deadline_message "cleanup deadline expired"
   @finish_reasons [

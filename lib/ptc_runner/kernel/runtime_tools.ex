@@ -18,7 +18,6 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.ModelContract
-  alias PtcRunner.Kernel.Program
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
@@ -27,6 +26,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.ValueContractDiagnostic
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.Lisp.Program
 
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.EvaluatorErrorCatalog

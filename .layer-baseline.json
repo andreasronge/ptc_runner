@@ -26,23 +26,8 @@
   },
   {
     "from": "PtcRunner.Lisp",
-    "to": "PtcRunner.Kernel.Program",
-    "issue": 2230
-  },
-  {
-    "from": "PtcRunner.Lisp",
     "to": "PtcRunner.Kernel.SafeMetadata",
     "issue": 2231
-  },
-  {
-    "from": "PtcRunner.Lisp",
-    "to": "PtcRunner.Sandbox",
-    "issue": 2230
-  },
-  {
-    "from": "PtcRunner.Lisp.Analyze",
-    "to": "PtcRunner.Kernel.Program",
-    "issue": 2230
   },
   {
     "from": "PtcRunner.Lisp.Eval.Helpers",
@@ -78,20 +63,5 @@
     "from": "PtcRunner.Lisp.Eval.Parallel",
     "to": "PtcRunner.Kernel.SafeMetadata",
     "issue": 2231
-  },
-  {
-    "from": "PtcRunner.Lisp.Java.Oracle.Runner",
-    "to": "PtcRunner.Kernel.PrivateDirectory",
-    "issue": 2230
-  },
-  {
-    "from": "PtcRunner.Lisp.NamespaceDiagnostic",
-    "to": "PtcRunner.Kernel.DiagnosticPattern",
-    "issue": 2230
-  },
-  {
-    "from": "PtcRunner.Lisp.Prelude.Compiler",
-    "to": "PtcRunner.Sandbox",
-    "issue": 2230
   }
 ]

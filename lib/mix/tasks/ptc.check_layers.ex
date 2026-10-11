@@ -19,7 +19,7 @@ defmodule Mix.Tasks.Ptc.CheckLayers do
   """
 
   @infrastructure ~w(PtcRunner.BuildIdentity PtcRunner.ChildEnvironment PtcRunner.HTTPEndpoint PtcRunner.Utf8)
-  @kernel ~w(PtcRunner PtcRunner.Dotenv PtcRunner.Kernel PtcRunner.LLM PtcRunner.Sandbox)
+  @kernel ~w(PtcRunner PtcRunner.Dotenv PtcRunner.Kernel PtcRunner.LLM)
   @frontend ~w(PtcRunner.Application PtcRunner.CLILogger PtcRunner.CLIProgress PtcRunner.LiveStatus PtcRunner.MixCommandAdapter PtcRunner.MixCommandRuntime PtcRunner.ProfileDiagnosticCatalog PtcRunner.ReplError PtcRunner.ReplFrontend PtcRunner.ReplLineEditor PtcRunner.ReplProfileRunner PtcRunner.ReplSessionRunner PtcRunner.ReplSupport PtcRunner.StandaloneCLI PtcRunner.StandaloneCommandRuntime PtcRunner.TranscriptFrontend PtcRunner.ViewerFrontend PtcRunner.ViewerLaunchAdapter PtcRunner.ViewerSnapshotStore)
   @elixir_apps [:elixir, :logger]
   @approved_external_apps []
@@ -74,6 +74,8 @@ defmodule Mix.Tasks.Ptc.CheckLayers do
       source(entry, :runtime_references)
   end
 
+  defp classify("PtcRunner.Lisp.ComponentCatalog.Any"), do: :lisp
+  defp classify("PtcRunner.Lisp.ComponentCatalog." <> module), do: classify(module)
   defp classify("Jason.Encoder." <> module), do: classify(module)
   defp classify("PtcRunner.SiteGuides." <> _), do: :frontend
   defp classify("Inspect." <> module), do: classify(module)

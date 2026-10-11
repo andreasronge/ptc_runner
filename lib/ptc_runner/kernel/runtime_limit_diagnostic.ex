@@ -1,8 +1,8 @@
 defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   @moduledoc false
 
-  alias PtcRunner.Kernel.DiagnosticPattern
   alias PtcRunner.Kernel.LimitCatalog
+  alias PtcRunner.Lisp.DiagnosticPattern
 
   # Naming a breached ceiling is only half an answer: the reader also has to know
   # where the number lives. The manifest is where a value is requested and the

@@ -2,7 +2,7 @@ defmodule PtcRunner.Kernel.MissionCapabilityDiagnostic do
   @moduledoc false
 
   alias PtcRunner.Kernel.CapabilityRequirementDiagnostic
-  alias PtcRunner.Kernel.DiagnosticPattern
+  alias PtcRunner.Lisp.DiagnosticPattern
 
   @mission_pattern "[a-z][a-z0-9._-]{0,127}"
 

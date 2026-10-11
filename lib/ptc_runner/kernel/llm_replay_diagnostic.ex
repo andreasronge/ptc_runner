@@ -1,7 +1,7 @@
 defmodule PtcRunner.Kernel.LLMReplayDiagnostic do
   @moduledoc false
 
-  alias PtcRunner.Kernel.DiagnosticPattern
+  alias PtcRunner.Lisp.DiagnosticPattern
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
 
   @prefix "no replay fixture matches this request (request_hash: "

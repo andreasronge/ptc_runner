@@ -154,7 +154,7 @@ hook; fix the shared-state race or brittle deadline.
 
 ## Project Structure
 
-- `lib/ptc_runner/` — the library (`kernel/`, `lisp/`, `sandbox.ex`, …).
+- `lib/ptc_runner/` — the library (`kernel/`, `lisp/`, …).
 - `ptc_runner_launcher/` — optional macOS/Linux MCP stdio launcher companion.
 - `docs/` — specifications, guides, and implementation records.
   `priv/preludes/kernel/` — shipped Lisp libraries; recompile after editing.

@@ -1,8 +1,8 @@
 defmodule PtcRunner.Kernel.LimitCapacityDiagnostic do
   @moduledoc false
 
-  alias PtcRunner.Kernel.DiagnosticPattern
   alias PtcRunner.Kernel.LimitCatalog
+  alias PtcRunner.Lisp.DiagnosticPattern
 
   @prefix "event_payload_bytes effective limit "
   @required_middle " is below the required "

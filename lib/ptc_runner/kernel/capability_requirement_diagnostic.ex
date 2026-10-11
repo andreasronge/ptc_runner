@@ -1,7 +1,7 @@
 defmodule PtcRunner.Kernel.CapabilityRequirementDiagnostic do
   @moduledoc false
 
-  alias PtcRunner.Kernel.DiagnosticPattern
+  alias PtcRunner.Lisp.DiagnosticPattern
   alias PtcRunner.Lisp.Format.SymbolRef
 
   @max_names 8

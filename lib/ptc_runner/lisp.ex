@@ -45,11 +45,11 @@ defmodule PtcRunner.Lisp do
     Format,
     Parser,
     RuntimeCallable,
+    Sandbox,
     SourceAtoms,
     SymbolCounter
   }
 
-  alias PtcRunner.Kernel.Program
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Effects
@@ -60,6 +60,7 @@ defmodule PtcRunner.Lisp do
   alias PtcRunner.Lisp.Prelude.Attach, as: PreludeAttach
   alias PtcRunner.Lisp.Prelude.AttachContext, as: PreludeAttachContext
   alias PtcRunner.Lisp.Prelude.ValidationError, as: PreludeValidationError
+  alias PtcRunner.Lisp.Program
 
   # Default capacity of the global parallel-worker slot semaphore (see
   # `PtcRunner.Lisp.Eval.ParallelBudget`). Conservative: with the
@@ -263,7 +264,7 @@ defmodule PtcRunner.Lisp do
       `config :ptc_runner, :default_max_heap`). Host-provided data
       (context, `:memory`, tool closures, the parsed program) is measured
       after spawn and excluded from this budget — see
-      `PtcRunner.Sandbox` for the re-baseline semantics.
+      `PtcRunner.Lisp.Sandbox` for the re-baseline semantics.
     - `:setup_max_heap` - Hard heap ceiling in words while the host
       environment is copied into the sandbox, before the re-baseline
       (default: `4 × max_heap`). Callers granting large tools/memory must
@@ -302,8 +303,8 @@ defmodule PtcRunner.Lisp do
       for selected overrides whose replacement source removed an export.
       Omitting the ownership map keeps the ordinary miss, so embedded callers
       are unchanged.
-    - `:component_catalog` - Optional attested Kernel component catalog for the
-      selected environment. Public `run/2` strips this option so a direct
+    - `:component_catalog` - Optional host catalog implementing
+      `PtcRunner.Lisp.ComponentCatalog` for the selected environment. Public `run/2` strips this option so a direct
       caller cannot inject a Kernel graph. Kernel evaluations pass it only
       through `run_native/2` for the selected workflow or mission catalog. The
       catalog is not projected into result stamps, traces, telemetry, or host
@@ -798,7 +799,7 @@ defmodule PtcRunner.Lisp do
 
   # Bundle the per-run options map consumed by the rest of the run pipeline.
   defp run_params(opts) do
-    max_heap = Keyword.get(opts, :max_heap, PtcRunner.Sandbox.default_max_heap())
+    max_heap = Keyword.get(opts, :max_heap, Sandbox.default_max_heap())
 
     %{
       ctx: Keyword.get(opts, :context, %{}),
@@ -807,7 +808,7 @@ defmodule PtcRunner.Lisp do
       signature_str: Keyword.get(opts, :signature),
       float_precision: Keyword.get(opts, :float_precision),
       preserve_runtime_callables: Keyword.get(opts, :preserve_runtime_callables, false),
-      timeout: Keyword.get(opts, :timeout, PtcRunner.Sandbox.default_timeout()),
+      timeout: Keyword.get(opts, :timeout, Sandbox.default_timeout()),
       max_heap: max_heap,
       setup_max_heap: Keyword.get(opts, :setup_max_heap),
       # Security H1: every pmap/pcalls worker runs under this FIXED heap cap
@@ -1155,7 +1156,7 @@ defmodule PtcRunner.Lisp do
       link: Map.get(opts, :link, false)
     ]
 
-    case PtcRunner.Sandbox.run_bounded(compile_fn, compile_opts) do
+    case Sandbox.run_bounded(compile_fn, compile_opts) do
       {:ok, {:ok, core_ast, undefined_vars, tool_check, prelude_calls}} ->
         with :ok <- check_undefined_var_candidates(undefined_vars, memory),
              :ok <- tool_check do
@@ -1242,7 +1243,7 @@ defmodule PtcRunner.Lisp do
       ]
       |> put_setup_max_heap(opts.setup_max_heap)
 
-    case PtcRunner.Sandbox.execute(:prepare_error_memory, step.memory, sandbox_opts) do
+    case Sandbox.execute(:prepare_error_memory, step.memory, sandbox_opts) do
       {:ok, prepared_memory, _metrics, %{}} ->
         {:error, %{step | memory: prepared_memory}}
 
@@ -1395,7 +1396,7 @@ defmodule PtcRunner.Lisp do
       |> put_setup_max_heap(setup_max_heap)
 
     core_ast
-    |> PtcRunner.Sandbox.execute(context, sandbox_opts)
+    |> Sandbox.execute(context, sandbox_opts)
     |> handle_execute_result(opts)
   end
 
@@ -1892,7 +1893,7 @@ defmodule PtcRunner.Lisp do
   defp grant_filter_reason(reason) when is_atom(reason), do: Atom.to_string(reason)
   defp grant_filter_reason(_reason), do: "grant_filtered"
 
-  # Human-readable kill message from `PtcRunner.Sandbox.memory_exceeded_info/0`
+  # Human-readable kill message from `PtcRunner.Lisp.Sandbox.memory_exceeded_info/0`
   # diagnostics (setup-phase kills are a grant problem, not a program
   # problem) or the integer byte limit reported by `Sandbox.run_bounded/2`.
   defp memory_exceeded_message(%{phase: :setup} = info) do

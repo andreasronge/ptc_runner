@@ -13,8 +13,8 @@ defmodule PtcRunner.Kernel.CompileDiagnostic do
   """
 
   alias PtcRunner.Kernel.CapabilityRequirementDiagnostic
-  alias PtcRunner.Kernel.DiagnosticPattern
   alias PtcRunner.Lisp.CoreAST
+  alias PtcRunner.Lisp.DiagnosticPattern
   alias PtcRunner.Lisp.Format.SymbolRef
   alias PtcRunner.Lisp.NamespaceDiagnostic
 
