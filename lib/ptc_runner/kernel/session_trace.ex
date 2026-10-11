@@ -365,7 +365,7 @@ defmodule PtcRunner.Kernel.SessionTrace do
   defp persist_state(state) do
     with true <- valid_terminal_batch?(state.events),
          :ok <-
-           TraceLog.publish_jsonl(state.destination, state.events,
+           TraceLog.Publish.publish_jsonl(state.destination, state.events,
              fault_hook: state.fault_hook,
              expected_parent_identity: state.destination_directory_identity
            ) do

@@ -765,7 +765,7 @@ defmodule PtcRunner.Kernel.ReplSession do
     private? = EventSink.policy(config.event_sink) == :private
 
     with {:ok, path} <- PrivateDirectory.anchor(path),
-         :ok <- TraceLog.preflight_destination(path, private?) do
+         :ok <- TraceLog.Append.preflight_destination(path, private?) do
       {:ok, path}
     else
       {:error, _reason} -> reject_unstarted_config(config, :trace_preflight_failed)

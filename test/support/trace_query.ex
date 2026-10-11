@@ -136,7 +136,7 @@ defmodule PtcRunner.TestSupport.TraceQuery do
            load(trace_log) do
       result_metadata =
         operation
-        |> TraceLog.source_presence_metadata(source_metadata)
+        |> TraceLog.Query.source_presence_metadata(source_metadata)
         |> reserve_snapshot_hash(trace_log.source, source_id)
 
       TraceLog.query_loaded(
@@ -273,7 +273,7 @@ defmodule PtcRunner.TestSupport.TraceQuery do
            ),
          {:ok, capture} <- retain_transient_directory(capture, trace_log.max_retained_bytes) do
       {:ok, capture.events, capture.source_id, capture.run_sources,
-       TraceLog.directory_source_metadata(capture), capture.known_isolated_run_ids}
+       TraceLog.Query.directory_source_metadata(capture), capture.known_isolated_run_ids}
     end
   end
 

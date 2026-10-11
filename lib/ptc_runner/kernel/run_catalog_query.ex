@@ -73,8 +73,8 @@ defmodule PtcRunner.Kernel.RunCatalogQuery do
   defp matches?(row, arguments) do
     Enum.all?(@exact_filters, &exact_match?(row, arguments, &1)) and
       tags_match?(row["tags"], arguments["tags"]) and
-      after_or_equal?(row["start_timestamp"], arguments["from"]) and
-      before_or_equal?(row["start_timestamp"], arguments["to"])
+      QueryValidation.after_or_equal?(row["start_timestamp"], arguments["from"]) and
+      QueryValidation.before_or_equal?(row["start_timestamp"], arguments["to"])
   end
 
   defp exact_match?(_row, arguments, key) when not is_map_key(arguments, key), do: true
@@ -86,19 +86,6 @@ defmodule PtcRunner.Kernel.RunCatalogQuery do
     do: Enum.all?(expected, fn {key, value} -> tags[key] == value end)
 
   defp tags_match?(_tags, _expected), do: false
-
-  defp after_or_equal?(_timestamp, nil), do: true
-  defp after_or_equal?(nil, _from), do: false
-  defp after_or_equal?(timestamp, from), do: compare_timestamp(timestamp, from) != :lt
-  defp before_or_equal?(_timestamp, nil), do: true
-  defp before_or_equal?(nil, _to), do: false
-  defp before_or_equal?(timestamp, to), do: compare_timestamp(timestamp, to) != :gt
-
-  defp compare_timestamp(left, right) do
-    {:ok, left_at, 0} = DateTime.from_iso8601(left)
-    {:ok, right_at, 0} = DateTime.from_iso8601(right)
-    DateTime.compare(left_at, right_at)
-  end
 
   defp paginate(items, page, catalog_digest, excluded_files, max_result_bytes) do
     selected = items |> Enum.drop(page.offset) |> Enum.take(page.limit)

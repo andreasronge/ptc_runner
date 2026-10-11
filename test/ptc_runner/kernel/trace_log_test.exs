@@ -42,7 +42,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
                  "expected_model_exchange_ids" => ["workflow-model"]
                }
              }
-           } = TraceLog.compile_analysis(events, :private)
+           } = TraceLog.Query.compile_analysis(events, :private)
   end
 
   @tag :tmp_dir
@@ -113,7 +113,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
       decoded_event("minimal-run", 2, "run-stopped", %{"outcome" => "ok"})
     ]
 
-    assert :ok = TraceLog.append_jsonl(path, events)
+    assert :ok = TraceLog.Append.append_jsonl(path, events)
     assert {:ok, trace_log} = TraceQuery.new(source: {:file, path})
     assert {:ok, %{"items" => items}} = TraceQuery.query(trace_log, :list_runs, %{})
 
@@ -186,7 +186,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     end
 
     assert {:error, :malformed_source} =
-             TraceLog.append_jsonl(
+             TraceLog.Append.append_jsonl(
                Path.join(directory, "appended.jsonl"),
                [
                  decoded_event("appended", 1, "run-started", %{
@@ -260,7 +260,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
       decoded_event("bundle-b-run", 2, "run-stopped", %{"outcome" => "ok"})
     ]
 
-    assert :ok = TraceLog.append_jsonl(path, events)
+    assert :ok = TraceLog.Append.append_jsonl(path, events)
     assert {:ok, trace_log} = TraceQuery.new(source: {:file, path})
 
     assert {:ok,
@@ -319,7 +319,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
       })
     ]
 
-    assert :ok = TraceLog.append_jsonl(path, events)
+    assert :ok = TraceLog.Append.append_jsonl(path, events)
     assert {:ok, trace_log} = TraceQuery.new(source: {:file, path})
 
     # One errored evaluation and one errored capability call are the two rows a
@@ -351,8 +351,8 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     first = decoded_event("append", 1, "run-started")
     second = decoded_event("append", 2, "run-stopped", %{"outcome" => "ok"})
 
-    assert :ok = TraceLog.append_jsonl(path, [first])
-    assert :ok = TraceLog.append_jsonl(path, [second])
+    assert :ok = TraceLog.Append.append_jsonl(path, [first])
+    assert :ok = TraceLog.Append.append_jsonl(path, [second])
     assert {:ok, trace_log} = TraceQuery.new(source: {:file, path})
 
     assert {:ok, %{"items" => [%{"run_id" => "append", "complete" => true}]}} =
@@ -371,11 +371,11 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     append_path = Path.join([alias_path, "..", "append.jsonl"])
     publish_path = Path.join([alias_path, "..", "publish.jsonl"])
 
-    assert :ok = TraceLog.append_jsonl(append_path, [event])
+    assert :ok = TraceLog.Append.append_jsonl(append_path, [event])
     assert File.regular?(Path.join(physical_parent, "append.jsonl"))
     refute File.exists?(Path.join(directory, "append.jsonl"))
 
-    assert :ok = TraceLog.publish_jsonl(publish_path, [event])
+    assert :ok = TraceLog.Publish.publish_jsonl(publish_path, [event])
     assert File.regular?(Path.join(physical_parent, "publish.jsonl"))
     refute File.exists?(Path.join(directory, "publish.jsonl"))
   end
@@ -390,7 +390,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     event = decoded_event("direct-parent-link", 1, "run-started")
     path = Path.join(alias_parent, "trace.jsonl")
 
-    assert :ok = TraceLog.append_jsonl(path, [event])
+    assert :ok = TraceLog.Append.append_jsonl(path, [event])
     assert File.regular?(Path.join(physical_parent, "trace.jsonl"))
   end
 
@@ -401,11 +401,11 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     sigma = Path.join(directory, "σ.jsonl")
     final_sigma = Path.join(directory, "ς.jsonl")
 
-    assert {:ok, identity} = TraceLog.append_lock_identity(upper)
-    assert {:ok, ^identity} = TraceLog.append_lock_identity(lower)
+    assert {:ok, identity} = TraceLog.Append.append_lock_identity(upper)
+    assert {:ok, ^identity} = TraceLog.Append.append_lock_identity(lower)
 
-    assert {:ok, sigma_identity} = TraceLog.append_lock_identity(sigma)
-    assert {:ok, ^sigma_identity} = TraceLog.append_lock_identity(final_sigma)
+    assert {:ok, sigma_identity} = TraceLog.Append.append_lock_identity(sigma)
+    assert {:ok, ^sigma_identity} = TraceLog.Append.append_lock_identity(final_sigma)
   end
 
   # Every append spawns lock helpers, which cost tens of milliseconds on macOS,
@@ -423,7 +423,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     1..1_000
     |> Task.async_stream(fn index ->
       path = Path.join(root, "trace-\#{index}.jsonl")
-      PtcRunner.Kernel.TraceLog.append_jsonl(path, [])
+      PtcRunner.Kernel.TraceLog.Append.append_jsonl(path, [])
     end, max_concurrency: 16, timeout: 30_000)
     |> Enum.each(fn {:ok, :ok} -> :ok end)
     [lock_root] = Path.wildcard(Path.join(root, "ptc-runner-trace-append-locks-*"))
@@ -449,7 +449,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     end)
 
     assert_receive {^port, {:data, {:eol, "APPEND_READY"}}}, 10_000
-    second_append = Task.async(fn -> TraceLog.append_jsonl(second_path, [second]) end)
+    second_append = Task.async(fn -> TraceLog.Append.append_jsonl(second_path, [second]) end)
     assert Task.yield(second_append, 250) == nil
     assert true = Port.command(port, "X\n")
     assert_receive {^port, {:data, {:eol, "APPEND_RESULT=:ok"}}}, 10_000
@@ -480,19 +480,22 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     end)
 
     assert_receive {^port, {:data, {:eol, "APPEND_READY"}}}, 10_000
-    second = Task.async(fn -> TraceLog.with_append_authority_lock(second_path, fn -> :ok end) end)
+
+    second =
+      Task.async(fn -> TraceLog.Append.with_append_authority_lock(second_path, fn -> :ok end) end)
+
     assert Task.yield(second, 2_000) == {:ok, :ok}
     assert true = Port.command(port, "X\n")
     assert_receive {^port, {:exit_status, 0}}, 10_000
   end
 
   defp different_bucket_path(first_path, directory) do
-    {:ok, first_scope} = TraceLog.append_lock_identity(first_path)
+    {:ok, first_scope} = TraceLog.Append.append_lock_identity(first_path)
     first_bucket = path_bucket(first_scope)
 
     Enum.find_value(1..100, fn index ->
       path = Path.join(directory, "unrelated-#{index}.jsonl")
-      {:ok, scope} = TraceLog.append_lock_identity(path)
+      {:ok, scope} = TraceLog.Append.append_lock_identity(path)
       if path_bucket(scope) != first_bucket, do: path
     end)
   end
@@ -505,9 +508,9 @@ defmodule PtcRunner.Kernel.TraceLogTest do
 
     task =
       Task.async(fn ->
-        TraceLog.append_jsonl(first_path, [first],
+        TraceLog.Append.append_jsonl(first_path, [first],
           append_hook: fn :after_file_ready ->
-            TraceLog.append_jsonl(second_path, [second])
+            TraceLog.Append.append_jsonl(second_path, [second])
           end
         )
       end)
@@ -521,7 +524,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
   defp colliding_append_paths(directory) do
     Enum.reduce_while(1..10_000, %{}, fn index, seen ->
       path = Path.join(directory, "collision-#{index}.jsonl")
-      {:ok, scope} = TraceLog.append_lock_identity(path)
+      {:ok, scope} = TraceLog.Append.append_lock_identity(path)
       bucket = path_bucket(scope)
 
       case Map.fetch(seen, bucket) do
@@ -552,7 +555,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
 
     assert_receive {^port, {:data, {:eol, "APPEND_READY"}}}, 10_000
 
-    second_append = Task.async(fn -> TraceLog.append_jsonl(path, [second]) end)
+    second_append = Task.async(fn -> TraceLog.Append.append_jsonl(path, [second]) end)
     assert Task.yield(second_append, 250) == nil
 
     assert true = Port.command(port, "X\n")
@@ -583,7 +586,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
                   "padding" => String.duplicate("x", 4_096)
                 })
 
-              TraceLog.append_jsonl(path, [event])
+              TraceLog.Append.append_jsonl(path, [event])
           end
         end)
       end
@@ -624,7 +627,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
                   "padding" => String.duplicate("x", 4_096)
                 })
 
-              TraceLog.append_jsonl(selected_path, [event])
+              TraceLog.Append.append_jsonl(selected_path, [event])
           end
         end)
       end
@@ -643,7 +646,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     path = Path.join(directory, "mailbox.jsonl")
     event = decoded_event("mailbox", 1, "run-started")
 
-    assert :ok = TraceLog.append_jsonl(path, [event])
+    assert :ok = TraceLog.Append.append_jsonl(path, [event])
     refute_receive {_port, {:exit_status, _status}}, 100
   end
 
@@ -660,7 +663,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
         :ok
       end
       result =
-        PtcRunner.Kernel.TraceLog.append_jsonl(path, [event], append_hook: hook)
+        PtcRunner.Kernel.TraceLog.Append.append_jsonl(path, [event], append_hook: hook)
       IO.puts("APPEND_RESULT=" <> inspect(result))
       """
 
@@ -692,16 +695,16 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     path = Path.join(directory, "publication.jsonl")
     events = [decoded_event("publication", 1, "run-started")]
 
-    assert :ok = TraceLog.publish_jsonl(path, events)
+    assert :ok = TraceLog.Publish.publish_jsonl(path, events)
     first = File.read!(path)
-    assert :ok = TraceLog.publish_jsonl(path, events)
+    assert :ok = TraceLog.Publish.publish_jsonl(path, events)
     assert File.read!(path) == first
 
     parent = self()
 
     replacement =
       Task.async(fn ->
-        TraceLog.publish_jsonl(path, events,
+        TraceLog.Publish.publish_jsonl(path, events,
           fault_hook: fn
             :before_publication_read ->
               send(parent, {:publication_read_ready, self()})
@@ -728,14 +731,14 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     File.write!(path, first)
 
     different = [decoded_event("different", 1, "run-started")]
-    assert {:error, :trace_collision} = TraceLog.publish_jsonl(path, different)
+    assert {:error, :trace_collision} = TraceLog.Publish.publish_jsonl(path, different)
     assert File.read!(path) == first
 
     replaced_temporary_path = Path.join(directory, "replaced-temporary.jsonl")
 
     replaced_temporary =
       Task.async(fn ->
-        TraceLog.publish_jsonl(replaced_temporary_path, events,
+        TraceLog.Publish.publish_jsonl(replaced_temporary_path, events,
           fault_hook: fn
             :after_sync ->
               send(parent, {:temporary_synced, self()})
@@ -772,7 +775,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     partial_path = Path.join(directory, "partial.jsonl")
 
     assert {:error, :trace_persistence_failed} =
-             TraceLog.publish_jsonl(partial_path, events,
+             TraceLog.Publish.publish_jsonl(partial_path, events,
                fault_hook: fn
                  :during_write -> {:error, :partial_write}
                  _stage -> :ok
@@ -785,7 +788,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     before_write_path = Path.join(directory, "before-write.jsonl")
 
     assert {:error, :trace_persistence_failed} =
-             TraceLog.publish_jsonl(before_write_path, events,
+             TraceLog.Publish.publish_jsonl(before_write_path, events,
                fault_hook: fn
                  :before_write -> {:error, :injected}
                  _stage -> :ok
@@ -809,16 +812,16 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     end
 
     assert {:error, :trace_persistence_failed} =
-             TraceLog.publish_jsonl(published_path, events, fault_hook: hook)
+             TraceLog.Publish.publish_jsonl(published_path, events, fault_hook: hook)
 
     assert File.regular?(published_path)
-    assert :ok = TraceLog.publish_jsonl(published_path, events, fault_hook: hook)
+    assert :ok = TraceLog.Publish.publish_jsonl(published_path, events, fault_hook: hook)
     refute Enum.any?(File.ls!(directory), &String.contains?(&1, ".ptc-tmp-"))
 
     cleanup_path = Path.join(directory, "cleanup-fault.jsonl")
 
     assert {:error, :trace_persistence_failed} =
-             TraceLog.publish_jsonl(cleanup_path, events,
+             TraceLog.Publish.publish_jsonl(cleanup_path, events,
                fault_hook: fn
                  :cleanup -> {:error, :injected}
                  _stage -> :ok
@@ -827,7 +830,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
 
     assert File.regular?(cleanup_path)
     refute Enum.any?(File.ls!(directory), &String.contains?(&1, ".ptc-tmp-"))
-    assert :ok = TraceLog.publish_jsonl(cleanup_path, events)
+    assert :ok = TraceLog.Publish.publish_jsonl(cleanup_path, events)
   end
 
   @tag :tmp_dir
@@ -844,7 +847,9 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     events = [decoded_event("identity", 1, "run-started")]
 
     assert {:error, :trace_persistence_failed} =
-             TraceLog.publish_jsonl(path, events, expected_parent_identity: expected_identity)
+             TraceLog.Publish.publish_jsonl(path, events,
+               expected_parent_identity: expected_identity
+             )
 
     refute File.exists?(path)
     assert File.ls!(destination) == []
@@ -872,7 +877,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     end
 
     assert {:error, :trace_persistence_failed} =
-             TraceLog.publish_jsonl(path, events,
+             TraceLog.Publish.publish_jsonl(path, events,
                expected_parent_identity: expected_identity,
                fault_hook: hook
              )
@@ -888,13 +893,15 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     normal_event = decoded_event("normal", 1, "run-started")
     private_event = decoded_event("private", 1, "run-started")
 
-    assert :ok = TraceLog.append_jsonl(normal_path, [normal_event])
-    assert :ok = TraceLog.append_jsonl(private_path, [private_event], private: true)
+    assert :ok = TraceLog.Append.append_jsonl(normal_path, [normal_event])
+    assert :ok = TraceLog.Append.append_jsonl(private_path, [private_event], private: true)
 
     assert {:error, :invalid_trace_log} =
-             TraceLog.append_jsonl(normal_path, [private_event], private: true)
+             TraceLog.Append.append_jsonl(normal_path, [private_event], private: true)
 
-    assert {:error, :invalid_trace_log} = TraceLog.append_jsonl(private_path, [normal_event])
+    assert {:error, :invalid_trace_log} =
+             TraceLog.Append.append_jsonl(private_path, [normal_event])
+
     assert {:error, :invalid_trace_log} = TraceQuery.new(source: {:file, private_path})
     assert {:ok, private_log} = TraceQuery.new(source: {:private_file, private_path})
     assert {:ok, normal_log} = TraceQuery.new(source: {:directory, directory})
@@ -924,7 +931,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     )
 
     assert :ok =
-             TraceLog.append_jsonl(
+             TraceLog.Append.append_jsonl(
                Path.join(directory, "private.private.jsonl"),
                [decoded_event("private", 1, "run-started")],
                private: true
@@ -968,7 +975,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     end
 
     assert {:error, :source_unavailable} =
-             TraceLog.append_jsonl(path, [event], private: true, append_hook: hook)
+             TraceLog.Append.append_jsonl(path, [event], private: true, append_hook: hook)
 
     refute File.exists?(path)
   end
@@ -983,7 +990,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     event = decoded_event("private-parent", 1, "run-started")
 
     assert {:error, :source_unavailable} =
-             TraceLog.append_jsonl(path, [event], private: true)
+             TraceLog.Append.append_jsonl(path, [event], private: true)
 
     refute File.exists?(path)
   end
@@ -998,7 +1005,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     event = decoded_event("private-mode", 1, "run-started")
 
     assert {:error, :source_unavailable} =
-             TraceLog.append_jsonl(path, [event], private: true)
+             TraceLog.Append.append_jsonl(path, [event], private: true)
 
     assert File.read!(path) == ""
     assert Bitwise.band(File.stat!(path).mode, 0o777) == 0o644

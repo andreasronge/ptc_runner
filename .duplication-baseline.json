@@ -230,24 +230,6 @@
       ],
       "type": "type_i"
     },
-    "9a5745cb297a916c230134aaad7350eec097cc0dff4429002490c01db7a8b665": {
-      "describe": "type_ii mass=39 lib/ptc_runner/kernel/trace_log.ex:1977 <-> lib/ptc_runner/kernel/trace_log.ex:2811",
-      "files": [
-        "lib/ptc_runner/kernel/trace_log.ex"
-      ],
-      "mass": 39,
-      "occurrences": [
-        {
-          "file": "lib/ptc_runner/kernel/trace_log.ex",
-          "snippet": "d1dbff42892fd27523151dfa8430a32f74bff5e7e5587684fd269b3ef7cc13e9"
-        },
-        {
-          "file": "lib/ptc_runner/kernel/trace_log.ex",
-          "snippet": "f937a92f347459661ab34d68a225d27d3a3786ad21ae9cb843c81338d65ac2fc"
-        }
-      ],
-      "type": "type_ii"
-    },
     "a37cf972b79c1c0917de2e14c4dd036e1626814b5e9eebab8c3b27caaa76733f": {
       "describe": "type_i mass=54 test/ptc_runner/kernel/provider_declaration_test.exs:1593 <-> test/ptc_runner/kernel/provider_declaration_test.exs:2291",
       "files": [

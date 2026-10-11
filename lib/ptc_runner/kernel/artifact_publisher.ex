@@ -173,7 +173,12 @@ defmodule PtcRunner.Kernel.ArtifactPublisher do
         {:ok, with_withheld(report, :trace)}
 
       trace ->
-        case TraceLog.publish_handle(trace, events, class == :private, hook(hooks, :trace)) do
+        case TraceLog.Publish.publish_handle(
+               trace,
+               events,
+               class == :private,
+               hook(hooks, :trace)
+             ) do
           :ok ->
             {:ok, with_written(report, :trace)}
 

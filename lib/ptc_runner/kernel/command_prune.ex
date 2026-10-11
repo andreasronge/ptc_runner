@@ -17,9 +17,12 @@ defmodule PtcRunner.Kernel.CommandPrune do
     with {:ok, uid} <- PrivateDirectory.preflight_owner(Path.join(root, "unused")),
          {:ok, directories} <- directories(root, uid),
          {:ok, result} <-
-           TraceLog.with_append_authority_lock(Path.join(root, ".ptc-prune.authority"), fn ->
-             run_locked(root, uid, directories, options)
-           end) do
+           TraceLog.Append.with_append_authority_lock(
+             Path.join(root, ".ptc-prune.authority"),
+             fn ->
+               run_locked(root, uid, directories, options)
+             end
+           ) do
       {:ok, result}
     else
       {:error, :unsafe_directory} -> {:error, :prune_unsafe_directory}

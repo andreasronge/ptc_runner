@@ -171,11 +171,11 @@ defmodule PtcRunner.Kernel.InspectionPreflightGlobalStateTest do
       # Initialize and validate the per-authority append-lock directory while
       # the first-creation executable is still available. The assertion below
       # then proves that an existing trace and lease root do not need it.
-      assert :ok = TraceLog.preflight_destination(path, true)
+      assert :ok = TraceLog.Append.preflight_destination(path, true)
 
       System.put_env("PATH", fake_bin)
 
-      assert :ok = TraceLog.preflight_destination(path, true)
+      assert :ok = TraceLog.Append.preflight_destination(path, true)
     end
 
     @tag :tmp_dir
@@ -199,7 +199,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightGlobalStateTest do
       System.put_env("PATH", fake_bin)
 
       assert :ok =
-               TraceLog.preflight_destination(Path.join(dir, "run.jsonl"), false)
+               TraceLog.Append.preflight_destination(Path.join(dir, "run.jsonl"), false)
     end
 
     @tag :tmp_dir
@@ -229,7 +229,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightGlobalStateTest do
                InspectionArtifact.preflight_destination(Path.join(dir, "run.ptcins"))
 
       assert {:error, :source_unavailable} =
-               TraceLog.preflight_destination(
+               TraceLog.Append.preflight_destination(
                  Path.join(dir, "run.private.jsonl"),
                  true
                )
@@ -267,10 +267,10 @@ defmodule PtcRunner.Kernel.InspectionPreflightGlobalStateTest do
       if actual_uid == 0, do: :ok = :file.change_owner(String.to_charlist(path), owner_uid)
 
       assert {:error, :trace_destination_unavailable} =
-               TraceLog.preflight_destination(path, true)
+               TraceLog.Append.preflight_destination(path, true)
 
       assert {:error, :source_unavailable} =
-               TraceLog.append_jsonl(path, [], private: true)
+               TraceLog.Append.append_jsonl(path, [], private: true)
     end
 
     @tag :tmp_dir
@@ -310,14 +310,14 @@ defmodule PtcRunner.Kernel.InspectionPreflightGlobalStateTest do
 
       # Populates any authority cache under this pathname with the mismatch.
       assert {:error, :trace_destination_unavailable} =
-               TraceLog.preflight_destination(path, true)
+               TraceLog.Append.preflight_destination(path, true)
 
       # The same pathname now answers with the owning uid. A cache keyed on the
       # pathname alone would keep refusing; the binary's identity has changed,
       # so the answer must be read again.
       write_fake_id.(owner_uid)
 
-      assert :ok = TraceLog.preflight_destination(path, true)
+      assert :ok = TraceLog.Append.preflight_destination(path, true)
     end
   end
 
@@ -396,7 +396,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightGlobalStateTest do
          end},
         {"trace", "trace",
          fn path ->
-           TraceLog.append_jsonl(path, trace_events, private: true)
+           TraceLog.Append.append_jsonl(path, trace_events, private: true)
          end}
       ]
 

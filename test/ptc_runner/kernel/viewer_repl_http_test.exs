@@ -151,7 +151,7 @@ defmodule PtcRunner.Kernel.ViewerReplHttpTest do
         usage: %{llm_budget: %{"total_tokens" => nil, "cost" => nil}}
       })
 
-    :ok = TraceLog.append_jsonl(path, EventSink.events(sink))
+    :ok = TraceLog.Append.append_jsonl(path, EventSink.events(sink))
     EventSink.stop(sink)
   end
 end

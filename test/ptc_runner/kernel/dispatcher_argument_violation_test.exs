@@ -433,7 +433,7 @@ defmodule PtcRunner.Kernel.DispatcherArgumentViolationTest do
            end)
 
     path = Path.join(dir, "canonical.jsonl")
-    assert :ok = TraceLog.append_jsonl(path, events)
+    assert :ok = TraceLog.Append.append_jsonl(path, events)
     canonical = File.read!(path)
     refute canonical =~ enum_literal
     refute canonical =~ submitted

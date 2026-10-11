@@ -56,6 +56,13 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
              |> Map.put("mcp_filesystem", "true")
   end
 
+  test "extracted trace-log modules retain operator coverage" do
+    for name <- ~w(append capture publish query source) do
+      path = "lib/ptc_runner/kernel/trace_log/#{name}.ex"
+      assert classify([path]) == only(~w(core operator)), path
+    end
+  end
+
   test "known standing paths do not fall through to every scope" do
     docs = only(["docs"])
     core = only(["core"])

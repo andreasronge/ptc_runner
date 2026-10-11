@@ -30,11 +30,11 @@ defmodule PtcRunner.Kernel.TraceLogEnvironmentTest do
       restore_env(sentinel, original_sentinel)
     end)
 
-    assert :ok = TraceLog.append_jsonl(Path.join(directory, "append.jsonl"), [])
+    assert :ok = TraceLog.Append.append_jsonl(Path.join(directory, "append.jsonl"), [])
     {:ok, stat} = File.stat(directory)
 
     assert :ok =
-             TraceLog.publish_jsonl(Path.join(directory, "published.jsonl"), [],
+             TraceLog.Publish.publish_jsonl(Path.join(directory, "published.jsonl"), [],
                expected_parent_identity: {stat.major_device, stat.minor_device, stat.inode}
              )
 

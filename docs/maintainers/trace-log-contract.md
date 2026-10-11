@@ -89,7 +89,11 @@ Kernel and capability providers
   emit canonical bounded events
 
 TraceLog
-  stores, sanitizes, loads, indexes, filters, and bounds event queries
+  Capture: immutable inventory, loading and admission
+  Append: descriptor-bound append and path/inode authority leases
+  Publish: canonical publication and TracePublication callbacks
+  Query: compiled analysis, filtering and bounded pagination
+  Source: shared encoding, validation and file identity checks
 
 Consumers
   ptc_viewer, CLI/debug tools, and the shared analysis/* capability surface

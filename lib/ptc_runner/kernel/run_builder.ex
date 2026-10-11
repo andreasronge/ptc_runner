@@ -1899,7 +1899,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
       path ->
         private? = event_policy == :private or provider_class == :private_inspection
 
-        case TraceLog.preflight_destination(path, private?) do
+        case TraceLog.Append.preflight_destination(path, private?) do
           :ok -> :ok
           {:error, reason} -> {:error, {:trace_preflight_failed, reason}}
         end

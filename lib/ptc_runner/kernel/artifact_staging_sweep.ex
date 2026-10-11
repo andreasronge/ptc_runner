@@ -58,7 +58,7 @@ defmodule PtcRunner.Kernel.ArtifactStagingSweep do
   defp inspect_parent(parent, root, root_stat, uid, entries, candidates) do
     lock = PrivateDirectory.staging_lock_path(Path.join(parent, "unused"))
 
-    case TraceLog.with_append_authority_lock(lock, fn ->
+    case TraceLog.Append.with_append_authority_lock(lock, fn ->
            inspect_locked_parent(parent, root, root_stat, uid, entries, candidates)
          end) do
       {remaining_entries, remaining_candidates} when is_integer(remaining_entries) ->

@@ -245,7 +245,12 @@ defmodule PtcRunner.Soak.AnalysisSessionSoakTest do
         usage: %{llm_budget: LLMBudget.initial_terminal_projection(limits)}
       })
 
-    :ok = TraceLog.append_jsonl(Path.join(directory, run_id <> ".jsonl"), EventSink.events(sink))
+    :ok =
+      TraceLog.Append.append_jsonl(
+        Path.join(directory, run_id <> ".jsonl"),
+        EventSink.events(sink)
+      )
+
     EventSink.stop(sink)
   end
 end

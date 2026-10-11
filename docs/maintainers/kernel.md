@@ -522,7 +522,13 @@ correlation metadata to the canonical plane and retain exact payloads only
 under private authority.
 
 `EventSink` owns event identity, sequence, bounds, loss policy, and terminal
-finalization. `TraceLog` owns canonical persistence and queries.
+finalization. `TraceLog` is the capture/query façade. `TraceLog.Capture` owns immutable
+file and directory admission; `TraceLog.Query` owns loaded-event analysis,
+filtering and pagination. `TraceLog.Append` owns append and cross-process
+authority leases, and `TraceLog.Publish` owns publication, including the
+callbacks supplied to `TracePublication`. `TraceLog.Source` shares canonical
+encoding, validation and file identity checks. Capture depends on Query for
+compiled analysis; Query does not load captures.
 `InspectionArtifact` owns the private grammar and correlation rules.
 `RunAnalysis` and the Viewer consume those snapshots rather than define another
 event model.
@@ -631,7 +637,7 @@ appenders therefore cannot both approve the same prefix and then race the byte
 or sequence checks.
 
 Complete analysis-session batches use atomic no-clobber publication rather than
-append. `TraceLog` validates and deterministically encodes the whole batch,
+append. `TraceLog.Publish` validates and deterministically encodes the whole batch,
 writes and syncs an exclusive same-directory temporary sibling whose name is not
 a discoverable trace, installs the final name with a hard link, and syncs the
 containing directory before reporting success. Removing the temporary link is
@@ -650,8 +656,8 @@ host-selected destinations only and grants no Lisp write authority.
 ### Immutable directory captures
 
 `TraceSnapshot` pins one host-selected canonical trace directory for a bounded
-analysis session. It is deliberately not another public `TraceLog.source()`
-variant and cannot capture a file or an inspection artifact. The constructor
+analysis session. Its directory constructor cannot capture a file or an
+inspection artifact. The constructor
 fixes whether the directory is ordinary normal-only input or private-authorized
 canonical input; a caller cannot widen an existing handle or relabel it for
 another profile.

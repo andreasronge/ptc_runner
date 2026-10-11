@@ -340,7 +340,7 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
 
     lock =
       Task.async(fn ->
-        TraceLog.with_append_authority_lock(
+        TraceLog.Append.with_append_authority_lock(
           PrivateDirectory.staging_lock_path(staging),
           fn ->
             send(parent, :locked)

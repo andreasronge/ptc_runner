@@ -44,7 +44,7 @@ defmodule PtcRunner.Kernel.ReplTerminalization do
       when is_binary(path) and is_list(events) do
     private? = EventSink.policy(event_sink) == :private
 
-    case TraceLog.append_jsonl(path, events, private: private?) do
+    case TraceLog.Append.append_jsonl(path, events, private: private?) do
       :ok -> :ok
       {:error, _reason} -> {:error, :trace_persistence_failed}
     end
