@@ -8,7 +8,7 @@ defmodule PtcRunner.ViewerFrontendGlobalStateTest do
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
   import PtcRunner.TestSupport.ViewerFrontendFixtures
 
-  alias PtcRunner.Kernel.CommandRouter
+  alias PtcRunner.CommandRouter
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.ViewerFrontend
 

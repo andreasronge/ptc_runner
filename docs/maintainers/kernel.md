@@ -80,6 +80,16 @@ gate. Protocol implementations inherit the layer of their implemented type.
 Referenced targets use the same name-based classification even when compiled
 outside `lib/`. Moving a file does not change its classification.
 
+`CommandRouter` owns frontend selection and command presentation.
+`ProjectViewerAdapter` routes Viewer requests to snapshot APIs or
+`PtcRunner.ViewerSnapshotStore`. Both the adapter and store use the frontend
+`ViewerSnapshotProjection` for immutable snapshot presentation, so
+the store does not call back into its adapter.
+`PtcRunner.Kernel.CommandEngine` and `CommandRunDispatch`
+remain kernel modules: they parse and prepare commands, enforce execution and
+publication boundaries, and return sealed outcomes for direct callers as well
+as frontend callers. They do not deliver frontend progress or select frontends.
+
 The kernel owns `PtcRunner.Kernel.Progress`, a per-run observation port separate
 from the canonical `EventSink`. Execution configuration supplies its sink
 explicitly. Frontends translate Viewer environment settings, labels and target

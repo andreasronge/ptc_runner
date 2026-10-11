@@ -4,7 +4,7 @@ defmodule PtcRunner.Kernel.InspectionPageCollectorTest do
   alias PtcRunner.Kernel.ConversationProjection
   alias PtcRunner.Kernel.InspectionPageCollector
   alias PtcRunner.Kernel.InspectionSnapshot
-  alias PtcRunner.Kernel.ProjectViewerAdapter
+  alias PtcRunner.ProjectViewerAdapter
 
   test "collects every bounded page without presenting truncated data as complete" do
     items = Enum.map(1..1_250, &%{"item" => &1})

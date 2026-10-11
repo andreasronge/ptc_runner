@@ -1,4 +1,4 @@
-defmodule PtcRunner.Kernel.CommandRouter do
+defmodule PtcRunner.CommandRouter do
   @moduledoc false
 
   alias PtcRunner.CLIProgress

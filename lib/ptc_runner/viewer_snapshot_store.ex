@@ -18,8 +18,8 @@ defmodule PtcRunner.ViewerSnapshotStore do
 
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.ProjectConfig
-  alias PtcRunner.Kernel.ProjectViewerAdapter
   alias PtcRunner.Kernel.TraceSnapshot
+  alias PtcRunner.ViewerSnapshotProjection
 
   @capture_timeout_ms 15_000
   @call_timeout_ms @capture_timeout_ms + 5_000
@@ -477,22 +477,22 @@ defmodule PtcRunner.ViewerSnapshotStore do
   defp inspect_snapshot(nil, _operation, _run_id), do: {:error, :unavailable}
 
   defp inspect_snapshot(snapshot, :conversation, run_id),
-    do: ProjectViewerAdapter.conversation({:inspection_snapshot, snapshot}, run_id)
+    do: ViewerSnapshotProjection.conversation({:inspection_snapshot, snapshot}, run_id)
 
   defp inspect_snapshot(snapshot, :generated_sources, run_id),
-    do: ProjectViewerAdapter.generated_sources({:inspection_snapshot, snapshot}, run_id)
+    do: ViewerSnapshotProjection.generated_sources({:inspection_snapshot, snapshot}, run_id)
 
   defp inspect_snapshot(snapshot, :result, run_id),
-    do: ProjectViewerAdapter.result({:inspection_snapshot, snapshot}, run_id)
+    do: ViewerSnapshotProjection.result({:inspection_snapshot, snapshot}, run_id)
 
   defp inspect_snapshot(snapshot, :preludes, run_id),
-    do: ProjectViewerAdapter.preludes({:inspection_snapshot, snapshot}, run_id)
+    do: ViewerSnapshotProjection.preludes({:inspection_snapshot, snapshot}, run_id)
 
   defp inspect_snapshot(snapshot, :execution_errors, run_id),
-    do: ProjectViewerAdapter.execution_errors({:inspection_snapshot, snapshot}, run_id)
+    do: ViewerSnapshotProjection.execution_errors({:inspection_snapshot, snapshot}, run_id)
 
   defp inspect_snapshot(snapshot, :explicit_failure_values, run_id),
-    do: ProjectViewerAdapter.explicit_failure_values({:inspection_snapshot, snapshot}, run_id)
+    do: ViewerSnapshotProjection.explicit_failure_values({:inspection_snapshot, snapshot}, run_id)
 
   defp cleanup(trace, inspection) do
     InspectionSnapshot.stop(inspection)

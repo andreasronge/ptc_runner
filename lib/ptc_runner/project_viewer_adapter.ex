@@ -1,10 +1,9 @@
-defmodule PtcRunner.Kernel.ProjectViewerAdapter do
+defmodule PtcRunner.ProjectViewerAdapter do
   @moduledoc false
 
-  alias PtcRunner.Kernel.ConversationProjection
-  alias PtcRunner.Kernel.InspectionPageCollector
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.TraceSnapshot
+  alias PtcRunner.ViewerSnapshotProjection
   alias PtcRunner.ViewerSnapshotStore
 
   @spec query(
@@ -14,7 +13,7 @@ defmodule PtcRunner.Kernel.ProjectViewerAdapter do
           map()
         ) :: {:ok, map()} | {:error, atom()}
   def query({:trace_snapshot, snapshot}, operation, arguments),
-    do: TraceSnapshot.query(snapshot, operation, arguments)
+    do: ViewerSnapshotProjection.query({:trace_snapshot, snapshot}, operation, arguments)
 
   def query({:viewer_snapshot_store, store}, operation, arguments),
     do: ViewerSnapshotStore.query(store, operation, arguments)
@@ -27,16 +26,8 @@ defmodule PtcRunner.Kernel.ProjectViewerAdapter do
           binary()
         ) ::
           {:ok, map()} | {:error, atom()}
-  def conversation({:inspection_snapshot, snapshot}, run_id) do
-    with {:ok, page} <- collect(snapshot, :turns, run_id),
-         result = ConversationProjection.present_page(page),
-         true <- byte_size(Jason.encode!(result)) <= 1_000_000 do
-      {:ok, result}
-    else
-      false -> {:error, :result_limit_exceeded}
-      {:error, _reason} = error -> error
-    end
-  end
+  def conversation({:inspection_snapshot, snapshot}, run_id),
+    do: ViewerSnapshotProjection.conversation({:inspection_snapshot, snapshot}, run_id)
 
   def conversation({:viewer_snapshot_store, store}, run_id),
     do: ViewerSnapshotStore.conversation(store, run_id)
@@ -49,7 +40,7 @@ defmodule PtcRunner.Kernel.ProjectViewerAdapter do
           binary()
         ) :: {:ok, map()} | {:error, atom()}
   def generated_sources({:inspection_snapshot, snapshot}, run_id),
-    do: collect(snapshot, :generated_sources, run_id)
+    do: ViewerSnapshotProjection.generated_sources({:inspection_snapshot, snapshot}, run_id)
 
   def generated_sources({:viewer_snapshot_store, store}, run_id),
     do: ViewerSnapshotStore.generated_sources(store, run_id)
@@ -63,7 +54,7 @@ defmodule PtcRunner.Kernel.ProjectViewerAdapter do
         ) ::
           {:ok, map()} | {:error, atom()}
   def result({:inspection_snapshot, snapshot}, run_id),
-    do: InspectionSnapshot.query(snapshot, :result, %{"run_id" => run_id})
+    do: ViewerSnapshotProjection.result({:inspection_snapshot, snapshot}, run_id)
 
   def result({:viewer_snapshot_store, store}, run_id),
     do: ViewerSnapshotStore.result(store, run_id)
@@ -77,7 +68,7 @@ defmodule PtcRunner.Kernel.ProjectViewerAdapter do
         ) ::
           {:ok, map()} | {:error, atom()}
   def preludes({:inspection_snapshot, snapshot}, run_id),
-    do: collect(snapshot, :effective_preludes, run_id)
+    do: ViewerSnapshotProjection.preludes({:inspection_snapshot, snapshot}, run_id)
 
   def preludes({:viewer_snapshot_store, store}, run_id),
     do: ViewerSnapshotStore.preludes(store, run_id)
@@ -91,7 +82,7 @@ defmodule PtcRunner.Kernel.ProjectViewerAdapter do
         ) ::
           {:ok, map()} | {:error, atom()}
   def execution_errors({:inspection_snapshot, snapshot}, run_id),
-    do: collect(snapshot, :execution_errors, run_id)
+    do: ViewerSnapshotProjection.execution_errors({:inspection_snapshot, snapshot}, run_id)
 
   def execution_errors({:viewer_snapshot_store, store}, run_id),
     do: ViewerSnapshotStore.execution_errors(store, run_id)
@@ -105,25 +96,10 @@ defmodule PtcRunner.Kernel.ProjectViewerAdapter do
         ) ::
           {:ok, map()} | {:error, atom()}
   def explicit_failure_values({:inspection_snapshot, snapshot}, run_id),
-    do: collect(snapshot, :explicit_failure_values, run_id)
+    do: ViewerSnapshotProjection.explicit_failure_values({:inspection_snapshot, snapshot}, run_id)
 
   def explicit_failure_values({:viewer_snapshot_store, store}, run_id),
     do: ViewerSnapshotStore.explicit_failure_values(store, run_id)
 
   def explicit_failure_values(_source, _run_id), do: {:error, :invalid_inspection_query}
-
-  @spec collect(
-          InspectionSnapshot.t(),
-          :turns
-          | :generated_sources
-          | :effective_preludes
-          | :execution_errors
-          | :explicit_failure_values,
-          binary()
-        ) ::
-          {:ok, map()} | {:error, atom()}
-  defp collect(snapshot, operation, run_id) do
-    query = &InspectionSnapshot.query(snapshot, operation, &1)
-    InspectionPageCollector.collect(query, operation, run_id)
-  end
 end

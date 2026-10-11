@@ -121,9 +121,9 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
         expected_port: 80,
         trace_dir: Path.dirname(journey.trace),
         trace_source: inspection_source.trace,
-        kernel_trace_adapter: PtcRunner.Kernel.ProjectViewerAdapter,
+        kernel_trace_adapter: PtcRunner.ProjectViewerAdapter,
         inspection_store: inspection_store,
-        inspection_adapter: PtcRunner.Kernel.ProjectViewerAdapter
+        inspection_adapter: PtcRunner.ProjectViewerAdapter
       ]
 
       conversation =

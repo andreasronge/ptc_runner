@@ -1,30 +1,5 @@
 [
   {
-    "from": "PtcRunner.Kernel.CommandRouter",
-    "to": "PtcRunner.CLIProgress",
-    "issue": 2233
-  },
-  {
-    "from": "PtcRunner.Kernel.CommandRouter",
-    "to": "PtcRunner.ReplFrontend",
-    "issue": 2233
-  },
-  {
-    "from": "PtcRunner.Kernel.CommandRouter",
-    "to": "PtcRunner.TranscriptFrontend",
-    "issue": 2233
-  },
-  {
-    "from": "PtcRunner.Kernel.CommandRouter",
-    "to": "PtcRunner.ViewerFrontend",
-    "issue": 2233
-  },
-  {
-    "from": "PtcRunner.Kernel.ProjectViewerAdapter",
-    "to": "PtcRunner.ViewerSnapshotStore",
-    "issue": 2233
-  },
-  {
     "from": "PtcRunner.Lisp",
     "to": "PtcRunner.Kernel.SafeMetadata",
     "issue": 2231

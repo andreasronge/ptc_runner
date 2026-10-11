@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.CommandFrontendTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.CommandRouter
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandDiagnosticRenderer
@@ -10,7 +11,6 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandRenderer
   alias PtcRunner.Kernel.CommandResults
-  alias PtcRunner.Kernel.CommandRouter
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
