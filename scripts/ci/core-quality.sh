@@ -34,6 +34,7 @@ rm -f "$stamp_file"
 # their own processes.
 mix do compile --warnings-as-errors + \
   xref graph --format cycles --label compile-connected --fail-above 0 + \
+  ptc.check_layers + \
   format --check-formatted + \
   credo --strict + \
   ptc.validate_spec + \
