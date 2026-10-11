@@ -637,37 +637,23 @@ defmodule PtcRunner.Kernel.HostConfigTest do
              dir |> write_config(write_digest, unique_name()) |> HostConfig.load()
   end
 
-  test "every enumerated value decodes to an atom this module owns" do
-    # The assertions above check the decoded values but not where the atoms came
-    # from. They previously came from `String.to_existing_atom/1`, which only
-    # succeeds once some other module has interned the atom: `:bounded` and
-    # `:closed` appear in MCPProtocol and MCPSource guards, `:bearer` and
-    # `:basic` nowhere else at all. Decoding a valid host document therefore
-    # raised ArgumentError rather than returning a result whenever HostConfig
-    # ran first, and the tests above passed only because the surrounding suite
-    # happened to load MCP first.
-    #
-    # Reading the compiled atom chunk is the one check that does not depend on
-    # what else the VM has loaded: an atom in this list is a literal of this
-    # module and exists as soon as the module does.
-    {:ok, {_module, [atoms: atoms]}} =
-      PtcRunner.Kernel.HostConfig |> :code.which() |> :beam_lib.chunks([:atoms])
-
-    owned = MapSet.new(atoms, fn {_index, atom} -> atom end)
-
-    for atom <- [
-          :bearer,
-          :basic,
-          :closed,
-          :bounded,
-          :write,
-          :normal,
-          :private_inspection,
-          :full,
-          :digest_results
+  test "enumerated values are literals in their decoder modules" do
+    # Inspecting each decoder's atom chunk verifies that decoding works even
+    # when no unrelated module has interned its atoms first.
+    for {decoder, expected} <- [
+          {HostConfig.Transport, [:bearer, :basic]},
+          {HostConfig.Common,
+           [:closed, :bounded, :write, :normal, :private_inspection, :full, :digest_results]}
         ] do
-      assert MapSet.member?(owned, atom),
-             "#{inspect(atom)} must be a literal in HostConfig, not borrowed from another module"
+      {:ok, {^decoder, [atoms: atoms]}} =
+        decoder |> :code.which() |> :beam_lib.chunks([:atoms])
+
+      owned = MapSet.new(atoms, fn {_index, atom} -> atom end)
+
+      for atom <- expected do
+        assert MapSet.member?(owned, atom),
+               "#{inspect(atom)} must be a literal in #{inspect(decoder)}"
+      end
     end
   end
 

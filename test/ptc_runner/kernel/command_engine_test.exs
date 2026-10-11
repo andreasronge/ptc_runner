@@ -33,7 +33,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.ExecutionPolicy
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.HostConfig
-  alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.Kernel.HostInstallation.Credentials
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.LimitCapacityDiagnostic
   alias PtcRunner.Kernel.LimitCatalog
@@ -4016,7 +4016,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     # Trailing whitespace is not part of the secret; the interior structure is.
     assert {:ok, %{"key" => resolved}} =
-             HostInstallation.resolve_runtime_credentials(host, ["key"])
+             Credentials.resolve_runtime_credentials(host, ["key"])
 
     assert resolved == String.trim(pem)
     assert String.contains?(resolved, "\n")

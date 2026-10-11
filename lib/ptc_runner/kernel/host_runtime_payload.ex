@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.HostRuntimePayload do
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.Kernel.HostInstallation.Credentials
   alias PtcRunner.Kernel.HostInstallationOwner
 
   @aad_version 1
@@ -86,7 +87,7 @@ defmodule PtcRunner.Kernel.HostRuntimePayload do
   @spec resolve_credentials(t(), [binary()]) ::
           {:ok, %{binary() => binary()}} | {:error, term()}
   def resolve_credentials(%__MODULE__{} = payload, names) when is_list(names) do
-    with_host(payload, fn host -> HostInstallation.resolve_runtime_credentials(host, names) end)
+    with_host(payload, fn host -> Credentials.resolve_runtime_credentials(host, names) end)
   end
 
   def resolve_credentials(_payload, _names), do: {:error, :invalid_host_runtime_payload}

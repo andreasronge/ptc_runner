@@ -1,7 +1,7 @@
 defmodule PtcRunner.Kernel.DecisionHostConfigTest do
   use ExUnit.Case, async: true
   alias PtcRunner.Kernel.HostConfig
-  alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.Kernel.HostInstallation.Credentials
 
   test "HTTP decisions admit zero bounds and diagnose endpoints" do
     installation = %{
@@ -20,7 +20,7 @@ defmodule PtcRunner.Kernel.DecisionHostConfigTest do
     assert {:ok, host} = HostConfig.decode(config, ".")
     assert host.install["decisions"].max_cost_microusd_per_call == 0
 
-    assert HostInstallation.installation_credential_names(host.install["decisions"]) == []
+    assert Credentials.installation_credential_names(host.install["decisions"]) == []
 
     {:ok, changed} =
       HostConfig.decode(

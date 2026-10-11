@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.Kernel.HostInstallation.Selection
   alias PtcRunner.Kernel.HostInstallationOwner
   alias PtcRunner.Kernel.HostRuntimePayload
   alias PtcRunner.Kernel.InstallationCatalog
@@ -1223,7 +1224,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     }
 
     runtime =
-      HostInstallation.normalize_selection(
+      Selection.normalize_selection(
         host.install["remote"],
         selection,
         context(dir, :mission)
