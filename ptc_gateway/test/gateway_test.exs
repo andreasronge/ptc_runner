@@ -6,8 +6,6 @@ defmodule PtcGatewayTest do
 
   alias PtcRunner.Kernel.{
     GatewayConfig,
-    HostConfig,
-    HostInstallation,
     InspectionSnapshot,
     Limits,
     ProjectConfig,
@@ -15,7 +13,6 @@ defmodule PtcGatewayTest do
     RunCatalogProbe,
     ServingTemplate,
     TraceSnapshot,
-    WarmProviderApplications,
     WarmProviderRuntime
   }
 
@@ -198,83 +195,7 @@ defmodule PtcGatewayTest do
       end
     end)
 
-    {path, config} = fixture(dir, :write)
-
-    File.write!(
-      Path.join(dir, "workflow.clj"),
-      ~s|(ns app) (defn run {:effect :write :requires ["tool:llm-request"]} [input] (let [_ (tool/llm-request {"messages" [{"role" "user" "content" "hi"}]})] (return input)))|
-    )
-
-    manifest_path = Path.join(dir, "app.json")
-    manifest = manifest_path |> File.read!() |> Jason.decode!()
-
-    File.write!(
-      manifest_path,
-      Jason.encode!(
-        Map.put(manifest, "providers", %{"workflow" => [%{"name" => "selected", "config" => %{}}]})
-      )
-    )
-
-    File.write!(Path.join(dir, "provider.key"), "provider-fixture-key")
-
-    File.write!(
-      Path.join(dir, "host.json"),
-      Jason.encode!(%{
-        "credentials" => %{
-          "gateway" => %{"env" => "GATEWAY_TEST_TOKEN"},
-          "key" => %{"file" => "provider.key"}
-        },
-        "install" => %{
-          "selected" => %{
-            "source" => "llm",
-            "model" => "openrouter:google/gemma-2-27b-it",
-            "credential" => "key",
-            "structured_output_mode" => "unsupported",
-            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
-            "installation_revision" => "served-v1"
-          }
-        }
-      })
-    )
-
-    {:ok, host} = HostConfig.load(Path.join(dir, "host.json"))
-    {:ok, catalog} = HostInstallation.catalog(host)
-    on_exit(fn -> PtcRunner.Kernel.InstallationCatalog.close(catalog) end)
-    {:ok, services} = HostInstallation.runtime_services(host)
-
-    {:ok, template} =
-      ServingTemplate.from_directory(manifest_path, host.limits,
-        providers: catalog,
-        inspection_capture: true
-      )
-
-    {:ok, applications, _} = WarmProviderApplications.start([:req_llm], 1)
-
-    pins = PtcRunner.TestSupport.WarmMCPFixture.pins(template, services)
-    Enum.each(Enum.reverse(applications), &Application.stop/1)
-
-    config =
-      config
-      |> Map.put("artifacts", %{"root" => "artifacts", "trace" => true, "inspection" => true})
-      |> Map.put("private_audit", %{
-        "directory" => "audit",
-        "max_file_bytes" => 4096,
-        "max_retained_files" => 2
-      })
-      |> update_in(["tools"], fn tools ->
-        Enum.map(tools, fn tool ->
-          tool
-          |> Map.put("allow_write", true)
-          |> Map.put(
-            "expected_application_content_digest",
-            ServingTemplate.application_content_digest(template)
-          )
-          |> Map.put("installation_config_pins", pins["installation_config_pins"])
-          |> Map.put("provider_snapshot_pins", pins["provider_snapshot_pins"])
-        end)
-      end)
-
-    File.write!(path, Jason.encode!(config))
+    {path, config} = llm_fixture(dir)
     env = Path.join(dir, "credentials.env")
     File.write!(env, "GATEWAY_TEST_TOKEN=#{@token}\n")
     assert {:ok, owner} = PtcGateway.start_link(path, env_file: env)
@@ -1916,37 +1837,6 @@ defmodule PtcGatewayTest do
     assert length(kept) == 2
     refute oldest in kept
     refute next in kept
-  end
-
-  # A second listener over the owner's live state, with extra router options the
-  # production listener never sets. Returns it with `config` pointed at its port.
-  defp serve_router(state, config, router_opts) do
-    {:ok, socket} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
-    {:ok, port} = :inet.port(socket)
-    :gen_tcp.close(socket)
-    config = put_in(config, ["listen", "port"], port)
-
-    assert {:ok, listener} =
-             Bandit.start_link(
-               plug:
-                 {PtcGateway.Router,
-                  [
-                    listen: config["listen"],
-                    warm: state.warm,
-                    tools: state.metadata,
-                    tool_entries: state.tools,
-                    run_admission: state.run_admission,
-                    audit: state.audit,
-                    request_admission: state.request_admission
-                  ] ++ router_opts},
-               ip: {127, 0, 0, 1},
-               port: port,
-               startup_log: false,
-               http_2_options: [enabled: false]
-             )
-
-    on_exit(fn -> stop(listener) end)
-    {listener, config}
   end
 
   defp block_audit_sync(owner) do

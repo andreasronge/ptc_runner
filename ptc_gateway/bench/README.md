@@ -5,6 +5,9 @@ reports admission, mailbox and residue measurements. Its clients share the
 server's BEAM schedulers, so throughput and latency include competition from
 the generator. Use a separate client process for absolute HTTP measurements.
 
+For the runtime soak coverage and residue gates, see the
+[gateway load probe](../../docs/maintainers/gateway-load-probe.md#runtime-soak-coverage).
+
 ## External HTTP/1.1 client (optional)
 
 Install [oha](https://github.com/hatoo/oha) separately. This benchmark is not a
