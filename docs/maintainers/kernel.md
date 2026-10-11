@@ -582,6 +582,11 @@ authority leases, and `TraceLog.Publish` owns publication, including the
 callbacks supplied to `TracePublication`. `TraceLog.Source` shares canonical
 encoding, validation and file identity checks. Capture depends on Query for
 compiled analysis; Query does not load captures.
+Evidence validation consumes the process-free `RuntimeToolContract` route
+vocabulary and `LLMRequestHash` request identity. These contracts do not build
+runtime callbacks or access replay cursors. Execution and replay consume storage;
+evidence storage does not call execution. Append owns its lock and reentrancy
+identities, independently of the capture/query façade.
 `InspectionArtifact` owns the private grammar and correlation rules.
 `RunAnalysis` and the Viewer consume those snapshots rather than define another
 event model.

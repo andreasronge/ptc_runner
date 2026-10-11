@@ -4,7 +4,7 @@ defmodule Mix.Tasks.PtcTranscriptTest do
 
   alias PtcRunner.Kernel.CommandEntry
   alias PtcRunner.Kernel.CommandRuntime
-  alias PtcRunner.Kernel.LLMReplay
+  alias PtcRunner.Kernel.LLMRequestHash
   alias PtcRunner.MixCommandAdapter
   alias PtcRunner.TestSupport.PrivateInspectionFixture
   alias PtcRunner.TestSupport.StreamingInspection
@@ -103,7 +103,7 @@ defmodule Mix.Tasks.PtcTranscriptTest do
     assert answer == "private-answer-#{run_id}"
 
     assert {:ok, ^request_hash} =
-             LLMReplay.request_hash(%{
+             LLMRequestHash.request_hash(%{
                "messages" => [%{"content" => prompt}],
                "system" => system
              })

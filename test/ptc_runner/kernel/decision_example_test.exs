@@ -4,7 +4,7 @@ defmodule PtcRunner.Kernel.DecisionExampleTest do
   alias PtcRunner.Kernel.ChatDecisions
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.InspectionSnapshot
-  alias PtcRunner.Kernel.LLMReplay
+  alias PtcRunner.Kernel.LLMRequestHash
   alias PtcRunner.Kernel.TraceSnapshot
 
   @example Path.expand("../../../examples/decision-refund-triage", __DIR__)
@@ -238,7 +238,7 @@ defmodule PtcRunner.Kernel.DecisionExampleTest do
                  "require_measured" (if (nil? probability) "escalate" (>= probability 0.5))})))
     """)
 
-    {:ok, hash} = LLMReplay.request_hash(request)
+    {:ok, hash} = LLMRequestHash.request_hash(request)
 
     for discrete <- [true, false] do
       measured = %{

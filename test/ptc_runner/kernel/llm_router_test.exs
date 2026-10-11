@@ -14,7 +14,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMCapability
-  alias PtcRunner.Kernel.LLMReplay
+  alias PtcRunner.Kernel.LLMRequestHash
   alias PtcRunner.Kernel.LLMRouter
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ProviderError
@@ -83,7 +83,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
              Kernel.run(~S|(return (llm/request {"messages" []}))|, config)
 
     assert_receive {:custom, %{"messages" => []}}
-    assert {:ok, request_hash} = LLMReplay.request_hash(%{"messages" => []})
+    assert {:ok, request_hash} = LLMRequestHash.request_hash(%{"messages" => []})
     assert {:ok, records} = StreamingInspection.records(inspection)
 
     assert input =

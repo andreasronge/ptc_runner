@@ -8,7 +8,7 @@ defmodule PtcRunner.Kernel.TraceLog.Query do
   alias PtcRunner.Kernel.QueryCursor
   alias PtcRunner.Kernel.QueryValidation
   alias PtcRunner.Kernel.ResultLimit
-  alias PtcRunner.Kernel.RuntimeTools
+  alias PtcRunner.Kernel.RuntimeToolContract
   alias PtcRunner.Kernel.TraceIsolationPresentation
 
   @default_limit 20
@@ -515,10 +515,10 @@ defmodule PtcRunner.Kernel.TraceLog.Query do
   end
 
   defp runtime_instrumented_name?("workflow", name),
-    do: RuntimeTools.instrumented_name?(:workflow, name)
+    do: RuntimeToolContract.instrumented_name?(:workflow, name)
 
   defp runtime_instrumented_name?("mission", name),
-    do: RuntimeTools.instrumented_name?(:mission, name)
+    do: RuntimeToolContract.instrumented_name?(:mission, name)
 
   defp scoped_terminal_call_count(calls, prefix) do
     Enum.reduce(calls, 0, fn {name, count}, total ->

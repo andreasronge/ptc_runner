@@ -7,7 +7,7 @@ defmodule PtcRunner.Kernel.DecisionHTTPHostTest do
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.InstallationCatalog
-  alias PtcRunner.Kernel.LLMReplay
+  alias PtcRunner.Kernel.LLMRequestHash
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.TestSupport.DecisionHTTPFixture
@@ -114,7 +114,7 @@ defmodule PtcRunner.Kernel.DecisionHTTPHostTest do
     assert usage["llm_budget"]["total_tokens"]["charged"] == 12
     assert usage["capability_calls"] == %{"workflow/decision-request" => 1}
 
-    {:ok, request_hash} = LLMReplay.request_hash(Map.drop(request, ["model"]))
+    {:ok, request_hash} = LLMRequestHash.request_hash(Map.drop(request, ["model"]))
 
     File.write!(
       Path.join(dir, "http-replay.jsonl"),

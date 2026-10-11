@@ -62,7 +62,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.JSONSchema
-  alias PtcRunner.Kernel.LLMReplay
+  alias PtcRunner.Kernel.LLMRequestHash
   alias PtcRunner.Kernel.LLMUsage
   alias PtcRunner.Kernel.ModelCapabilities
   alias PtcRunner.Kernel.RoutedCapability
@@ -922,7 +922,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
     do: payload
 
   defp put_model_request_hash(payload, arguments) do
-    case LLMReplay.request_hash(arguments) do
+    case LLMRequestHash.request_hash(arguments) do
       {:ok, request_hash} -> Map.put(payload, :request_hash, request_hash)
       :error -> payload
     end

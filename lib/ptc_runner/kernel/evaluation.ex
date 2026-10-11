@@ -50,7 +50,7 @@ defmodule PtcRunner.Kernel.Evaluation do
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.ProjectionError
   alias PtcRunner.Kernel.RunState
-  alias PtcRunner.Kernel.RuntimeTools
+  alias PtcRunner.Kernel.RuntimeToolContract
   alias PtcRunner.Kernel.TerminalResultLimit
   alias PtcRunner.Kernel.ToolGrant
   alias PtcRunner.Lisp
@@ -916,7 +916,7 @@ defmodule PtcRunner.Kernel.Evaluation do
 
   defp read_only_tool?(environment, name) do
     read_only_capability?(environment, name) or
-      name in RuntimeTools.mission_contract_descriptor()["routes"]
+      name in RuntimeToolContract.mission_contract_descriptor()["routes"]
   end
 
   defp evaluator_capability_activity?(step) do

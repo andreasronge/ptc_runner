@@ -21,6 +21,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
+  alias PtcRunner.Kernel.RuntimeToolContract
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.SourceCheck
   alias PtcRunner.Kernel.ValueContract
@@ -37,32 +38,6 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   alias PtcRunner.LLM.OutputLimit
 
   @agent_invocation_key {__MODULE__, :agent_invocation}
-  @mission_contract_version 1
-  @mission_routes [
-    {"cap-describe", :capability_description},
-    {"cap-list", :capability_list},
-    {"runtime-remaining", :remaining},
-    {"runtime-usage", :usage}
-  ]
-
-  @doc false
-  @spec mission_contract_descriptor() :: map()
-  def mission_contract_descriptor do
-    %{
-      "version" => @mission_contract_version,
-      "routes" => Enum.map(@mission_routes, &elem(&1, 0))
-    }
-  end
-
-  @doc false
-  @spec instrumented_name?(:workflow | :mission, binary()) :: boolean()
-  def instrumented_name?(environment, name)
-      when environment in [:workflow, :mission] and is_binary(name) do
-    mission_route? = Enum.any?(@mission_routes, &(elem(&1, 0) == name))
-
-    mission_route? or (environment == :workflow and Environment.reserved_capability_name?(name))
-  end
-
   @doc """
   Builds the reserved runtime-tool map for one environment.
 
@@ -82,7 +57,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     # being captured even once per callback. See PtcRunner.Kernel.ToolGrant.
     view = Environment.capability_view(environment)
 
-    @mission_routes
+    RuntimeToolContract.mission_routes()
     |> Map.new(fn {name, route} ->
       {name, route_callback(route, state, view, event_sink, kind, lease)}
     end)

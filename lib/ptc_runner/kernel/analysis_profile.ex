@@ -17,7 +17,7 @@ defmodule PtcRunner.Kernel.AnalysisProfile do
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.MissionInventory
   alias PtcRunner.Kernel.RunConfig
-  alias PtcRunner.Kernel.RuntimeTools
+  alias PtcRunner.Kernel.RuntimeToolContract
   alias PtcRunner.Kernel.SessionTrace
   alias PtcRunner.Kernel.SourceIntern
   alias PtcRunner.Kernel.WorkflowEnvironment
@@ -172,7 +172,7 @@ defmodule PtcRunner.Kernel.AnalysisProfile do
       "profile_id" => recipe.id(),
       "bundle_hash" => bundle.hash,
       "mission_inventory_hash" => inventory.hash,
-      "implicit_runtime" => RuntimeTools.mission_contract_descriptor(),
+      "implicit_runtime" => RuntimeToolContract.mission_contract_descriptor(),
       "limits" => limits |> Map.from_struct() |> stringify_keys(),
       "explicit_capabilities" => mission.capabilities |> Map.keys() |> Enum.sort(),
       "components" => bundle.component_ids,

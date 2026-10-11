@@ -10,7 +10,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMCapability
-  alias PtcRunner.Kernel.LLMReplay
+  alias PtcRunner.Kernel.LLMRequestHash
   alias PtcRunner.Kernel.LLMRouter
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ModelContract
@@ -4003,8 +4003,8 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert elem(small, 1) == elem(large, 1)
     assert elem(small, 2) == elem(large, 2)
 
-    assert {:ok, small_hash} = LLMReplay.request_hash(elem(small, 1))
-    assert {:ok, ^small_hash} = LLMReplay.request_hash(elem(large, 1))
+    assert {:ok, small_hash} = LLMRequestHash.request_hash(elem(small, 1))
+    assert {:ok, ^small_hash} = LLMRequestHash.request_hash(elem(large, 1))
   end
 
   test "agent distinguishes retained-definition rejection from a heap kill" do
