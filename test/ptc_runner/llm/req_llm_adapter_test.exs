@@ -13,8 +13,10 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
   alias PtcRunner.LLM.Invocation
   alias PtcRunner.LLM.ReqLLMAdapter
   alias PtcRunner.LLM.ReqLLMPreparedModel
+  alias PtcRunner.LLM.ReqLLMUsage
   alias PtcRunner.LLM.Requirements
   alias PtcRunner.TestSupport.LLMSupport
+  alias PtcRunner.TestSupport.ReqLLMGeneration
   alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
   alias ReqLLM.Message
@@ -38,19 +40,23 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
   describe "generate_object/4" do
     test "returns structured_output_not_supported for ollama" do
       assert {:error, :structured_output_not_supported} =
-               ReqLLMAdapter.generate_object("ollama:model", [], %{})
+               ReqLLMGeneration.generate_object("ollama:model", [], %{})
     end
   end
 
   describe "generate_with_tools/4" do
     test "returns tool_calling_not_supported for ollama" do
       assert {:error, :tool_calling_not_supported} =
-               ReqLLMAdapter.generate_with_tools("ollama:model", [], [])
+               ReqLLMGeneration.generate_with_tools("ollama:model", [], [])
     end
 
     test "returns tool_calling_not_supported for openai-compat" do
       assert {:error, :tool_calling_not_supported} =
-               ReqLLMAdapter.generate_with_tools("openai-compat:http://localhost|model", [], [])
+               ReqLLMGeneration.generate_with_tools(
+                 "openai-compat:http://localhost|model",
+                 [],
+                 []
+               )
     end
   end
 
@@ -690,7 +696,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
 
       meta = %{ptc_runner_usage_observation: :reported}
 
-      assert ReqLLMAdapter.build_tokens_from_req_llm_response(usage, meta) == %{
+      assert ReqLLMUsage.build_tokens_from_req_llm_response(usage, meta) == %{
                input: 100,
                output: 50,
                cache_read: 20,
@@ -704,7 +710,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
 
       meta = %{ptc_runner_usage_observation: :reported}
 
-      assert ReqLLMAdapter.build_tokens_from_req_llm_response(usage, meta) == %{
+      assert ReqLLMUsage.build_tokens_from_req_llm_response(usage, meta) == %{
                input: 7,
                output: 3,
                cache_read: 2,
@@ -720,7 +726,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
         ptc_runner_usage_observation: :reported
       }
 
-      assert ReqLLMAdapter.build_tokens_from_req_llm_response(usage, meta) == %{
+      assert ReqLLMUsage.build_tokens_from_req_llm_response(usage, meta) == %{
                input: 1,
                cache_read: 0,
                cache_creation: 42
@@ -728,7 +734,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
     end
 
     test "does not invent missing input or output usage" do
-      assert ReqLLMAdapter.build_tokens_from_req_llm_response(%{}, %{}) == %{
+      assert ReqLLMUsage.build_tokens_from_req_llm_response(%{}, %{}) == %{
                cache_read: 0,
                cache_creation: 0
              }
@@ -865,9 +871,9 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
 
     result =
       if is_list(Map.get(request, :tools)) and request.tools != [] do
-        ReqLLMAdapter.generate_with_tools(selector, messages, request.tools, opts)
+        ReqLLMGeneration.generate_with_tools(selector, messages, request.tools, opts)
       else
-        ReqLLMAdapter.generate_text(selector, messages, opts)
+        ReqLLMGeneration.generate_text(selector, messages, opts)
       end
 
     mode =
