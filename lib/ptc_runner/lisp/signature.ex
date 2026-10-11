@@ -93,6 +93,9 @@ defmodule PtcRunner.Lisp.Signature do
 
   Returns `:ok` or `{:error, [validation_error()]}`.
 
+  Options are passed to `PtcRunner.Lisp.Signature.Validator.validate/3`,
+  including `:max_errors` to bound collected diagnostics (default: `:infinity`).
+
   ## Examples
 
       iex> {:ok, sig} = PtcRunner.Lisp.Signature.parse("() -> {count :int, items [:string]}")
@@ -104,11 +107,14 @@ defmodule PtcRunner.Lisp.Signature do
       {:error, [%{path: [], message: "expected int, got string"}]}
   """
   @spec validate(signature(), term()) :: :ok | {:error, [validation_error()]}
-  def validate({:signature, _params, return_type}, data) do
-    Validator.validate(data, return_type)
+  @spec validate(signature(), term(), keyword()) :: :ok | {:error, [validation_error()]}
+  def validate(signature, data, opts \\ [])
+
+  def validate({:signature, _params, return_type}, data, opts) do
+    Validator.validate(data, return_type, opts)
   end
 
-  def validate(signature, _data) do
+  def validate(signature, _data, _opts) do
     {:error, "signature must be a parsed signature tuple, got #{inspect(signature)}"}
   end
 
