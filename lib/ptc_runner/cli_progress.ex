@@ -9,6 +9,7 @@ defmodule PtcRunner.CLIProgress do
   alias PtcRunner.LiveStatus.Target
 
   @heartbeat_ms 10_000
+  @presentation_timeout_ms 250
 
   def start(arguments, opts) do
     writer = Keyword.get(opts, :progress_writer, &IO.write(:stderr, &1))
@@ -17,29 +18,56 @@ defmodule PtcRunner.CLIProgress do
     guarded_start(self(), {arguments, writer, columns, clock})
   end
 
+  defdelegate attach_runtime(runtime, opts), to: PtcRunner.LiveStatus
+
   def attach(runtime, nil), do: {:ok, runtime}
 
   def attach(runtime, pid) do
     {:ok, progress} =
-      Target.new(fn _run_id, frame -> send(pid, {:frame, frame}) end, append_external?: true)
+      Target.new(fn run_id, frame -> deliver_frame(pid, run_id, frame) end,
+        append_external?: true
+      )
 
-    target =
-      case runtime.live_status do
-        nil -> progress
-        existing -> elem(Target.compose([progress, existing]), 1)
+    existing = runtime.progress_setup
+
+    setup = fn package, application ->
+      progress_sink = PtcRunner.LiveStatus.sink(progress)
+
+      external =
+        PtcRunner.LiveStatus.sink(
+          PtcRunner.LiveStatus.external_target(
+            PtcRunner.LiveStatus.application_label_for(package, application)
+          )
+        )
+
+      other = if existing, do: existing.(package, application), else: external
+
+      fn run_id, frame ->
+        progress_result = progress_sink.(run_id, frame)
+        other_result = if other, do: other.(run_id, frame), else: :ok
+        if :error in [progress_result, other_result], do: :error, else: :ok
       end
+    end
 
-    CommandRuntime.with_live_status(runtime, target)
+    CommandRuntime.with_progress(runtime, setup)
   end
 
   def finish(nil, _presentation), do: :ok
 
   def finish(pid, presentation) do
-    GenServer.call(pid, {:finish, presentation}, 250)
+    GenServer.call(pid, {:finish, presentation}, @presentation_timeout_ms)
   catch
     :exit, _ ->
       Process.exit(pid, :kill)
       :ok
+  end
+
+  defp deliver_frame(pid, run_id, frame) do
+    GenServer.call(pid, {:frame, run_id, frame}, @presentation_timeout_ms)
+  catch
+    :exit, _reason ->
+      Process.exit(pid, :kill)
+      :error
   end
 
   defp guarded_start(owner, init) do
@@ -111,7 +139,9 @@ defmodule PtcRunner.CLIProgress do
     do: {:noreply, state |> write(state.initial) |> Map.delete(:initial)}
 
   @impl GenServer
-  def handle_info({:frame, frame}, state) do
+  def handle_call({:frame, run_id, frame}, _from, state) do
+    frame = Map.put(frame, :run_id, run_id)
+
     frame =
       Map.put(
         frame,
@@ -119,11 +149,11 @@ defmodule PtcRunner.CLIProgress do
         max(Map.get(frame, :elapsed_ms, 0), state.clock.() - state.started)
       )
 
-    {:noreply, render(state, frame)}
+    {:reply, :ok, render(state, frame)}
   rescue
-    _ -> {:noreply, state}
+    _ -> {:reply, :error, state}
   catch
-    _, _ -> {:noreply, state}
+    _, _ -> {:reply, :error, state}
   end
 
   @impl GenServer

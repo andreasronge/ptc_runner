@@ -690,8 +690,9 @@ defmodule PtcRunner.Kernel.RunState do
   # about to enforce, and an invented usage snapshot would misreport the budget.
   # Exiting with the dead owner is the safe outcome, so they stay unguarded.
   @spec usage(t()) :: map()
-  @doc "Returns a read-only bounded usage snapshot."
-  def usage(state), do: call(state, :usage)
+  @spec usage(t(), timeout()) :: map()
+  @doc "Returns a read-only bounded usage snapshot with an optional call timeout."
+  def usage(state, timeout_ms \\ 5_000), do: call(state, :usage, timeout_ms)
 
   @spec limits(t()) :: Limits.t()
   @doc "Returns the normalized limits owned by this run."
@@ -2421,8 +2422,10 @@ defmodule PtcRunner.Kernel.RunState do
   defp valid_run_deadline?(nil), do: true
   defp valid_run_deadline?(deadline), do: Deadline.valid?(deadline)
 
-  defp call(%__MODULE__{pid: pid, token: token}, request),
-    do: GenServer.call(pid, {token, request})
+  defp call(state, request, timeout_ms \\ 5_000)
+
+  defp call(%__MODULE__{pid: pid, token: token}, request, timeout_ms),
+    do: GenServer.call(pid, {token, request}, timeout_ms)
 
   # Blocking admission is bounded server-side (admission timer + run
   # deadline), so the client timeout is infinite: a finite one would race the

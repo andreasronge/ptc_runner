@@ -19,6 +19,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.LLMBudget
   alias PtcRunner.Kernel.LLMReplayDiagnostic
+  alias PtcRunner.Kernel.Progress
   alias PtcRunner.Kernel.ProjectionError
   alias PtcRunner.Kernel.ProviderCleanupDiagnostic
   alias PtcRunner.Kernel.Result
@@ -131,7 +132,11 @@ defmodule PtcRunner.Kernel.Runner do
     do: %{llm_budget: LLMBudget.initial_terminal_projection(config.limits)}
 
   defp run_claimed(entry_source, config, state) do
-    reporter = PtcRunner.LiveStatus.maybe_start(config, state)
+    reporter =
+      case Progress.start(config.progress_sink, config, state) do
+        {:ok, pid} -> pid
+        _ -> nil
+      end
 
     try do
       execution =
@@ -153,15 +158,15 @@ defmodule PtcRunner.Kernel.Runner do
           result = apply_provider_cleanup_failure(result, cleanup, usage)
           {final_result, _events} = finalized = finalize_result(result, usage, config.event_sink)
 
-          {live_reason, live_limit} = live_terminal_outcome(final_result)
+          {progress_reason, progress_limit} = progress_terminal_outcome(final_result)
 
           _ =
-            PtcRunner.LiveStatus.complete(
+            Progress.complete(
               reporter,
               outcome(final_result),
-              live_reason,
-              live_limit,
-              live_evaluation_error(final_result, config.event_sink)
+              progress_reason,
+              progress_limit,
+              progress_evaluation_error(final_result, config.event_sink)
             )
 
           finalized
@@ -174,10 +179,10 @@ defmodule PtcRunner.Kernel.Runner do
       end
     catch
       kind, reason ->
-        _ = PtcRunner.LiveStatus.complete(reporter, :error, :internal_error, nil)
+        _ = Progress.complete(reporter, :error, :internal_error, nil)
         :erlang.raise(kind, reason, __STACKTRACE__)
     after
-      PtcRunner.LiveStatus.stop(reporter)
+      if reporter, do: Progress.stop(reporter)
     end
   end
 
@@ -764,9 +769,9 @@ defmodule PtcRunner.Kernel.Runner do
 
   defp terminal_reason({:error, %Error{reason: reason}}), do: reason
 
-  defp live_terminal_outcome({:ok, _result}), do: {nil, nil}
+  defp progress_terminal_outcome({:ok, _result}), do: {nil, nil}
 
-  defp live_terminal_outcome({:error, %Error{details: details, reason: reason}}) do
+  defp progress_terminal_outcome({:error, %Error{details: details, reason: reason}}) do
     case RuntimeLimitDiagnostic.details_message(details) do
       {:ok, limit, message} -> {message, limit}
       :error -> {live_failure_reason(reason, details), nil}
@@ -779,7 +784,7 @@ defmodule PtcRunner.Kernel.Runner do
 
   defp live_failure_reason(reason, _details), do: reason
 
-  defp live_evaluation_error({:error, %Error{} = error}, sink) do
+  defp progress_evaluation_error({:error, %Error{} = error}, sink) do
     result_class =
       case EventSink.policy(sink) do
         :normal -> :normal
@@ -789,7 +794,7 @@ defmodule PtcRunner.Kernel.Runner do
     EvaluatorEvidence.envelope_value(result_class, error)
   end
 
-  defp live_evaluation_error(_result, _sink), do: nil
+  defp progress_evaluation_error(_result, _sink), do: nil
 
   defp maybe_put_result_hash(stopped_data, {:ok, %Result{value: value}}) do
     case ResultIdentity.hash(value) do

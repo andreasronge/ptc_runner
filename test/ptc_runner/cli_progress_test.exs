@@ -22,11 +22,15 @@ defmodule PtcRunner.CLIProgressTest do
 
     assert_receive {:written, "invoice-triage.json\n\rpreparing 00:00"}
 
-    send(pid, {:frame, frame(18_000, 21_000)})
+    GenServer.call(pid, {:frame, "test-run", frame(18_000, 21_000)})
     assert_receive {:written, first}
     assert first =~ "\rrunning 00:18"
 
-    send(pid, {:frame, %{frame(19_000, 1_000) | parallel: nil, activity: []}})
+    GenServer.call(
+      pid,
+      {:frame, "test-run", %{frame(19_000, 1_000) | parallel: nil, activity: []}}
+    )
+
     assert_receive {:written, second}
     assert String.ends_with?(second, " ")
 
@@ -53,16 +57,16 @@ defmodule PtcRunner.CLIProgressTest do
     refute start =~ "\r"
     refute start =~ <<27>>
 
-    send(pid, {:frame, frame(0, 20_000)})
+    GenServer.call(pid, {:frame, "test-run", frame(0, 20_000)})
     assert_receive {:written, milestone}
     refute milestone =~ "\r"
-    send(pid, {:frame, frame(300, 19_700)})
+    GenServer.call(pid, {:frame, "test-run", frame(300, 19_700)})
     refute_receive {:written, _}
     Agent.update(clock, fn _ -> 9_999 end)
-    send(pid, {:frame, frame(9_999, 10_001)})
+    GenServer.call(pid, {:frame, "test-run", frame(9_999, 10_001)})
     refute_receive {:written, _}
     Agent.update(clock, fn _ -> 10_000 end)
-    send(pid, {:frame, frame(10_000, 10_000)})
+    GenServer.call(pid, {:frame, "test-run", frame(10_000, 10_000)})
     assert_receive {:written, heartbeat}
     assert heartbeat =~ "still running"
     refute heartbeat =~ "\r"
@@ -95,7 +99,7 @@ defmodule PtcRunner.CLIProgressTest do
       )
 
     assert_receive {:written, _start}
-    send(pid, {:frame, frame(1_000, 1_000)})
+    GenServer.call(pid, {:frame, "test-run", frame(1_000, 1_000)})
     assert_receive {:written, _running}
 
     diagnostic = CommandDiagnostic.new!(:arguments, :invalid_arguments)
@@ -197,7 +201,7 @@ defmodule PtcRunner.CLIProgressTest do
       )
 
     assert_receive {:written, _}
-    send(pid, {:frame, frame(0, 1_000)})
+    GenServer.call(pid, {:frame, "test-run", frame(0, 1_000)})
     assert_receive {:written, milestone}
     assert milestone =~ "agent a31f turn 2/6"
     stop_progress(pid)
@@ -214,7 +218,7 @@ defmodule PtcRunner.CLIProgressTest do
       )
 
     assert_receive {:written, _}
-    send(pid, {:frame, %{phase: "ok", elapsed_ms: 10, usage: nil}})
+    GenServer.call(pid, {:frame, "test-run", %{phase: "ok", elapsed_ms: 10, usage: nil}})
     assert_receive {:written, completed}
     assert completed =~ "completed"
 
@@ -273,6 +277,33 @@ defmodule PtcRunner.CLIProgressTest do
     assert_receive {:DOWN, ^ref, :process, ^owner, :normal}
   end
 
+  test "a blocked presentation cannot accumulate undelivered progress" do
+    parent = self()
+
+    writer = fn _bytes ->
+      send(parent, {:blocked_writer, self()})
+      receive do: (:release -> :ok)
+    end
+
+    progress =
+      CLIProgress.start(%{application: "app.json"},
+        progress_writer: writer,
+        progress_columns: fn -> :error end
+      )
+
+    on_exit(fn -> Process.exit(progress, :kill) end)
+    assert_receive {:blocked_writer, ^progress}
+    monitor = Process.monitor(progress)
+    {:ok, runtime} = CommandRuntime.new()
+    {:ok, attached} = CLIProgress.attach(runtime, progress)
+    package = progress_package()
+    sink = attached.progress_setup.(package, "app.json")
+    started = System.monotonic_time(:millisecond)
+    sink.("blocked-run", frame(0, 1_000))
+    assert_receive {:DOWN, ^monitor, :process, ^progress, :killed}, 750
+    assert System.monotonic_time(:millisecond) - started < 1_000
+  end
+
   test "attachment preserves explicit target privacy and marks standalone progress for Viewer fan-out" do
     parent = self()
     writer = fn bytes -> send(parent, {:written, bytes}) end
@@ -281,10 +312,15 @@ defmodule PtcRunner.CLIProgressTest do
     assert_receive {:written, _}
 
     {:ok, explicit} = Target.new(fn _run_id, frame -> send(parent, {:explicit, frame}) end)
-    {:ok, private_runtime} = CommandRuntime.new(live_status: explicit)
+    {:ok, base_runtime} = CommandRuntime.new()
+    {:ok, private_runtime} = PtcRunner.LiveStatus.attach_target(base_runtime, explicit)
     assert {:ok, attached_private} = CLIProgress.attach(private_runtime, progress)
-    refute Target.append_external?(attached_private.live_status)
-    assert :ok = Target.report(attached_private.live_status, "run", frame(0, 1_000))
+
+    package =
+      progress_package()
+
+    private_sink = attached_private.progress_setup.(package, "app.json")
+    private_sink.("run", frame(0, 1_000))
     assert_receive {:explicit, _}
     assert_receive {:written, _}
     stop_progress(progress)
@@ -293,8 +329,15 @@ defmodule PtcRunner.CLIProgressTest do
     assert_receive {:written, _}
     {:ok, viewer_runtime} = CommandRuntime.new()
     assert {:ok, attached_viewer} = CLIProgress.attach(viewer_runtime, viewer_progress)
-    assert Target.append_external?(attached_viewer.live_status)
+    assert is_function(attached_viewer.progress_setup.(package, "app.json"), 2)
     stop_progress(viewer_progress)
+  end
+
+  defp progress_package do
+    struct(PtcRunner.Kernel.ApplicationPackage,
+      manifest: %{"labels" => %{"name" => "Demo"}},
+      entry: "main"
+    )
   end
 
   defp frame(elapsed, remaining) do

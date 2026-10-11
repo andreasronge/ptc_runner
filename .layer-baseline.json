@@ -1,10 +1,5 @@
 [
   {
-    "from": "PtcRunner.Kernel.CommandEngine",
-    "to": "PtcRunner.LiveStatus",
-    "issue": 2232
-  },
-  {
     "from": "PtcRunner.Kernel.CommandRouter",
     "to": "PtcRunner.CLIProgress",
     "issue": 2233
@@ -25,39 +20,9 @@
     "issue": 2233
   },
   {
-    "from": "PtcRunner.Kernel.CommandRunDispatch",
-    "to": "PtcRunner.LiveStatus",
-    "issue": 2232
-  },
-  {
-    "from": "PtcRunner.Kernel.CommandRunDispatch",
-    "to": "PtcRunner.LiveStatus.Target",
-    "issue": 2232
-  },
-  {
-    "from": "PtcRunner.Kernel.CommandRuntime",
-    "to": "PtcRunner.LiveStatus.Target",
-    "issue": 2232
-  },
-  {
-    "from": "PtcRunner.Kernel.ExecutionSessionOwner",
-    "to": "PtcRunner.LiveStatus",
-    "issue": 2232
-  },
-  {
-    "from": "PtcRunner.Kernel.ExecutionSessionOwner",
-    "to": "PtcRunner.LiveStatus.Target",
-    "issue": 2232
-  },
-  {
     "from": "PtcRunner.Kernel.ProjectViewerAdapter",
     "to": "PtcRunner.ViewerSnapshotStore",
     "issue": 2233
-  },
-  {
-    "from": "PtcRunner.Kernel.Runner",
-    "to": "PtcRunner.LiveStatus",
-    "issue": 2232
   },
   {
     "from": "PtcRunner.Lisp",

@@ -45,7 +45,6 @@ defmodule PtcRunner.Kernel.CommandEngine do
   alias PtcRunner.Kernel.ProviderCredentials
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.PublicationHandle
-  alias PtcRunner.LiveStatus
 
   @fallback_run_ref "cmd-00000000000000000000000000"
   @frontend_commands CommandDeclaration.frontend_commands()
@@ -204,11 +203,13 @@ defmodule PtcRunner.Kernel.CommandEngine do
   end
 
   defp dispatch_preparation(preparation, runtime, entry, arguments, true) do
-    package = preparation.prepared_run.request.package
-    label = LiveStatus.application_label_for(package, arguments.application)
-
     {status, outcome, rejection} =
-      CommandRunDispatch.dispatch_frontend(preparation, runtime, entry.frontend, label)
+      CommandRunDispatch.dispatch_frontend(
+        preparation,
+        runtime,
+        entry.frontend,
+        arguments.application
+      )
 
     {status, outcome, rejection, named_env_file_hint?(preparation, arguments)}
   end

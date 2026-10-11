@@ -1,10 +1,24 @@
-defmodule PtcRunner.LiveStatus.Reporter do
-  @moduledoc false
+defmodule PtcRunner.Kernel.Progress do
+  @moduledoc """
+  Per-run, best-effort progress observations, separate from canonical events.
 
-  # Per-run live status reporter.
+  A run explicitly supplies a two-argument sink in `RunConfig.progress_sink`.
+  Observations carry a run ID and increasing sequence. Delivery runs in an
+  isolated, heap-bounded worker with one coalesced pending frame and a
+  1,250 ms timeout. Callback workers are cancelled if the port dies.
+  Completion drains at most two delivery attempts with a 3,000 ms caller
+  bound; no running frame can follow the terminal attempt.
+
+  Run-filtered telemetry remains the instrumentation source for activity,
+  subordinate evaluations and sandbox samples. Subordinate activity aggregates
+  into the parent run's observations; it never creates a separate progress run.
+  Frontends supply labels, transport, environment policy and sink composition.
+  """
+
+  # Per-run progress observations.
   #
-  # Owns a poll timer and a set of telemetry subscriptions; every tick it
-  # assembles one frame from public run state and POSTs it to the Viewer.
+  # Owns a poll timer and bounded run-filtered instrumentation; every tick it
+  # assembles one observation from public run state.
   # Reads only — `RunState.usage/1`, `ParallelBudget.held/available`, and
   # `Process.info(pid, :total_heap_size)` — so no second accounting exists.
   #
@@ -18,11 +32,10 @@ defmodule PtcRunner.LiveStatus.Reporter do
 
   require Logger
 
+  alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Lisp.Eval.ParallelBudget
-  alias PtcRunner.LiveStatus.Config
-  alias PtcRunner.LiveStatus.Target
 
   @tick_ms 300
   @delivery_timeout_ms 1_250
@@ -38,33 +51,30 @@ defmodule PtcRunner.LiveStatus.Reporter do
     [:ptc_runner, :lisp, :execute, :stop]
   ]
 
-  @spec start(term(), struct(), struct()) :: {:ok, pid()} | {:error, term()}
-  def start(target, config, run_state) when is_binary(target) do
+  @type sink :: (binary(), map() -> term())
+
+  @spec start(sink() | nil, struct(), struct()) :: {:ok, pid()} | {:error, term()} | nil
+  def start(nil, _config, _run_state), do: nil
+
+  def start(sink, config, run_state) when is_function(sink, 2) do
     GenServer.start(__MODULE__, %{
-      target: target,
+      target: sink,
       config: config,
       run_state: run_state,
       owner: self()
     })
   end
 
-  def start(target, config, run_state) do
-    if Target.valid?(target),
-      do:
-        GenServer.start(__MODULE__, %{
-          target: target,
-          config: config,
-          run_state: run_state,
-          owner: self()
-        }),
-      else: {:error, :invalid_live_status_target}
-  end
+  @spec complete(pid() | nil, atom(), term(), binary() | nil, map() | nil) :: :ok
+  def complete(pid, phase, reason, limit, last_evaluation_error \\ nil)
+  def complete(nil, _phase, _reason, _limit, _error), do: :ok
 
-  @spec complete(pid(), atom(), term(), binary() | nil, map() | nil) :: :ok
-  def complete(pid, phase, reason, limit, last_evaluation_error \\ nil) do
-    GenServer.call(pid, {:complete, phase, reason, limit, last_evaluation_error}, 1_000)
+  def complete(pid, phase, reason, limit, last_evaluation_error) do
+    GenServer.call(pid, {:complete, phase, reason, limit, last_evaluation_error}, 3_000)
   catch
-    :exit, _reason -> :ok
+    :exit, _reason ->
+      Process.exit(pid, :kill)
+      :ok
   end
 
   @spec stop(pid()) :: :ok
@@ -76,41 +86,71 @@ defmodule PtcRunner.LiveStatus.Reporter do
   end
 
   @doc false
-  def handle_telemetry(event, measurements, metadata, reporter) do
-    case reporter do
-      {reporter_pid, live_run} when is_pid(reporter_pid) and is_pid(live_run) ->
-        if Map.get(metadata, :live_run) == live_run do
-          send(
-            reporter_pid,
-            {:live_telemetry, event, measurements, Map.delete(metadata, :live_run)}
-          )
+  def handle_telemetry(event, measurements, metadata, {_pid, live_run, table}) do
+    if Map.get(metadata, :live_run) == live_run do
+      seq = :ets.update_counter(table, :counter, 1)
+
+      measurements =
+        Map.take(measurements, [:baseline_words, :ceiling_words, :duration, :duration_ms])
+
+      measurements =
+        case event do
+          [:ptc_runner, :sandbox, :armed] ->
+            case Process.info(metadata.pid, :total_heap_size) do
+              {:total_heap_size, words} -> Map.put(measurements, :heap_words, words)
+              nil -> measurements
+            end
+
+          _event ->
+            measurements
         end
 
-      _invalid ->
-        :ok
+      metadata =
+        metadata
+        |> Map.take([
+          :pid,
+          :budget,
+          :name,
+          :status,
+          :invocation,
+          :kind,
+          :turn,
+          :max_turns,
+          :outcome
+        ])
+        |> Map.new(fn {key, value} ->
+          {key, if(is_binary(value), do: PtcRunner.Utf8.truncate_valid(value, 256), else: value)}
+        end)
+
+      :ets.insert(table, {rem(seq, 128), seq, event, measurements, metadata})
     end
 
     :ok
+  rescue
+    ArgumentError -> :ok
   end
 
   @impl GenServer
   def init(args) do
     handler_id = {__MODULE__, self()}
+    observations = :ets.new(__MODULE__, [:set, :public, write_concurrency: true])
+    :ets.insert(observations, {:counter, 0})
     owner_ref = Process.monitor(args.owner)
 
     :telemetry.attach_many(
       handler_id,
       @telemetry_events,
       &__MODULE__.handle_telemetry/4,
-      {self(), args.run_state.pid}
+      {self(), args.run_state.pid, observations}
     )
 
     state = %{
-      target: normalize_target(args.target),
+      observations: observations,
+      observation_seq: 0,
+      target: args.target,
       run_state: args.run_state,
       limits: limits_frame(args.config.limits),
       run_id: run_id(args.config),
-      label: label(args.config, args.target),
       owner_ref: owner_ref,
       handler_id: handler_id,
       started_ms: System.monotonic_time(:millisecond),
@@ -128,9 +168,9 @@ defmodule PtcRunner.LiveStatus.Reporter do
       activity: [],
       last_usage: nil,
       post_failed?: false,
-      viewer_token: viewer_token(args.target),
       delivery: nil,
       pending_delivery: nil,
+      completion_waiter: nil,
       stopping?: false
     }
 
@@ -139,7 +179,9 @@ defmodule PtcRunner.LiveStatus.Reporter do
   end
 
   @impl GenServer
-  def handle_call({:complete, phase, reason, limit, last_evaluation_error}, _from, state) do
+  def handle_call({:complete, phase, reason, limit, last_evaluation_error}, from, state) do
+    state = collect_observations(state)
+
     state = %{
       state
       | phase: to_string(phase),
@@ -149,7 +191,7 @@ defmodule PtcRunner.LiveStatus.Reporter do
     }
 
     state = state |> sample_heap() |> post_frame()
-    {:reply, :ok, %{state | stopping?: true}}
+    {:noreply, %{state | stopping?: true, completion_waiter: from}}
   end
 
   @impl GenServer
@@ -159,7 +201,7 @@ defmodule PtcRunner.LiveStatus.Reporter do
 
   @impl GenServer
   def handle_info(:tick, %{phase: "running", stopping?: false} = state) do
-    state = state |> sample_heap() |> post_frame()
+    state = state |> collect_observations() |> sample_heap() |> post_frame()
     Process.send_after(self(), :tick, @tick_ms)
     {:noreply, state}
   end
@@ -168,20 +210,8 @@ defmodule PtcRunner.LiveStatus.Reporter do
 
   def handle_info({:delivery_result, ref, result}, %{delivery: %{ref: ref}} = state) do
     Process.demonitor(state.delivery.monitor_ref, [:flush])
-    cancel_delivery_timer(state.delivery.timer_ref)
     finish_delivery(%{state | delivery: nil}, result)
   end
-
-  def handle_info({:delivery_timeout, ref}, %{delivery: %{ref: ref, pid: pid}} = state) do
-    Process.exit(pid, :kill)
-    Process.demonitor(state.delivery.monitor_ref, [:flush])
-    finish_delivery(%{state | delivery: nil}, :error)
-  end
-
-  def handle_info({:delivery_timeout, _ref}, state), do: {:noreply, state}
-
-  def handle_info({:live_telemetry, event, measurements, metadata}, state),
-    do: {:noreply, apply_telemetry(state, event, measurements, metadata)}
 
   def handle_info(
         {:DOWN, ref, :process, _pid, _reason},
@@ -196,7 +226,6 @@ defmodule PtcRunner.LiveStatus.Reporter do
         {:DOWN, monitor_ref, :process, _pid, _reason},
         %{delivery: %{monitor_ref: monitor_ref}} = state
       ) do
-    cancel_delivery_timer(state.delivery.timer_ref)
     finish_delivery(%{state | delivery: nil}, :error)
   end
 
@@ -210,6 +239,19 @@ defmodule PtcRunner.LiveStatus.Reporter do
     :telemetry.detach(state.handler_id)
     if state.delivery, do: Process.exit(state.delivery.pid, :kill)
     :ok
+  end
+
+  defp collect_observations(state) do
+    state.observations
+    |> :ets.tab2list()
+    |> Enum.filter(fn
+      {_slot, seq, _event, _measurements, _metadata} -> seq > state.observation_seq
+      _counter -> false
+    end)
+    |> Enum.sort_by(&elem(&1, 1))
+    |> Enum.reduce(state, fn {_slot, seq, event, measurements, metadata}, acc ->
+      %{apply_telemetry(acc, event, measurements, metadata) | observation_seq: seq}
+    end)
   end
 
   defp apply_telemetry(state, [:ptc_runner, :sandbox, :armed], measurements, metadata) do
@@ -230,7 +272,10 @@ defmodule PtcRunner.LiveStatus.Reporter do
         heap_ceiling: measurements.ceiling_words
     }
 
-    sample_heap(%{state | sandbox: sandbox})
+    state
+    |> Map.put(:sandbox, sandbox)
+    |> record_heap_sample(Map.get(measurements, :heap_words))
+    |> sample_heap()
   end
 
   defp apply_telemetry(state, [:ptc_runner, :parallel, :budget], _measurements, metadata),
@@ -291,12 +336,18 @@ defmodule PtcRunner.LiveStatus.Reporter do
   defp sample_heap(%{sandbox: sandbox} = state) do
     case Process.info(sandbox.pid, :total_heap_size) do
       {:total_heap_size, words} ->
-        samples = Enum.take([words | state.heap_samples], @heap_samples_limit)
-        %{state | heap_samples: samples, heap_peak: max(state.heap_peak, words)}
+        record_heap_sample(state, words)
 
       nil ->
         state
     end
+  end
+
+  defp record_heap_sample(state, nil), do: state
+
+  defp record_heap_sample(state, words) do
+    samples = Enum.take([words | state.heap_samples], @heap_samples_limit)
+    %{state | heap_samples: samples, heap_peak: max(state.heap_peak, words)}
   end
 
   defp post_frame(state) do
@@ -316,16 +367,25 @@ defmodule PtcRunner.LiveStatus.Reporter do
 
     pid =
       spawn(fn ->
-        result = request(state.target, state.run_id, frame, state.viewer_token)
+        result =
+          case BoundedWorker.run(fn -> request(state.target, state.run_id, frame) end,
+                 timeout_ms: @delivery_timeout_ms,
+                 max_heap_words: 1_000_000,
+                 cancel_with_caller: true,
+                 cancel_with: parent
+               ) do
+            {:ok, :ok} -> :ok
+            _failure -> :error
+          end
+
         send(parent, {:delivery_result, ref, result})
       end)
 
     monitor_ref = Process.monitor(pid)
-    timer_ref = Process.send_after(self(), {:delivery_timeout, ref}, @delivery_timeout_ms)
 
     %{
       state
-      | delivery: %{pid: pid, ref: ref, monitor_ref: monitor_ref, timer_ref: timer_ref},
+      | delivery: %{pid: pid, ref: ref, monitor_ref: monitor_ref},
         pending_delivery: nil
     }
   end
@@ -338,6 +398,7 @@ defmodule PtcRunner.LiveStatus.Reporter do
         {:noreply, start_delivery(state, frame)}
 
       nil when state.stopping? ->
+        if state.completion_waiter, do: GenServer.reply(state.completion_waiter, :ok)
         {:stop, :normal, state}
 
       nil ->
@@ -349,55 +410,22 @@ defmodule PtcRunner.LiveStatus.Reporter do
 
   defp record_delivery_result(state, :error) do
     unless state.post_failed? do
-      Logger.warning("live status: configured Viewer target is unreachable")
+      Logger.warning("progress: configured sink rejected delivery")
     end
 
     %{state | post_failed?: true}
   end
 
-  defp cancel_delivery_timer(timer_ref) do
-    _ = Process.cancel_timer(timer_ref, async: true, info: false)
-    :ok
-  end
-
-  defp request(%Target{} = target, run_id, frame, _viewer_token),
-    do: Target.report(target, run_id, frame)
-
-  defp request(viewer_url, run_id, frame, viewer_token) when is_binary(viewer_url),
-    do: report_http(viewer_url, run_id, frame, viewer_token)
-
-  @doc false
-  def report_http(viewer_url, run_id, frame, viewer_token)
-      when is_binary(viewer_url) and is_binary(run_id) and is_map(frame) do
-    {:ok, endpoint} = PtcRunner.HTTPEndpoint.validate(viewer_url, viewer_token)
-    encoded_run_id = URI.encode(run_id, &URI.char_unreserved?/1)
-    url = PtcRunner.HTTPEndpoint.append_path(endpoint, "/api/live/runs/" <> encoded_run_id)
-
-    case Req.post(url,
-           json: frame,
-           headers: authorization_headers(viewer_token),
-           retry: false,
-           redirect: false,
-           connect_options: [timeout: 500],
-           receive_timeout: 1_000
-         ) do
-      {:ok, %{status: status}} when status in 200..299 -> :ok
-      _other -> :error
+  defp request(sink, run_id, frame) do
+    case sink.(run_id, frame) do
+      :error -> :error
+      _result -> :ok
     end
   rescue
     _exception -> :error
+  catch
+    _kind, _reason -> :error
   end
-
-  defp authorization_headers(token) when is_binary(token),
-    do: [{"authorization", "Bearer " <> token}]
-
-  defp authorization_headers(_token), do: []
-
-  defp normalize_target(%Target{} = target), do: target
-  defp normalize_target(viewer_url), do: String.trim_trailing(viewer_url, "/")
-
-  defp viewer_token(%Target{}), do: nil
-  defp viewer_token(_viewer_url), do: Config.read().token
 
   defp format_reason(nil), do: nil
   defp format_reason(reason) when is_binary(reason), do: reason
@@ -406,7 +434,6 @@ defmodule PtcRunner.LiveStatus.Reporter do
   defp frame(state, usage) do
     %{
       run_id: state.run_id,
-      label: state.label,
       seq: state.seq,
       phase: state.phase,
       outcome_reason: state.outcome_reason,
@@ -453,7 +480,7 @@ defmodule PtcRunner.LiveStatus.Reporter do
   end
 
   defp safe_usage(run_state) do
-    RunState.usage(run_state)
+    RunState.usage(run_state, 50)
   catch
     :exit, _reason -> nil
   end
@@ -479,26 +506,6 @@ defmodule PtcRunner.LiveStatus.Reporter do
     case EventSink.identity(config.event_sink) do
       {:ok, %{run_id: run_id}} -> run_id
       _error -> "run-live-" <> Integer.to_string(System.unique_integer([:positive]))
-    end
-  end
-
-  defp label(config, target) do
-    case target_label(target) do
-      name when is_binary(name) and name != "" -> name
-      _absent -> config_label(config)
-    end
-  end
-
-  defp target_label(%Target{} = target), do: Target.label(target)
-  defp target_label(_viewer_url), do: System.get_env("PTC_VIEWER_LABEL")
-
-  defp config_label(config) do
-    case config.labels do
-      # Manifest names may already be privacy-hashed by the CLI path; a hash
-      # is useless to a human, so fall back to the run id in that case.
-      %{"name" => "sha256:" <> _hash} -> nil
-      %{"name" => name} when is_binary(name) -> name
-      _other -> nil
     end
   end
 end

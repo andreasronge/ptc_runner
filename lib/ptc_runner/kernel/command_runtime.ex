@@ -6,19 +6,24 @@ defmodule PtcRunner.Kernel.CommandRuntime do
   document, application source, provider credential, or artifact destination.
   Environment setup is invoked only when inert preparation proves that a
   selected installation uses an environment credential.
+
+  `progress_setup` is an optional frontend callback that receives the prepared
+  package and application name after environment setup and returns a progress
+  sink. Execution propagates that sink explicitly into `RunConfig`; the
+  callback owns label and transport policy.
   """
 
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandFailureCause
-  alias PtcRunner.LiveStatus.Target
+  alias PtcRunner.Kernel.Progress
 
   @enforce_keys [
     :provider_application_mode,
     :authorization_targets,
     :authorization_notifier,
     :environment_setup,
-    :live_status,
+    :progress_setup,
     :attestation
   ]
   defstruct @enforce_keys
@@ -29,7 +34,7 @@ defmodule PtcRunner.Kernel.CommandRuntime do
           authorization_targets: [binary()],
           authorization_notifier: (binary() -> any()) | nil,
           environment_setup: (-> :ok | {:error, term()}) | nil,
-          live_status: Target.t() | nil,
+          progress_setup: (term(), binary() -> Progress.sink() | nil) | nil,
           attestation: binary()
         }
 
@@ -52,14 +57,14 @@ defmodule PtcRunner.Kernel.CommandRuntime do
              :authorization_targets,
              :authorization_notifier,
              :environment_setup,
-             :live_status
+             :progress_setup
            ] == [] and length(keys) == MapSet.size(MapSet.new(keys)) do
       runtime = %__MODULE__{
         provider_application_mode: Keyword.get(opts, :provider_application_mode, :host_owned),
         authorization_targets: Keyword.get(opts, :authorization_targets, []),
         authorization_notifier: Keyword.get(opts, :authorization_notifier),
         environment_setup: Keyword.get(opts, :environment_setup),
-        live_status: Keyword.get(opts, :live_status),
+        progress_setup: Keyword.get(opts, :progress_setup),
         attestation: <<>>
       }
 
@@ -152,7 +157,7 @@ defmodule PtcRunner.Kernel.CommandRuntime do
         authorization_targets: runtime.authorization_targets,
         authorization_notifier: runtime.authorization_notifier,
         environment_setup: combined,
-        live_status: runtime.live_status
+        progress_setup: runtime.progress_setup
       )
     else
       {:error, :invalid_command_runtime}
@@ -162,37 +167,23 @@ defmodule PtcRunner.Kernel.CommandRuntime do
   def with_environment(_runtime, _setup), do: {:error, :invalid_command_runtime}
 
   @doc false
-  @spec with_live_status(t(), Target.t()) :: {:ok, t()} | {:error, :invalid_command_runtime}
-  def with_live_status(%__MODULE__{} = runtime, %Target{} = target) do
-    if valid?(runtime) and Target.valid?(target) do
+  @spec with_progress(t(), (term(), binary() -> Progress.sink() | nil)) ::
+          {:ok, t()} | {:error, :invalid_command_runtime}
+  def with_progress(%__MODULE__{} = runtime, target) when is_function(target, 2) do
+    if valid?(runtime) do
       new(
         provider_application_mode: runtime.provider_application_mode,
         authorization_targets: runtime.authorization_targets,
         authorization_notifier: runtime.authorization_notifier,
         environment_setup: runtime.environment_setup,
-        live_status: target
+        progress_setup: target
       )
     else
       {:error, :invalid_command_runtime}
     end
   end
 
-  def with_live_status(_runtime, _target), do: {:error, :invalid_command_runtime}
-
-  @doc false
-  @spec attach_live_status(t(), keyword()) :: {:ok, t()} | {:error, :invalid_command_runtime}
-  def attach_live_status(%__MODULE__{} = runtime, opts) when is_list(opts) do
-    if Keyword.keyword?(opts) do
-      case Keyword.fetch(opts, :live_status) do
-        {:ok, target} -> with_live_status(runtime, target)
-        :error -> {:ok, runtime}
-      end
-    else
-      {:error, :invalid_command_runtime}
-    end
-  end
-
-  def attach_live_status(_runtime, _opts), do: {:error, :invalid_command_runtime}
+  def with_progress(_runtime, _target), do: {:error, :invalid_command_runtime}
 
   defp fields_valid?(runtime) do
     Enum.sort(Map.keys(runtime)) == @field_keys and
@@ -203,7 +194,7 @@ defmodule PtcRunner.Kernel.CommandRuntime do
       Enum.all?(runtime.authorization_targets, &valid_name?/1) and
       authorization_pair_valid?(runtime.authorization_targets, runtime.authorization_notifier) and
       (is_nil(runtime.environment_setup) or is_function(runtime.environment_setup, 0)) and
-      (is_nil(runtime.live_status) or Target.valid?(runtime.live_status))
+      (is_nil(runtime.progress_setup) or is_function(runtime.progress_setup, 2))
   end
 
   defp authorization_pair_valid?([], nil), do: true
@@ -221,5 +212,5 @@ defmodule PtcRunner.Kernel.CommandRuntime do
   defp payload(runtime),
     do:
       {runtime.provider_application_mode, runtime.authorization_targets,
-       runtime.authorization_notifier, runtime.environment_setup, runtime.live_status}
+       runtime.authorization_notifier, runtime.environment_setup, runtime.progress_setup}
 end

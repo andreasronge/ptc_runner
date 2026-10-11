@@ -52,7 +52,7 @@ defmodule PtcRunner.Kernel.ServingRequestTest do
              )
 
     assert {:error, :invalid_prepared_run} =
-             ProviderExecution.execute(prepared, nil, %{}, nil, nil, nil, self(), :run)
+             ProviderExecution.execute(prepared, nil, %{}, nil, nil, nil, self(), {:run, nil})
 
     assert {:error, :invalid_prepared_run} =
              ProviderExecution.open_repl(prepared, nil, %{}, nil, nil, self())

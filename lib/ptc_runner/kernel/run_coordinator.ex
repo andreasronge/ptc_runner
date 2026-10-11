@@ -38,6 +38,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.MissionInventory
   alias PtcRunner.Kernel.MissionReplTarget
   alias PtcRunner.Kernel.PreparedRun
+  alias PtcRunner.Kernel.Progress
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.ProviderExecution
@@ -48,7 +49,6 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.SelectionRulesDiagnostic
   alias PtcRunner.Kernel.ServingRequest
   alias PtcRunner.Lisp.Prelude
-  alias PtcRunner.LiveStatus.Target
 
   @mission_compile_timeout_ms 5_000
   @mission_bundles_bytes 4_000_000
@@ -303,19 +303,19 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   def execute(_prepared, _authority), do: {:error, :invalid_prepared_run}
 
   @doc false
-  @spec execute(PreparedRun.t(), PublicationAuthority.t(), Target.t() | nil) ::
+  @spec execute(PreparedRun.t(), PublicationAuthority.t(), Progress.sink() | nil) ::
           {:ok, ExecutionOutcome.t()}
           | {:error,
              :invalid_prepared_run
              | :invalid_publication_authority
              | :provider_session_required
              | term()}
-  def execute(%PreparedRun{} = prepared, authority, live_status),
-    do: open_free(prepared, authority, :run, live_status)
+  def execute(%PreparedRun{} = prepared, authority, progress_sink),
+    do: open_free(prepared, authority, :run, progress_sink)
 
-  def execute(_prepared, _authority, _live_status), do: {:error, :invalid_prepared_run}
+  def execute(_prepared, _authority, _progress_sink), do: {:error, :invalid_prepared_run}
 
-  defp open_free(prepared, authority, operation, live_status) do
+  defp open_free(prepared, authority, operation, progress_sink) do
     cond do
       not PreparedRun.valid?(prepared) ->
         {:error, :invalid_prepared_run}
@@ -335,7 +335,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
                  nil,
                  nil,
                  operation,
-                 live_status
+                 progress_sink
                ),
              do: ExecutionSessionOwner.await(owner)
     end
@@ -367,7 +367,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
           PublicationAuthority.t(),
           ProviderExecution.t(),
           (binary() -> term()) | nil,
-          Target.t() | nil
+          Progress.sink() | nil
         ) ::
           {:ok, ExecutionOutcome.t()}
           | {:error,
@@ -375,11 +375,11 @@ defmodule PtcRunner.Kernel.RunCoordinator do
              | :invalid_publication_authority
              | :invalid_provider_execution
              | term()}
-  def execute(%PreparedRun{} = prepared, authority, provider_execution, notifier, live_status)
+  def execute(%PreparedRun{} = prepared, authority, provider_execution, notifier, progress_sink)
       when is_nil(notifier) or is_function(notifier, 1),
-      do: open_active(prepared, authority, provider_execution, notifier, :run, live_status)
+      do: open_active(prepared, authority, provider_execution, notifier, :run, progress_sink)
 
-  def execute(_prepared, _authority, _provider_execution, _notifier, _live_status),
+  def execute(_prepared, _authority, _provider_execution, _notifier, _progress_sink),
     do: {:error, :invalid_prepared_run}
 
   # Internal only, like its `execute/4` neighbour.
@@ -407,7 +407,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   def connect(_prepared, _authority, _provider_execution),
     do: {:error, :invalid_prepared_run}
 
-  defp open_active(prepared, authority, provider_execution, notifier, operation, live_status) do
+  defp open_active(prepared, authority, provider_execution, notifier, operation, progress_sink) do
     cond do
       not PreparedRun.valid?(prepared) ->
         {:error, :invalid_prepared_run}
@@ -430,7 +430,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
                  provider_execution,
                  notifier,
                  operation,
-                 live_status
+                 progress_sink
                ),
              do: ExecutionSessionOwner.await(owner)
     end

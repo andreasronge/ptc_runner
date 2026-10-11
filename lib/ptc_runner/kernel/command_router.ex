@@ -32,7 +32,7 @@ defmodule PtcRunner.Kernel.CommandRouter do
       mode,
       fn arguments ->
         with {:ok, runtime} <- bootstrap.bootstrap(arguments),
-             do: CommandRuntime.attach_live_status(runtime, opts)
+             do: CLIProgress.attach_runtime(runtime, opts)
       end,
       fn arguments, runtime ->
         run_frontend(arguments, runtime, Keyword.delete(opts, :live_status))

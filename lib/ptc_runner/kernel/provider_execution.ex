@@ -27,6 +27,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
   alias PtcRunner.Kernel.MissionReplTarget
   alias PtcRunner.Kernel.PreparedRun
+  alias PtcRunner.Kernel.Progress
   alias PtcRunner.Kernel.ProviderAcquisition
   alias PtcRunner.Kernel.ProviderActiveSession
   alias PtcRunner.Kernel.ProviderApplicationGate
@@ -169,7 +170,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
           (binary() -> term()) | nil,
           tracker(),
           pid(),
-          :run | :connect
+          {:run | :connect, Progress.sink() | nil}
         ) ::
           {:ok, PtcRunner.Kernel.ExecutionOutcome.t() | ConnectivityResult.t()}
           | {:error, term()}
@@ -181,7 +182,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         _arg3,
         _arg4,
         _arg5,
-        _arg6
+        _scope
       ),
       do: {:error, :invalid_prepared_run}
 
@@ -193,7 +194,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         notifier,
         tracker,
         lifecycle_owner,
-        operation
+        {operation, progress_sink}
       )
       when is_function(tracker, 3) and is_pid(lifecycle_owner) and
              operation in [:run, :connect] do
@@ -205,7 +206,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
       notifier,
       tracker,
       lifecycle_owner,
-      {operation, :all}
+      {operation, :all, progress_sink}
     )
   end
 
@@ -217,7 +218,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         _notifier,
         _tracker,
         _lifecycle_owner,
-        _operation
+        _scope
       ),
       do: {:error, :invalid_provider_execution}
 
@@ -257,7 +258,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
       nil,
       tracker,
       lifecycle_owner,
-      {:repl, :all}
+      {:repl, :all, nil}
     )
   end
 
@@ -294,7 +295,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
       nil,
       tracker,
       lifecycle_owner,
-      {:repl, target}
+      {:repl, target, nil}
     )
   end
 
@@ -343,7 +344,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
       Process.put({__MODULE__, :serving_deadline}, deadline)
 
       try do
-        do_execute(prepared, {nil, nil}, %{}, execution, nil, tracker, owner, {:serve, :all})
+        do_execute(prepared, {nil, nil}, %{}, execution, nil, tracker, owner, {:serve, :all, nil})
       after
         Process.delete({__MODULE__, :serving_deadline})
       end
@@ -363,7 +364,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          notifier,
          tracker,
          lifecycle_owner,
-         {operation, target} = scope
+         {operation, target, _progress_sink} = scope
        ) do
     if operation != :repl,
       do: Process.put({__MODULE__, :publication_lease}, lease)
@@ -431,7 +432,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          notifier,
          tracker,
          session,
-         {operation, target} = scope
+         {operation, target, _progress_sink} = scope
        ) do
     result =
       case unauthorized_oauth_alias(prepared, execution, target) do
@@ -525,7 +526,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          notifier,
          tracker,
          session,
-         {_operation, _target} = scope
+         {_operation, _target, _progress_sink} = scope
        ) do
     if execution.authorizations == [] do
       execute_ordinary(
@@ -606,7 +607,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          execution,
          tracker,
          session,
-         {operation, target} = scope
+         {operation, target, _progress_sink} = scope
        ) do
     selected_names = selected_provider_names(prepared, target)
     selected_declarations = declarations(prepared, target)
@@ -651,7 +652,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          notifier,
          tracker,
          session,
-         {operation, target} = scope
+         {operation, target, _progress_sink} = scope
        ) do
     selected_names = selected_provider_names(prepared, target)
     selected_declarations = declarations(prepared, target)
@@ -728,7 +729,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          registry,
          session,
          execution,
-         {_operation, target} = scope
+         {_operation, target, _progress_sink} = scope
        ),
        do:
          resolve_credentials_and_complete(
@@ -749,7 +750,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          registry,
          session,
          execution,
-         {_operation, target} = scope,
+         {_operation, target, _progress_sink} = scope,
          provider_activity
        ) do
     with {:ok, credentials} <-
@@ -812,7 +813,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          registry,
          session,
          execution,
-         {:serve, :all},
+         {:serve, :all, nil},
          credentials
        ) do
     with :ok <-
@@ -842,7 +843,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          registry,
          session,
          execution,
-         {:run, _target} = scope,
+         {:run, _target, _progress_sink} = scope,
          credentials
        ),
        do:
@@ -864,7 +865,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          registry,
          session,
          execution,
-         {:repl, _target} = scope,
+         {:repl, _target, _progress_sink} = scope,
          credentials
        ),
        do:
@@ -890,7 +891,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          registry,
          session,
          execution,
-         {:connect, _target},
+         {:connect, _target, _progress_sink},
          credentials
        ),
        do: complete_connectivity(prepared, execution, registry, session, credentials)
@@ -902,7 +903,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          registry,
          session,
          catalog,
-         {operation, target},
+         {operation, target, progress_sink},
          credentials
        ) do
     with {:ok, built} <-
@@ -920,7 +921,8 @@ defmodule PtcRunner.Kernel.ProviderExecution do
         :run ->
           complete_operation(
             Map.put(built, :publication_lease, Process.get({__MODULE__, :publication_lease})),
-            operation
+            operation,
+            progress_sink
           )
 
         :repl ->
@@ -1106,8 +1108,8 @@ defmodule PtcRunner.Kernel.ProviderExecution do
 
   defp connectivity_entry(_declaration, _descriptor), do: {:error, internal_diagnostic()}
 
-  defp complete_operation(%{publication_lease: lease} = built, :run),
-    do: RunBuilder.execute_built_claimed(built, lease)
+  defp complete_operation(%{publication_lease: lease} = built, :run, progress_sink),
+    do: RunBuilder.execute_built_claimed(built, lease, nil, progress_sink)
 
   defp with_runtime_registry(
          execution,
