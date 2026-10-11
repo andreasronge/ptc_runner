@@ -419,6 +419,7 @@ defmodule PtcRunner.Kernel.Evaluation do
       loop_limit: limits.evaluation_loop_iterations,
       filter_context: false,
       caller: :kernel,
+      host_error_policy: PtcRunner.Kernel.HostErrorPolicy,
       preserve_runtime_callables: true,
       link: true,
       strict_data: true,

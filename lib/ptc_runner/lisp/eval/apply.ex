@@ -991,7 +991,14 @@ defmodule PtcRunner.Lisp.Eval.Apply do
           PreludeClosure.tag_namespace(result, prelude_ns)
 
         {:error, reason} ->
-          raise_closure_error(maybe_sanitize_private_error(reason, prelude_ns, prelude_origin))
+          raise_closure_error(
+            maybe_sanitize_private_error(
+              reason,
+              prelude_ns,
+              prelude_origin,
+              eval_context.host_error_policy
+            )
+          )
       end
     rescue
       error in Abort ->
@@ -1068,7 +1075,14 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          _stacktrace
        ) do
     restored_ctx = restore_hof_caller(abort_ctx, caller_baseline)
-    reason = maybe_sanitize_private_error(reason, prelude_ns, prelude_origin)
+
+    reason =
+      maybe_sanitize_private_error(
+        reason,
+        prelude_ns,
+        prelude_origin,
+        restored_ctx.host_error_policy
+      )
 
     if passthrough_hof_error?(reason) do
       Abort.error!(reason, restored_ctx)
@@ -1456,7 +1470,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
               maybe_sanitize_private_error(
                 reason,
                 prelude_ns_tag(meta),
-                prelude_error_origin(meta)
+                prelude_error_origin(meta),
+                caller_ctx.host_error_policy
               ),
               caller_ctx
             )
@@ -1464,7 +1479,12 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
       {:error, reason} ->
         Abort.error!(
-          maybe_sanitize_private_error(reason, prelude_ns_tag(meta), prelude_error_origin(meta)),
+          maybe_sanitize_private_error(
+            reason,
+            prelude_ns_tag(meta),
+            prelude_error_origin(meta),
+            caller_ctx.host_error_policy
+          ),
           caller_ctx
         )
     end
@@ -1559,7 +1579,12 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     restored_ctx = restore_direct_caller(abort_ctx, caller_ctx, meta)
 
     reason =
-      maybe_sanitize_private_error(reason, prelude_ns_tag(meta), prelude_error_origin(meta))
+      maybe_sanitize_private_error(
+        reason,
+        prelude_ns_tag(meta),
+        prelude_error_origin(meta),
+        caller_ctx.host_error_policy
+      )
 
     Abort.error!(reason, restored_ctx)
   end
@@ -1575,10 +1600,10 @@ defmodule PtcRunner.Lisp.Eval.Apply do
        ),
        do: reraise(error, stacktrace)
 
-  defp maybe_sanitize_private_error(reason, nil, _origin), do: reason
+  defp maybe_sanitize_private_error(reason, nil, _origin, _policy), do: reason
 
-  defp maybe_sanitize_private_error(reason, _prelude_ns, origin),
-    do: Helpers.sanitize_private_error(reason, origin)
+  defp maybe_sanitize_private_error(reason, _prelude_ns, origin, policy),
+    do: Helpers.sanitize_private_error(reason, origin, policy)
 
   defp prelude_error_origin(%{prelude_ref: ref}) when is_binary(ref), do: %{ref: ref}
 

@@ -2476,7 +2476,9 @@ defmodule PtcRunner.Kernel.CoreContractTest do
           do: "(pmap (fn [_] (fail #{value})) [1])",
           else: "(pcalls #(fail #{value}))"
 
-      assert {:error, step} = PtcRunner.Lisp.run(source)
+      assert {:error, step} =
+               PtcRunner.Lisp.run(source, host_error_policy: PtcRunner.Kernel.HostErrorPolicy)
+
       expected_reason = if(parallel == :pmap, do: :pmap_error, else: :pcalls_error)
       assert step.fail.reason == expected_reason
 

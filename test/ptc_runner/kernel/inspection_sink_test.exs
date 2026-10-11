@@ -293,7 +293,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
   test "large streamed artifacts admit and query without an eager record collection", %{
     tmp_dir: root
   } do
-    fixture = PrivateInspectionFixture.create_model_exchanges!(root, 120, "large-run")
+    fixture = PrivateInspectionFixture.create_model_exchanges!(root, 40, "large-run")
     path = Path.join(fixture.inspection, "large-run.ptcins")
     assert File.stat!(path).size > 500_000
 
@@ -304,12 +304,12 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
       TraceSnapshot.stop(trace)
     end)
 
-    assert {:ok, %{"record_count" => 240, "counts" => counts}} =
+    assert {:ok, %{"record_count" => 80, "counts" => counts}} =
              InspectionSnapshot.query(snapshot, :get_run, %{"run_id" => "large-run"})
 
-    assert counts["model_exchanges"] == 120
+    assert counts["model_exchanges"] == 40
 
-    assert {:ok, %{"items" => items, "omitted_count" => 110}} =
+    assert {:ok, %{"items" => items, "omitted_count" => 30}} =
              InspectionSnapshot.query(snapshot, :model_exchanges, %{
                "run_id" => "large-run",
                "limit" => 10

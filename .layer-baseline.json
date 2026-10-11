@@ -23,45 +23,5 @@
     "from": "PtcRunner.Kernel.ProjectViewerAdapter",
     "to": "PtcRunner.ViewerSnapshotStore",
     "issue": 2233
-  },
-  {
-    "from": "PtcRunner.Lisp",
-    "to": "PtcRunner.Kernel.SafeMetadata",
-    "issue": 2231
-  },
-  {
-    "from": "PtcRunner.Lisp.Eval.Helpers",
-    "to": "PtcRunner.Kernel.AgentConfigDiagnostic",
-    "issue": 2231
-  },
-  {
-    "from": "PtcRunner.Lisp.Eval.Helpers",
-    "to": "PtcRunner.Kernel.LLMReplayDiagnostic",
-    "issue": 2231
-  },
-  {
-    "from": "PtcRunner.Lisp.Eval.Helpers",
-    "to": "PtcRunner.Kernel.LimitCatalog",
-    "issue": 2231
-  },
-  {
-    "from": "PtcRunner.Lisp.Eval.Helpers",
-    "to": "PtcRunner.Kernel.RuntimeLimitDiagnostic",
-    "issue": 2231
-  },
-  {
-    "from": "PtcRunner.Lisp.Eval.Helpers",
-    "to": "PtcRunner.Kernel.SafeMetadata",
-    "issue": 2231
-  },
-  {
-    "from": "PtcRunner.Lisp.Eval.Helpers",
-    "to": "PtcRunner.LLM.OutputLimit",
-    "issue": 2231
-  },
-  {
-    "from": "PtcRunner.Lisp.Eval.Parallel",
-    "to": "PtcRunner.Kernel.SafeMetadata",
-    "issue": 2231
   }
 ]

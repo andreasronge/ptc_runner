@@ -50,12 +50,12 @@ defmodule PtcRunner.Lisp do
     SymbolCounter
   }
 
-  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Effects
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Eval.HostContext
   alias PtcRunner.Lisp.Eval.ParallelBudget
+  alias PtcRunner.Lisp.HostErrorPolicy
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Attach, as: PreludeAttach
   alias PtcRunner.Lisp.Prelude.AttachContext, as: PreludeAttachContext
@@ -303,6 +303,12 @@ defmodule PtcRunner.Lisp do
       for selected overrides whose replacement source removed an export.
       Omitting the ownership map keeps the ordinary miss, so embedded callers
       are unchanged.
+    - `:host_error_policy` - Optional module implementing
+      `PtcRunner.Lisp.HostErrorPolicy`. Host diagnostics crossing private prelude
+      boundaries fail closed without it. Parallel program `fail` values retain
+      only a bounded scalar kind by default; a policy projects host catalog
+      metadata. The invocation's policy is inherited by workers and is never
+      captured in closure metadata.
     - `:component_catalog` - Optional host catalog implementing
       `PtcRunner.Lisp.ComponentCatalog` for the selected environment. Public `run/2` strips this option so a direct
       caller cannot inject a Kernel graph. Kernel evaluations pass it only
@@ -842,6 +848,7 @@ defmodule PtcRunner.Lisp do
       data_grants: Keyword.get(opts, :data_grants),
       missing_data_params_message: Keyword.get(opts, :missing_data_params_message),
       component_catalog: Keyword.get(opts, :component_catalog),
+      host_error_policy: Keyword.get(opts, :host_error_policy),
       inspect_only: Keyword.get(opts, :inspect_only, false),
       strict_transitive_calls: Keyword.get(opts, :strict_transitive_calls, false),
       direct_namespaces: Keyword.get(opts, :direct_namespaces, []),
@@ -1334,6 +1341,7 @@ defmodule PtcRunner.Lisp do
         data_grants: data_grants,
         missing_data_params_message: missing_data_params_message,
         component_catalog: component_catalog,
+        host_error_policy: Map.get(opts, :host_error_policy),
         inspect_only: inspect_only,
         strict_transitive_calls: strict_transitive_calls,
         private_tool_authority?: private_tool_authority?,
@@ -1600,7 +1608,7 @@ defmodule PtcRunner.Lisp do
       fail: %{
         reason: reason_atom,
         message: format_error(reason),
-        details: error_details(reason)
+        details: error_details(reason, eval_ctx.host_error_policy)
       },
       memory: memory,
       signature: nil,
@@ -1619,6 +1627,14 @@ defmodule PtcRunner.Lisp do
 
     {:error, step}
   end
+
+  defp error_details({:pmap_error, _message, taxonomy}, policy),
+    do: HostErrorPolicy.project_failure_metadata(policy, taxonomy, :retain)
+
+  defp error_details({:pcalls_error, _index, _message, taxonomy}, policy),
+    do: HostErrorPolicy.project_failure_metadata(policy, taxonomy, :retain)
+
+  defp error_details(reason, _policy), do: error_details(reason)
 
   defp error_details({:arithmetic_error, token})
        when token in [:division_by_zero, :integer_overflow, :bad_argument],
@@ -1683,7 +1699,7 @@ defmodule PtcRunner.Lisp do
   defp error_details(_reason), do: %{}
 
   defp retain_parallel_failure_metadata(metadata) do
-    SafeMetadata.retain_failure_metadata(metadata)
+    HostErrorPolicy.project_failure_metadata(nil, metadata, :retain)
   end
 
   @doc """

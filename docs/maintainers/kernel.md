@@ -68,6 +68,15 @@ templates and scratch-directory primitives belong to Lisp. Kernel private-artifa
 checks stay in PtcRunner.Kernel.PrivateDirectory. Component introspection uses
 the Lisp-owned `PtcRunner.Lisp.ComponentCatalog` protocol; the kernel supplies
 its catalog implementation.
+
+Private-prelude host errors and parallel failure metadata use the Lisp-owned
+`PtcRunner.Lisp.HostErrorPolicy` behaviour. The kernel injects its implementation
+at workflow, subordinate, and REPL evaluations. It rebuilds validated diagnostics
+before they cross the private boundary; evaluator diagnostics remain Lisp-owned.
+Direct `PtcRunner.Lisp.run/2` embeddings must pass `:host_error_policy` to retain
+host taxonomy through private boundaries. Without it, host errors fail closed
+and parallel program failures retain only a bounded, shape-checked kind.
+
 Mix tasks, benchmark and site-generation modules, application startup, CLI,
 REPL, progress presentation and Viewer modules belong to the frontend. The exact root-module
 inventory is in `Mix.Tasks.Ptc.CheckLayers`; an unclassified module fails the

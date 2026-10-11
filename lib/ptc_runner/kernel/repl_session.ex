@@ -866,6 +866,7 @@ defmodule PtcRunner.Kernel.ReplSession do
     result =
       Lisp.run_native(source,
         caller: :repl,
+        host_error_policy: PtcRunner.Kernel.HostErrorPolicy,
         context: session.config.input,
         memory: memory,
         turn_history: history,

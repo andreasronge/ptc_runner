@@ -8,7 +8,6 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
   deadlines, cancellation, and monitor cleanup belong to `ParallelRunner`.
   """
 
-  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Lisp.ChildResult
   alias PtcRunner.Lisp.Eval.Abort
   alias PtcRunner.Lisp.Eval.Apply
@@ -19,6 +18,7 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
   alias PtcRunner.Lisp.Eval.HostContext
   alias PtcRunner.Lisp.Eval.ParallelRunner
   alias PtcRunner.Lisp.Eval.ParallelRunner.Envelope
+  alias PtcRunner.Lisp.HostErrorPolicy
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Args
   alias PtcRunner.Lisp.Runtime.Collection.Normalize
@@ -321,10 +321,12 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
 
   defp captured_failure(
          :error,
-         %Abort{outcome: {:control, :fail, value, _context}},
+         %Abort{outcome: {:control, :fail, value, context}},
          _stacktrace
        ),
-       do: {:worker_control, :fail, SafeMetadata.failure_metadata(value)}
+       do:
+         {:worker_control, :fail,
+          HostErrorPolicy.project_failure_metadata(context.host_error_policy, value, :extract)}
 
   defp captured_failure(
          :error,

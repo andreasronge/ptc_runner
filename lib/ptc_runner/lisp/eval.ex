@@ -857,7 +857,12 @@ defmodule PtcRunner.Lisp.Eval do
            merge_export_effects(caller_ctx, final_ctx)}
 
         {:error, reason} ->
-          {:error, Helpers.sanitize_private_error(reason, %{ref: export.ref})}
+          {:error,
+           Helpers.sanitize_private_error(
+             reason,
+             %{ref: export.ref},
+             caller_ctx.host_error_policy
+           )}
       end
     rescue
       error in Abort ->
@@ -874,7 +879,11 @@ defmodule PtcRunner.Lisp.Eval do
 
           {:error, reason, %EvalContext{} = abort_ctx} ->
             Abort.error!(
-              Helpers.sanitize_private_error(reason, %{ref: export.ref}),
+              Helpers.sanitize_private_error(
+                reason,
+                %{ref: export.ref},
+                caller_ctx.host_error_policy
+              ),
               merge_export_effects(caller_ctx, abort_ctx)
             )
 
