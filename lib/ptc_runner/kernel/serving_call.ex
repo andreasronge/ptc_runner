@@ -1,8 +1,8 @@
 defmodule PtcRunner.Kernel.ServingCall do
   @moduledoc """
-  Owns the opaque reservation used by `PtcRunner.Kernel.ServingTemplate`.
+  Owns the opaque reservation used by `PtcRunner.Kernel.ServingPlan`.
 
-  Hosts use ServingTemplate for reserve, activation and close. This module owns
+  Hosts use ServingPlan for reserve, activation and close. This module owns
   the internal reservation representation; it does not authorize transport
   commitment or add per-call policy overrides.
   """
@@ -20,16 +20,16 @@ defmodule PtcRunner.Kernel.ServingCall do
   alias PtcRunner.Kernel.RunAdmission
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.ServingOutcome
-  alias PtcRunner.Kernel.ServingTemplate
+  alias PtcRunner.Kernel.ServingPlan
   alias PtcRunner.Kernel.StrictJSON
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WarmProviderRuntime
 
   @opaque reservation ::
-            {__MODULE__, ServingTemplate.t(), map(), RunAdmission.reservation(), integer(), pid(),
+            {__MODULE__, ServingPlan.t(), map(), RunAdmission.reservation(), integer(), pid(),
              binary(), map() | nil}
 
-  @spec reserve(ServingTemplate.t(), term(), pid(), integer() | :infinity, map() | nil) ::
+  @spec reserve(ServingPlan.t(), term(), pid(), integer() | :infinity, map() | nil) ::
           {:ok, reservation()} | ServingOutcome.t()
   def reserve(template, input, admission, caller_deadline, artifacts) do
     with {:ok, input} <- StrictJSON.admit(input),
@@ -45,7 +45,7 @@ defmodule PtcRunner.Kernel.ServingCall do
 
   defp reserve_valid(template, input, admission, caller_deadline, artifacts) do
     now = System.monotonic_time(:millisecond)
-    limit = now + ServingTemplate.limits(template).run_duration_ms
+    limit = now + ServingPlan.limits(template).run_duration_ms
     deadline = if caller_deadline == :infinity, do: limit, else: caller_deadline
     deadline = if is_integer(deadline), do: min(deadline, limit), else: deadline
 
@@ -179,7 +179,7 @@ defmodule PtcRunner.Kernel.ServingCall do
              event_policy: :normal
            ),
          {:ok, request} <- RunRequest.new(template.package, input, policy) do
-      ServingTemplate.prepare_call(template, request)
+      ServingPlan.prepare_call(template, request)
     end
   end
 
@@ -307,7 +307,7 @@ defmodule PtcRunner.Kernel.ServingCall do
   end
 
   defp runtime_ready?(template, deadline) do
-    context = ServingTemplate.runtime_context(template)
+    context = ServingPlan.runtime_context(template)
 
     warm_ready =
       context.warm_runtime == nil or
@@ -320,14 +320,14 @@ defmodule PtcRunner.Kernel.ServingCall do
   end
 
   defp activate_execution(template, lease, prepared, authority, deadline) do
-    context = ServingTemplate.runtime_context(template)
+    context = ServingPlan.runtime_context(template)
 
     cond do
       not runtime_ready?(template, deadline) ->
         {:error, :run_admission_unavailable}
 
       context.cold? ->
-        {:ok, plan} = ServingTemplate.provider_plan(template)
+        {:ok, plan} = ServingPlan.provider_plan(template)
         RunAdmission.activate(lease, prepared, authority, plan.catalog, context.cold_services)
 
       context.required? ->

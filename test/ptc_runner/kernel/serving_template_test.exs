@@ -581,7 +581,10 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
 
   test "fenced transfer refusal survives activation-failure cancellation" do
     host = start_supervised!({RunAdmission, max_concurrent_runs: 1})
-    {:ok, {RunAdmission, ^host, ref} = lease} = RunAdmission.reserve(host, :infinity)
+
+    {:ok, {PtcRunner.Kernel.RunAdmissionOwner, ^host, ref} = lease} =
+      RunAdmission.reserve(host, :infinity)
+
     :ok = RunAdmission.retain_publication(lease)
     {:ok, ticket} = GenServer.call(host, {:begin_activation, ref})
     :sys.replace_state(host, &%{&1 | status: :unavailable})

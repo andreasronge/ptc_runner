@@ -1048,3 +1048,21 @@ without another cursor owner or fixture format. Decision reservation metadata
 carries fixed host cost and token maxima directly, without a tariff estimate.
 `RunState` charges both kinds against its existing ledgers and settles reported
 usage even when output admission rejects an answer or a reservation is exceeded.
+
+## Run planning and lifecycle direction
+
+`RunPreparation` owns compilation, declaration validation and sealed preparation
+metadata; `RunAssembly` assembles environments from admitted bundles and grants.
+Neither depends on execution orchestration. `RunCoordinator` starts execution
+owners from those preparations, and `RunBuilder` opens sinks and assembles runs.
+
+`ServingPlan` holds the immutable compiled serving data. `ServingTemplate` is the
+host API for construction, runtime binding and calls; provider opening and call
+execution consume the plan directly. The plan owns no runtime resources.
+`ProviderRuntime.Borrow` validates retained capability tokens and speaks the
+runtime protocol without depending on the runtime owner's orchestration.
+
+`RunAdmissionOwner` serializes capacity, reservation transfer, cancellation and
+publication settlement. `RunAdmission` starts execution sessions, whose owners
+report cleanup directly to the admission state owner. Admission still precedes
+resource opening; absolute deadlines and cleanup acknowledgements govern release.

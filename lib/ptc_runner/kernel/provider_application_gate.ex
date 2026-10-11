@@ -36,7 +36,7 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
   alias PtcRunner.Kernel.MissionReplTarget
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderRuntimeServices
-  alias PtcRunner.Kernel.ServingTemplate
+  alias PtcRunner.Kernel.ServingPlan
 
   @spec admit(PreparedRun.t(), InstallationCatalog.t(), ProviderRuntimeServices.t()) ::
           :ok | {:error, CommandDiagnostic.t()}
@@ -150,7 +150,7 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
 
   @doc "Admits the union of a command's templates once, retaining command-VM ownership."
   @spec admit_command_templates(
-          [ServingTemplate.t()],
+          [ServingPlan.t()],
           InstallationCatalog.t(),
           ProviderRuntimeServices.t()
         ) ::
@@ -165,7 +165,7 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
       selected =
         templates
         |> Enum.flat_map(fn template ->
-          case ServingTemplate.provider_plan(template) do
+          case ServingPlan.provider_plan(template) do
             {:ok, plan} -> requirements(plan.metadata.provider_declarations, plan.catalog)
             {:error, _} -> []
           end

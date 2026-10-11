@@ -18,7 +18,7 @@ defmodule PtcRunner.Kernel.CommandInitializer do
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.ProjectConfig
-  alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunPreparation
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.StrictJSON
 
@@ -206,7 +206,7 @@ defmodule PtcRunner.Kernel.CommandInitializer do
                Map.take(@documents, ["main.clj", "ptc.json"]),
                result_projection: :json
              ),
-           {:ok, prepared} <- RunCoordinator.prepare(request, catalog),
+           {:ok, prepared} <- RunPreparation.prepare(request, catalog),
            :ok <- PreparedRun.close(prepared),
            {:ok, project} <- StrictJSON.decode(@project),
            {:ok, root} <- JSV.build(ProjectConfig.schema(), atoms: false, warnings: :silent),

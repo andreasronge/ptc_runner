@@ -33,12 +33,12 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   alias PtcRunner.Kernel.ProviderApplicationGate
   alias PtcRunner.Kernel.ProviderCredentials
   alias PtcRunner.Kernel.ProviderRegistry
-  alias PtcRunner.Kernel.ProviderRuntime
+  alias PtcRunner.Kernel.ProviderRuntime.Borrow
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunBuilder
-  alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunPreparation
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.ServingRequest
 
@@ -91,7 +91,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   def valid?(%__MODULE__.Retained{} = retained),
     do:
       Enum.sort(Map.keys(retained)) == [:__struct__, :borrow, :execution, :plan_identity] and
-        valid?(retained.execution) and ProviderRuntime.valid_borrow?(retained.borrow) and
+        valid?(retained.execution) and Borrow.valid_borrow?(retained.borrow) and
         retained.plan_identity == retained.borrow.plan_identity
 
   def valid?(_execution), do: false
@@ -157,7 +157,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   def bound_to_prepared?(%__MODULE__.Retained{} = retained, %PreparedRun{} = prepared),
     do:
       valid?(retained) and bound_to_prepared?(retained.execution, prepared) and
-        retained.plan_identity == ProviderRuntime.plan_identity(prepared)
+        retained.plan_identity == Borrow.plan_identity(prepared)
 
   def bound_to_prepared?(_execution, _prepared), do: false
 
@@ -1610,10 +1610,10 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     do: local_checks(prepared, execution, target)
 
   defp local_checks(prepared, execution, :all),
-    do: RunCoordinator.local_checks(prepared, execution.catalog, execution.services)
+    do: RunPreparation.local_checks(prepared, execution.catalog, execution.services)
 
   defp local_checks(prepared, execution, %MissionReplTarget{} = target),
-    do: RunCoordinator.local_checks(prepared, execution.catalog, execution.services, target)
+    do: RunPreparation.local_checks(prepared, execution.catalog, execution.services, target)
 
   defp open_consumed_setup(prepared, execution, lifecycle_owner, tracker, :all),
     do:

@@ -48,7 +48,6 @@ defmodule PtcRunner.Kernel.RunBuilder do
   """
 
   alias PtcRunner.Kernel
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.ArtifactPublisher
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.BundleCompiler
@@ -56,13 +55,11 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CompileDiagnostic
-  alias PtcRunner.Kernel.ComponentCatalog
   alias PtcRunner.Kernel.DeclaredReadEffectDiagnostic
   alias PtcRunner.Kernel.DeclaredReadEffectValidator
   alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.ExecutionOutcome
-  alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.InstallationCatalog
@@ -76,13 +73,14 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.ProviderAcquisition
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderRegistry
-  alias PtcRunner.Kernel.ProviderRuntime
+  alias PtcRunner.Kernel.ProviderRuntime.Borrow
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.ResultArtifact
   alias PtcRunner.Kernel.ResultIdentity
+  alias PtcRunner.Kernel.RunAssembly
   alias PtcRunner.Kernel.RunConfig
-  alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunPreparation
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.ServingRequest
   alias PtcRunner.Kernel.SourceIntern
@@ -640,19 +638,19 @@ defmodule PtcRunner.Kernel.RunBuilder do
           ProviderRegistry.t(),
           PublicationAuthority.t(),
           map(),
-          ProviderRuntime.Borrow.t()
+          Borrow.t()
         ) :: {:ok, map()} | {:error, term()}
   def build_borrowed_owned(
         %PreparedRun{request: %RunRequest{}} = prepared,
         %ProviderRegistry{} = registry,
         authority,
         opened_sinks,
-        %ProviderRuntime.Borrow{} = borrow
+        %Borrow{} = borrow
       ) do
     result =
       with true <- PreparedRun.consumed_valid?(prepared),
            :ok <- borrowed_plan_matches(prepared, borrow),
-           true <- ProviderRuntime.valid_borrow?(borrow),
+           true <- Borrow.valid_borrow?(borrow),
            true <- borrow.session.deadline > System.monotonic_time(:millisecond),
            :ok <- validate_registry(registry),
            true <- PublicationAuthority.authorized?(authority),
@@ -684,15 +682,15 @@ defmodule PtcRunner.Kernel.RunBuilder do
         {:error, _reason} = error -> error
       end
 
-    if match?({:error, _}, result), do: ProviderRuntime.release_borrow(borrow)
+    if match?({:error, _}, result), do: Borrow.release_borrow(borrow)
     result
   rescue
     _exception ->
-      ProviderRuntime.release_borrow(borrow)
+      Borrow.release_borrow(borrow)
       {:error, :invalid_prepared_run}
   catch
     _kind, _reason ->
-      ProviderRuntime.release_borrow(borrow)
+      Borrow.release_borrow(borrow)
       {:error, :invalid_prepared_run}
   end
 
@@ -700,7 +698,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
     do: {:error, :invalid_prepared_run}
 
   defp borrowed_plan_matches(prepared, borrow) do
-    if ProviderRuntime.plan_identity(prepared) == borrow.plan_identity,
+    if Borrow.plan_identity(prepared) == borrow.plan_identity,
       do: :ok,
       else: {:error, :provider_runtime_mismatch}
   end
@@ -852,7 +850,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
     with {:ok, catalog} <-
            InstallationCatalog.new(%{}, installed_limits: installed_limits) do
-      case RunCoordinator.prepare(request, catalog) do
+      case RunPreparation.prepare(request, catalog) do
         {:ok, prepared} ->
           try do
             build_prepared(prepared, registry, opts)
@@ -948,14 +946,14 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
     with {:ok, workflow} <- WorkflowEnvironment.new([]),
          {:ok, _intern, catalog} <-
-           environment_catalog(spec.components, bundle, SourceIntern.new()),
+           RunAssembly.environment_catalog(spec.components, bundle, SourceIntern.new()),
          {:ok, mission} <-
            MissionEnvironment.new(
              bundle: bundle,
              capabilities: capabilities,
              data: spec.data,
              catalog: catalog,
-             shipped_component_ids: library_component_ids(spec.kinds)
+             shipped_component_ids: RunAssembly.library_component_ids(spec.kinds)
            ) do
       build_config(
         {prepared.request, prepared.entry_source},
@@ -984,15 +982,15 @@ defmodule PtcRunner.Kernel.RunBuilder do
              request.package.workflow_components,
              workflow_bundle
            ),
-         :ok <- RunCoordinator.validate_entry(workflow_bundle, request.package.entry),
+         :ok <- RunPreparation.validate_entry(workflow_bundle, request.package.entry),
          :ok <-
-           RunCoordinator.validate_entry_missions(
+           RunPreparation.validate_entry_missions(
              workflow_bundle,
              request.package.entry,
              request.package.missions
            ),
          :ok <-
-           RunCoordinator.validate_mission_capabilities(
+           RunPreparation.validate_mission_capabilities(
              request.package.missions,
              mission_bundles
            ) do
@@ -1055,50 +1053,6 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
-  # One environment per declared mission, each assembled from its already
-  # prepared bundle and granted only the mission providers that mission named.
-  # A grant a mission did not name is simply absent from its environment, so
-  # authority is enforced by assembly rather than by anything the model is
-  # asked to respect.
-  defp mission_environments(package, mission_bundles, providers, intern) do
-    by_occurrence = Map.get(providers.mission, :by_occurrence, %{})
-
-    Enum.reduce_while(Map.get(package, :missions) || %{}, {:ok, intern, %{}}, fn {name, spec},
-                                                                                 {:ok, intern,
-                                                                                  acc} ->
-      capabilities =
-        spec.provider_occurrences
-        |> Enum.flat_map(&Map.get(by_occurrence, &1, []))
-
-      with {:ok, bundle} <- Map.fetch(mission_bundles, name),
-           {:ok, intern, catalog} <- environment_catalog(spec.components, bundle, intern),
-           {:ok, environment} <-
-             MissionEnvironment.new(
-               bundle: bundle,
-               capabilities: capabilities,
-               data: spec.data,
-               catalog: catalog,
-               shipped_component_ids: library_component_ids(spec.kinds)
-             ) do
-        {:cont, {:ok, intern, Map.put(acc, name, environment)}}
-      else
-        {:error, {:missing_capability_requirement, _names}} = error -> {:halt, error}
-        {:error, :source_hash_collision} = error -> {:halt, error}
-        {:error, :catalog_bundle_mismatch} = error -> {:halt, error}
-        _error -> {:halt, {:error, :invalid_mission_environment}}
-      end
-    end)
-    |> case do
-      {:ok, _intern, environments} -> {:ok, environments}
-      {:error, _reason} = error -> error
-    end
-  end
-
-  defp environment_catalog([], nil, intern), do: {:ok, intern, ComponentCatalog.empty()}
-
-  defp environment_catalog(components, bundle, intern),
-    do: ComponentCatalog.build(components, bundle, intern)
-
   defp mission_bundles(missions, deadline, initial_bytes, workflow_components, workflow_bundle) do
     case BundleCompiler.compile_named(
            missions,
@@ -1113,25 +1067,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
   end
 
   @doc false
-  @spec assemble_environments(ApplicationPackage.t(), FrozenBundle.t(), map(), map()) ::
-          {:ok, WorkflowEnvironment.t(), map()} | {:error, term()}
-  def assemble_environments(package, workflow_bundle, mission_bundles, providers) do
-    with {:ok, intern, workflow_catalog} <-
-           environment_catalog(package.workflow_components, workflow_bundle, SourceIntern.new()),
-         {:ok, workflow} <-
-           WorkflowEnvironment.new_for_package(
-             [
-               bundle: workflow_bundle,
-               capabilities: providers.workflow.capabilities,
-               catalog: workflow_catalog,
-               shipped_component_ids: library_component_ids(package.workflow_component_kinds)
-             ],
-             package
-           ),
-         {:ok, missions} <- mission_environments(package, mission_bundles, providers, intern) do
-      {:ok, workflow, missions}
-    end
-  end
+  defdelegate assemble_environments(package, workflow_bundle, mission_bundles, providers),
+    to: RunAssembly
 
   defp build_with_providers(
          request,
@@ -2036,10 +1973,6 @@ defmodule PtcRunner.Kernel.RunBuilder do
     if inspection_sink, do: InspectionSink.stop(inspection_sink)
     EventSink.stop(event_sink)
     error
-  end
-
-  defp library_component_ids(kinds) do
-    for {id, :library} <- kinds, do: id
   end
 
   defp maybe_put(opts, _key, nil), do: opts
