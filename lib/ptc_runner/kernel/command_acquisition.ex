@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.Kernel.HostInstallation.Credentials
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.ManifestReplPreparation
   alias PtcRunner.Kernel.OptionalBudgetDiagnostic
@@ -410,7 +411,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
 
       installation ->
         installation
-        |> HostInstallation.installation_credential_names()
+        |> Credentials.installation_credential_names()
         |> Enum.any?(&match?(%{source: :env}, Map.get(host.credentials, &1)))
     end
   end

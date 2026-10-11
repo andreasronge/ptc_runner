@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
   alias PtcRunner.Kernel.EffectiveApplication
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.Kernel.HostInstallation.Selection
   alias PtcRunner.Kernel.HostInstallationAuthority
   alias PtcRunner.Kernel.HostInstallationOwner
   alias PtcRunner.Kernel.InstallationCatalog
@@ -1135,14 +1136,14 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
                )
 
       assert {:ok, ^normalized} =
-               HostInstallation.normalize_selection(
+               Selection.normalize_selection(
                  host.install[name],
                  raw_selection,
                  %{limits: catalog.installed_limits}
                )
 
       assert {:ok, ^normalized} =
-               HostInstallation.normalize_selection(
+               Selection.normalize_selection(
                  host.install[name],
                  normalized,
                  %{limits: catalog.installed_limits}

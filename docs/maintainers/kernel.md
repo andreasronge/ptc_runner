@@ -799,6 +799,13 @@ proves that a selected LLM uses an environment credential. Kernel modules
 never search for or load dotenv input; embedders acquire environment state
 explicitly.
 
+`HostConfig` dispatches installation decoding to its MCP, LLM, Decision,
+Snapshot, and Replay modules, with transport decoding and shared validation
+kept separately. `HostInstallation` assembles catalogs and runtime bindings;
+its `Executable`, `Credentials`, and `Selection` modules own executable
+resolution, runtime secrets, and selection rules respectively.
+
+`MCPSource.Selection` validates the selected tool set and destination bounds.
 `MCPSource` owns discovery and capability assembly; `MCPProtocol` owns pure
 protocol validation. HTTP and stdio transport owners bound, correlate, and
 cancel requests. Host configuration owns endpoints, commands, credentials,
