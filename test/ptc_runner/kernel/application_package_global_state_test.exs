@@ -3,9 +3,9 @@ defmodule PtcRunner.Kernel.ApplicationPackageGlobalStateTest do
   # The rest of ApplicationPackage coverage is async in ApplicationPackageTest.
   use ExUnit.Case, async: false
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.Kernel.RunRequest
 
   test "sealed Kernel runs ignore the ambient default compile heap" do
     previous = Application.get_env(:ptc_runner, :default_max_heap)
@@ -34,7 +34,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageGlobalStateTest do
     }
 
     assert {:ok, request} =
-             ApplicationPackage.request_memory("app.json", documents, result_projection: :native)
+             RunRequest.from_memory("app.json", documents, result_projection: :native)
 
     {:ok, registry} = ProviderRegistry.new()
     assert {:ok, built} = RunBuilder.build(request, registry)

@@ -27,7 +27,7 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
   } do
     path = fixture(dir)
     assert {:ok, template} = build(path)
-    assert {:error, _reason} = ApplicationPackage.request_directory(path)
+    assert {:error, _reason} = RunRequest.from_directory(path)
     assert {:ok, package, _input} = ApplicationPackage.acquire_directory(path, omit_input: true)
     assert ServingTemplate.input_schema(template) == package.contracts.input.schema
     assert ServingTemplate.output_schema(template) == package.contracts.result.schema
@@ -226,7 +226,7 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
     path = fixture(dir, %{"input" => %{"value" => %{"wrong" => "not contract valid"}}})
     File.write!(Path.join(dir, "schema.json"), Jason.encode!(schema))
     assert {:ok, template} = build(path)
-    assert {:error, _reason} = ApplicationPackage.request_directory(path)
+    assert {:error, _reason} = RunRequest.from_directory(path)
     {:ok, compiled} = ValueContract.compile(schema)
     assert ServingTemplate.input_schema(template) == compiled.schema
     assert ServingTemplate.output_schema(template) == compiled.schema
@@ -239,7 +239,7 @@ defmodule PtcRunner.Kernel.ServingTemplateTest do
     File.write!(Path.join(dir, "schema.json"), Jason.encode!(schema))
     assert {:ok, template} = build(path, expected_application_content_digest: content)
     File.write!(Path.join(dir, "missing.json"), Jason.encode!(%{"kind" => "b"}))
-    assert {:ok, request} = ApplicationPackage.request_directory(path)
+    assert {:ok, request} = RunRequest.from_directory(path)
     assert request.input.value == %{"kind" => "b"}
 
     assert {:ok, _same} =

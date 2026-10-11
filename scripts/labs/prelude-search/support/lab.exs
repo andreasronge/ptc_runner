@@ -1,7 +1,6 @@
 defmodule PtcRunner.Labs.PreludeSearch do
   @moduledoc false
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.ExecutionInput
   alias PtcRunner.Kernel.ExecutionPolicy
@@ -136,7 +135,7 @@ defmodule PtcRunner.Labs.PreludeSearch do
 
     try do
       {:ok, saved} =
-        ApplicationPackage.request_directory(path, installed_limits: registry.installed_limits)
+        RunRequest.from_directory(path, installed_limits: registry.installed_limits)
 
       {:ok, ref} = CommandRunRef.generate()
       {:ok, request} = request(saved.package, input, ref, true)
@@ -324,7 +323,7 @@ defmodule PtcRunner.Labs.PreludeSearch do
         manifest = Path.join([subject_dir, record["variant"] <> "-bundle", "ptc.json"])
 
         {:ok, saved} =
-          ApplicationPackage.request_directory(manifest,
+          RunRequest.from_directory(manifest,
             installed_limits: registry.installed_limits
           )
 
@@ -389,7 +388,7 @@ defmodule PtcRunner.Labs.PreludeSearch do
     File.write!(manifest_path, pretty_json(manifest))
 
     {:ok, request} =
-      ApplicationPackage.request_directory(manifest_path, installed_limits: installed_limits)
+      RunRequest.from_directory(manifest_path, installed_limits: installed_limits)
 
     %{package: request.package}
   end

@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.Materialize do
   alias PtcRunner.Kernel.ComponentOverride
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.PrivateDirectory
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.StrictJSON
 
   @max_result_bytes 1_048_576
@@ -165,7 +166,7 @@ defmodule PtcRunner.Kernel.Materialize do
   end
 
   defp acquire_candidate(application, materialize_opts, acquisition_opts) do
-    case ApplicationPackage.request_directory(
+    case RunRequest.from_directory(
            application,
            [
              result_projection: :native,

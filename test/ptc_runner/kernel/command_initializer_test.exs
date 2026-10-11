@@ -1,12 +1,12 @@
 defmodule PtcRunner.Kernel.CommandInitializerTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandInitializer
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.ProjectConfig
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.TestSupport.CommandContractSchema
 
   @run_ref CommandRunRef.encode(<<0::128>>)
@@ -58,7 +58,7 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
              "https://ptc-runner.dev/schemas/ptc-application-manifest.schema.json"
 
     assert {:ok, request} =
-             ApplicationPackage.request_directory(Path.join(target, "ptc.json"))
+             RunRequest.from_directory(Path.join(target, "ptc.json"))
 
     manifest_without_schema =
       String.replace(
@@ -68,7 +68,7 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
       )
 
     assert {:ok, request_without_schema} =
-             ApplicationPackage.request_memory("ptc.json", %{
+             RunRequest.from_memory("ptc.json", %{
                "main.clj" => @main_clj,
                "ptc.json" => manifest_without_schema
              })

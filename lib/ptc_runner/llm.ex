@@ -14,6 +14,7 @@ defmodule PtcRunner.LLM do
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.LLM.Invocation
   alias PtcRunner.LLM.PreparedModel
+  alias PtcRunner.LLM.PublicModel
   alias PtcRunner.LLM.Requirements
 
   @type message :: %{role: :system | :user | :assistant | :tool, content: String.t()}
@@ -188,27 +189,6 @@ defmodule PtcRunner.LLM do
   def reservation_bound(_prepared, _request, _tariff),
     do: {:error, :reservation_attestation_unavailable}
 
-  @doc false
-  @spec attested_public_model(module(), String.t()) :: String.t() | nil
-  def attested_public_model(adapter, model) when is_atom(adapter) and is_binary(model) do
-    if Code.ensure_loaded?(adapter) and function_exported?(adapter, :public_model, 1) do
-      case adapter.public_model(model) do
-        {:ok, ^model}
-        when byte_size(model) in 1..256 ->
-          if String.valid?(model), do: model
-
-        _private_or_invalid ->
-          nil
-      end
-    end
-  rescue
-    _exception -> nil
-  catch
-    _kind, _reason -> nil
-  end
-
-  def attested_public_model(_adapter, _model), do: nil
-
   @doc """
   Resolves a configured selector into an immutable adapter-owned request target.
 
@@ -278,7 +258,7 @@ defmodule PtcRunner.LLM do
   """
   @spec catalog_warning(PreparedModel.t()) :: {:model_uncataloged, binary() | nil} | nil
   def catalog_warning(%PreparedModel{catalog_status: :uncataloged} = prepared) do
-    {:model_uncataloged, attested_public_model(prepared.adapter, prepared.selector)}
+    {:model_uncataloged, PublicModel.attested(prepared.adapter, prepared.selector)}
   end
 
   def catalog_warning(%PreparedModel{}), do: nil

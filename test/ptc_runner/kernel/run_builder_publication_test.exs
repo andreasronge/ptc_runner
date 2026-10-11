@@ -3,12 +3,12 @@ defmodule PtcRunner.Kernel.RunBuilderPublicationTest do
   # :erlang.trace_pattern (class D); the other case is clean.
   use ExUnit.Case, async: false
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.TestSupport.RunLifecycle
   alias PtcRunner.TestSupport.StreamingInspection
@@ -47,7 +47,7 @@ defmodule PtcRunner.Kernel.RunBuilderPublicationTest do
 
     assert {:ok, built} =
              manifest_path
-             |> ApplicationPackage.request_directory(
+             |> RunRequest.from_directory(
                installed_limits: registry.installed_limits,
                inspection_capture: true
              )
@@ -171,7 +171,7 @@ defmodule PtcRunner.Kernel.RunBuilderPublicationTest do
 
     assert {:ok, built} =
              manifest_path
-             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunRequest.from_directory(installed_limits: registry.installed_limits)
              |> RunLifecycle.build(registry)
 
     tampered_config = %{built.config | result_contract: nil}

@@ -6,9 +6,9 @@ defmodule PtcRunner.Kernel.CandidatePromotionTest do
   asked to look at it, and what the gate deliberately does not claim.
   """
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CandidatePromotion
   alias PtcRunner.Kernel.ComponentOverride
+  alias PtcRunner.Kernel.RunRequest
 
   @base """
   (ns helper "Helper exports." {:visibility :prompt})
@@ -175,12 +175,12 @@ defmodule PtcRunner.Kernel.CandidatePromotionTest do
 
   defp evaluate(candidate_source, opts \\ []) do
     {:ok, base} =
-      ApplicationPackage.request_memory("app.json", base_documents(), result_projection: :native)
+      RunRequest.from_memory("app.json", base_documents(), result_projection: :native)
 
     # The candidate is acquired through the same override path a run takes, so
     # the gate never sees a package a run could not have produced.
     {:ok, candidate} =
-      ApplicationPackage.request_memory("app.json", candidate_documents(candidate_source),
+      RunRequest.from_memory("app.json", candidate_documents(candidate_source),
         component_override: {"override.json", "candidate.clj"},
         result_projection: :native
       )

@@ -1,7 +1,6 @@
 defmodule PtcRunner.Kernel.ProviderConnectivityTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
@@ -25,6 +24,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.TestSupport.HostBoundFixture
   alias PtcRunner.TestSupport.ProviderSessionFixture
@@ -1363,7 +1363,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
         do: [result_projection: :json, installed_limits: installed],
         else: [result_projection: :json]
 
-    {:ok, request} = ApplicationPackage.request_memory("ptc.json", documents, options)
+    {:ok, request} = RunRequest.from_memory("ptc.json", documents, options)
 
     {:ok, prepared} = RunCoordinator.prepare(request, catalog)
     prepared

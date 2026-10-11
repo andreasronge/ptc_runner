@@ -1,7 +1,6 @@
 defmodule PtcRunner.Kernel.ProviderLifecycleTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
@@ -14,6 +13,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
   alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunConfig
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.TraceEventValidation
   alias PtcRunner.Kernel.TraceLog
@@ -130,7 +130,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
       end)
 
     {:ok, registry} = ProviderRegistry.new(%{"custom" => builder})
-    {:ok, request} = ApplicationPackage.request_directory(manifest, result_projection: :native)
+    {:ok, request} = RunRequest.from_directory(manifest, result_projection: :native)
     assert {:ok, built} = RunBuilder.build(request, registry)
     assert :ok = RunBuilder.close(built)
   end
@@ -233,7 +233,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
         [provider("staged", %{"id" => "mission"})]
       )
 
-    {:ok, request} = ApplicationPackage.request_directory(manifest, result_projection: :native)
+    {:ok, request} = RunRequest.from_directory(manifest, result_projection: :native)
     assert {:ok, built} = RunBuilder.build(request, registry)
     assert :ok = RunBuilder.close(built)
 
@@ -405,7 +405,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
         [provider("staged", %{"id" => "bad"})]
       )
 
-    {:ok, request} = ApplicationPackage.request_directory(manifest, result_projection: :native)
+    {:ok, request} = RunRequest.from_directory(manifest, result_projection: :native)
     assert {:error, :fixture_preflight_failed} = RunBuilder.build(request, registry)
     assert_receive {:preflight, "ok"}
     assert_receive {:preflight, "bad"}
@@ -463,7 +463,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
         []
       )
 
-    {:ok, request} = ApplicationPackage.request_directory(manifest, result_projection: :native)
+    {:ok, request} = RunRequest.from_directory(manifest, result_projection: :native)
     assert {:error, :fixture_acquisition_failed} = RunBuilder.build(request, registry)
     assert_receive {:closed_after_acquisition_failure, first_closed}
     assert_receive {:closed_after_acquisition_failure, second_closed}
@@ -528,7 +528,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
       )
 
     {:ok, request} =
-      ApplicationPackage.request_directory(path,
+      RunRequest.from_directory(path,
         installed_limits: installed_limits,
         result_projection: :native
       )
@@ -712,7 +712,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
         [provider("owned", %{"id" => "mission"})]
       )
 
-    {:ok, request} = ApplicationPackage.request_directory(manifest, result_projection: :native)
+    {:ok, request} = RunRequest.from_directory(manifest, result_projection: :native)
 
     builder = fn %{"id" => id}, _context ->
       {:ok, capability} = capability("provided.#{id}")
@@ -1686,7 +1686,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     do: [installed_limits: registry.installed_limits]
 
   defp directory_request(path, registry, opts \\ []) do
-    {ApplicationPackage.request_directory(path, request_options(registry, opts)), registry,
+    {RunRequest.from_directory(path, request_options(registry, opts)), registry,
      build_options(opts)}
   end
 

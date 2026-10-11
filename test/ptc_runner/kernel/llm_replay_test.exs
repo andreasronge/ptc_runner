@@ -7,7 +7,6 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
   runtime contract.
   """
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandEngine
@@ -24,6 +23,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.TestSupport.RunLifecycle
@@ -1044,9 +1044,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
         assert {:error, %{reason: reason}} =
                  paths.manifest
-                 |> ApplicationPackage.request_directory(
-                   installed_limits: registry.installed_limits
-                 )
+                 |> RunRequest.from_directory(installed_limits: registry.installed_limits)
                  |> RunLifecycle.build(registry, trace_path: trace_path)
                  |> RunLifecycle.execute()
 
@@ -1188,9 +1186,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
       assert {:ok, result} =
                paths.manifest
-               |> ApplicationPackage.request_directory(
-                 installed_limits: registry.installed_limits
-               )
+               |> RunRequest.from_directory(installed_limits: registry.installed_limits)
                |> RunLifecycle.build(registry)
                |> RunLifecycle.execute()
 
@@ -1257,9 +1253,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
       assert {:ok, result} =
                paths.manifest
-               |> ApplicationPackage.request_directory(
-                 installed_limits: registry.installed_limits
-               )
+               |> RunRequest.from_directory(installed_limits: registry.installed_limits)
                |> RunLifecycle.build(registry)
                |> RunLifecycle.execute()
 
@@ -1276,7 +1270,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       assert {:ok, catalog} = HostInstallation.catalog(host)
 
       assert {:ok, request} =
-               ApplicationPackage.request_directory(paths.manifest,
+               RunRequest.from_directory(paths.manifest,
                  installed_limits: catalog.installed_limits
                )
 
@@ -1324,7 +1318,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       assert {:ok, catalog} = HostInstallation.catalog(host)
 
       assert {:ok, request} =
-               ApplicationPackage.request_directory(paths.manifest,
+               RunRequest.from_directory(paths.manifest,
                  installed_limits: catalog.installed_limits
                )
 
@@ -1347,7 +1341,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       assert {:ok, catalog} = HostInstallation.catalog(host)
 
       assert {:ok, request} =
-               ApplicationPackage.request_directory(paths.manifest,
+               RunRequest.from_directory(paths.manifest,
                  installed_limits: catalog.installed_limits
                )
 
@@ -1372,9 +1366,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
       assert {:error, :provider_destination_denied} =
                paths.manifest
-               |> ApplicationPackage.request_directory(
-                 installed_limits: registry.installed_limits
-               )
+               |> RunRequest.from_directory(installed_limits: registry.installed_limits)
                |> RunLifecycle.build(registry)
                |> RunLifecycle.execute()
     end
@@ -1395,9 +1387,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
       assert {:error, :invalid_llm_replay_selection} =
                paths.manifest
-               |> ApplicationPackage.request_directory(
-                 installed_limits: registry.installed_limits
-               )
+               |> RunRequest.from_directory(installed_limits: registry.installed_limits)
                |> RunLifecycle.build(registry)
                |> RunLifecycle.execute()
     end

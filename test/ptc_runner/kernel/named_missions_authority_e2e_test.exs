@@ -19,9 +19,9 @@ defmodule PtcRunner.Kernel.NamedMissionsAuthorityE2ETest do
   @moduletag :e2e
   @moduletag timeout: 180_000
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.TestSupport.PtcFsMCP
   alias PtcRunner.TestSupport.RunLifecycle
   alias PtcRunner.TestSupport.TestHelpers
@@ -42,7 +42,7 @@ defmodule PtcRunner.Kernel.NamedMissionsAuthorityE2ETest do
 
     assert {:ok, built} =
              paths.manifest
-             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunRequest.from_directory(installed_limits: registry.installed_limits)
              |> RunLifecycle.build(registry)
 
     assert {:ok, result} = RunLifecycle.execute({:ok, built})

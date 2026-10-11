@@ -1,12 +1,12 @@
 defmodule PtcRunner.Kernel.ConnectivityResultTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.ConnectivityResult
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SelectionRules
 
   test "a result is bound to the exact preparation and catalog it answers for" do
@@ -358,7 +358,7 @@ defmodule PtcRunner.Kernel.ConnectivityResultTest do
     }
 
     {:ok, request} =
-      ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+      RunRequest.from_memory("ptc.json", documents, result_projection: :json)
 
     {:ok, prepared} = RunCoordinator.prepare(request, catalog)
 

@@ -17,10 +17,10 @@ defmodule PtcRunner.Kernel.MCPRemoteAgentE2ETest do
   @moduletag :e2e
   @moduletag timeout: 180_000
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.TestSupport.RunLifecycle
   alias PtcRunner.TestSupport.StreamingInspection
@@ -122,7 +122,7 @@ defmodule PtcRunner.Kernel.MCPRemoteAgentE2ETest do
 
     assert {:ok, result} =
              manifest_path
-             |> ApplicationPackage.request_directory(
+             |> RunRequest.from_directory(
                inspection_capture: true,
                installed_limits: registry.installed_limits
              )

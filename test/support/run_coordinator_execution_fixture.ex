@@ -2,13 +2,13 @@ defmodule PtcRunner.TestSupport.RunCoordinatorExecutionFixture do
   @moduledoc false
   import ExUnit.Assertions
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.EventBudget
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.TestSupport.HostBoundFixture
   alias PtcRunner.TestSupport.TestHelpers
@@ -36,7 +36,7 @@ defmodule PtcRunner.TestSupport.RunCoordinatorExecutionFixture do
     }
 
     request_opts = Keyword.merge([result_projection: :json], request_opts)
-    assert {:ok, request} = ApplicationPackage.request_memory("ptc.json", documents, request_opts)
+    assert {:ok, request} = RunRequest.from_memory("ptc.json", documents, request_opts)
     assert {:ok, catalog} = InstallationCatalog.new()
     assert {:ok, prepared} = RunCoordinator.prepare(request, catalog)
     {prepared, catalog}
@@ -105,7 +105,7 @@ defmodule PtcRunner.TestSupport.RunCoordinatorExecutionFixture do
     }
 
     assert {:ok, request} =
-             ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+             RunRequest.from_memory("ptc.json", documents, result_projection: :json)
 
     assert {:ok, prepared} = RunCoordinator.prepare(request, catalog)
     {prepared, catalog, services}
@@ -196,7 +196,7 @@ defmodule PtcRunner.TestSupport.RunCoordinatorExecutionFixture do
     }
 
     assert {:ok, request} =
-             ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+             RunRequest.from_memory("ptc.json", documents, result_projection: :json)
 
     assert {:ok, prepared} = RunCoordinator.prepare(request, catalog)
     {prepared, catalog, services}
@@ -224,7 +224,7 @@ defmodule PtcRunner.TestSupport.RunCoordinatorExecutionFixture do
       |> Map.put("main.clj", "(ns app) (defn run [_input] (return 42))")
 
     assert {:ok, request} =
-             ApplicationPackage.request_memory("ptc.json", documents, inspection_capture: true)
+             RunRequest.from_memory("ptc.json", documents, inspection_capture: true)
 
     assert {:ok, catalog} = InstallationCatalog.new()
     assert {:ok, prepared} = RunCoordinator.prepare(request, catalog)

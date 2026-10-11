@@ -2,6 +2,10 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   @moduledoc """
   Immutable, path-free application semantics and captured source closure.
 
+  Use `PtcRunner.Kernel.RunRequest.from_directory/2` or
+  `PtcRunner.Kernel.RunRequest.from_memory/3` to acquire a complete sealed request.
+  This module acquires package semantics and input without constructing requests.
+
   Directory and memory adapters feed the same manifest decoder and bounded
   document source. The resulting package contains portable logical names,
   effective component bytes, compiled contracts, safe override identities,
@@ -35,18 +39,17 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   cached document without bound.
   """
 
+  alias PtcRunner.Kernel.ApplicationOptions
   alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.ComponentOverride
   alias PtcRunner.Kernel.ConfinedFile
   alias PtcRunner.Kernel.ExecutionInput
-  alias PtcRunner.Kernel.ExecutionPolicy
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.ModelContract
   alias PtcRunner.Kernel.ReplLimitProfile
-  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SemanticRevision
   alias PtcRunner.Kernel.SourceIntern
   alias PtcRunner.Kernel.StrictJSON
@@ -58,15 +61,6 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   @max_bytes 8_388_608
   @max_input_bytes 2_000_000
   @input_marker %{"$ptc_input" => "excluded"}
-  @common_acquisition_options [:installed_limits, :input_authority, :input]
-  @directory_shared_options @common_acquisition_options ++ [:component_override_descriptor]
-  @directory_acquisition_options @directory_shared_options ++
-                                   [:repl_interactive_loop, :omit_input]
-  @memory_acquisition_options @common_acquisition_options ++ [:component_override]
-  @directory_request_options @directory_shared_options ++
-                               [:inspection_capture, :result_projection, :event_identity]
-  @memory_request_options @memory_acquisition_options ++
-                            [:inspection_capture, :result_projection, :event_identity]
 
   @enforce_keys [
     :manifest,
@@ -144,7 +138,7 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   def acquire_directory(path, opts \\ [])
 
   def acquire_directory(path, opts) when is_binary(path) and is_list(opts) do
-    with :ok <- validate_options(opts, @directory_acquisition_options),
+    with :ok <- ApplicationOptions.validate(opts, :directory_acquisition),
          do: do_acquire_directory(path, opts)
   end
 
@@ -163,74 +157,11 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
 
   def acquire_memory(manifest_name, documents, opts)
       when is_binary(manifest_name) and is_map(documents) and is_list(opts) do
-    with :ok <- validate_options(opts, @memory_acquisition_options),
+    with :ok <- ApplicationOptions.validate(opts, :memory_acquisition),
          do: do_acquire_memory(manifest_name, documents, opts)
   end
 
   def acquire_memory(_manifest_name, _documents, _opts),
-    do: {:error, :invalid_application_source}
-
-  @spec request_directory(binary(), keyword()) :: {:ok, RunRequest.t()} | {:error, term()}
-  @doc """
-  Acquires and seals one complete directory-backed run request.
-
-  In addition to `:installed_limits`, `:input_authority`, `:input`, and
-  `:component_override_descriptor`, accepts exactly `:inspection_capture`,
-  `:result_projection`, and `:event_identity`. The latter fixes both event
-  IDs and is rejected when the manifest already owns either identity.
-  `:omit_input` and `:repl_interactive_loop` are package-acquisition flags
-  and are rejected here.
-  """
-  def request_directory(path, opts \\ [])
-
-  def request_directory(path, opts) when is_binary(path) and is_list(opts) do
-    with :ok <- validate_options(opts, @directory_request_options),
-         do: request_directory_with_profile(path, opts, false)
-  end
-
-  def request_directory(_path, _opts), do: {:error, :invalid_application_source}
-
-  @doc false
-  @spec request_repl_directory(binary(), keyword(), boolean()) ::
-          {:ok, RunRequest.t()} | {:error, term()}
-  def request_repl_directory(path, opts, interactive_loop?)
-      when is_binary(path) and is_list(opts) and is_boolean(interactive_loop?) do
-    with :ok <- validate_options(opts, @directory_request_options),
-         do: request_directory_with_profile(path, opts, interactive_loop?)
-  end
-
-  def request_repl_directory(_path, _opts, _interactive_loop?),
-    do: {:error, :invalid_application_source}
-
-  defp request_directory_with_profile(path, opts, interactive_loop?) do
-    acquisition_opts = Keyword.put(opts, :repl_interactive_loop, interactive_loop?)
-
-    with {:ok, package, input} <- do_acquire_directory(path, acquisition_opts),
-         {:ok, policy} <- execution_policy(package, opts),
-         do: RunRequest.new(package, input, policy)
-  end
-
-  @spec request_memory(binary(), %{binary() => binary()}, keyword()) ::
-          {:ok, RunRequest.t()} | {:error, term()}
-  @doc """
-  Acquires and seals one complete memory-backed run request.
-
-  In addition to the memory-acquisition options, accepts exactly
-  `:inspection_capture`, `:result_projection`, and `:event_identity`. The
-  latter fixes both event IDs and is rejected when the manifest already owns
-  either identity.
-  """
-  def request_memory(manifest_name, documents, opts \\ [])
-
-  def request_memory(manifest_name, documents, opts)
-      when is_binary(manifest_name) and is_map(documents) and is_list(opts) do
-    with :ok <- validate_options(opts, @memory_request_options),
-         {:ok, package, input} <- do_acquire_memory(manifest_name, documents, opts),
-         {:ok, policy} <- execution_policy(package, opts),
-         do: RunRequest.new(package, input, policy)
-  end
-
-  def request_memory(_manifest_name, _documents, _opts),
     do: {:error, :invalid_application_source}
 
   @spec valid?(term()) :: boolean()
@@ -254,46 +185,6 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   defp do_acquire_memory(manifest_name, documents, opts) do
     with {:ok, source} <- ApplicationSource.open_memory(manifest_name, documents) do
       acquire_source(source, memory_override(source, opts), opts)
-    end
-  end
-
-  defp validate_options(opts, allowed) do
-    if Keyword.keyword?(opts) do
-      keys = Keyword.keys(opts)
-
-      cond do
-        keys -- allowed != [] or length(keys) != MapSet.size(MapSet.new(keys)) ->
-          {:error, :invalid_application_options}
-
-        not valid_optional_installed_limits?(opts) ->
-          {:error, :invalid_installed_limits}
-
-        not valid_optional_boolean?(opts, :repl_interactive_loop) ->
-          {:error, :invalid_application_options}
-
-        not valid_optional_boolean?(opts, :omit_input) ->
-          {:error, :invalid_application_options}
-
-        true ->
-          :ok
-      end
-    else
-      {:error, :invalid_application_options}
-    end
-  end
-
-  defp valid_optional_installed_limits?(opts) do
-    case Keyword.fetch(opts, :installed_limits) do
-      {:ok, limits} -> Limits.valid?(limits)
-      :error -> true
-    end
-  end
-
-  defp valid_optional_boolean?(opts, key) do
-    case Keyword.fetch(opts, key) do
-      :error -> true
-      {:ok, value} when is_boolean(value) -> true
-      _other -> false
     end
   end
 
@@ -887,31 +778,6 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   defp library_component_ids(components, kinds),
     do:
       for(component <- components, Map.fetch!(kinds, component.id) == :library, do: component.id)
-
-  defp execution_policy(package, opts) do
-    with {:ok, run_id, trace_id} <- event_identity(package.events, opts) do
-      ExecutionPolicy.new(
-        event_policy: package.events.policy,
-        run_id: run_id,
-        trace_id: trace_id,
-        inspection_capture: Keyword.get(opts, :inspection_capture, false),
-        result_projection: Keyword.get(opts, :result_projection, :native)
-      )
-    end
-  end
-
-  defp event_identity(events, opts) do
-    case Keyword.fetch(opts, :event_identity) do
-      :error ->
-        {:ok, events.run_id, events.trace_id}
-
-      {:ok, identity} when is_nil(events.run_id) and is_nil(events.trace_id) ->
-        {:ok, identity, identity}
-
-      {:ok, _identity} ->
-        {:error, :event_identity_conflict}
-    end
-  end
 
   defp payload(package) do
     package

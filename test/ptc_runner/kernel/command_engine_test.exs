@@ -6345,7 +6345,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       }
 
       assert {:error, reason} =
-               ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+               RunRequest.from_memory("ptc.json", documents, result_projection: :json)
 
       assert manifest_error_path(reason) == expected_path
     end
@@ -6385,7 +6385,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert_error(["validate", invalid_bundle], "bundle", "bundle_invalid")
 
     assert {:ok, request} =
-             ApplicationPackage.request_directory(invalid_bundle, result_projection: :json)
+             RunRequest.from_directory(invalid_bundle, result_projection: :json)
 
     assert {:ok, registry} = ProviderRegistry.new()
 
@@ -6403,7 +6403,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       assert_error(["validate", application], "bundle", "entry_invalid")
 
       assert {:ok, request} =
-               ApplicationPackage.request_directory(application, result_projection: :json)
+               RunRequest.from_directory(application, result_projection: :json)
 
       assert {:error, %CommandDiagnostic{phase: :bundle, code: :entry_invalid}} =
                RunBuilder.build(request, registry)
@@ -6433,7 +6433,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       })
 
     assert {:ok, provider_request} =
-             ApplicationPackage.request_directory(provider_application,
+             RunRequest.from_directory(provider_application,
                result_projection: :json
              )
 
@@ -6451,7 +6451,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     File.write!(occupied, "occupied")
 
     assert {:ok, inspection_request} =
-             ApplicationPackage.request_directory(invalid_bundle,
+             RunRequest.from_directory(invalid_bundle,
                result_projection: :json,
                inspection_capture: true
              )
@@ -7489,7 +7489,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                  rule: ^expected_rule,
                  path: ^typed_path
                }}} =
-               ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+               RunRequest.from_memory("ptc.json", documents, result_projection: :json)
     end
   end
 
@@ -7600,7 +7600,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         end)
 
       assert {:error, reason} =
-               ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+               RunRequest.from_memory("ptc.json", documents, result_projection: :json)
 
       assert manifest_error_path(reason) == typed_path
     end
@@ -7623,7 +7623,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       assert outcome.envelope["error"]["path"] == expected_path
 
       assert {:error, {:manifest_path, ^typed_path, :duplicate_json_key}} =
-               ApplicationPackage.request_memory(
+               RunRequest.from_memory(
                  "ptc.json",
                  %{
                    "ptc.json" => manifest,
@@ -7791,7 +7791,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                )
     end
 
-    assert {:ok, native_request} = ApplicationPackage.request_directory(application)
+    assert {:ok, native_request} = RunRequest.from_directory(application)
 
     assert {:ok, native_prepared} =
              RunCoordinator.prepare(native_request, preparation.catalog)
@@ -7910,7 +7910,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     tmp_dir: directory
   } do
     application = write_application(directory, "invalid-registry", valid_manifest())
-    assert {:ok, request} = ApplicationPackage.request_directory(application)
+    assert {:ok, request} = RunRequest.from_directory(application)
     assert {:ok, registry} = ProviderRegistry.new()
     invalid_registry = Map.put(registry, :unexpected, :retained)
 
@@ -7935,7 +7935,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     application = write_application(directory, "prepared", valid_manifest())
 
     assert {:ok, request} =
-             ApplicationPackage.request_directory(application, result_projection: :json)
+             RunRequest.from_directory(application, result_projection: :json)
 
     assert {:ok, registry} = ProviderRegistry.new()
 
@@ -7956,7 +7956,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     application = write_application(directory, "prepared-transfer", valid_manifest())
 
     assert {:ok, request} =
-             ApplicationPackage.request_directory(application, result_projection: :json)
+             RunRequest.from_directory(application, result_projection: :json)
 
     assert {:ok, registry} = ProviderRegistry.new()
 
@@ -7990,7 +7990,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     application = write_application(directory, "prepared-build", valid_manifest())
 
     assert {:ok, request} =
-             ApplicationPackage.request_directory(application, result_projection: :json)
+             RunRequest.from_directory(application, result_projection: :json)
 
     assert {:ok, registry} = ProviderRegistry.new()
 
@@ -8010,7 +8010,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     application = write_application(directory, "prepared-options", valid_manifest())
 
     assert {:ok, request} =
-             ApplicationPackage.request_directory(application, result_projection: :json)
+             RunRequest.from_directory(application, result_projection: :json)
 
     assert {:ok, registry} = ProviderRegistry.new()
     assert {:ok, prepared} = RunCoordinator.prepare(request, catalog_for(registry))
@@ -8066,7 +8066,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     application = write_application(directory, "prepared-concurrent", valid_manifest())
 
     assert {:ok, request} =
-             ApplicationPackage.request_directory(application, result_projection: :json)
+             RunRequest.from_directory(application, result_projection: :json)
 
     assert {:ok, registry} = ProviderRegistry.new()
     assert {:ok, prepared} = RunCoordinator.prepare(request, catalog_for(registry))
@@ -8106,10 +8106,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       )
 
     assert {:ok, first_request} =
-             ApplicationPackage.request_directory(first, result_projection: :json)
+             RunRequest.from_directory(first, result_projection: :json)
 
     assert {:ok, second_request} =
-             ApplicationPackage.request_directory(second, result_projection: :json)
+             RunRequest.from_directory(second, result_projection: :json)
 
     assert {:ok, registry} = ProviderRegistry.new()
     catalog = catalog_for(registry)
@@ -8145,7 +8145,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       )
 
     assert {:ok, mission_request} =
-             ApplicationPackage.request_directory(mission_application, result_projection: :json)
+             RunRequest.from_directory(mission_application, result_projection: :json)
 
     assert {:ok, mission_prepared} =
              RunCoordinator.prepare(mission_request, catalog)
@@ -8196,7 +8196,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       )
 
     assert {:ok, request} =
-             ApplicationPackage.request_directory(application, result_projection: :json)
+             RunRequest.from_directory(application, result_projection: :json)
 
     assert {:ok, registry} = ProviderRegistry.new()
     assert {:ok, prepared} = RunCoordinator.prepare(request, catalog_for(registry))
@@ -8224,7 +8224,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       )
 
     assert {:ok, request} =
-             ApplicationPackage.request_directory(application, result_projection: :json)
+             RunRequest.from_directory(application, result_projection: :json)
 
     assert {:ok, workflow_bundle} =
              PtcRunner.Kernel.compile_bundle(request.package.workflow_components)
@@ -8250,7 +8250,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     application = write_application(directory, "prepared-activity", valid_manifest())
 
     assert {:ok, request} =
-             ApplicationPackage.request_directory(application, result_projection: :json)
+             RunRequest.from_directory(application, result_projection: :json)
 
     assert {:ok, registry} = ProviderRegistry.new()
     catalog = catalog_for(registry)
@@ -8290,7 +8290,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     application = write_application(directory, "prepared-owner", valid_manifest())
 
     assert {:ok, request} =
-             ApplicationPackage.request_directory(application, result_projection: :json)
+             RunRequest.from_directory(application, result_projection: :json)
 
     assert {:ok, workflow_bundle} =
              PtcRunner.Kernel.compile_bundle(request.package.workflow_components)
@@ -8584,7 +8584,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
       assert {:error,
               {:manifest_schema_invalid, %PtcRunner.Kernel.SchemaViolation{path: ^typed_path}}} =
-               ApplicationPackage.request_memory(
+               RunRequest.from_memory(
                  "ptc.json",
                  %{
                    "ptc.json" => Jason.encode!(manifest),
@@ -8618,7 +8618,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       assert {:error,
               {:manifest_schema_invalid,
                %PtcRunner.Kernel.SchemaViolation{rule: :type, path: ^typed_path}}} =
-               ApplicationPackage.request_memory(
+               RunRequest.from_memory(
                  "ptc.json",
                  %{
                    "ptc.json" => Jason.encode!(manifest),
@@ -8642,7 +8642,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                rule: :type,
                path: [{:property, "contracts"}]
              }}} =
-             ApplicationPackage.request_memory(
+             RunRequest.from_memory(
                "ptc.json",
                %{
                  "ptc.json" => Jason.encode!(invalid_contracts),
@@ -8752,7 +8752,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     }
 
     assert {:ok, request} =
-             ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+             RunRequest.from_memory("ptc.json", documents, result_projection: :json)
 
     assert {:ok, registry} = ProviderRegistry.new()
 
@@ -8792,7 +8792,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       expected_reason = String.to_existing_atom(code)
 
       assert {:error, {:source_role, :component, ^name, ^expected_reason}} =
-               ApplicationPackage.request_memory(
+               RunRequest.from_memory(
                  "ptc.json",
                  memory_documents,
                  result_projection: :json
@@ -9148,10 +9148,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     for acquire <- [
           fn ->
-            ApplicationPackage.request_directory(declared_shape, result_projection: :json)
+            RunRequest.from_directory(declared_shape, result_projection: :json)
           end,
           fn ->
-            ApplicationPackage.request_memory(
+            RunRequest.from_memory(
               "ptc.json",
               %{
                 "ptc.json" => Jason.encode!(declared_shape_manifest),
@@ -9321,7 +9321,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
            end)
 
     assert {:error, {:source_role, :external_input, :reference_missing}} =
-             ApplicationPackage.request_memory(
+             RunRequest.from_memory(
                "ptc.json",
                %{
                  "ptc.json" => Jason.encode!(valid_manifest()),

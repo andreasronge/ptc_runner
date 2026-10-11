@@ -5,7 +5,6 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
 
   import ExUnit.CaptureIO
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandOutcome
@@ -13,6 +12,7 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.ProjectConfig
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.MixCommandAdapter
 
   @root Path.expand("../../..", __DIR__)
@@ -324,7 +324,7 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
     do:
       assert(
         {:ok, _request} =
-          ApplicationPackage.request_directory(path, installed_limits: installed_limits)
+          RunRequest.from_directory(path, installed_limits: installed_limits)
       )
 
   defp assert_runtime_loads(:host, path, _installed_limits),

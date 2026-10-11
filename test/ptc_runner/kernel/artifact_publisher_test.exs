@@ -1,7 +1,6 @@
 defmodule PtcRunner.Kernel.ArtifactPublisherTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.ArtifactPublisher
   alias PtcRunner.Kernel.CommandRunOutcome
   alias PtcRunner.Kernel.ExecutionOutcome
@@ -12,6 +11,7 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
   alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.ResultArtifact
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.TestSupport.InspectionFixture
   alias PtcRunner.TestSupport.RunLifecycle
@@ -1068,7 +1068,7 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
 
     {:ok, built} =
       manifest_path
-      |> ApplicationPackage.request_directory(request_opts)
+      |> RunRequest.from_directory(request_opts)
       |> RunLifecycle.build(registry, opts)
 
     {built, registry}

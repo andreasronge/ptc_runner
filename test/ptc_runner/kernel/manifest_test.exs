@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.SchemaViolation
   alias PtcRunner.Kernel.ValueContract
@@ -130,12 +131,12 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     assert {:ok, first} =
              linked_path
-             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunRequest.from_directory(installed_limits: registry.installed_limits)
              |> RunLifecycle.build(registry)
 
     assert {:ok, second} =
              path
-             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunRequest.from_directory(installed_limits: registry.installed_limits)
              |> RunLifecycle.build(registry)
 
     assert first.entry_source == "(workflow.main/run data/input)"
@@ -145,7 +146,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     assert {:ok, %{value: 42}} =
              path
-             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunRequest.from_directory(installed_limits: registry.installed_limits)
              |> RunLifecycle.build(registry)
              |> RunLifecycle.execute()
   end
@@ -191,7 +192,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     assert {:ok, %{value: 42}} =
              path
-             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunRequest.from_directory(installed_limits: registry.installed_limits)
              |> RunLifecycle.build(registry)
              |> RunLifecycle.execute()
 
@@ -308,7 +309,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
     assert {:error,
             {:source_role, :external_input, {:input_contract_failed, external_classification}}} =
              path
-             |> ApplicationPackage.request_directory(
+             |> RunRequest.from_directory(
                installed_limits: registry.installed_limits,
                input: "invalid.json",
                input_authority: :normal
@@ -324,7 +325,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     assert {:ok, built} =
              path
-             |> ApplicationPackage.request_directory(
+             |> RunRequest.from_directory(
                installed_limits: registry.installed_limits,
                input: "valid.json",
                input_authority: :normal
@@ -339,7 +340,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     assert {:error, {:input_contract_failed, initial_classification}} =
              path
-             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunRequest.from_directory(installed_limits: registry.installed_limits)
              |> RunLifecycle.build(registry)
 
     assert Enum.any?(
@@ -459,7 +460,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     assert {:ok, %{value: %{"decision" => "no-change"}}} =
              path
-             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunRequest.from_directory(installed_limits: registry.installed_limits)
              |> RunLifecycle.build(registry, output: valid_output)
              |> RunLifecycle.execute()
 
@@ -474,7 +475,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     error =
       path
-      |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+      |> RunRequest.from_directory(installed_limits: registry.installed_limits)
       |> RunLifecycle.build(registry, output: invalid_output, trace_path: trace)
       |> RunLifecycle.execute()
 
@@ -544,7 +545,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
               }
             }} =
              manifest_path
-             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunRequest.from_directory(installed_limits: registry.installed_limits)
              |> RunLifecycle.build(registry, output: output_path)
              |> RunLifecycle.execute()
 
@@ -580,7 +581,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     assert {:error, %{kind: :workflow_failed, reason: :public_projection_collision}} =
              manifest_path
-             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunRequest.from_directory(installed_limits: registry.installed_limits)
              |> RunLifecycle.build(registry, output: output_path)
              |> RunLifecycle.execute()
 
@@ -672,7 +673,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     assert {:ok, %{value: 1}} =
              path
-             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunRequest.from_directory(installed_limits: registry.installed_limits)
              |> RunLifecycle.build(registry)
              |> RunLifecycle.execute()
 
@@ -808,7 +809,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     assert {:ok, built} =
              path
-             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunRequest.from_directory(installed_limits: registry.installed_limits)
              |> RunLifecycle.build(registry)
 
     assert built.config.workflow_environment.bundle.component_ids == [
@@ -926,7 +927,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     assert {:error, :unknown_provider} =
              path
-             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunRequest.from_directory(installed_limits: registry.installed_limits)
              |> RunLifecycle.build(registry)
 
     assert {:ok, _explicit_registry} =
@@ -963,9 +964,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     assert {:ok, _built} =
              path
-             |> ApplicationPackage.request_directory(
-               installed_limits: custom_registry.installed_limits
-             )
+             |> RunRequest.from_directory(installed_limits: custom_registry.installed_limits)
              |> RunLifecycle.build(custom_registry)
 
     assert_receive {:provider_built, %{"mode" => "read"}, :workflow}
@@ -979,7 +978,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     assert {:error, :unknown_provider} =
              path
-             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunRequest.from_directory(installed_limits: registry.installed_limits)
              |> RunLifecycle.build(registry)
   end
 
