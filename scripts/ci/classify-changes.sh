@@ -48,6 +48,8 @@ mark_operator() {
       test/support/*|mix.exs|mix.lock|\
       lib/ptc_runner/kernel.ex|lib/ptc_runner/repl_frontend.ex|\
       lib/ptc_runner/dotenv.ex|lib/ptc_runner/build_identity.ex|\
+      lib/ptc_runner/command_router.ex|lib/ptc_runner/project_viewer_adapter.ex|\
+      lib/ptc_runner/viewer_snapshot_projection.ex|\
       lib/ptc_runner/kernel/command_*|lib/ptc_runner/kernel/repl_*|\
       lib/ptc_runner/kernel/viewer_*|lib/ptc_runner/kernel/mix_command_*|\
       lib/ptc_runner/kernel/standalone_*|lib/ptc_runner/kernel/project_*|\
