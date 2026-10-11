@@ -76,11 +76,11 @@ defmodule PtcRunner.Kernel.LLMReplay do
   """
 
   alias PtcRunner.Kernel.ConfinedFile
-  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.LLMFailureCatalog
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.LLMReplayOwner
+  alias PtcRunner.Kernel.LLMRequestHash
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.StrictJSON
@@ -220,23 +220,6 @@ defmodule PtcRunner.Kernel.LLMReplay do
     }
   end
 
-  @doc """
-  Hashes a provider-neutral request the way fixture keys are computed.
-
-  Manifest authors normally copy the hash from a replay-miss command error;
-  this function supports embedders that already hold the provider-neutral
-  request map.
-  """
-  @spec request_hash(map()) :: {:ok, binary()} | :error
-  def request_hash(request) when is_map(request) do
-    case DeterministicJSON.encode(request) do
-      {:ok, encoded} -> {:ok, hash(encoded)}
-      _other -> :error
-    end
-  end
-
-  def request_hash(_request), do: :error
-
   # One atomic take: reading the remaining responses and advancing the cursor
   # must not be two operations, or two concurrent workflow calls could replay
   # the same element.
@@ -248,7 +231,7 @@ defmodule PtcRunner.Kernel.LLMReplay do
   end
 
   defp hash_request(request) do
-    case request_hash(request) do
+    case LLMRequestHash.request_hash(request) do
       {:ok, key} ->
         {:ok, key}
 

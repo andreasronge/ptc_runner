@@ -7,7 +7,7 @@ defmodule PtcRunner.Kernel.TraceEventValidation do
   alias PtcRunner.Kernel.LLMBudget
   alias PtcRunner.Kernel.LLMUsageSummary
   alias PtcRunner.Kernel.ResultIdentity
-  alias PtcRunner.Kernel.RuntimeTools
+  alias PtcRunner.Kernel.RuntimeToolContract
 
   @event_type ~r/\A[a-z][a-z0-9-]{0,127}\z/
   @capability_call_key ~r/\A(?:workflow|mission)\/[a-z][a-z0-9._\/-]{0,127}\z/
@@ -506,10 +506,10 @@ defmodule PtcRunner.Kernel.TraceEventValidation do
   end
 
   defp runtime_instrumented_name?("workflow/" <> name),
-    do: RuntimeTools.instrumented_name?(:workflow, name)
+    do: RuntimeToolContract.instrumented_name?(:workflow, name)
 
   defp runtime_instrumented_name?("mission/" <> name),
-    do: RuntimeTools.instrumented_name?(:mission, name)
+    do: RuntimeToolContract.instrumented_name?(:mission, name)
 
   defp runtime_instrumented_name?(_name), do: false
 

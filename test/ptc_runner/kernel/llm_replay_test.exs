@@ -17,6 +17,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMReplay
+  alias PtcRunner.Kernel.LLMRequestHash
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderRegistry
@@ -34,7 +35,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
   describe "fixture decoding" do
     @tag :tmp_dir
     test "retained fixtures have independent atomic sequences for each run", %{tmp_dir: dir} do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
 
       write(dir, [
         %{"request_hash" => key, "responses" => [%{"n" => 1}, %{"n" => 2}, %{"n" => 3}]}
@@ -66,7 +67,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "replays a provider failure followed by a priced response", %{tmp_dir: dir} do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
 
       details = String.duplicate("é", 1_024)
 
@@ -106,7 +107,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "rejects replay error details that ProviderError would truncate", %{tmp_dir: dir} do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
 
       write(dir, [
         %{
@@ -128,7 +129,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "the local probe parses fixtures without starting a replay owner", %{tmp_dir: dir} do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => key, "responses" => [%{"n" => 1}, %{"n" => 2}]}])
 
       assert {:ok,
@@ -147,7 +148,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "a single response answers every call with the same value", %{tmp_dir: dir} do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => key, "response" => %{"content" => "only"}}])
 
       {:ok, replay} = start(dir)
@@ -160,10 +161,10 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
     end
 
     test "a request schema is part of the fixture hash" do
-      {:ok, without_schema} = LLMReplay.request_hash(@request)
+      {:ok, without_schema} = LLMRequestHash.request_hash(@request)
 
       {:ok, with_schema} =
-        LLMReplay.request_hash(
+        LLMRequestHash.request_hash(
           Map.put(@request, "schema", %{
             "type" => "object",
             "properties" => %{"ok" => %{"type" => "boolean"}}
@@ -182,7 +183,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
           "required" => ["ok"]
         })
 
-      {:ok, key} = LLMReplay.request_hash(request)
+      {:ok, key} = LLMRequestHash.request_hash(request)
 
       write(dir, [
         %{
@@ -199,7 +200,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "an ordered sequence is consumed once per call and then closes", %{tmp_dir: dir} do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
 
       write(dir, [
         %{"request_hash" => key, "responses" => [%{"turn" => 1}, %{"turn" => 2}]}
@@ -219,7 +220,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "concurrent requester calls consume one run sequence exactly once", %{tmp_dir: dir} do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => key, "responses" => Enum.map(1..100, &%{"turn" => &1})}])
       {:ok, replay} = start(dir)
       on_exit(fn -> LLMReplay.stop(replay) end)
@@ -246,13 +247,13 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
     test "an unmatched request fails closed rather than reusing another response", %{
       tmp_dir: dir
     } do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => key, "response" => %{"content" => "only"}}])
 
       {:ok, replay} = start(dir)
 
       unmatched = %{"system" => "different", "messages" => []}
-      {:ok, unmatched_hash} = LLMReplay.request_hash(unmatched)
+      {:ok, unmatched_hash} = LLMRequestHash.request_hash(unmatched)
 
       assert {:error, %ProviderError{kind: :not_found, retryable?: false} = error} =
                LLMReplay.requester(replay).(unmatched, LLMSupport.llm_context())
@@ -271,7 +272,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "a replay miss is never retryable", %{tmp_dir: dir} do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => key, "response" => %{"content" => "only"}}])
       {:ok, replay} = start(dir)
 
@@ -283,7 +284,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "rejects duplicate entries, both keys and request hashes", %{tmp_dir: dir} do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
 
       write(dir, [
         %{"request_hash" => key, "response" => %{"n" => 1}},
@@ -302,7 +303,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "rejects malformed entries", %{tmp_dir: dir} do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
 
       File.write!(
         Path.join(dir, "replay.jsonl"),
@@ -333,7 +334,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "a rejected line is reported by its number in the file", %{tmp_dir: dir} do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
 
       # Blank lines are numbered before they are dropped, so the reported line
       # is the line the author's editor shows.
@@ -370,14 +371,14 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
     test "enforces the entry ceiling and the response ceiling", %{tmp_dir: dir} do
       entries =
         for index <- 1..4 do
-          {:ok, key} = LLMReplay.request_hash(%{"n" => index})
+          {:ok, key} = LLMRequestHash.request_hash(%{"n" => index})
           %{"request_hash" => key, "response" => %{"n" => index}}
         end
 
       write(dir, entries)
       assert {:error, {:entry_limit_exceeded, 4}} = start(dir, max_entries: 3)
 
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
 
       write(dir, [
         %{"request_hash" => key, "response" => %{"blob" => String.duplicate("x", 4_096)}}
@@ -390,7 +391,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
   describe "identity and lifecycle" do
     @tag :tmp_dir
     test "the safe snapshot carries counts and ceilings but no payload or path", %{tmp_dir: dir} do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => key, "responses" => [%{"secret" => "shh"}, %{"n" => 2}]}])
 
       {:ok, replay} = start(dir)
@@ -410,7 +411,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "a changed fixture set changes the identity", %{tmp_dir: dir} do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => key, "response" => %{"n" => 1}}])
       {:ok, first} = start(dir)
 
@@ -423,7 +424,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "the required installation revision changes provider identity", %{tmp_dir: dir} do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => key, "response" => %{"n" => 1}}])
 
       snapshot = fn revision ->
@@ -463,7 +464,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "the owner dies with the process that acquired it", %{tmp_dir: dir} do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => key, "response" => %{"n" => 1}}])
 
       owner = spawn(fn -> receive do: (:release -> :ok) end)
@@ -480,7 +481,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "stopping the owner is idempotent and releases the process", %{tmp_dir: dir} do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => key, "response" => %{"n" => 1}}])
       {:ok, replay} = start(dir)
 
@@ -495,7 +496,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "an unavailable registrar is not reported as invalid fixtures", %{tmp_dir: dir} do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => key, "response" => %{"n" => 1}}])
 
       {:ok, session} = ProviderSession.start(Limits.defaults())
@@ -531,7 +532,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
   describe "installed provider" do
     @tag :tmp_dir
     test "validate refuses a fixture run cannot load, and names the line", %{tmp_dir: dir} do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => key, "response" => %{"content" => "ok"}}])
       paths = write_application(dir)
 
@@ -570,7 +571,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
     test "a command replay miss prints the hash needed to author a working fixture", %{
       tmp_dir: dir
     } do
-      {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
+      {:ok, unrelated_hash} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
 
       paths = write_application(dir)
@@ -629,7 +630,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "a loop that never got a tool call says so instead of naming max_turns", %{tmp_dir: dir} do
-      {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
+      {:ok, unrelated_hash} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
 
       paths = write_application(dir)
@@ -699,7 +700,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
     test "a turn limit after a failed evaluation carries authenticated evaluator evidence", %{
       tmp_dir: dir
     } do
-      {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
+      {:ok, unrelated_hash} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
 
       paths = write_application(dir)
@@ -750,7 +751,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
     test "a turn limit after an intermediate result keeps last_evaluation_error null", %{
       tmp_dir: dir
     } do
-      {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
+      {:ok, unrelated_hash} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
 
       paths = write_application(dir)
@@ -789,7 +790,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "the transcript ceiling names max_transcript_chars and its value", %{tmp_dir: dir} do
-      {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
+      {:ok, unrelated_hash} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
 
       paths = write_application(dir)
@@ -840,7 +841,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "agent result-contract exhaustion publishes its bounded final diagnosis", %{tmp_dir: dir} do
-      {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
+      {:ok, unrelated_hash} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
 
       paths = write_application(dir)
@@ -956,7 +957,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "run-value leaves final result cleanup fail-closed", %{tmp_dir: dir} do
-      {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
+      {:ok, unrelated_hash} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
 
       paths = write_application(dir)
@@ -1021,7 +1022,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "parallel replay misses retain the authoring hash", %{tmp_dir: dir} do
-      {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
+      {:ok, unrelated_hash} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
       paths = write_application(dir)
 
@@ -1062,7 +1063,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "direct replay misses retain the authoring hash", %{tmp_dir: dir} do
-      {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
+      {:ok, unrelated_hash} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
       paths = write_application(dir)
 
@@ -1103,7 +1104,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "a private replay miss keeps its request hash out of public diagnostics", %{tmp_dir: dir} do
-      {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
+      {:ok, unrelated_hash} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
       paths = write_application(dir)
       private_input = Path.join(dir, "private-input.json")
@@ -1160,7 +1161,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
                    record["payload"]["name"] == "llm-request"
                end)
 
-      assert {:ok, expected_hash} = LLMReplay.request_hash(payload["arguments"])
+      assert {:ok, expected_hash} = LLMRequestHash.request_hash(payload["arguments"])
       assert payload["request_hash"] == expected_hash
       assert Jason.encode!(private_records) =~ secret
     end
@@ -1169,7 +1170,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
     test "a replay-backed run reaches the same llm-request capability as a live one", %{
       tmp_dir: dir
     } do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
 
       write(dir, [
         %{"request_hash" => key, "responses" => [%{"content" => "a"}, %{"content" => "b"}]}
@@ -1198,7 +1199,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "a run explicitly routes between two installed replay aliases", %{tmp_dir: dir} do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
 
       File.write!(
         Path.join(dir, "replay.jsonl"),
@@ -1262,7 +1263,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "a sealed replay declaration is accepted by the runtime provider path", %{tmp_dir: dir} do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => key, "response" => %{"content" => "a"}}])
 
       paths = write_application(dir)
@@ -1307,7 +1308,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
     test "a run may select both a live and a replay LLM while providers are inert", %{
       tmp_dir: dir
     } do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => key, "response" => %{"content" => "a"}}])
 
       # A fixture path that does not exist and a credential that is never set
@@ -1352,7 +1353,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "a replay alias cannot be selected into mission", %{tmp_dir: dir} do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => key, "response" => %{"content" => "a"}}])
 
       paths = write_application(dir, destination: "mission")
@@ -1373,7 +1374,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
     @tag :tmp_dir
     test "a manifest may lower the result ceiling but not raise it", %{tmp_dir: dir} do
-      {:ok, key} = LLMReplay.request_hash(@request)
+      {:ok, key} = LLMRequestHash.request_hash(@request)
       write(dir, [%{"request_hash" => key, "response" => %{"content" => "a"}}])
 
       paths = write_application(dir, selection: %{"max_result_bytes" => 500_000})

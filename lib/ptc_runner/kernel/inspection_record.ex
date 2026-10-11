@@ -6,7 +6,7 @@ defmodule PtcRunner.Kernel.InspectionRecord do
   alias PtcRunner.Kernel.InspectionRecordTypes
   alias PtcRunner.Kernel.InspectionValueIdentity
   alias PtcRunner.Kernel.JSONValue
-  alias PtcRunner.Kernel.LLMReplay
+  alias PtcRunner.Kernel.LLMRequestHash
   alias PtcRunner.Kernel.MCPProtocol
   alias PtcRunner.Kernel.ModelCapabilities
   alias PtcRunner.Kernel.ResultIdentity
@@ -398,7 +398,7 @@ defmodule PtcRunner.Kernel.InspectionRecord do
        ),
        do:
          not ModelCapabilities.model_call?(name, model_call_names) or
-           LLMReplay.request_hash(arguments) == {:ok, request_hash}
+           LLMRequestHash.request_hash(arguments) == {:ok, request_hash}
 
   defp valid_capability_request_hash?(
          %{"environment" => _environment, "name" => _name},

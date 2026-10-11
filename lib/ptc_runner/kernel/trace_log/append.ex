@@ -63,10 +63,10 @@ defmodule PtcRunner.Kernel.TraceLog.Append do
 
   def append_jsonl(_path, _events, _opts), do: {:error, :invalid_trace_log}
 
-  # Keep the original lock namespace across this module extraction.
+  # Append owns both the path lock and authority-lock namespace.
   defp append_jsonl_with_lock(path, events, max_bytes, private?, append_hook) do
     with_callback_lock(append_hook, fn ->
-      :global.trans({{PtcRunner.Kernel.TraceLog, {:append, path}}, self()}, fn ->
+      :global.trans({{__MODULE__, {:append, path}}, self()}, fn ->
         with_append_lock(path, fn ->
           append_locked(path, normalize(events), max_bytes, private?, append_hook)
         end)
@@ -142,7 +142,7 @@ defmodule PtcRunner.Kernel.TraceLog.Append do
       when is_binary(path) and is_function(callback, 0) do
     case PrivateDirectory.anchor(path) do
       {:ok, path} ->
-        :global.trans({{PtcRunner.Kernel.TraceLog, {:append, path}}, self()}, fn ->
+        :global.trans({{__MODULE__, {:append, path}}, self()}, fn ->
           with_append_authority_lock_at(path, callback)
         end)
 
@@ -407,8 +407,8 @@ defmodule PtcRunner.Kernel.TraceLog.Append do
     # prevents another hook holder from taking nested buckets in reverse order;
     # reentrant use of the same bucket needs no second port.
     name = append_lock_name(scope)
-    # Reentrancy and lease identities remain bound to the original namespace.
-    key = {PtcRunner.Kernel.TraceLog, :held_append_buckets}
+    # Every append authority caller shares this owner-local reentrancy identity.
+    key = {__MODULE__, :held_append_buckets}
     held = Process.get(key, [])
 
     if name in held do

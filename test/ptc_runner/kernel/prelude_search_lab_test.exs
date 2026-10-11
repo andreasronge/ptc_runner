@@ -2,7 +2,7 @@ defmodule PtcRunner.Kernel.PreludeSearchLabTest do
   use ExUnit.Case, async: false
   @moduletag :operator
 
-  alias PtcRunner.Kernel.LLMReplay
+  alias PtcRunner.Kernel.LLMRequestHash
   alias PtcRunner.Labs.PreludeSearch
   alias PtcRunner.Labs.PreludeSearch.Phase1
   alias PtcRunner.Labs.PreludeSearch.Statistics
@@ -305,7 +305,7 @@ defmodule PtcRunner.Kernel.PreludeSearchLabTest do
     hashes =
       Enum.map(proposals, fn params ->
         {:ok, hash} =
-          LLMReplay.request_hash(%{"prompt" => Jason.encode!(params)})
+          LLMRequestHash.request_hash(%{"prompt" => Jason.encode!(params)})
 
         hash
       end)

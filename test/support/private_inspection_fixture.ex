@@ -5,7 +5,7 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
-  alias PtcRunner.Kernel.LLMReplay
+  alias PtcRunner.Kernel.LLMRequestHash
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.ResultIdentity
 
@@ -20,7 +20,7 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
 
   @doc false
   def llm_input(arguments) when is_map(arguments) do
-    {:ok, request_hash} = LLMReplay.request_hash(arguments)
+    {:ok, request_hash} = LLMRequestHash.request_hash(arguments)
 
     %{
       environment: :workflow,
