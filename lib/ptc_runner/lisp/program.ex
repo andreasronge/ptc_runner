@@ -1,4 +1,4 @@
-defmodule PtcRunner.Kernel.Program do
+defmodule PtcRunner.Lisp.Program do
   @moduledoc """
   Internal opaque representation of a static subordinate PTC-Lisp program.
 

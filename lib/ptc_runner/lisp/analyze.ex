@@ -10,7 +10,6 @@ defmodule PtcRunner.Lisp.Analyze do
   Returns `{:ok, CoreAST.t()}` on success or `{:error, error_reason()}` on failure.
   """
 
-  alias PtcRunner.Kernel.Program
   alias PtcRunner.Lisp.Analyze.Conditionals
   alias PtcRunner.Lisp.Analyze.Definitions
   alias PtcRunner.Lisp.Analyze.Iteration
@@ -23,6 +22,7 @@ defmodule PtcRunner.Lisp.Analyze do
   alias PtcRunner.Lisp.Formatter
   alias PtcRunner.Lisp.Java.Surface, as: JavaSurface
   alias PtcRunner.Lisp.NamespaceDiagnostic
+  alias PtcRunner.Lisp.Program
 
   # Special form names that can be shadowed by local bindings.
   # These correspond to Clojure macros (not true special forms like if/def/recur/do).

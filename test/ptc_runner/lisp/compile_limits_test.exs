@@ -9,6 +9,7 @@ defmodule PtcRunner.Lisp.CompileLimitsTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.Sandbox
 
   # ============================================================
   # Oversized source (max_program_bytes)
@@ -191,17 +192,17 @@ defmodule PtcRunner.Lisp.CompileLimitsTest do
 
   describe "Sandbox.run_bounded/2" do
     test "returns function result" do
-      assert {:ok, 42} = PtcRunner.Sandbox.run_bounded(fn -> 42 end)
+      assert {:ok, 42} = Sandbox.run_bounded(fn -> 42 end)
     end
 
     test "returns timeout error" do
       assert {:error, {:timeout, 50}} =
-               PtcRunner.Sandbox.run_bounded(fn -> :timer.sleep(:infinity) end, timeout: 50)
+               Sandbox.run_bounded(fn -> :timer.sleep(:infinity) end, timeout: 50)
     end
 
     test "returns memory error for heap-busting work" do
       assert {:error, {:memory_exceeded, _bytes}} =
-               PtcRunner.Sandbox.run_bounded(
+               Sandbox.run_bounded(
                  fn -> Enum.to_list(1..10_000_000) end,
                  max_heap: 1000
                )
@@ -209,7 +210,7 @@ defmodule PtcRunner.Lisp.CompileLimitsTest do
 
     test "catches crashes gracefully" do
       assert {:error, {:execution_error, msg}} =
-               PtcRunner.Sandbox.run_bounded(fn -> raise "boom" end)
+               Sandbox.run_bounded(fn -> raise "boom" end)
 
       assert msg =~ "RuntimeError"
     end

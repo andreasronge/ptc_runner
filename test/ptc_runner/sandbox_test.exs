@@ -1,7 +1,8 @@
-defmodule PtcRunner.SandboxTest do
+defmodule PtcRunner.Lisp.SandboxTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp.Context
+  alias PtcRunner.Lisp.Sandbox
 
   # Simple eval_fn that returns the AST value directly
   defp simple_eval(value, _context), do: {:ok, value, %{}}
@@ -14,7 +15,7 @@ defmodule PtcRunner.SandboxTest do
       context = Context.new()
 
       {:error, {:runtime_error, "boom"}} =
-        PtcRunner.Sandbox.execute(:anything, context, eval_fn: error_eval)
+        Sandbox.execute(:anything, context, eval_fn: error_eval)
     end
 
     test "returns error when execution crashes" do
@@ -22,7 +23,7 @@ defmodule PtcRunner.SandboxTest do
       context = Context.new()
 
       {:error, {:execution_error, _msg}} =
-        PtcRunner.Sandbox.execute(:anything, context, eval_fn: crash_eval)
+        Sandbox.execute(:anything, context, eval_fn: crash_eval)
     end
 
     test "setup timeout does not leak worker replies" do
@@ -35,7 +36,7 @@ defmodule PtcRunner.SandboxTest do
 
       spawn(fn ->
         result =
-          PtcRunner.Sandbox.execute(:anything, Context.new(),
+          Sandbox.execute(:anything, Context.new(),
             eval_fn: &simple_eval/2,
             prepare_context: prepare_context,
             timeout: 1_000
@@ -71,7 +72,7 @@ defmodule PtcRunner.SandboxTest do
             [setup_max_heap: -1]
           ] do
         assert_raise ArgumentError, fn ->
-          PtcRunner.Sandbox.execute(
+          Sandbox.execute(
             :anything,
             Context.new(),
             [
@@ -91,7 +92,7 @@ defmodule PtcRunner.SandboxTest do
       context = Context.new()
 
       {:ok, result, metrics, _memory} =
-        PtcRunner.Sandbox.execute(42, context, eval_opts())
+        Sandbox.execute(42, context, eval_opts())
 
       assert result == 42
       assert is_integer(metrics.duration_ms)
@@ -119,7 +120,7 @@ defmodule PtcRunner.SandboxTest do
             [max_heap: -1]
           ] do
         assert_raise ArgumentError, fn ->
-          PtcRunner.Sandbox.run_bounded(bounded_fun, invalid_opts)
+          Sandbox.run_bounded(bounded_fun, invalid_opts)
         end
       end
 
@@ -132,7 +133,7 @@ defmodule PtcRunner.SandboxTest do
       owner =
         spawn(fn ->
           result =
-            PtcRunner.Sandbox.run_bounded(
+            Sandbox.run_bounded(
               fn ->
                 send(test_pid, {:bounded_worker_ready, self()})
                 receive do: (:finish -> :done)
@@ -160,7 +161,7 @@ defmodule PtcRunner.SandboxTest do
 
       {owner, owner_ref} =
         spawn_monitor(fn ->
-          PtcRunner.Sandbox.run_bounded(
+          Sandbox.run_bounded(
             fn ->
               send(parent, {:bounded_worker, self()})
               receive do: (:finish -> :ok)
@@ -184,7 +185,7 @@ defmodule PtcRunner.SandboxTest do
   describe "shared binary memory accounting (#993)" do
     test "run_bounded kills binary-heavy function under tight heap cap" do
       assert {:error, {:memory_exceeded, _bytes}} =
-               PtcRunner.Sandbox.run_bounded(
+               Sandbox.run_bounded(
                  fn -> String.duplicate("x", 20_000_000) end,
                  max_heap: 1_000,
                  timeout: 5_000
@@ -200,7 +201,7 @@ defmodule PtcRunner.SandboxTest do
       context = Context.new()
 
       assert {:error, {:memory_exceeded, _bytes}} =
-               PtcRunner.Sandbox.execute(:ignored, context,
+               Sandbox.execute(:ignored, context,
                  eval_fn: binary_eval,
                  max_heap: 1_000,
                  timeout: 5_000
@@ -209,7 +210,7 @@ defmodule PtcRunner.SandboxTest do
 
     test "small string results still work under normal heap cap" do
       assert {:ok, result} =
-               PtcRunner.Sandbox.run_bounded(fn -> String.duplicate("x", 100) end)
+               Sandbox.run_bounded(fn -> String.duplicate("x", 100) end)
 
       assert byte_size(result) == 100
     end

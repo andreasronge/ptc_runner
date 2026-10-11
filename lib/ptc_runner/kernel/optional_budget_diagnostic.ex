@@ -1,8 +1,8 @@
 defmodule PtcRunner.Kernel.OptionalBudgetDiagnostic do
   @moduledoc false
 
-  alias PtcRunner.Kernel.DiagnosticPattern
   alias PtcRunner.Kernel.LimitCatalog
+  alias PtcRunner.Lisp.DiagnosticPattern
 
   @prerequisite_messages %{
     usage_tokens:

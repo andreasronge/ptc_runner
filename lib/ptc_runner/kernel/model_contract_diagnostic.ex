@@ -1,7 +1,7 @@
 defmodule PtcRunner.Kernel.ModelContractDiagnostic do
   @moduledoc false
 
-  alias PtcRunner.Kernel.DiagnosticPattern
+  alias PtcRunner.Lisp.DiagnosticPattern
 
   @prefix "llm_cost_microusd requires supported USD reservation pricing for "
   @suffix "; remove limits.llm_cost_microusd, or select a model with supported USD reservation pricing"

@@ -1,7 +1,7 @@
 defmodule PtcRunner.Kernel.AgentConfigDiagnostic do
   @moduledoc false
 
-  alias PtcRunner.Kernel.DiagnosticPattern
+  alias PtcRunner.Lisp.DiagnosticPattern
 
   # The shipped agent library rejects an out-of-range or mistyped bounded option
   # before it spends a provider request. The Kernel authors the command sentence

@@ -62,7 +62,12 @@ directions, while the separate compile-connected cycle gate detects cycles.
 
 Classification follows module names, not file locations. `PtcRunner.Lisp`
 and its descendants belong to Lisp. `PtcRunner.Kernel`, `PtcRunner.LLM` and
-their descendants, `PtcRunner` and `PtcRunner.Sandbox` belong to the kernel.
+their descendants and `PtcRunner` belong to the kernel.
+`PtcRunner.Lisp.Sandbox`, the opaque `PtcRunner.Lisp.Program`, diagnostic
+templates and scratch-directory primitives belong to Lisp. Kernel private-artifact
+checks stay in PtcRunner.Kernel.PrivateDirectory. Component introspection uses
+the Lisp-owned `PtcRunner.Lisp.ComponentCatalog` protocol; the kernel supplies
+its catalog implementation.
 Mix tasks, benchmark and site-generation modules, application startup, CLI,
 REPL, progress and Viewer modules belong to the frontend. The exact root-module
 inventory is in `Mix.Tasks.Ptc.CheckLayers`; an unclassified module fails the

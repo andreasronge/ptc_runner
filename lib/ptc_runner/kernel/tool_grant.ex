@@ -14,7 +14,7 @@ defmodule PtcRunner.Kernel.ToolGrant do
   the hand-over `O(capabilities²)` — enough for a tool-rich MCP environment to
   blow the sandbox setup ceiling before the program runs, and enough for a
   modest environment to eat the program's whole heap budget through the
-  measured baseline. `PtcRunner.Sandbox` documents how that baseline is billed.
+  measured baseline. `PtcRunner.Lisp.Sandbox` documents how that baseline is billed.
 
   Size a grant with `:erts_debug.flat_size` (plus referenced binaries for byte
   units); that is what the sandbox's own baseline measurement bills.

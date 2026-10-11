@@ -1,4 +1,4 @@
-defmodule PtcRunner.Kernel.DiagnosticPattern do
+defmodule PtcRunner.Lisp.DiagnosticPattern do
   @moduledoc false
 
   # A template is a list of literal segments and named typed slots:

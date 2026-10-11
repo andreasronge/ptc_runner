@@ -1,7 +1,7 @@
 defmodule PtcRunner.Kernel.DeclaredReadEffectDiagnostic do
   @moduledoc false
 
-  alias PtcRunner.Kernel.DiagnosticPattern
+  alias PtcRunner.Lisp.DiagnosticPattern
   alias PtcRunner.Lisp.Format.SymbolRef
 
   @prefix "export `"

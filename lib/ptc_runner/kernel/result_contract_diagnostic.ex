@@ -4,7 +4,7 @@ defmodule PtcRunner.Kernel.ResultContractDiagnostic do
   alias PtcRunner.Kernel.CommandContractAuthority
   alias PtcRunner.Kernel.CommandPath
   alias PtcRunner.Kernel.CommandSource
-  alias PtcRunner.Kernel.DiagnosticPattern
+  alias PtcRunner.Lisp.DiagnosticPattern
 
   @constraints [
     :additionalProperties,

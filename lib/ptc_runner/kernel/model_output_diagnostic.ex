@@ -1,7 +1,7 @@
 defmodule PtcRunner.Kernel.ModelOutputDiagnostic do
   @moduledoc false
 
-  alias PtcRunner.Kernel.DiagnosticPattern
+  alias PtcRunner.Lisp.DiagnosticPattern
   alias PtcRunner.LLM.OutputLimit
 
   @binding_lists (for mask <- 1..63 do

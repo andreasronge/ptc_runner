@@ -46,8 +46,8 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   alias PtcRunner.Lisp.Prelude.ValidationError
   alias PtcRunner.Lisp.PreludeClosure
   alias PtcRunner.Lisp.ProtectedNamespaces
+  alias PtcRunner.Lisp.Sandbox
   alias PtcRunner.Lisp.Signature
-  alias PtcRunner.Sandbox
   alias PtcRunner.Utf8
 
   @default_visibility :prompt

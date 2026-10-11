@@ -1,4 +1,4 @@
-defmodule PtcRunner.Sandbox do
+defmodule PtcRunner.Lisp.Sandbox do
   @moduledoc """
   Executes programs in isolated BEAM processes with resource limits.
 
@@ -544,10 +544,10 @@ defmodule PtcRunner.Sandbox do
 
   ## Examples
 
-      iex> PtcRunner.Sandbox.run_bounded(fn -> 1 + 1 end)
+      iex> PtcRunner.Lisp.Sandbox.run_bounded(fn -> 1 + 1 end)
       {:ok, 2}
 
-      iex> PtcRunner.Sandbox.run_bounded(fn -> :timer.sleep(:infinity) end, timeout: 50)
+      iex> PtcRunner.Lisp.Sandbox.run_bounded(fn -> :timer.sleep(:infinity) end, timeout: 50)
       {:error, {:timeout, 50}}
   """
   @spec run_bounded((-> term()), keyword()) ::

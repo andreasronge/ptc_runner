@@ -1,8 +1,8 @@
 defmodule PtcRunner.Kernel.MCPAcquisitionDiagnostic do
   @moduledoc false
 
-  alias PtcRunner.Kernel.DiagnosticPattern
   alias PtcRunner.Kernel.MCPProtocol
+  alias PtcRunner.Lisp.DiagnosticPattern
 
   @missing_tool_prefix "the installed endpoint does not expose declared tool "
   @max_message_bytes byte_size(@missing_tool_prefix) + 514

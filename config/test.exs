@@ -6,7 +6,7 @@ config :req_llm, load_dotenv: false
 config :llm_db, load_dotenv: false
 
 # Widen the Sandbox wall-clock budget under test (prod default stays 1 s).
-# The full suite spawns many `PtcRunner.Sandbox.execute/3` children that
+# The full suite spawns many `PtcRunner.Lisp.Sandbox.execute/3` children that
 # fight for scheduler slices; under heavy parallel load a trivially-fast,
 # deterministic PTC-Lisp program can be starved past the 1 s cap and
 # surface as a flaky `{:error, %Step{fail: %{reason: :timeout}}}` ("the

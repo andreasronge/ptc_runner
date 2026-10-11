@@ -1,7 +1,7 @@
 defmodule PtcRunner.Lisp.NamespaceDiagnostic do
   @moduledoc false
 
-  alias PtcRunner.Kernel.DiagnosticPattern
+  alias PtcRunner.Lisp.DiagnosticPattern
   alias PtcRunner.Lisp.Java.Surface, as: JavaSurface
 
   @builtin_namespaces [

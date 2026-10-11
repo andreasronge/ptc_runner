@@ -17,7 +17,6 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
-  alias PtcRunner.Kernel.Program
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ReplSession
@@ -31,6 +30,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp.Format
+  alias PtcRunner.Lisp.Program
   alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.TestSupport.ProviderSessionFixture
   alias PtcRunner.TestSupport.StreamingInspection

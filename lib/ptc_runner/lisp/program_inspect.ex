@@ -1,6 +1,6 @@
-defimpl Inspect, for: PtcRunner.Kernel.Program do
+defimpl Inspect, for: PtcRunner.Lisp.Program do
   def inspect(program, _opts) do
-    "#PtcRunner.Kernel.Program<byte_size: #{safe_byte_size(program)}, " <>
+    "#PtcRunner.Lisp.Program<byte_size: #{safe_byte_size(program)}, " <>
       "digest: #{safe_digest(program)}>"
   end
 

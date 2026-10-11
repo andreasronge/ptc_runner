@@ -6,7 +6,7 @@ defmodule PtcRunner.Lisp.Java.StringDispatchTest do
   alias PtcRunner.Lisp.Java.Dispatch
   alias PtcRunner.Lisp.Java.Primitive
   alias PtcRunner.Lisp.Parser
-  alias PtcRunner.Sandbox
+  alias PtcRunner.Lisp.Sandbox
 
   def handle_dispatch_attestation(_event, _measurements, metadata, test_pid),
     do: send(test_pid, {:java_dispatch, metadata})

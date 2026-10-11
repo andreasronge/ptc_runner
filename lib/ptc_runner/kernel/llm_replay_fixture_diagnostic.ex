@@ -13,7 +13,7 @@ defmodule PtcRunner.Kernel.LLMReplayFixtureDiagnostic do
   # The file-level reasons carry no number because they are properties of the
   # file rather than of any one line.
 
-  alias PtcRunner.Kernel.DiagnosticPattern
+  alias PtcRunner.Lisp.DiagnosticPattern
 
   @file_reasons [
     {:replay_fixtures_unreadable, "the replay fixture file could not be read"},
