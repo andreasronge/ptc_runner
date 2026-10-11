@@ -290,6 +290,31 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "direct dispatch APIs deliver configured terminal progress", %{tmp_dir: directory} do
+    application = write_application(directory, "direct-progress", valid_manifest())
+    parent = self()
+
+    setup = fn _package, selected_application ->
+      send(parent, {:progress_setup, selected_application})
+      fn run_id, frame -> send(parent, {:direct_progress, run_id, frame}) end
+    end
+
+    {:ok, runtime} = CommandRuntime.new(progress_setup: setup)
+
+    dispatch_entry = fn argv, runtime ->
+      {:ok, entry} = CommandEntry.open(argv, :standalone)
+      CommandEngine.dispatch_entry(entry, runtime)
+    end
+
+    for dispatch <- [&CommandEngine.dispatch/2, dispatch_entry] do
+      assert {:ok, %CommandOutcome{}} = dispatch.(["run", application], runtime)
+      assert_receive {:progress_setup, ^application}
+      assert_receive {:direct_progress, run_id, %{phase: "ok", run_id: frame_run_id}}
+      assert run_id == frame_run_id
+    end
+  end
+
+  @tag :tmp_dir
   test "provider-free dispatch rejects explicit authorization targets", %{tmp_dir: directory} do
     application = write_application(directory, "provider-free-authorization", valid_manifest())
 

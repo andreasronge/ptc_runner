@@ -64,11 +64,25 @@ Classification follows module names, not file locations. `PtcRunner.Lisp`
 and its descendants belong to Lisp. `PtcRunner.Kernel`, `PtcRunner.LLM` and
 their descendants, `PtcRunner` and `PtcRunner.Sandbox` belong to the kernel.
 Mix tasks, benchmark and site-generation modules, application startup, CLI,
-REPL, progress and Viewer modules belong to the frontend. The exact root-module
+REPL, progress presentation and Viewer modules belong to the frontend. The exact root-module
 inventory is in `Mix.Tasks.Ptc.CheckLayers`; an unclassified module fails the
 gate. Protocol implementations inherit the layer of their implemented type.
 Referenced targets use the same name-based classification even when compiled
 outside `lib/`. Moving a file does not change its classification.
+
+The kernel owns `PtcRunner.Kernel.Progress`, a per-run observation port separate
+from the canonical `EventSink`. Execution configuration supplies its sink
+explicitly. Frontends translate Viewer environment settings, labels and target
+composition into that callback. Delivery uses one isolated worker and one
+coalesced pending frame. Each attempt has a 1,250 ms deadline and a fixed heap
+ceiling. Completion drains at most two delivery attempts after cleanup and
+trace finalization, with a 3,000 ms caller bound. No running frame can follow
+the terminal attempt. Callback workers are cancelled if the port dies.
+CLI frame delivery acknowledges rendering; a renderer that does not answer
+within 250 ms is stopped to keep presentation buffering bounded.
+Run-filtered telemetry remains the instrumentation source, stored in a bounded
+128-slot ring rather than queued in the reporter mailbox. Subordinate activity
+aggregates into the parent run, with the same identity and sequence.
 
 The infrastructure list is exactly `PtcRunner.BuildIdentity`,
 PtcRunner.ChildEnvironment, PtcRunner.HTTPEndpoint and `PtcRunner.Utf8`.

@@ -12,17 +12,16 @@ defmodule PtcRunner.Kernel.CommandRunDispatch do
   alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunCoordinator
-  alias PtcRunner.LiveStatus
-  alias PtcRunner.LiveStatus.Target
 
-  @spec dispatch(CommandPreparation.t(), CommandRuntime.t()) ::
+  @spec dispatch(CommandPreparation.t(), CommandRuntime.t(), binary()) ::
           {:ok, CommandOutcome.t()} | {:error, CommandOutcome.t()}
-  def dispatch(%CommandPreparation{} = preparation, %CommandRuntime{} = runtime) do
+  def dispatch(%CommandPreparation{} = preparation, %CommandRuntime{} = runtime, application)
+      when is_binary(application) do
     case dispatch_after_preflight(
            CommandDestination.preflight(preparation),
            preparation,
            runtime,
-           nil
+           application
          ) do
       {status, outcome, _rejection} -> {status, outcome}
     end
@@ -41,19 +40,19 @@ defmodule PtcRunner.Kernel.CommandRunDispatch do
         %CommandPreparation{} = preparation,
         %CommandRuntime{} = runtime,
         frontend,
-        external_label
+        application
       )
-      when frontend in [:standalone, :mix] and is_binary(external_label) do
+      when frontend in [:standalone, :mix] and is_binary(application) do
     preparation
     |> CommandDestination.preflight_frontend(frontend)
-    |> dispatch_after_preflight(preparation, runtime, external_label)
+    |> dispatch_after_preflight(preparation, runtime, application)
   end
 
-  defp dispatch_after_preflight({:ok, authority}, preparation, runtime, external_label),
-    do: with_rejection(execute_preflighted(preparation, runtime, authority, external_label))
+  defp dispatch_after_preflight({:ok, authority}, preparation, runtime, application),
+    do: with_rejection(execute_preflighted(preparation, runtime, authority, application))
 
-  defp dispatch_after_preflight({:ok, authority, nil}, preparation, runtime, external_label),
-    do: with_rejection(execute_preflighted(preparation, runtime, authority, external_label))
+  defp dispatch_after_preflight({:ok, authority, nil}, preparation, runtime, application),
+    do: with_rejection(execute_preflighted(preparation, runtime, authority, application))
 
   defp dispatch_after_preflight(
          {:error, %CommandOutcome{} = outcome},
@@ -74,11 +73,11 @@ defmodule PtcRunner.Kernel.CommandRunDispatch do
   defp with_rejection({status, %CommandOutcome{} = outcome}) when status in [:ok, :error],
     do: {status, outcome, nil}
 
-  defp execute_preflighted(preparation, runtime, authority, external_label) do
+  defp execute_preflighted(preparation, runtime, authority, application) do
     with :ok <- maybe_setup_environment(preparation, runtime),
          {:ok, execution} <- provider_execution(preparation, runtime) do
-      runtime = attach_external_live_status(runtime, external_label)
-      execute_started(preparation, runtime, authority, execution)
+      progress_sink = prepare_progress(runtime, preparation, application)
+      execute_started(preparation, runtime, authority, execution, progress_sink)
     else
       {:error, reason} ->
         operation_failure(
@@ -112,35 +111,20 @@ defmodule PtcRunner.Kernel.CommandRunDispatch do
     CommandPreparation.close(preparation)
   end
 
-  defp attach_external_live_status(%{live_status: nil} = runtime, label) when is_binary(label) do
-    case LiveStatus.external_target(label) do
-      nil -> runtime
-      target -> elem(CommandRuntime.with_live_status(runtime, target), 1)
-    end
+  defp prepare_progress(%{progress_setup: setup}, preparation, application)
+       when is_function(setup, 2) and is_binary(application) do
+    sink = setup.(preparation.prepared_run.request.package, application)
+    if is_function(sink, 2), do: sink, else: nil
+  rescue
+    _ -> nil
+  catch
+    _, _ -> nil
   end
 
-  defp attach_external_live_status(%{live_status: local} = runtime, label)
-       when is_binary(label) do
-    if Target.append_external?(local),
-      do: append_external_live_status(runtime, local, label),
-      else: runtime
-  end
+  defp prepare_progress(_runtime, _preparation, _application), do: nil
 
-  defp attach_external_live_status(runtime, _label), do: runtime
-
-  defp append_external_live_status(runtime, local, label) do
-    case LiveStatus.external_target(label) do
-      nil ->
-        runtime
-
-      external ->
-        {:ok, target} = Target.compose([local, external])
-        elem(CommandRuntime.with_live_status(runtime, target), 1)
-    end
-  end
-
-  defp execute_started(preparation, runtime, authority, execution) do
-    case execute_run(preparation, authority, execution, runtime) do
+  defp execute_started(preparation, runtime, authority, execution, progress_sink) do
+    case execute_run(preparation, authority, execution, runtime, progress_sink) do
       {:ok, outcome} ->
         CommandRunOutcome.settle(
           outcome,
@@ -270,17 +254,17 @@ defmodule PtcRunner.Kernel.CommandRunDispatch do
         runtime.authorization_targets
       )
 
-  defp execute_run(preparation, authority, nil, runtime),
-    do: RunCoordinator.execute(preparation.prepared_run, authority, runtime.live_status)
+  defp execute_run(preparation, authority, nil, _runtime, progress_sink),
+    do: RunCoordinator.execute(preparation.prepared_run, authority, progress_sink)
 
-  defp execute_run(preparation, authority, execution, runtime),
+  defp execute_run(preparation, authority, execution, runtime, progress_sink),
     do:
       RunCoordinator.execute(
         preparation.prepared_run,
         authority,
         execution,
         runtime.authorization_notifier,
-        runtime.live_status
+        progress_sink
       )
 
   defp operation_failure(

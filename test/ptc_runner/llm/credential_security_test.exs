@@ -2,7 +2,7 @@ defmodule PtcRunner.LLM.CredentialSecurityTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.ProviderError
-  alias PtcRunner.LiveStatus.Reporter
+  alias PtcRunner.LiveStatus.HTTP
   alias PtcRunner.LLM.Invocation
   alias PtcRunner.LLM.ReqLLMAdapter
   alias PtcRunner.LLM.Requirements
@@ -20,7 +20,7 @@ defmodule PtcRunner.LLM.CredentialSecurityTest do
                req_http_options: [plug: fn _ -> flunk("insecure request was dispatched") end]
              )
 
-    assert :error = Reporter.report_http("http://example.com", "run", %{}, "private-token")
+    assert :error = HTTP.report_http("http://example.com", "run", %{}, "private-token")
   end
 
   test "non-map successful provider responses return invalid_result" do
@@ -119,7 +119,7 @@ defmodule PtcRunner.LLM.CredentialSecurityTest do
                api_key: "key"
              )
 
-    assert :error = Reporter.report_http(server.endpoint, "run", %{}, "token")
+    assert :error = HTTP.report_http(server.endpoint, "run", %{}, "token")
   end
 
   test "loopback Viewer delivery carries its token" do
@@ -132,7 +132,7 @@ defmodule PtcRunner.LLM.CredentialSecurityTest do
       end)
 
     on_exit(server.close)
-    assert :ok = Reporter.report_http(server.endpoint, "run", %{}, "token")
+    assert :ok = HTTP.report_http(server.endpoint, "run", %{}, "token")
     assert_receive {:viewer_request, request}
     assert request.headers["authorization"] == "Bearer token"
   end

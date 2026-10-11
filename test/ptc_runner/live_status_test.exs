@@ -1,5 +1,5 @@
 defmodule PtcRunner.LiveStatusTest do
-  # The cases that set PTC_VIEWER_URL or PTC_VIEWER_TOKEN, which every Kernel.run in the VM reads,
+  # Cases that set the frontend Viewer environment settings
   # and the one that asserts elapsed time live in LiveStatusGlobalStateTest.
   use ExUnit.Case, async: true
 
@@ -14,11 +14,11 @@ defmodule PtcRunner.LiveStatusTest do
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.LLMRouter
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.Progress, as: Reporter
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.WorkflowEnvironment
-  alias PtcRunner.LiveStatus.Reporter
   alias PtcRunner.LiveStatus.Target
 
   @moduletag :capture_log
@@ -29,7 +29,7 @@ defmodule PtcRunner.LiveStatusTest do
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "failed-delivery")
     {:ok, config} = run_config(limits, sink, %{})
     {:ok, run_state} = RunState.start(limits)
-    {:ok, reporter} = Reporter.start(target, config, run_state)
+    {:ok, reporter} = Reporter.start(PtcRunner.LiveStatus.sink(target), config, run_state)
 
     assert assert_eventually(fn -> :sys.get_state(reporter).post_failed? end)
     assert :ok = Reporter.stop(reporter)
@@ -39,7 +39,9 @@ defmodule PtcRunner.LiveStatusTest do
   test "telemetry delivery is isolated to its correlated run" do
     run_ref = self()
     other_run_ref = spawn(fn -> :ok end)
-    handler_config = {self(), run_ref}
+    table = :ets.new(:observations, [:set, :public])
+    :ets.insert(table, {:counter, 0})
+    handler_config = {self(), run_ref, table}
 
     assert :ok =
              Reporter.handle_telemetry(
@@ -49,7 +51,7 @@ defmodule PtcRunner.LiveStatusTest do
                handler_config
              )
 
-    refute_receive {:live_telemetry, _, _, _}
+    assert :ets.lookup(table, :counter) == [{:counter, 0}]
 
     assert :ok =
              Reporter.handle_telemetry(
@@ -59,7 +61,7 @@ defmodule PtcRunner.LiveStatusTest do
                handler_config
              )
 
-    assert_receive {:live_telemetry, [:ptc_runner, :capability, :start], %{}, %{}}
+    assert :ets.lookup(table, 1) == [{1, 1, [:ptc_runner, :capability, :start], %{}, %{}}]
   end
 
   test "agent progress remains scoped to concurrent invocation identities" do
@@ -69,7 +71,7 @@ defmodule PtcRunner.LiveStatusTest do
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "concurrent-agent-progress")
     {:ok, config} = run_config(limits, sink, %{})
     {:ok, run_state} = RunState.start(limits)
-    {:ok, reporter} = Reporter.start(target, config, run_state)
+    {:ok, reporter} = Reporter.start(PtcRunner.LiveStatus.sink(target), config, run_state)
     assert_receive {:live_frame, _frame}
 
     for progress <- [
@@ -80,7 +82,7 @@ defmodule PtcRunner.LiveStatusTest do
         [:ptc_runner, :agent, :action],
         %{},
         Map.put(progress, :live_run, run_state.pid),
-        {reporter, run_state.pid}
+        {reporter, run_state.pid, :sys.get_state(reporter).observations}
       )
     end
 
@@ -111,7 +113,7 @@ defmodule PtcRunner.LiveStatusTest do
         {:ok, config} = run_config(limits, sink, %{})
         {:ok, run_state} = RunState.start(limits)
         {:ok, target} = Target.new(fn _run_id, _frame -> :ok end)
-        {:ok, reporter} = Reporter.start(target, config, run_state)
+        {:ok, reporter} = Reporter.start(PtcRunner.LiveStatus.sink(target), config, run_state)
         send(parent, {:reporter, reporter})
 
         receive do
@@ -142,7 +144,7 @@ defmodule PtcRunner.LiveStatusTest do
     {:ok, config} = run_config(limits, sink, %{})
     {:ok, run_state} = RunState.start(limits)
     {:ok, fanout} = Target.compose([terminal, viewer])
-    {:ok, reporter} = Reporter.start(fanout, config, run_state)
+    {:ok, reporter} = Reporter.start(PtcRunner.LiveStatus.sink(fanout), config, run_state)
 
     assert_receive {:terminal_frame, "running"}, 1_000
     assert_receive :viewer_started
@@ -150,7 +152,7 @@ defmodule PtcRunner.LiveStatusTest do
     assert :ok = RunState.stop(run_state)
   end
 
-  test "an exiting execution owner does not cancel its terminal frame" do
+  test "execution completion waits for terminal delivery before owner exit" do
     test_process = self()
 
     {:ok, target} =
@@ -172,7 +174,7 @@ defmodule PtcRunner.LiveStatusTest do
         {:ok, sink} = EventSink.start(:normal, limits, run_id: "owner-terminal-frame")
         {:ok, config} = run_config(limits, sink, %{})
         {:ok, run_state} = RunState.start(limits)
-        {:ok, reporter} = Reporter.start(target, config, run_state)
+        {:ok, reporter} = Reporter.start(PtcRunner.LiveStatus.sink(target), config, run_state)
         send(test_process, {:owner_reporter, reporter, run_state})
 
         receive do
@@ -186,7 +188,7 @@ defmodule PtcRunner.LiveStatusTest do
     send(owner, :complete)
 
     assert_receive {:owner_delivery, terminal_delivery, "ok"}
-    assert_receive {:DOWN, ^owner_ref, :process, ^owner, :normal}
+    assert Process.alive?(owner)
     assert Process.alive?(reporter)
 
     reporter_ref = Process.monitor(reporter)
@@ -194,6 +196,7 @@ defmodule PtcRunner.LiveStatusTest do
     run_state_ref = Process.monitor(run_state_pid)
     send(terminal_delivery, :release_terminal)
     assert_receive {:terminal_delivered, "ok"}
+    assert_receive {:DOWN, ^owner_ref, :process, ^owner, :normal}
     assert_receive {:DOWN, ^reporter_ref, :process, ^reporter, :normal}
     assert_receive {:DOWN, ^run_state_ref, :process, ^run_state_pid, reason}
     assert reason in [:normal, :noproc]
@@ -220,7 +223,9 @@ defmodule PtcRunner.LiveStatusTest do
     {:ok, sink} = EventSink.start(:normal, limits, run_id: run_id)
     {:ok, config} = run_config(limits, sink, %{})
     {:ok, run_state} = RunState.start(limits)
-    {:ok, reporter} = Reporter.start("http://127.0.0.1:#{port}", config, run_state)
+
+    {:ok, reporter} =
+      Reporter.start(PtcRunner.LiveStatus.sink("http://127.0.0.1:#{port}"), config, run_state)
 
     assert_receive {:http_request, request}, 2_000
     assert request =~ "POST /api/live/runs/run%20%2F%3F%23%20caf%C3%A9 HTTP/1.1"
@@ -238,7 +243,7 @@ defmodule PtcRunner.LiveStatusTest do
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "live-spend-before-telemetry")
     {:ok, config} = run_config(limits, sink, %{})
     {:ok, run_state} = RunState.start(limits)
-    {:ok, reporter} = Reporter.start(target, config, run_state)
+    {:ok, reporter} = Reporter.start(PtcRunner.LiveStatus.sink(target), config, run_state)
 
     assert_receive {:live_frame, %{phase: "running"}}, 1_000
 
@@ -250,6 +255,7 @@ defmodule PtcRunner.LiveStatusTest do
              })
 
     gate = make_ref()
+    observation_table = :sys.get_state(reporter).observations
 
     late =
       Task.async(fn ->
@@ -269,7 +275,7 @@ defmodule PtcRunner.LiveStatusTest do
             status: :ok,
             live_run: run_state.pid
           },
-          {reporter, run_state.pid}
+          {reporter, run_state.pid, observation_table}
         )
       end)
 
@@ -296,7 +302,7 @@ defmodule PtcRunner.LiveStatusTest do
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "live-spend-telemetry-does-not-own")
     {:ok, config} = run_config(limits, sink, %{})
     {:ok, run_state} = RunState.start(limits)
-    {:ok, reporter} = Reporter.start(target, config, run_state)
+    {:ok, reporter} = Reporter.start(PtcRunner.LiveStatus.sink(target), config, run_state)
 
     assert_receive {:live_frame, %{phase: "running"}}, 1_000
 
@@ -311,7 +317,7 @@ defmodule PtcRunner.LiveStatusTest do
                  status: :ok,
                  live_run: run_state.pid
                },
-               {reporter, run_state.pid}
+               {reporter, run_state.pid, :sys.get_state(reporter).observations}
              )
 
     assert :ok = Reporter.complete(reporter, :ok, nil, nil)
@@ -358,9 +364,10 @@ defmodule PtcRunner.LiveStatusTest do
     {:ok, config} = run_config(limits, sink, %{}, workflow, mission)
 
     assert {:ok, _} =
-             PtcRunner.LiveStatus.with_target(target, fn ->
-               Kernel.run(~S|(return (llm/request {"messages" []}))|, config)
-             end)
+             Kernel.run(
+               ~S|(return (llm/request {"messages" []}))|,
+               PtcRunner.LiveStatus.configure(config, target)
+             )
 
     assert_receive {:live_frame, %{phase: "ok"} = frame}, 2_000
 
@@ -398,9 +405,10 @@ defmodule PtcRunner.LiveStatusTest do
       )
 
     assert {:error, %{kind: :limit_exceeded}} =
-             PtcRunner.LiveStatus.with_target(target, fn ->
-               Kernel.run(~S[(return (pcalls #(tool/park {})))], config)
-             end)
+             Kernel.run(
+               ~S[(return (pcalls #(tool/park {})))],
+               PtcRunner.LiveStatus.configure(config, target)
+             )
 
     assert_receive {:live_frame,
                     %{
@@ -434,9 +442,10 @@ defmodule PtcRunner.LiveStatusTest do
     {:ok, config} = run_config(limits, sink, %{}, workflow, mission)
 
     assert {:error, _error} =
-             PtcRunner.LiveStatus.with_target(target, fn ->
-               Kernel.run(~S|(agent.core/run "Work" {"max_turns" 1})|, config)
-             end)
+             Kernel.run(
+               ~S|(agent.core/run "Work" {"max_turns" 1})|,
+               PtcRunner.LiveStatus.configure(config, target)
+             )
 
     assert_receive {:live_frame, %{phase: "error", outcome_limit: "max_turns"} = frame}, 5_000
 
@@ -454,9 +463,10 @@ defmodule PtcRunner.LiveStatusTest do
     {:ok, config} = run_config(limits, sink, %{}, workflow, mission)
 
     assert {:error, %{kind: :limit_exceeded, reason: :memory_exceeded}} =
-             PtcRunner.LiveStatus.with_target(target, fn ->
-               Kernel.run(~S[(return (count (vec (range 2000000))))], config)
-             end)
+             Kernel.run(
+               ~S[(return (count (vec (range 2000000))))],
+               PtcRunner.LiveStatus.configure(config, target)
+             )
 
     assert_receive {:live_frame, %{phase: "error", outcome_limit: "workflow_heap_words"} = frame},
                    5_000
@@ -501,9 +511,10 @@ defmodule PtcRunner.LiveStatusTest do
     {:ok, config} = run_config(limits, sink, %{}, workflow, mission)
 
     assert {:error, %{kind: :limit_exceeded, reason: :llm_total_tokens}} =
-             PtcRunner.LiveStatus.with_target(target, fn ->
-               Kernel.run(~S|(agent.core/run "Work" {"max_turns" 2})|, config)
-             end)
+             Kernel.run(
+               ~S|(agent.core/run "Work" {"max_turns" 2})|,
+               PtcRunner.LiveStatus.configure(config, target)
+             )
 
     assert_receive {:live_frame, %{phase: "error", outcome_limit: "llm_total_tokens"} = frame},
                    5_000
@@ -522,9 +533,7 @@ defmodule PtcRunner.LiveStatusTest do
     {:ok, config} = run_config(limits, sink, %{}, workflow, mission)
 
     assert {:error, %{kind: :evaluation_failed, reason: :arithmetic_error}} =
-             PtcRunner.LiveStatus.with_target(target, fn ->
-               Kernel.run(~S[(return (/ 1 0))], config)
-             end)
+             Kernel.run(~S[(return (/ 1 0))], PtcRunner.LiveStatus.configure(config, target))
 
     assert_receive {:live_frame,
                     %{
@@ -547,9 +556,7 @@ defmodule PtcRunner.LiveStatusTest do
     {:ok, config} = run_config(limits, sink, %{}, workflow, mission)
 
     assert {:error, %{kind: :workflow_failed, details: %{message: "private workflow failed"}}} =
-             PtcRunner.LiveStatus.with_target(target, fn ->
-               Kernel.run(~S[(return (/ 1 0))], config)
-             end)
+             Kernel.run(~S[(return (/ 1 0))], PtcRunner.LiveStatus.configure(config, target))
 
     assert_receive {:live_frame, %{phase: "error", last_evaluation_error: nil} = frame}, 2_000
     assert frame.outcome_reason == "private workflow failed"
@@ -578,9 +585,10 @@ defmodule PtcRunner.LiveStatusTest do
 
     run =
       Task.async(fn ->
-        PtcRunner.LiveStatus.with_target(target, fn ->
-          Kernel.run(~S[(return (pcalls #(tool/park {})))], config)
-        end)
+        Kernel.run(
+          ~S[(return (pcalls #(tool/park {})))],
+          PtcRunner.LiveStatus.configure(config, target)
+        )
       end)
 
     assert_receive {:parked, _callback}

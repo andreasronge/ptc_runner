@@ -390,6 +390,7 @@ defmodule PtcRunner.Kernel.Evaluation do
     limits = RunState.limits(state)
 
     options = [
+      telemetry_run: state.pid,
       context: evaluation_data(environment.data, params),
       memory: memory,
       turn_history: history,

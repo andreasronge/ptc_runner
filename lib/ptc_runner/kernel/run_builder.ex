@@ -72,6 +72,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.MissionReplTarget
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.PrivateDirectory
+  alias PtcRunner.Kernel.Progress
   alias PtcRunner.Kernel.ProviderAcquisition
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderRegistry
@@ -1682,7 +1683,13 @@ defmodule PtcRunner.Kernel.RunBuilder do
           (PtcRunner.Kernel.ProviderTaskTracker.t() -> :ok) | nil
         ) ::
           {:ok, ExecutionOutcome.t()} | {:error, term()}
-  def execute_built_claimed(built, lease, observer \\ nil)
+  @spec execute_built_claimed(
+          map(),
+          PublicationAuthority.lease(),
+          (PtcRunner.Kernel.ProviderTaskTracker.t() -> :ok) | nil,
+          Progress.sink() | nil
+        ) :: {:ok, ExecutionOutcome.t()} | {:error, term()}
+  def execute_built_claimed(built, lease, observer \\ nil, progress_sink \\ nil)
 
   def execute_built_claimed(
         %{
@@ -1691,11 +1698,17 @@ defmodule PtcRunner.Kernel.RunBuilder do
           publication_authority: authority
         } = built,
         lease,
-        observer
+        observer,
+        progress_sink
       )
-      when is_binary(entry_source) and (is_nil(observer) or is_function(observer, 1)) do
+      when is_binary(entry_source) and (is_nil(observer) or is_function(observer, 1)) and
+             (is_nil(progress_sink) or is_function(progress_sink, 2)) do
     if valid_built_binding?(built) and PublicationAuthority.lease_valid?(authority, lease) do
-      config = %{config | provider_cleanup_observer: observer}
+      config = %{
+        config
+        | provider_cleanup_observer: observer,
+          progress_sink: progress_sink || config.progress_sink
+      }
 
       try do
         {result, terminal_batch} = Kernel.run_and_events(entry_source, config)
@@ -1717,7 +1730,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
-  def execute_built_claimed(_built, _lease, _observer), do: {:error, :invalid_execution_outcome}
+  def execute_built_claimed(_built, _lease, _observer, _progress_sink),
+    do: {:error, :invalid_execution_outcome}
 
   @doc false
   @spec publish_execution_report(ExecutionOutcome.t(), PublicationAuthority.t(), map()) ::

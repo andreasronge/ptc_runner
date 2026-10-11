@@ -51,6 +51,12 @@ defmodule PtcRunner.Kernel.RunConfig do
   used only for an attested result-contract diagnostic. Final publication
   enforcement remains the responsibility of `RunBuilder`.
 
+  `progress_sink` is an optional two-argument callback receiving run identity
+  and bounded observations from `PtcRunner.Kernel.Progress`. It is explicitly
+  propagated into execution and is never stored in the process dictionary.
+  Delivery is isolated and coalesced; terminal delivery is drained within a
+  bound after provider cleanup and canonical trace finalization.
+
   `labels` is an optional closed safe-metadata map. Caller-defined identifier
   fields become SHA-256 fingerprints and tags use finite enumerated values
   before the map enters `run-started`.
@@ -81,6 +87,7 @@ defmodule PtcRunner.Kernel.RunConfig do
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.MissionInventory
   alias PtcRunner.Kernel.ModelContract
+  alias PtcRunner.Kernel.Progress
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ProviderTaskTracker
   alias PtcRunner.Kernel.SafeMetadata
@@ -121,6 +128,7 @@ defmodule PtcRunner.Kernel.RunConfig do
     session_profile: nil,
     labels: %{},
     run_started_metadata: %{},
+    progress_sink: nil,
     inspect_only: false
   ]
 
@@ -146,6 +154,7 @@ defmodule PtcRunner.Kernel.RunConfig do
           session_profile: map() | nil,
           labels: map(),
           run_started_metadata: map(),
+          progress_sink: Progress.sink() | nil,
           inspect_only: boolean()
         }
 
@@ -178,6 +187,7 @@ defmodule PtcRunner.Kernel.RunConfig do
                :session_profile,
                :labels,
                :component_overrides,
+               :progress_sink,
                :inspect_only
              ] !=
              [],
@@ -212,6 +222,9 @@ defmodule PtcRunner.Kernel.RunConfig do
          true <- connector_snapshots?(Keyword.get(opts, :connector_snapshots, [])),
          true <- provider_warnings?(Keyword.get(opts, :provider_warnings, [])),
          {:ok, session_profile} <- session_profile(Keyword.get(opts, :session_profile)),
+         true <-
+           is_nil(Keyword.get(opts, :progress_sink)) or
+             is_function(Keyword.get(opts, :progress_sink), 2),
          true <- Keyword.get(opts, :inspect_only, false) in [true, false],
          true <-
            inspect_only_environments_allowed?(
@@ -257,6 +270,7 @@ defmodule PtcRunner.Kernel.RunConfig do
          session_profile: session_profile,
          labels: labels,
          run_started_metadata: run_started_metadata,
+         progress_sink: Keyword.get(opts, :progress_sink),
          inspect_only: Keyword.get(opts, :inspect_only, false)
        }}
     else

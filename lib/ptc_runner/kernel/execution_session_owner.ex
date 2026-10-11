@@ -16,6 +16,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
   alias PtcRunner.Kernel.OwnerFailure
   alias PtcRunner.Kernel.PreparedRun
+  alias PtcRunner.Kernel.Progress
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.ProviderExecutionResources
@@ -26,8 +27,6 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunAdmission
   alias PtcRunner.Kernel.RunBuilder
-  alias PtcRunner.LiveStatus
-  alias PtcRunner.LiveStatus.Target
 
   @enforce_keys [:pid, :token]
   defstruct @enforce_keys ++ [:monitor]
@@ -70,7 +69,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           ProviderExecution.t() | ProviderExecution.Retained.t() | nil,
           (binary() -> term()) | nil,
           :run | :connect,
-          Target.t() | nil
+          Progress.sink() | nil
         ) ::
           {:ok, t()}
           | {:error,
@@ -78,7 +77,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
              | :invalid_publication_authority
              | :provider_session_required
              | :invalid_provider_execution}
-  def start(prepared, authority, caller, provider_execution, notifier, operation, live_status)
+  def start(prepared, authority, caller, provider_execution, notifier, operation, progress_sink)
       when is_pid(caller) and operation in [:run, :connect] do
     with :ok <- retained_caller(provider_execution, caller),
          :ok <-
@@ -88,7 +87,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
              provider_execution,
              notifier,
              operation,
-             live_status
+             progress_sink
            ),
          {:ok, lease} <- PublicationAuthority.claim(authority) do
       token = make_ref()
@@ -96,7 +95,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       case GenServer.start(
              __MODULE__,
              {prepared, authority, caller, token, lease, provider_execution, notifier, operation,
-              live_status}
+              progress_sink}
            ) do
         {:ok, pid} ->
           {:ok, %__MODULE__{pid: pid, token: token}}
@@ -115,7 +114,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
         _provider_execution,
         _notifier,
         _operation,
-        _live_status
+        _progress_sink
       ),
       do: {:error, :invalid_prepared_run}
 
@@ -206,9 +205,9 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
   defp retained_caller(_execution, _caller), do: :ok
 
-  defp admissible(prepared, authority, provider_execution, notifier, operation, live_status) do
+  defp admissible(prepared, authority, provider_execution, notifier, operation, progress_sink) do
     cond do
-      not live_status?(live_status) ->
+      not progress_sink?(progress_sink) ->
         {:error, :invalid_prepared_run}
 
       not match?(%PreparedRun{request: %PtcRunner.Kernel.RunRequest{}}, prepared) or
@@ -260,9 +259,8 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   defp provider_free_admissible(_provider_execution, _operation),
     do: {:error, :invalid_provider_execution}
 
-  defp live_status?(nil), do: true
-  defp live_status?(%Target{} = target), do: Target.valid?(target)
-  defp live_status?(_target), do: false
+  defp progress_sink?(nil), do: true
+  defp progress_sink?(target), do: is_function(target, 2)
 
   # Each operation completes with its own evidence: a run with a sealed
   # execution outcome and connectivity with the sealed per-occurrence result.
@@ -318,7 +316,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
   defp initialize(
          {prepared, authority, caller, token, lease, provider_execution, notifier, operation,
-          live_status},
+          progress_sink},
          admission
        ) do
     caller_ref = Process.monitor(caller)
@@ -345,7 +343,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       waiter: nil,
       result: nil,
       handoff_waiting?: false,
-      live_status: live_status,
+      progress_sink: progress_sink,
       held_resources: ExecutionSessionResources.new([:prepared, :authority])
     }
 
@@ -593,8 +591,8 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
         {worker_pid, worker_ref} =
           spawn_monitor(fn ->
             execution_result =
-              with_cached_live_status(initial.live_status, fn ->
-                complete_operation(built, operation)
+              Attestation.with_validation_cache(fn ->
+                complete_operation(built, operation, initial.progress_sink)
               end)
 
             send(owner, {token, :execution_result, self(), execution_result})
@@ -652,7 +650,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
          _notifier,
          _tracker,
          {owner, token},
-         :run
+         {:run, progress_sink}
        ) do
     with {:ok, built} <-
            RunBuilder.build_borrowed_owned(
@@ -666,7 +664,12 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
         GenServer.call(owner, {token, {:borrowed_tracker, tracker}}, :infinity)
       end
 
-      RunBuilder.execute_built_claimed(Map.put(built, :publication_lease, lease), lease, observer)
+      RunBuilder.execute_built_claimed(
+        Map.put(built, :publication_lease, lease),
+        lease,
+        observer,
+        progress_sink
+      )
     end
   end
 
@@ -678,7 +681,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
          notifier,
          tracker,
          {owner, _token},
-         operation
+         scope
        ),
        do:
          ProviderExecution.execute(
@@ -689,7 +692,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
            notifier,
            tracker,
            owner,
-           operation
+           scope
          )
 
   defp open_provider_execution(
@@ -717,7 +720,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
             end
 
             execution_result =
-              with_cached_live_status(initial.live_status, fn ->
+              Attestation.with_validation_cache(fn ->
                 with :ok <- held do
                   execute_providers(
                     initial.prepared,
@@ -727,7 +730,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
                     notifier,
                     tracker,
                     {owner, token},
-                    operation
+                    {operation, initial.progress_sink}
                   )
                 end
               end)
@@ -773,12 +776,8 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     end
   end
 
-  defp complete_operation(%{publication_lease: lease} = built, :run),
-    do: RunBuilder.execute_built_claimed(built, lease)
-
-  defp with_cached_live_status(target, fun) do
-    Attestation.with_validation_cache(fn -> LiveStatus.with_target(target, fun) end)
-  end
+  defp complete_operation(%{publication_lease: lease} = built, :run, progress_sink),
+    do: RunBuilder.execute_built_claimed(built, lease, nil, progress_sink)
 
   defp finish_or_wait(%{waiter: nil} = state), do: {:noreply, state}
 

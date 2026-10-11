@@ -1,7 +1,6 @@
 defmodule PtcRunner.LiveStatusGlobalStateTest do
-  # async: false — three cases set PTC_VIEWER_URL or PTC_VIEWER_TOKEN, which every Kernel.run in
-  # the VM reads (class D), and one asserts that completion returns within 500 ms, which a loaded
-  # async phase cannot promise (class A). The rest of live-status coverage is async.
+  # async: false — cases change frontend Viewer environment settings, and
+  # one checks the bounded terminal delivery deadline.
   use ExUnit.Case, async: false
 
   import PtcRunner.TestSupport.LiveStatusFixtures
@@ -12,10 +11,10 @@ defmodule PtcRunner.LiveStatusGlobalStateTest do
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.Progress, as: Reporter
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
-  alias PtcRunner.LiveStatus.Reporter
   alias PtcRunner.LiveStatus.Target
   alias PtcRunner.MixCommandAdapter
   alias PtcRunner.TestSupport.HTTPRequest
@@ -73,24 +72,32 @@ defmodule PtcRunner.LiveStatusGlobalStateTest do
         end
       end)
 
-    {:ok, limits} = Limits.new()
-    {:ok, sink} = EventSink.start(:normal, limits, run_id: "blocked-live-target")
-    {:ok, config} = run_config(limits, sink, %{})
-    {:ok, run_state} = RunState.start(limits)
-    {:ok, reporter} = Reporter.start(target, config, run_state)
+    task =
+      Task.async(fn ->
+        {:ok, limits} = Limits.new()
+        {:ok, sink} = EventSink.start(:normal, limits, run_id: "blocked-live-target")
+        {:ok, config} = run_config(limits, sink, %{})
+        started = System.monotonic_time(:millisecond)
+        result = Kernel.run("(return 42)", PtcRunner.LiveStatus.configure(config, target))
+        {result, System.monotonic_time(:millisecond) - started}
+      end)
 
-    assert_receive {:blocked_delivery, delivery, "running"}, 1_000
+    assert_receive {:blocked_delivery, delivery, first_phase}, 1_000
     delivery_ref = Process.monitor(delivery)
+    assert {{:ok, %{value: 42}}, elapsed_ms} = Task.await(task, 4_000)
+    assert elapsed_ms < 3_000
+    assert_receive {:DOWN, ^delivery_ref, :process, ^delivery, :killed}
 
-    started = System.monotonic_time(:millisecond)
-    assert :ok = Reporter.complete(reporter, :ok, nil, nil)
-    assert System.monotonic_time(:millisecond) - started < 500
-    assert :ok = Reporter.stop(reporter)
+    terminal_delivery =
+      if first_phase == "ok" do
+        delivery
+      else
+        assert_receive {:blocked_delivery, terminal, "ok"}
+        terminal
+      end
 
-    assert_receive {:DOWN, ^delivery_ref, :process, ^delivery, :killed}, 2_000
-    reporter_ref = Process.monitor(reporter)
-    assert_receive {:DOWN, ^reporter_ref, :process, ^reporter, :normal}, 2_000
-    assert :ok = RunState.stop(run_state)
+    refute Process.alive?(terminal_delivery)
+    refute_receive {:blocked_delivery, _, "running"}
   end
 
   test "OTP status redacts private input and the HTTP bearer token" do
@@ -108,7 +115,9 @@ defmodule PtcRunner.LiveStatusGlobalStateTest do
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "private-status")
     {:ok, config} = run_config(limits, sink, %{"secret" => "PRIVATE_LIVE_INPUT_MARKER"})
     {:ok, run_state} = RunState.start(limits)
-    {:ok, reporter} = Reporter.start("http://127.0.0.1:1", config, run_state)
+
+    {:ok, reporter} =
+      Reporter.start(PtcRunner.LiveStatus.sink("http://127.0.0.1:1"), config, run_state)
 
     status = inspect(:sys.get_status(reporter), limit: :infinity, printable_limit: :infinity)
     refute status =~ "PRIVATE_LIVE_INPUT_MARKER"
@@ -145,7 +154,7 @@ defmodule PtcRunner.LiveStatusGlobalStateTest do
     {:ok, config} = run_config(limits, sink, %{})
     config = %{config | labels: %{"name" => "configured-label"}}
 
-    assert {:ok, %{value: 42}} = Kernel.run("(return 42)", config)
+    assert {:ok, %{value: 42}} = Kernel.run("(return 42)", PtcRunner.LiveStatus.configure(config))
     assert_receive {:live_label, "configured-label"}, 2_000
   end
 
@@ -172,6 +181,6 @@ defmodule PtcRunner.LiveStatusGlobalStateTest do
         event_sink: sink
       )
 
-    assert {:ok, %{value: 42}} = Kernel.run("(return 42)", config)
+    assert {:ok, %{value: 42}} = Kernel.run("(return 42)", PtcRunner.LiveStatus.configure(config))
   end
 end

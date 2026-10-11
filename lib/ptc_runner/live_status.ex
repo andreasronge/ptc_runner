@@ -2,18 +2,18 @@ defmodule PtcRunner.LiveStatus do
   @moduledoc """
   Opt-in live status reporting for one Kernel run.
 
-  `PtcRunner.Kernel.Runner` starts one internal reporter per run when either an
-  owning host injects a per-run target or `PTC_VIEWER_URL` names an external
-  Viewer. It samples public run state (`RunState.usage/1`, parallel-budget
-  occupancy, sandbox heap) and sends self-contained frames to that target.
-  `PTC_VIEWER_TOKEN`, when present, authenticates the HTTP form. Reporting is
-  strictly best-effort: a dead, absent, or rejecting Viewer never affects the
-  run.
+  Frontends translate explicit targets or `PTC_VIEWER_URL` into a callback
+  consumed by `PtcRunner.Kernel.Progress`. `PTC_VIEWER_TOKEN` authenticates HTTP
+  delivery. Embedders attach the callback explicitly with `configure/2`.
+  Labels, environment settings and target composition stay in this frontend.
+  A slow, dead or rejecting Viewer is isolated by the kernel's progress port.
   """
 
   alias PtcRunner.Kernel.ApplicationPackage
+  alias PtcRunner.Kernel.CommandRuntime
+  alias PtcRunner.Kernel.Progress
   alias PtcRunner.LiveStatus.Config
-  alias PtcRunner.LiveStatus.Reporter
+  alias PtcRunner.LiveStatus.HTTP
   alias PtcRunner.LiveStatus.Target
   alias PtcRunner.Utf8
 
@@ -27,7 +27,7 @@ defmodule PtcRunner.LiveStatus do
     case url do
       url when is_binary(url) and url != "" ->
         case Target.new(
-               fn run_id, frame -> Reporter.report_http(url, run_id, frame, token) end,
+               fn run_id, frame -> HTTP.report_http(url, run_id, frame, token) end,
                label: label
              ) do
           {:ok, target} -> target
@@ -52,65 +52,89 @@ defmodule PtcRunner.LiveStatus do
   def application_label(name, entry) when is_binary(name) and is_binary(entry),
     do: Utf8.truncate_valid("#{name} · #{entry}", 256)
 
-  @target_key {__MODULE__, :target}
+  @doc "Builds a frontend sink with label and optional external Viewer delivery."
+  @spec sink(Target.t() | binary() | nil) :: Progress.sink() | nil
+  @spec sink(Target.t() | binary() | nil, binary() | nil) :: Progress.sink() | nil
+  def sink(target, fallback_label \\ nil)
+  def sink(nil, _fallback_label), do: nil
 
-  @doc "Starts the configured per-run or HTTP reporter; returns nil otherwise."
-  @spec maybe_start(struct(), struct()) :: pid() | nil
-  def maybe_start(config, run_state) do
-    case Process.get(@target_key) do
-      %Target{} = target ->
-        case Reporter.start(target, config, run_state) do
-          {:ok, pid} -> pid
-          _error -> nil
-        end
+  def sink(url, fallback_label) when is_binary(url) do
+    token = Config.read().token
 
-      _absent ->
-        maybe_start_http(config, run_state)
+    fn run_id, frame ->
+      HTTP.report_http(url, run_id, Map.put(frame, :label, fallback_label), token)
+    end
+  end
+
+  def sink(%Target{} = target, fallback_label) do
+    fn run_id, frame ->
+      Target.report(
+        target,
+        run_id,
+        Map.put(frame, :label, Target.label(target) || fallback_label)
+      )
+    end
+  end
+
+  @doc "Attaches explicit frontend progress to a run configuration."
+  def configure(config, target \\ nil) do
+    configured_label = config_label(config)
+
+    label =
+      case System.get_env("PTC_VIEWER_LABEL") do
+        value when is_binary(value) and value != "" -> value
+        _absent -> configured_label
+      end
+
+    target = target || external_target(label)
+    %{config | progress_sink: sink(target, configured_label)}
+  end
+
+  defp config_label(config) do
+    case config.labels do
+      %{"name" => "sha256:" <> _hash} -> nil
+      %{"name" => name} when is_binary(name) and name != "" -> Utf8.truncate_valid(name, 256)
+      _absent -> nil
     end
   end
 
   @doc false
-  @spec with_target(Target.t() | nil, (-> result)) :: result when result: term()
-  def with_target(nil, fun) when is_function(fun, 0), do: fun.()
-
-  def with_target(%Target{} = target, fun) when is_function(fun, 0) do
-    previous = Process.get(@target_key, :absent)
-    Process.put(@target_key, target)
-
-    try do
-      fun.()
-    after
-      restore_target(previous)
+  def attach_runtime(runtime, opts) do
+    case Keyword.fetch(opts, :live_status) do
+      {:ok, %Target{} = target} -> attach_target(runtime, target)
+      {:ok, _invalid} -> {:error, :invalid_command_runtime}
+      :error -> attach_target(runtime, nil)
     end
   end
 
-  defp maybe_start_http(config, run_state) do
-    case external_target(System.get_env("PTC_VIEWER_LABEL")) do
-      nil ->
-        nil
+  def attach_target(runtime, target) do
+    if is_nil(target) or Target.valid?(target),
+      do: attach_valid_target(runtime, target),
+      else: {:error, :invalid_command_runtime}
+  end
 
-      target ->
-        case Reporter.start(target, config, run_state) do
-          {:ok, pid} -> pid
-          _error -> nil
+  defp attach_valid_target(runtime, target) do
+    setup = fn package, application ->
+      label = application_label_for(package, application)
+      external = external_target(label)
+
+      selected =
+        case {target, external} do
+          {nil, external} ->
+            external
+
+          {local, nil} ->
+            local
+
+          {local, external} ->
+            if Target.append_external?(local),
+              do: elem(Target.compose([local, external]), 1),
+              else: local
         end
+
+      sink(selected)
     end
+
+    CommandRuntime.with_progress(runtime, setup)
   end
-
-  defp restore_target(:absent), do: Process.delete(@target_key)
-  defp restore_target(previous), do: Process.put(@target_key, previous)
-
-  @doc "Posts the final frame carrying the run outcome."
-  @spec complete(pid() | nil, atom(), term(), binary() | nil, map() | nil) :: :ok
-  def complete(reporter, phase, reason, limit, last_evaluation_error \\ nil)
-
-  def complete(nil, _phase, _reason, _limit, _last_evaluation_error), do: :ok
-
-  def complete(pid, phase, reason, limit, last_evaluation_error) when is_pid(pid),
-    do: Reporter.complete(pid, phase, reason, limit, last_evaluation_error)
-
-  @doc "Stops the reporter; safe on nil and on an already-dead pid."
-  @spec stop(pid() | nil) :: :ok
-  def stop(nil), do: :ok
-  def stop(pid) when is_pid(pid), do: Reporter.stop(pid)
 end
