@@ -20,6 +20,7 @@ defmodule PtcRunner.Kernel.CommandDoctor do
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunPreparation
 
   @spec dispatch(CommandArguments.t(), binary(), CommandRuntime.t()) ::
           {:ok, CommandOutcome.t()} | {:error, CommandOutcome.t()}
@@ -100,7 +101,7 @@ defmodule PtcRunner.Kernel.CommandDoctor do
 
     with {:ok, rows} <- DoctorPlan.new(catalog, prepared, environment, :default),
          {:ok, services} <- runtime_services(host, runtime),
-         {:ok, findings} <- RunCoordinator.local_check_findings(prepared, catalog, services),
+         {:ok, findings} <- RunPreparation.local_check_findings(prepared, catalog, services),
          {:ok, settled} <-
            DoctorPlan.settle_local(rows, findings, prepared, catalog, environment),
          {:ok, checks} <- DoctorPlan.checks(settled) do

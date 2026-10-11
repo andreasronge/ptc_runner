@@ -38,6 +38,7 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   use GenServer
   use PtcRunner.Kernel.OwnerStatusRedaction
 
+  alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.InstallationConfigDigest
   alias PtcRunner.Kernel.MCPBorrowToken
   alias PtcRunner.Kernel.MCPWarmAcquisition
@@ -45,7 +46,6 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   alias PtcRunner.Kernel.ServingEvents
 
   alias PtcRunner.Kernel.{
-    Attestation,
     Deadline,
     PreparedRun,
     ProviderActivity,
@@ -53,8 +53,8 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
     ProviderRegistry,
     ProviderRuntimeServices,
     ProviderSession,
-    ServingProviderMode,
-    ServingTemplate
+    ServingPlan,
+    ServingProviderMode
   }
 
   alias PtcRunner.Kernel.ProviderRuntime.Borrow
@@ -84,22 +84,14 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
 
   def borrow(_runtime, _deadline), do: {:error, :invalid_provider_runtime}
   @spec return(Borrow.t()) :: :ok | {:error, atom()}
-  def return(%Borrow{caller: caller} = borrow) when caller == self(),
-    do: safe_call(borrow.runtime, {:return, borrow}, {:error, :provider_runtime_lost}, :infinity)
-
-  def return(_borrow), do: {:error, :invalid_provider_runtime}
+  defdelegate return(borrow), to: Borrow
   @doc false
   @spec release_borrow(Borrow.t()) :: :ok | {:error, atom()}
-  def release_borrow(%Borrow{} = borrow),
-    do: safe_call(borrow.runtime, {:release, borrow}, {:error, :provider_runtime_lost}, :infinity)
-
+  defdelegate release_borrow(borrow), to: Borrow
   @doc false
-  def settle_borrow(%Borrow{} = borrow),
-    do: safe_call(borrow.runtime, {:settle, borrow}, {:error, :provider_runtime_lost}, :infinity)
-
+  defdelegate settle_borrow(borrow), to: Borrow
   @doc false
-  def hold_borrow(%Borrow{} = borrow),
-    do: safe_call(borrow.runtime, {:hold, borrow}, {:error, :provider_runtime_lost})
+  defdelegate hold_borrow(borrow), to: Borrow
 
   @doc "Refuses new borrows before the host begins draining all destinations."
   @spec quiesce(pid()) :: :ok | {:error, :provider_runtime_lost}
@@ -110,42 +102,26 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
     do: safe_call(runtime, {:drain, deadline}, {:error, :provider_runtime_lost}, :infinity)
 
   @doc false
-  @spec plan_identity(PreparedRun.t()) :: tuple()
-  def plan_identity(prepared),
-    do:
-      {prepared.catalog_attestation, prepared.effective_application_digest,
-       prepared.installation_config_digests}
-
+  defdelegate plan_identity(prepared), to: Borrow
   @doc false
-  @spec valid_borrow?(term()) :: boolean()
-  def valid_borrow?(%Borrow{} = borrow) do
-    Attestation.valid?(
-      Borrow,
-      Map.delete(Map.from_struct(borrow), :attestation),
-      borrow.attestation
-    ) and
-      ProviderSession.alive?(borrow.session) and
-      safe_call(borrow.runtime, {:valid_borrow, borrow.monitor}, false)
-  end
-
-  def valid_borrow?(_borrow), do: false
+  defdelegate valid_borrow?(borrow), to: Borrow
 
   @doc "Checks a runtime against the exact sealed template without borrowing."
-  @spec matches_template?(pid(), ServingTemplate.t()) :: boolean()
+  @spec matches_template?(pid(), ServingPlan.t()) :: boolean()
   def matches_template?(runtime, template),
     do: matches_template?(runtime, template, System.monotonic_time(:millisecond) + 5_000)
 
   @doc false
-  @spec matches_template?(pid(), ServingTemplate.t(), integer()) :: boolean()
+  @spec matches_template?(pid(), ServingPlan.t(), integer()) :: boolean()
   def matches_template?(runtime, template, deadline) do
     deadline > System.monotonic_time(:millisecond) and
       matches_template_before?(runtime, template, deadline)
   end
 
   defp matches_template_before?(runtime, template, deadline) do
-    case ServingTemplate.provider_plan(template) do
+    case ServingPlan.provider_plan(template) do
       {:ok, retained} ->
-        {digest, digests} = ServingTemplate.runtime_context(template).identity
+        {digest, digests} = ServingPlan.runtime_context(template).identity
         identity = {retained.catalog.attestation, digest, digests}
 
         remaining = deadline - System.monotonic_time(:millisecond)
@@ -158,7 +134,7 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
 
   @impl true
   def init(opts) do
-    with {:ok, retained} <- ServingTemplate.provider_plan(opts[:template]),
+    with {:ok, retained} <- ServingPlan.provider_plan(opts[:template]),
          true <- ProviderRuntimeServices.valid?(opts[:services]),
          :ok <- supported_for_opening(retained, opts[:pins]),
          {:ok, execution} <- ProviderExecution.new(retained.catalog, opts[:services], []),
@@ -282,7 +258,7 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   end
 
   @doc "Acquires and closes a template, returning safe pin maps without printing."
-  @spec discover(ServingTemplate.t(), ProviderRuntimeServices.t()) ::
+  @spec discover(ServingPlan.t(), ProviderRuntimeServices.t()) ::
           {:ok, map()} | {:error, term()}
   def discover(template, services) do
     # Discovery retains no live acquisition. An initialization refusal must
@@ -649,9 +625,6 @@ defmodule PtcRunner.Kernel.ProviderRuntime do
   @impl true
   def terminate(_reason, state), do: cleanup(state.opened)
 
-  defp safe_call(pid, request, fallback, timeout \\ 5_000) do
-    GenServer.call(pid, request, timeout)
-  catch
-    :exit, _reason -> fallback
-  end
+  defp safe_call(pid, request, fallback, timeout \\ 5_000),
+    do: Borrow.call(pid, request, fallback, timeout)
 end

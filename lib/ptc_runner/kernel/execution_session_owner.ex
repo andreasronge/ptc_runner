@@ -25,7 +25,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ProviderTaskTracker
   alias PtcRunner.Kernel.PublicationAuthority
-  alias PtcRunner.Kernel.RunAdmission
+  alias PtcRunner.Kernel.RunAdmissionOwner
   alias PtcRunner.Kernel.RunBuilder
 
   @enforce_keys [:pid, :token]
@@ -309,10 +309,10 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     initialize(args, nil)
   end
 
-  defp acquire_admission(host, :admit), do: RunAdmission.admit(host)
+  defp acquire_admission(host, :admit), do: RunAdmissionOwner.admit(host)
 
   defp acquire_admission(host, {:transfer, ref, ticket, caller}),
-    do: RunAdmission.transfer(host, ref, ticket, caller)
+    do: RunAdmissionOwner.transfer(host, ref, ticket, caller)
 
   defp initialize(
          {prepared, authority, caller, token, lease, provider_execution, notifier, operation,
@@ -539,7 +539,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
   @impl GenServer
   def terminate(reason, %{pending: _, admission: {host, _}}) do
-    RunAdmission.complete(host, reason == :normal)
+    RunAdmissionOwner.complete(host, reason == :normal)
     :ok
   end
 
@@ -549,7 +549,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
     if state.admission do
       {host, _} = state.admission
-      RunAdmission.complete(host, reason == :normal and clean_admitted_exit?(state))
+      RunAdmissionOwner.complete(host, reason == :normal and clean_admitted_exit?(state))
     end
 
     :ok

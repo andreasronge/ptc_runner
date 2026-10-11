@@ -23,7 +23,7 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
   alias PtcRunner.Kernel.ReplTerminalization
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunConfig
-  alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunPreparation
   alias PtcRunner.Kernel.RunState
 
   @doc false
@@ -493,7 +493,7 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
 
   defp local_checks(preparation, :workflow),
     do:
-      RunCoordinator.local_checks(
+      RunPreparation.local_checks(
         preparation.prepared_run,
         preparation.catalog,
         preparation.runtime_services
@@ -501,7 +501,7 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
 
   defp local_checks(preparation, %MissionReplTarget{} = target),
     do:
-      RunCoordinator.local_checks(
+      RunPreparation.local_checks(
         preparation.prepared_run,
         preparation.catalog,
         preparation.runtime_services,

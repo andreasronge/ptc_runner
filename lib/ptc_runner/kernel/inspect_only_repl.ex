@@ -17,7 +17,7 @@ defmodule PtcRunner.Kernel.InspectOnlyRepl do
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.RunConfig
-  alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunPreparation
   alias PtcRunner.Kernel.WorkflowEnvironment
 
   @compile_timeout_ms 5_000
@@ -110,7 +110,7 @@ defmodule PtcRunner.Kernel.InspectOnlyRepl do
     deadline = System.monotonic_time(:millisecond) + @compile_timeout_ms
 
     with {:ok, bundle} <- compile_bundle(package.workflow_components, deadline),
-         :ok <- RunCoordinator.validate_entry(bundle, package.entry),
+         :ok <- RunPreparation.validate_entry(bundle, package.entry),
          {:ok, _intern, catalog} <-
            ComponentCatalog.build(package.workflow_components, bundle),
          {:ok, workflow} <-
@@ -161,7 +161,7 @@ defmodule PtcRunner.Kernel.InspectOnlyRepl do
         {:ok, bundle}
 
       {:error, reason} ->
-        case RunCoordinator.classify_bundle_failure(reason, components) do
+        case RunPreparation.classify_bundle_failure(reason, components) do
           {:ok, diagnostic} ->
             {:error, %{code: diagnostic.code, diagnostic: diagnostic}}
 

@@ -87,7 +87,7 @@ defmodule PtcRunner.Kernel.WarmProviderRuntime do
     ProviderRuntime,
     ProviderRuntimeServices,
     RunAdmission,
-    ServingTemplate,
+    ServingPlan,
     WarmProviderApplications
   }
 
@@ -115,7 +115,7 @@ defmodule PtcRunner.Kernel.WarmProviderRuntime do
 
   def start_link(_), do: {:error, :invalid_warm_provider_runtime}
 
-  @spec template(pid(), binary()) :: {:ok, ServingTemplate.t()} | {:error, atom()}
+  @spec template(pid(), binary()) :: {:ok, ServingPlan.t()} | {:error, atom()}
   def template(owner, name),
     do: call(owner, {:template, name}, {:error, :provider_runtime_unavailable})
 
@@ -206,15 +206,15 @@ defmodule PtcRunner.Kernel.WarmProviderRuntime do
 
   defp plans(tools) do
     Enum.reduce_while(Enum.sort(tools), {:ok, []}, fn
-      {name, %{template: %ServingTemplate{retained: nil} = template, pins: pins}}, {:ok, acc}
+      {name, %{template: %ServingPlan{retained: nil} = template, pins: pins}}, {:ok, acc}
       when is_binary(name) ->
         if pins == %{installation_config_pins: %{}, provider_snapshot_pins: %{}},
           do: {:cont, {:ok, [{name, template, pins, nil} | acc]}},
           else: {:halt, {:error, :provider_pin_mismatch}}
 
-      {name, %{template: %ServingTemplate{} = template, pins: pins}}, {:ok, acc}
+      {name, %{template: %ServingPlan{} = template, pins: pins}}, {:ok, acc}
       when is_binary(name) ->
-        case ServingTemplate.provider_plan(template) do
+        case ServingPlan.provider_plan(template) do
           {:ok, plan} -> {:cont, {:ok, [{name, template, pins, plan} | acc]}}
           _ -> {:halt, {:error, :invalid_warm_provider_runtime}}
         end
@@ -245,7 +245,7 @@ defmodule PtcRunner.Kernel.WarmProviderRuntime do
   defp capture(opts, plans, state) do
     names =
       plans
-      |> Enum.flat_map(fn {_, template, _, _} -> ServingTemplate.credential_names(template) end)
+      |> Enum.flat_map(fn {_, template, _, _} -> ServingPlan.credential_names(template) end)
       |> Enum.uniq()
       |> Enum.sort()
 
@@ -318,11 +318,11 @@ defmodule PtcRunner.Kernel.WarmProviderRuntime do
   defp open_tools(plans, services, state) do
     Enum.reduce_while(plans, {:ok, state}, fn
       {name, template, _, nil}, {:ok, next} ->
-        bound = ServingTemplate.with_warm_runtime(template, self())
+        bound = ServingPlan.with_warm_runtime(template, self())
         {:cont, {:ok, put_in(next.tools[name], bound)}}
 
       {name, template, pins, _}, {:ok, next} ->
-        if ServingTemplate.cold?(template) do
+        if ServingPlan.cold?(template) do
           open_cold_tool(name, template, pins, services, next)
         else
           open_warm_tool(name, template, pins, services, next)
@@ -336,8 +336,8 @@ defmodule PtcRunner.Kernel.WarmProviderRuntime do
          {:ok, _} <- ProviderRuntime.compare_pins(actual, pins) do
       bound =
         template
-        |> ServingTemplate.with_cold_services(services)
-        |> ServingTemplate.with_warm_runtime(self())
+        |> ServingPlan.with_cold_services(services)
+        |> ServingPlan.with_warm_runtime(self())
 
       {:cont, {:ok, put_in(state.tools[name], bound)}}
     else
@@ -353,8 +353,9 @@ defmodule PtcRunner.Kernel.WarmProviderRuntime do
            events: if(next.events, do: next.events.(name))
          ) do
       {:ok, runtime} ->
-        {:ok, bound} = ServingTemplate.with_provider_runtime(template, runtime)
-        bound = ServingTemplate.with_warm_runtime(bound, self())
+        true = ProviderRuntime.matches_template?(runtime, template)
+        bound = %{template | provider_runtime: runtime}
+        bound = ServingPlan.with_warm_runtime(bound, self())
         next = put_in(next.runtimes[name], runtime)
         {:cont, {:ok, put_in(next.tools[name], bound)}}
 

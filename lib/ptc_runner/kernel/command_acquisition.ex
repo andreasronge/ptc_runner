@@ -20,7 +20,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProjectContext
   alias PtcRunner.Kernel.ProviderRuntimeServices
-  alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunPreparation
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SchemaViolation
   alias PtcRunner.Kernel.SchemaViolationDiagnostic
@@ -170,7 +170,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
           {:ok, PreparedRun.t()} | {:error, CommandDiagnostic.t()}
   def prepare_request(arguments, catalog, run_ref) do
     with {:ok, request} <- request_arguments(arguments, catalog, run_ref) do
-      RunCoordinator.prepare(request, catalog)
+      RunPreparation.prepare(request, catalog)
     end
   end
 
@@ -326,7 +326,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
                interactive_loop?
              ),
            :ok <- require_repl_host(request, host),
-           {:ok, prepared} <- RunCoordinator.prepare(request, catalog) do
+           {:ok, prepared} <- RunPreparation.prepare(request, catalog) do
         prepare_repl_runtime(prepared, catalog, host, runtime)
       else
         {:error, %CommandDiagnostic{} = diagnostic} -> {:error, diagnostic}
@@ -416,7 +416,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
   end
 
   defp validation_outcome(arguments, run_ref, prepared, catalog, runtime_services) do
-    case RunCoordinator.declared_input_checks(prepared, catalog, runtime_services) do
+    case RunPreparation.declared_input_checks(prepared, catalog, runtime_services) do
       :ok ->
         validation_outcome(arguments, run_ref, prepared)
 
@@ -427,7 +427,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
   end
 
   defp validation_outcome(arguments, run_ref, prepared) do
-    case RunCoordinator.validation_result(prepared) do
+    case RunPreparation.validation_result(prepared) do
       {:ok, result} ->
         PreparedRun.close(prepared)
         {:ok, CommandOutcome.success(:validate, run_ref, result)}
