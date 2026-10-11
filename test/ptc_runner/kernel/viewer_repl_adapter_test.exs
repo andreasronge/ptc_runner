@@ -333,6 +333,9 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
     assert :ok = ViewerReplAdapter.prepare_operation(backend, session, :evaluation, evaluation_id)
 
     %{sessions: %{^session => %{worker: worker}}} = :sys.get_state(backend.pid)
+    # Register before dispatch: the watchdog can kill the worker before the
+    # running-state snapshot reaches the test process under suite load.
+    worker_ref = Process.monitor(worker)
     true = :erlang.suspend_process(worker)
 
     evaluation =
@@ -348,7 +351,6 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
       end)
 
     assert state.sessions[session].worker == worker
-    worker_ref = Process.monitor(worker)
     send(backend.pid, {:operation_timeout, key})
 
     assert {:error, :adapter_failure} = Task.await(evaluation, 1_000)
