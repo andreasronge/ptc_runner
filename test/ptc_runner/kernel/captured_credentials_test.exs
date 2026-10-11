@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.CapturedCredentialsTest do
   use ExUnit.Case, async: false
   alias PtcRunner.Kernel.CapturedCredentials
+  alias PtcRunner.TestSupport.TestHelpers
 
   test "capture resolves the exact union once and later permits only selected subsets" do
     parent = self()
@@ -14,7 +15,7 @@ defmodule PtcRunner.Kernel.CapturedCredentialsTest do
     {:ok, owner} =
       CapturedCredentials.start_link(resolver, ["first", "second", "first"], "bearer")
 
-    on_exit(fn -> if Process.alive?(owner), do: GenServer.stop(owner) end)
+    on_exit(fn -> TestHelpers.stop_quietly(owner) end)
     assert_receive {:resolved, ["bearer", "first", "second"]}
     assert {:ok, %{"first" => "provider-secret"}} = CapturedCredentials.resolve(owner, ["first"])
     assert {:ok, %{}} = CapturedCredentials.resolve(owner, [])
