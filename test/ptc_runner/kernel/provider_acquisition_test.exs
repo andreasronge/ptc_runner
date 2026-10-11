@@ -1,7 +1,6 @@
 defmodule PtcRunner.Kernel.ProviderAcquisitionTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.InstallationCatalog
@@ -13,6 +12,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionTest do
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.TestSupport.ProviderSessionFixture
 
@@ -390,7 +390,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionTest do
     }
 
     {:ok, request} =
-      ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+      RunRequest.from_memory("ptc.json", documents, result_projection: :json)
 
     case RunCoordinator.prepare(request, catalog) do
       {:ok, prepared} -> {:ok, prepared, catalog, request.package}

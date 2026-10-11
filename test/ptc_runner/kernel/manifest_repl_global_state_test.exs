@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.ManifestReplGlobalStateTest do
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.HostRuntimePayload
   alias PtcRunner.Kernel.ManifestRepl
+  alias PtcRunner.Kernel.ManifestReplLease
   alias PtcRunner.Kernel.ManifestReplOpening
   alias PtcRunner.Kernel.OwnerFailure
   alias PtcRunner.Kernel.PublicationAuthority
@@ -304,12 +305,12 @@ defmodule PtcRunner.Kernel.ManifestReplGlobalStateTest do
     assert {:ok, preparation} = CommandAcquisition.prepare_repl(manifest, host, runtime, true)
     assert {:ok, authority} = PublicationAuthority.new([])
     assert {:ok, opening} = ManifestReplOpening.start(preparation, authority, nil, self())
-    opening_ref = Process.monitor(ManifestReplOpening.pid(opening))
+    opening_ref = Process.monitor(ManifestReplLease.pid(opening))
 
     assert_receive {:host_llm_ensure_ready, worker}, 5_000
     Process.exit(worker, :kill)
 
-    assert {:error, failure} = ManifestReplOpening.await(opening)
+    assert {:error, failure} = ManifestReplLease.await(opening)
     assert_receive {:DOWN, ^opening_ref, :process, _pid, :normal}, 5_000
 
     assert {:ok, %CommandDiagnostic{provider_activity: true}, true, :incomplete} =

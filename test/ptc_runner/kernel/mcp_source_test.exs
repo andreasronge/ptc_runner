@@ -7,7 +7,6 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
 
   alias PtcRunner.Kernel
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.DeterministicJSON
@@ -27,6 +26,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunConfig
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Test.MCPOAuthRecordingStore
@@ -3762,7 +3762,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   defp directory_request(path, registry, opts \\ []) do
-    {ApplicationPackage.request_directory(path, request_options(registry, opts)), registry,
+    {RunRequest.from_directory(path, request_options(registry, opts)), registry,
      build_options(opts)}
   end
 

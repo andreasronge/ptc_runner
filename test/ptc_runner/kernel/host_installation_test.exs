@@ -8,7 +8,6 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
   @stdio_fixture Path.expand("../../support/mcp_stdio_fixture.exs", __DIR__)
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandCatalog
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandEngine
@@ -27,6 +26,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.TestSupport.ProviderSessionFixture
@@ -749,7 +749,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
     assert {:ok, built} =
              manifest_path
-             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunRequest.from_directory(installed_limits: registry.installed_limits)
              |> RunLifecycle.build(registry)
 
     assert built.config.limits.subordinate_evaluations == 24
@@ -1056,7 +1056,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     }
 
     assert {:ok, request} =
-             ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+             RunRequest.from_memory("ptc.json", documents, result_projection: :json)
 
     assert {:ok, run_prepared} = RunCoordinator.prepare(request, catalog)
     assert :ok = PreparedRun.close(run_prepared)

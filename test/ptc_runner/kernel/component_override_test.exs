@@ -7,13 +7,13 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
   override path.
   """
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.ComponentOverride
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.TestSupport.RunLifecycle
   alias PtcRunner.TestSupport.TestHelpers
 
@@ -32,15 +32,13 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
       # proof the candidate source compiled rather than the shipped source.
       assert {:error, _reason} =
                paths.manifest
-               |> ApplicationPackage.request_directory(
-                 installed_limits: context.registry.installed_limits
-               )
+               |> RunRequest.from_directory(installed_limits: context.registry.installed_limits)
                |> RunLifecycle.build(context.registry)
                |> RunLifecycle.execute()
 
       assert {:ok, result} =
                paths.manifest
-               |> ApplicationPackage.request_directory(
+               |> RunRequest.from_directory(
                  installed_limits: context.registry.installed_limits,
                  component_override_descriptor: paths.descriptor
                )
@@ -57,7 +55,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
 
       assert {:error, {:source_role, :component_override, :invalid_override_source}} =
                paths.manifest
-               |> ApplicationPackage.request_directory(
+               |> RunRequest.from_directory(
                  installed_limits: context.registry.installed_limits,
                  component_override_descriptor: paths.descriptor
                )
@@ -87,7 +85,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
 
       assert {:error, {:source_role, :component_override, :invalid_override_source}} =
                paths.manifest
-               |> ApplicationPackage.request_directory(
+               |> RunRequest.from_directory(
                  installed_limits: context.registry.installed_limits,
                  component_override_descriptor: descriptor_path
                )
@@ -110,7 +108,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
                 {:source_role, :component_override,
                  {:component_override_path, ^expected_path, :invalid_override_descriptor}}} =
                  paths.manifest
-                 |> ApplicationPackage.request_directory(
+                 |> RunRequest.from_directory(
                    installed_limits: context.registry.installed_limits,
                    component_override_descriptor: paths.descriptor
                  )
@@ -126,7 +124,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
 
       assert {:error, {:source_role, :component_override, :invalid_override_descriptor}} =
                paths.manifest
-               |> ApplicationPackage.request_directory(
+               |> RunRequest.from_directory(
                  installed_limits: context.registry.installed_limits,
                  component_override_descriptor: Path.join(paths.dir, "absent.json")
                )
@@ -142,7 +140,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
 
       assert {:ok, built} =
                paths.manifest
-               |> ApplicationPackage.request_directory(
+               |> RunRequest.from_directory(
                  installed_limits: context.registry.installed_limits,
                  component_override_descriptor: paths.descriptor
                )
@@ -172,9 +170,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
 
       assert {:ok, built} =
                paths.manifest
-               |> ApplicationPackage.request_directory(
-                 installed_limits: context.registry.installed_limits
-               )
+               |> RunRequest.from_directory(installed_limits: context.registry.installed_limits)
                |> RunLifecycle.build(context.registry)
 
       refute Map.has_key?(built.config.run_started_metadata, :component_overrides)
@@ -187,7 +183,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
 
       assert {:ok, built} =
                paths.manifest
-               |> ApplicationPackage.request_directory(
+               |> RunRequest.from_directory(
                  installed_limits: context.registry.installed_limits,
                  component_override_descriptor: paths.descriptor
                )
@@ -237,7 +233,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
 
       assert {:ok, built} =
                paths.manifest
-               |> ApplicationPackage.request_directory(
+               |> RunRequest.from_directory(
                  installed_limits: context.registry.installed_limits,
                  component_override_descriptor: paths.descriptor
                )
@@ -295,7 +291,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
 
       assert {:ok, built} =
                paths.manifest
-               |> ApplicationPackage.request_directory(
+               |> RunRequest.from_directory(
                  installed_limits: registry.installed_limits,
                  component_override_descriptor: paths.descriptor
                )
@@ -339,7 +335,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
                  "kernel-runtime-limit-failure"
                ]}} =
                paths.manifest
-               |> ApplicationPackage.request_directory(
+               |> RunRequest.from_directory(
                  installed_limits: registry.installed_limits,
                  component_override_descriptor: paths.descriptor
                )
@@ -378,9 +374,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
                  "kernel-runtime-limit-failure"
                ]}} =
                paths.manifest
-               |> ApplicationPackage.request_directory(
-                 installed_limits: registry.installed_limits
-               )
+               |> RunRequest.from_directory(installed_limits: registry.installed_limits)
                |> RunLifecycle.build(registry)
     end
 
@@ -409,7 +403,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
       paths = write_application(context, context.base, raw: %{"provenance" => provenance()})
 
       assert {:ok, request} =
-               ApplicationPackage.request_directory(paths.manifest,
+               RunRequest.from_directory(paths.manifest,
                  component_override_descriptor: paths.descriptor,
                  result_projection: :native
                )
@@ -437,13 +431,13 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
         )
 
       assert {:ok, plain} =
-               ApplicationPackage.request_directory(without.manifest,
+               RunRequest.from_directory(without.manifest,
                  component_override_descriptor: without.descriptor,
                  result_projection: :native
                )
 
       assert {:ok, provenanced} =
-               ApplicationPackage.request_directory(with_provenance.manifest,
+               RunRequest.from_directory(with_provenance.manifest,
                  component_override_descriptor: with_provenance.descriptor,
                  result_projection: :native
                )
@@ -464,7 +458,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
 
       assert {:error, {:source_role, :component_override, reason}} =
                paths.manifest
-               |> ApplicationPackage.request_directory(
+               |> RunRequest.from_directory(
                  installed_limits: context.registry.installed_limits,
                  component_override_descriptor: paths.descriptor
                )
@@ -486,7 +480,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
 
       assert {:error, {:source_role, :component_override, reason}} =
                paths.manifest
-               |> ApplicationPackage.request_directory(
+               |> RunRequest.from_directory(
                  installed_limits: context.registry.installed_limits,
                  component_override_descriptor: paths.descriptor
                )
@@ -502,7 +496,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
       paths = write_application(context, context.base)
 
       assert {:ok, request} =
-               ApplicationPackage.request_directory(paths.manifest,
+               RunRequest.from_directory(paths.manifest,
                  component_override_descriptor: paths.descriptor,
                  result_projection: :native
                )

@@ -4,8 +4,10 @@ defmodule PtcRunner.LLMTest do
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.ModelContractDiagnostic
+  alias PtcRunner.Kernel.ModelContractPricingCause
   alias PtcRunner.LLM.Invocation
   alias PtcRunner.LLM.PreparedModel
+  alias PtcRunner.LLM.PublicModel
   alias PtcRunner.LLM.Requirements
   alias PtcRunner.TestSupport.LLMSupport
 
@@ -262,6 +264,18 @@ defmodule PtcRunner.LLMTest do
     test "rejects a pricing sentinel when no cost reservation was requested" do
       assert {:error, :invalid_model_preparation} =
                PtcRunner.LLM.prepare("provider:model", requirements(), PricingUnavailableAdapter)
+    end
+
+    test "seals a private pricing miss without exposing the selector" do
+      tariff = %{currency: "USD", id: "test-v1"}
+      requested = put_in(requirements(), [:reservation, :cost_tariff], tariff)
+
+      assert {:error, %ModelContractPricingCause{public_model: nil} = cause} =
+               PtcRunner.LLM.prepare("private-selector", requested, PricingUnavailableAdapter)
+
+      assert ModelContractPricingCause.valid?(cause)
+      refute ModelContractPricingCause.valid?(%{cause | public_model: "private-selector"})
+      refute ModelContractPricingCause.valid?(Map.put(cause, :private_payload, "private"))
     end
 
     test "does not classify a generic adapter pricing miss as uncataloged" do
@@ -573,34 +587,34 @@ defmodule PtcRunner.LLMTest do
     end
   end
 
-  describe "attested_public_model/2" do
+  describe "PublicModel.attested/2" do
     test "accepts only the exact bounded model value" do
       model = "provider:public-model"
 
-      assert PtcRunner.LLM.attested_public_model(PublicModelAdapter, model) == model
-      assert PtcRunner.LLM.attested_public_model(MismatchingPublicModelAdapter, model) == nil
-      assert PtcRunner.LLM.attested_public_model(MockAdapter, model) == nil
+      assert PublicModel.attested(PublicModelAdapter, model) == model
+      assert PublicModel.attested(MismatchingPublicModelAdapter, model) == nil
+      assert PublicModel.attested(MockAdapter, model) == nil
     end
 
     test "treats adapter failures and malformed values as private" do
-      assert PtcRunner.LLM.attested_public_model(RaisingPublicModelAdapter, "provider:model") ==
+      assert PublicModel.attested(RaisingPublicModelAdapter, "provider:model") ==
                nil
 
       invalid_utf8 = <<"provider:", 255>>
-      assert PtcRunner.LLM.attested_public_model(PublicModelAdapter, invalid_utf8) == nil
+      assert PublicModel.attested(PublicModelAdapter, invalid_utf8) == nil
 
       oversized = "provider:" <> String.duplicate("m", 256)
-      assert PtcRunner.LLM.attested_public_model(PublicModelAdapter, oversized) == nil
+      assert PublicModel.attested(PublicModelAdapter, oversized) == nil
     end
 
     test "the built-in adapter publishes ReqLLM targets but not direct HTTP targets" do
       adapter = PtcRunner.LLM.ReqLLMAdapter
       model = "openrouter:deepseek/deepseek-v4-flash-0731"
 
-      assert PtcRunner.LLM.attested_public_model(adapter, model) == model
-      assert PtcRunner.LLM.attested_public_model(adapter, "ollama:local-model") == nil
+      assert PublicModel.attested(adapter, model) == model
+      assert PublicModel.attested(adapter, "ollama:local-model") == nil
 
-      assert PtcRunner.LLM.attested_public_model(
+      assert PublicModel.attested(
                adapter,
                "openai-compat:https://private.example/v1|deployment"
              ) == nil

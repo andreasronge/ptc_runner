@@ -51,6 +51,11 @@ projection. PTC-Lisp owns replaceable workflow policy such as prompts,
 planning, retries, feedback, and completion. Frontends own path acquisition,
 presentation, and host interaction.
 
+`LLM.PublicModel` validates adapter attestations of public model
+names. Both the LLM facade and `ModelContractPricingCause` use it directly;
+the pricing cause seals the bounded public name with its existing attestation.
+Adapter exceptions, mismatched names and invalid names remain private.
+
 ## Module dependency layers
 
 `mix ptc.check_layers`, also run by `mix precommit`, checks every compiled
@@ -110,6 +115,27 @@ indirect dispatch for the same dependency rules, including the catalog dispatch
 in Lisp introspection. An injected interface must be owned by the lower layer;
 string dispatch must not conceal a forbidden edge.
 
+### Retained same-layer reciprocal dependencies
+
+The runtime-cycle inventory keeps these direct pairs for their shared contract
+or owner protocol. They are deliberate same-layer dependencies, not exceptions
+to the dependency direction above. Run-spine planning, evidence storage, and
+Viewer adaptation cycles are separate refactoring surfaces.
+
+| Pair (under `PtcRunner.Kernel` unless qualified) | Reason to keep |
+| --- | --- |
+| `CommandAcquisition` ↔ `ProjectContext` | Acquisition matches the explicit project context; the context obtains host-installed limits through the canonical catalog acquisition boundary. |
+| `CommandDestination` ↔ `CommandOutcome` | Destination failures use the sealed command envelope, and argument failures use the destination's canonical requested-artifact state. |
+| `HostInstallation` ↔ `HostRuntimePayload` | The installation seals credential transport; that transport resolves credentials only through authenticated host-owner operations. |
+| `HostInstallation` ↔ `InstallationCatalog` | Installation constructs trusted catalogs; catalog runtime bootstrap obtains builders tied to that same host owner. |
+| `HostInstallationAuthority` ↔ `HostInstallationOwner` | The authority client and its owner authenticate the token and role before operating on credential leases. |
+| `MCPOAuth.ManagerCleanup` ↔ `MCPOAuth.TokenManager` | Token-manager failure hands ownership to the bounded cleanup owner, which accepts the manager's explicit handle and serializes adoption. |
+| `ProviderSession` ↔ `ResourceRegistrar` | The session creates scoped registrar handles; each registrar operates through its session owner and deadline fence. |
+| `PublicationHandle` ↔ `PublicationHandleOwner` | The publication client and owner share the authenticated authority protocol and owner-atomic publication state. |
+| `PtcRunner.Lisp.Env` ↔ `PtcRunner.Lisp.Registry` | Environment discovery uses registry metadata, while the registry categorizes names through the environment's canonical namespace rules. |
+| `PtcRunner.Lisp.Eval.Capture` ↔ `PtcRunner.Lisp.Eval.Context` | Capture materializes evaluation context; context records effects through the invocation's capture ledger. |
+| `PtcRunner.Lisp.Runtime.Regex` ↔ `PtcRunner.Lisp.Runtime.String` | String operations delegate pattern semantics to regex operations; regex split limits use the canonical string-to-integer parsing. |
+
 ## Lifecycle
 
 The main path is:
@@ -155,7 +181,10 @@ an immutable versioned directory.
 
 `ApplicationPackage`, `ExecutionInput`, and `ExecutionPolicy` separate
 application identity, selected input authority, and execution/publication
-policy. `RunRequest` seals those values. Provider implementations remain in a
+policy. `RunRequest.from_directory/2` and `RunRequest.from_memory/3` acquire
+those values and seal them; `ApplicationPackage` owns only package and input
+acquisition. Both use `ApplicationOptions` for the closed option vocabulary
+and validation before opening a source. Provider implementations remain in a
 host-owned `InstallationCatalog`; manifests select trusted aliases and cannot
 install callbacks, endpoints, commands, or credentials.
 
@@ -297,7 +326,12 @@ same authority check used for real requests.
 
 Manifest REPL startup follows the same acquisition, preparation, local-check,
 sink, and active-provider prefix as a one-shot run. It then transfers the
-opening and run state to `ReplSessionOwner`. `ReplSession` is process-affine;
+run state and a `ManifestReplLease` to `ReplSessionOwner`.
+`ManifestReplOpening` owns startup orchestration and provider resources; the
+lease owns the token-bearing cleanup protocol. Adoption, caller checks and
+state mutation remain atomic in the session owner. The opening owner still
+authenticates cleanup calls against the adopted session PID and token.
+`ReplSession` is process-affine;
 passing its public value does not transfer ownership.
 
 The frontend separately classifies whether it will enter the line loop. That

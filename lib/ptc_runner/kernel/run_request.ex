@@ -2,11 +2,16 @@ defmodule PtcRunner.Kernel.RunRequest do
   @moduledoc """
   Sealed, path-free application package, input, and execution-policy tuple.
 
+  `from_directory/2` and `from_memory/3` acquire a package and selected input,
+  construct execution policy, and seal the complete request. Package acquisition
+  remains below request orchestration and does not depend on this module.
+
   This is the sole request shape accepted by the path-free coordinator added
   above the Kernel. Acquisition adapters may construct it; callers cannot
   replace one member after sealing without invalidating the request.
   """
 
+  alias PtcRunner.Kernel.ApplicationOptions
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.ExecutionInput
@@ -39,6 +44,100 @@ defmodule PtcRunner.Kernel.RunRequest do
   end
 
   def new(_package, _input, _policy), do: {:error, :invalid_run_request}
+
+  @spec from_directory(binary(), keyword()) :: {:ok, t()} | {:error, term()}
+  @doc """
+  Acquires and seals one complete directory-backed run request.
+
+  In addition to `:installed_limits`, `:input_authority`, `:input`, and
+  `:component_override_descriptor`, accepts exactly `:inspection_capture`,
+  `:result_projection`, and `:event_identity`. The latter fixes both event
+  IDs and is rejected when the manifest already owns either identity.
+  `:omit_input` and `:repl_interactive_loop` are package-acquisition flags
+  and are rejected here.
+  """
+  def from_directory(path, opts \\ [])
+
+  def from_directory(path, opts) when is_binary(path) and is_list(opts) do
+    with :ok <- ApplicationOptions.validate(opts, :directory_request),
+         do: from_directory_with_profile(path, opts, false)
+  end
+
+  def from_directory(_path, _opts), do: {:error, :invalid_application_source}
+
+  @doc false
+  @spec from_repl_directory(binary(), keyword(), boolean()) ::
+          {:ok, t()} | {:error, term()}
+  def from_repl_directory(path, opts, interactive_loop?)
+      when is_binary(path) and is_list(opts) and is_boolean(interactive_loop?) do
+    with :ok <- ApplicationOptions.validate(opts, :directory_request),
+         do: from_directory_with_profile(path, opts, interactive_loop?)
+  end
+
+  def from_repl_directory(_path, _opts, _interactive_loop?),
+    do: {:error, :invalid_application_source}
+
+  defp from_directory_with_profile(path, opts, interactive_loop?) do
+    acquisition_opts =
+      opts |> acquisition_options() |> Keyword.put(:repl_interactive_loop, interactive_loop?)
+
+    with {:ok, package, input} <- ApplicationPackage.acquire_directory(path, acquisition_opts),
+         {:ok, policy} <- execution_policy(package, opts),
+         do: new(package, input, policy)
+  end
+
+  @spec from_memory(binary(), %{binary() => binary()}, keyword()) ::
+          {:ok, t()} | {:error, term()}
+  @doc """
+  Acquires and seals one complete memory-backed run request.
+
+  In addition to the `PtcRunner.Kernel.ApplicationPackage.acquire_memory/3`
+  options, accepts exactly
+  `:inspection_capture`, `:result_projection`, and `:event_identity`. The
+  latter fixes both event IDs and is rejected when the manifest already owns
+  either identity.
+  """
+  def from_memory(manifest_name, documents, opts \\ [])
+
+  def from_memory(manifest_name, documents, opts)
+      when is_binary(manifest_name) and is_map(documents) and is_list(opts) do
+    with :ok <- ApplicationOptions.validate(opts, :memory_request),
+         {:ok, package, input} <-
+           ApplicationPackage.acquire_memory(manifest_name, documents, acquisition_options(opts)),
+         {:ok, policy} <- execution_policy(package, opts),
+         do: new(package, input, policy)
+  end
+
+  def from_memory(_manifest_name, _documents, _opts),
+    do: {:error, :invalid_application_source}
+
+  defp acquisition_options(opts),
+    do: Keyword.drop(opts, [:inspection_capture, :result_projection, :event_identity])
+
+  defp execution_policy(package, opts) do
+    with {:ok, run_id, trace_id} <- event_identity(package.events, opts) do
+      ExecutionPolicy.new(
+        event_policy: package.events.policy,
+        run_id: run_id,
+        trace_id: trace_id,
+        inspection_capture: Keyword.get(opts, :inspection_capture, false),
+        result_projection: Keyword.get(opts, :result_projection, :native)
+      )
+    end
+  end
+
+  defp event_identity(events, opts) do
+    case Keyword.fetch(opts, :event_identity) do
+      :error ->
+        {:ok, events.run_id, events.trace_id}
+
+      {:ok, identity} when is_nil(events.run_id) and is_nil(events.trace_id) ->
+        {:ok, identity, identity}
+
+      {:ok, _identity} ->
+        {:error, :event_identity_conflict}
+    end
+  end
 
   @spec valid?(term()) :: boolean()
   @doc "Checks the request and all nested construction attestations."

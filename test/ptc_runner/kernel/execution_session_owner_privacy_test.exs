@@ -3,7 +3,6 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwnerPrivacyTest do
 
   import ExUnit.CaptureLog
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.ExecutionSessionOwner
@@ -13,6 +12,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwnerPrivacyTest do
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SelectionRules
 
   @credential "sentinel-credential-4f21"
@@ -253,7 +253,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwnerPrivacyTest do
     }
 
     {:ok, request} =
-      ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+      RunRequest.from_memory("ptc.json", documents, result_projection: :json)
 
     {:ok, prepared} = RunCoordinator.prepare(request, catalog)
     on_exit(fn -> InstallationCatalog.close(catalog) end)

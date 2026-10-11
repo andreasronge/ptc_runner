@@ -2,7 +2,6 @@ defmodule PtcRunner.Kernel.ComponentCatalogTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.ComponentCatalog
   alias PtcRunner.Kernel.ComponentOverride
@@ -12,6 +11,7 @@ defmodule PtcRunner.Kernel.ComponentCatalogTest do
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunConfig
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SourceIntern
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp
@@ -152,7 +152,7 @@ defmodule PtcRunner.Kernel.ComponentCatalogTest do
     manifest_path = write_documents(directory, documents)
 
     assert {:ok, request} =
-             ApplicationPackage.request_directory(manifest_path, result_projection: :native)
+             RunRequest.from_directory(manifest_path, result_projection: :native)
 
     File.write!(Path.join(directory, "workflow.clj"), mutated)
 
@@ -249,7 +249,7 @@ defmodule PtcRunner.Kernel.ComponentCatalogTest do
     manifest_path = write_documents(directory, documents)
 
     assert {:ok, request} =
-             ApplicationPackage.request_directory(manifest_path, result_projection: :native)
+             RunRequest.from_directory(manifest_path, result_projection: :native)
 
     package_sources =
       request.package.missions
@@ -428,7 +428,7 @@ defmodule PtcRunner.Kernel.ComponentCatalogTest do
     manifest_path = write_documents(directory, documents)
 
     assert {:ok, request} =
-             ApplicationPackage.request_directory(manifest_path,
+             RunRequest.from_directory(manifest_path,
                result_projection: :native,
                component_override_descriptor: Path.join(directory, "override.json")
              )

@@ -24,6 +24,7 @@ defmodule PtcRunner.Kernel.ManifestRepl do
   alias PtcRunner.Kernel.CommandAcquisition
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandRuntime
+  alias PtcRunner.Kernel.ManifestReplLease
   alias PtcRunner.Kernel.ManifestReplOpening
   alias PtcRunner.Kernel.ManifestReplPreparation
   alias PtcRunner.Kernel.MissionReplTarget
@@ -106,7 +107,7 @@ defmodule PtcRunner.Kernel.ManifestRepl do
   defp open_authorized(preparation, authority, trace_path, target) do
     case ManifestReplOpening.start(preparation, authority, trace_path, self(), target) do
       {:ok, opening} ->
-        with {:ok, owner_pid, owner_token} <- ManifestReplOpening.await(opening),
+        with {:ok, owner_pid, owner_token} <- ManifestReplLease.await(opening),
              do: ReplSession.attach(owner_pid, owner_token)
 
       {:error, reason} ->

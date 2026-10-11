@@ -66,10 +66,10 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
     manifest_path = write_documents(directory, documents)
 
     assert {:ok, directory_request} =
-             ApplicationPackage.request_directory(manifest_path, result_projection: :native)
+             RunRequest.from_directory(manifest_path, result_projection: :native)
 
     assert {:ok, memory_request} =
-             ApplicationPackage.request_memory("app.json", documents, result_projection: :native)
+             RunRequest.from_memory("app.json", documents, result_projection: :native)
 
     assert package_projection(directory_request.package) ==
              package_projection(memory_request.package)
@@ -104,7 +104,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
     baseline_path = write_documents(Path.join(directory, "baseline"), documents)
 
     assert {:ok, baseline} =
-             ApplicationPackage.request_directory(baseline_path, result_projection: :native)
+             RunRequest.from_directory(baseline_path, result_projection: :native)
 
     for {filename, index} <-
           Enum.with_index([
@@ -119,7 +119,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
       File.rename!(manifest_path, renamed_path)
 
       assert {:ok, request} =
-               ApplicationPackage.request_directory(renamed_path, result_projection: :native)
+               RunRequest.from_directory(renamed_path, result_projection: :native)
 
       assert package_projection(request.package) == package_projection(baseline.package)
       assert request.input == baseline.input
@@ -140,10 +140,10 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
       end)
 
     assert {:ok, directory_request} =
-             ApplicationPackage.request_directory(manifest_path, result_projection: :native)
+             RunRequest.from_directory(manifest_path, result_projection: :native)
 
     assert {:ok, memory_request} =
-             ApplicationPackage.request_memory(
+             RunRequest.from_memory(
                "apps/fixture/app.json",
                memory_documents,
                result_projection: :native
@@ -183,10 +183,10 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
       end)
 
     assert {:ok, directory_request} =
-             ApplicationPackage.request_directory(manifest_path, result_projection: :native)
+             RunRequest.from_directory(manifest_path, result_projection: :native)
 
     assert {:ok, memory_request} =
-             ApplicationPackage.request_memory(
+             RunRequest.from_memory(
                Path.join(prefix, "app.json"),
                memory_documents,
                result_projection: :native
@@ -211,7 +211,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
     digests =
       for documents <- [inline_a, inline_b, path_a, path_b] do
         {:ok, request} =
-          ApplicationPackage.request_memory("app.json", documents, result_projection: :native)
+          RunRequest.from_memory("app.json", documents, result_projection: :native)
 
         request.package.application_content_digest
       end
@@ -223,7 +223,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
     documents = fixture_documents()
 
     assert {:ok, request} =
-             ApplicationPackage.request_memory("app.json", documents,
+             RunRequest.from_memory("app.json", documents,
                inspection_capture: true,
                result_projection: :native
              )
@@ -234,9 +234,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
 
   test "RunBuilder binds separately acquired requests to registry-installed ceilings" do
     assert {:ok, request} =
-             ApplicationPackage.request_memory("app.json", fixture_documents(),
-               result_projection: :native
-             )
+             RunRequest.from_memory("app.json", fixture_documents(), result_projection: :native)
 
     {:ok, lower_ceiling} = Limits.new(evaluation_timeout_ms: 500)
     {:ok, registry} = ProviderRegistry.new(%{}, installed_limits: lower_ceiling)
@@ -253,7 +251,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
 
   test "RunRequest revalidates an independently sealed input against the package contract" do
     assert {:ok, request} =
-             ApplicationPackage.request_memory("app.json", fixture_documents())
+             RunRequest.from_memory("app.json", fixture_documents())
 
     assert {:ok, mismatched_input} =
              ExecutionInput.new(%{"not_answer" => true}, :normal)
@@ -267,7 +265,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
     {:ok, registry} = ProviderRegistry.new()
 
     assert {:ok, native_request} =
-             ApplicationPackage.request_memory("app.json", documents, result_projection: :native)
+             RunRequest.from_memory("app.json", documents, result_projection: :native)
 
     assert {:ok, native_build} = RunBuilder.build(native_request, registry)
     assert native_build.result_projection == :native
@@ -279,7 +277,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
     assert :ok = RunBuilder.close(native_build)
 
     assert {:ok, json_request} =
-             ApplicationPackage.request_memory("app.json", documents, result_projection: :json)
+             RunRequest.from_memory("app.json", documents, result_projection: :json)
 
     assert {:ok, json_build} = RunBuilder.build(json_request, registry)
     assert json_build.result_projection == :json
@@ -300,7 +298,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
     {:ok, registry} = ProviderRegistry.new()
 
     assert {:ok, sealed_request} =
-             ApplicationPackage.request_memory("app.json", documents)
+             RunRequest.from_memory("app.json", documents)
 
     assert sealed_request.policy.result_projection == :native
     assert {:ok, sealed_build} = RunBuilder.build(sealed_request, registry)
@@ -312,7 +310,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
 
     assert {:ok, filesystem_build} =
              manifest_path
-             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunRequest.from_directory(installed_limits: registry.installed_limits)
              |> RunLifecycle.build(registry)
 
     assert filesystem_build.result_projection == :native
@@ -352,12 +350,10 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
              )
 
     assert {:error, :invalid_application_options} =
-             ApplicationPackage.request_directory(missing, result_projecton: :json)
+             RunRequest.from_directory(missing, result_projecton: :json)
 
     assert {:error, :invalid_application_options} =
-             ApplicationPackage.request_memory("app.json", invalid_memory,
-               result_projecton: :json
-             )
+             RunRequest.from_memory("app.json", invalid_memory, result_projecton: :json)
 
     for limits <- invalid_limits do
       for adapter <- [
@@ -370,12 +366,10 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
               )
             end,
             fn ->
-              ApplicationPackage.request_directory(missing, installed_limits: limits)
+              RunRequest.from_directory(missing, installed_limits: limits)
             end,
             fn ->
-              ApplicationPackage.request_memory("app.json", invalid_memory,
-                installed_limits: limits
-              )
+              RunRequest.from_memory("app.json", invalid_memory, installed_limits: limits)
             end
           ] do
         assert {:error, :invalid_installed_limits} = adapter.()
@@ -387,10 +381,10 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
     duplicate = [result_projection: :json, result_projection: :native]
 
     assert {:error, :invalid_application_options} =
-             ApplicationPackage.request_directory(manifest_path, duplicate)
+             RunRequest.from_directory(manifest_path, duplicate)
 
     assert {:error, :invalid_application_options} =
-             ApplicationPackage.request_memory("app.json", documents, duplicate)
+             RunRequest.from_memory("app.json", documents, duplicate)
 
     assert {:error, :invalid_application_options} =
              ApplicationPackage.acquire_directory(manifest_path, repl_interactive_loop: :yes)
@@ -399,10 +393,10 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
              ApplicationPackage.acquire_directory(manifest_path, omit_input: :yes)
 
     assert {:error, :invalid_application_options} =
-             ApplicationPackage.request_directory(manifest_path, omit_input: true)
+             RunRequest.from_directory(manifest_path, omit_input: true)
 
     assert {:error, :invalid_application_options} =
-             ApplicationPackage.request_directory(manifest_path, repl_interactive_loop: true)
+             RunRequest.from_directory(manifest_path, repl_interactive_loop: true)
   end
 
   test "selected override input bypasses the unselected manifest-path input" do
@@ -411,7 +405,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
       |> Map.put("selected.json", ~S({"answer":7}))
 
     assert {:ok, request} =
-             ApplicationPackage.request_memory("app.json", documents,
+             RunRequest.from_memory("app.json", documents,
                input: "selected.json",
                result_projection: :native
              )
@@ -432,9 +426,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
     }
 
     assert {:error, {:source_role, :component_override, :invalid_override_descriptor}} =
-             ApplicationPackage.request_memory("app.json", fixture_documents(),
-               component_override: forged
-             )
+             RunRequest.from_memory("app.json", fixture_documents(), component_override: forged)
   end
 
   test "memory override candidate name must match the descriptor path" do
@@ -446,7 +438,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
       |> Map.put("different.clj", candidate)
 
     assert {:error, {:source_role, :component_override, :invalid_override_descriptor}} =
-             ApplicationPackage.request_memory("app.json", documents,
+             RunRequest.from_memory("app.json", documents,
                component_override: {"override.json", "different.clj"}
              )
   end
@@ -711,13 +703,13 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
     manifest_path = write_documents(directory, documents)
 
     assert {:ok, directory_request} =
-             ApplicationPackage.request_directory(manifest_path,
+             RunRequest.from_directory(manifest_path,
                component_override_descriptor: Path.join(directory, "override.json"),
                result_projection: :native
              )
 
     assert {:ok, memory_request} =
-             ApplicationPackage.request_memory("app.json", documents,
+             RunRequest.from_memory("app.json", documents,
                component_override: {"override.json", "candidate.clj"},
                result_projection: :native
              )
@@ -746,7 +738,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
       |> Map.put("candidate.clj", candidate)
 
     assert {:ok, other_request} =
-             ApplicationPackage.request_memory("app.json", other_documents,
+             RunRequest.from_memory("app.json", other_documents,
                component_override: {"override.json", "candidate.clj"},
                result_projection: :native
              )
@@ -827,7 +819,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
 
     assert {:error, :stop_after_context} =
              manifest_path
-             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunRequest.from_directory(installed_limits: registry.installed_limits)
              |> RunLifecycle.build(registry)
              |> RunLifecycle.execute()
 

@@ -1,7 +1,6 @@
 defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.ComponentOverride
@@ -18,6 +17,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.RunAnalysisCapability
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.TestSupport.PrivateInspectionFixture
@@ -1104,7 +1104,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     {:ok, built} =
       manifest_path
-      |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+      |> RunRequest.from_directory(installed_limits: registry.installed_limits)
       |> RunLifecycle.build(registry)
 
     assert built.config.event_sink.policy == :private
@@ -1211,7 +1211,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     assert {:error, :provider_data_class_denied} =
              manifest_path
-             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+             |> RunRequest.from_directory(installed_limits: registry.installed_limits)
              |> RunLifecycle.build(registry)
   end
 

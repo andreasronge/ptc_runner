@@ -1,7 +1,6 @@
 defmodule PtcRunner.TestSupport.ProviderExecutionFixture do
   @moduledoc false
   import ExUnit.Callbacks, only: [on_exit: 1]
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.Limits
@@ -11,6 +10,7 @@ defmodule PtcRunner.TestSupport.ProviderExecutionFixture do
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SelectionRules
 
   def provider_fixture(opts \\ []) do
@@ -131,7 +131,7 @@ defmodule PtcRunner.TestSupport.ProviderExecutionFixture do
     }
 
     {:ok, request} =
-      ApplicationPackage.request_memory("ptc.json", documents,
+      RunRequest.from_memory("ptc.json", documents,
         result_projection: :json,
         installed_limits: installed_limits
       )

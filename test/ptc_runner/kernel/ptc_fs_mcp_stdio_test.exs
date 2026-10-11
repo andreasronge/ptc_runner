@@ -11,9 +11,9 @@ defmodule PtcRunner.Kernel.PtcFsMCPStdioTest do
   @moduletag :e2e
   @moduletag timeout: 180_000
 
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.TestSupport.PtcFsMCP
   alias PtcRunner.TestSupport.RunLifecycle
   alias PtcRunner.TestSupport.StreamingInspection
@@ -42,7 +42,7 @@ defmodule PtcRunner.Kernel.PtcFsMCPStdioTest do
 
     assert {:ok, result} =
              paths.manifest
-             |> ApplicationPackage.request_directory(
+             |> RunRequest.from_directory(
                installed_limits: registry.installed_limits,
                inspection_capture: true
              )

@@ -23,6 +23,7 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
   alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.ModelContractDiagnostic
   alias PtcRunner.Kernel.ProviderError
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.StandaloneCLI
   alias PtcRunner.TestSupport.HTTPRequest
   alias PtcRunner.TestSupport.LLMSupport
@@ -972,13 +973,13 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
     original = File.cwd!()
 
     on_exit(fn ->
-      :erlang.trace_pattern({ApplicationPackage, :request_directory, 2}, false, [])
+      :erlang.trace_pattern({RunRequest, :from_directory, 2}, false, [])
       File.cd!(original)
     end)
 
     File.cd!(invocation)
-    assert {:module, ApplicationPackage} = Code.ensure_loaded(ApplicationPackage)
-    assert 1 = :erlang.trace_pattern({ApplicationPackage, :request_directory, 2}, true, [])
+    assert {:module, RunRequest} = Code.ensure_loaded(RunRequest)
+    assert 1 = :erlang.trace_pattern({RunRequest, :from_directory, 2}, true, [])
 
     preparation =
       Task.async(fn ->
@@ -997,8 +998,7 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
     assert 1 = :erlang.trace(preparation.pid, true, [:call])
     send(preparation.pid, :prepare)
 
-    assert_receive {:trace, preparation_pid, :call,
-                    {ApplicationPackage, :request_directory, _arguments}},
+    assert_receive {:trace, preparation_pid, :call, {RunRequest, :from_directory, _arguments}},
                    1_000
 
     assert preparation_pid == preparation.pid
