@@ -298,7 +298,7 @@ defmodule PtcRunner.Kernel.ModelCapabilitiesTest do
     refute ModelCapabilities.chat?("decision-request")
 
     assert %{facts_by_run_id: %{"model-classification-run" => facts}} =
-             TraceLog.compile_analysis(events, :private)
+             TraceLog.Query.compile_analysis(events, :private)
 
     assert facts["expected_model_exchange_ids"] == []
   end

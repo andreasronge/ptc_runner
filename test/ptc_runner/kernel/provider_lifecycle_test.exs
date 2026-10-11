@@ -867,7 +867,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     assert List.last(close_events).data.reason == :provider_cleanup_failed
 
     trace_path = Path.join(dir, "cleanup-failure.jsonl")
-    assert :ok = TraceLog.append_jsonl(trace_path, close_events)
+    assert :ok = TraceLog.Append.append_jsonl(trace_path, close_events)
     assert {:ok, _trace} = TraceQuery.new(source: {:file, trace_path})
     assert File.read!(trace_path) =~ ~s("reason":"provider_cleanup_failed")
 

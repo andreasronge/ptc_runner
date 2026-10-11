@@ -524,7 +524,7 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
         task =
           Task.async(fn ->
             send(test, :direct_append_started)
-            TraceLog.append_jsonl(trace, [direct_event])
+            TraceLog.Append.append_jsonl(trace, [direct_event])
           end)
 
         receive do

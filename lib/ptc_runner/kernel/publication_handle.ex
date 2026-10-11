@@ -1169,9 +1169,12 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   # A creator paused past the markerless grace cannot install a live marker
   # between a sweeper's stale check and deletion.
   defp create_open_staging(directory, path, fault_hook) do
-    case TraceLog.with_append_authority_lock(PrivateDirectory.staging_lock_path(directory), fn ->
-           create_locked_staging(directory, path, fault_hook)
-         end) do
+    case TraceLog.Append.with_append_authority_lock(
+           PrivateDirectory.staging_lock_path(directory),
+           fn ->
+             create_locked_staging(directory, path, fault_hook)
+           end
+         ) do
       {:ok, _device, _identity} = success -> success
       {:error, reason} -> {:error, filesystem_destination_failure(reason)}
       unavailable -> collapsed_failure(unavailable)
@@ -1216,7 +1219,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   end
 
   defp with_append_reservation(path, fun) do
-    case TraceLog.append_reservation_path(path) do
+    case TraceLog.Append.append_reservation_path(path) do
       {:ok, reservation_path} ->
         _ = maybe_reclaim_abandoned_reservation(reservation_path)
         maybe_sweep_abandoned_append_reservations(Path.dirname(reservation_path))
@@ -1270,7 +1273,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   end
 
   defp reclaim_abandoned_reservation(path) do
-    TraceLog.with_append_authority_lock(path <> ".reclaim", fn ->
+    TraceLog.Append.with_append_authority_lock(path <> ".reclaim", fn ->
       reclaim_stale_reservation(path, fn -> true end)
     end)
   end
@@ -1357,7 +1360,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
       # lock. Re-read under the lock so a delayed reaper cannot remove a
       # replacement owner's marker. Fresh mkdir contenders still arbitrate
       # atomically, and the retry is deliberately inside this lock.
-      TraceLog.with_append_authority_lock(path <> ".reclaim", fn ->
+      TraceLog.Append.with_append_authority_lock(path <> ".reclaim", fn ->
         case reclaim_reservation(path, destination) do
           :ok -> create_reservation(path, destination, false, nil)
           _other -> {:error, :destination_exists}

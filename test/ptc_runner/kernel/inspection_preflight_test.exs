@@ -473,13 +473,13 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       File.chmod!(replaceable, 0o777)
 
       assert {:error, :trace_destination_unsafe} =
-               TraceLog.preflight_destination(
+               TraceLog.Append.preflight_destination(
                  Path.join(replaceable, "run.private.jsonl"),
                  true
                )
 
       assert {:error, :trace_destination_unsafe} =
-               TraceLog.preflight_destination(Path.join(replaceable, "run.jsonl"), false)
+               TraceLog.Append.preflight_destination(Path.join(replaceable, "run.jsonl"), false)
     end
 
     @tag :tmp_dir
@@ -492,7 +492,8 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       File.chmod!(path, 0o600)
       File.chmod!(replaceable, 0o777)
 
-      assert {:error, :trace_destination_unsafe} = TraceLog.preflight_destination(path, true)
+      assert {:error, :trace_destination_unsafe} =
+               TraceLog.Append.preflight_destination(path, true)
     end
 
     # Only the untrusted ancestor is named apart here; an unavailable parent has
@@ -505,7 +506,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       on_exit(fn -> File.chmod(parent, 0o700) end)
 
       assert {:error, :source_unavailable} =
-               TraceLog.preflight_destination(Path.join(parent, "run.private.jsonl"), true)
+               TraceLog.Append.preflight_destination(Path.join(parent, "run.private.jsonl"), true)
     end
 
     @tag :tmp_dir
@@ -522,7 +523,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
 
       on_exit(fn -> File.chmod(parent, 0o700) end)
 
-      assert :ok = TraceLog.preflight_destination(path, true)
+      assert :ok = TraceLog.Append.preflight_destination(path, true)
     end
 
     @tag :tmp_dir
@@ -643,8 +644,8 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
                  inspection_records
                )
 
-      assert :ok = TraceLog.preflight_destination(trace_path, true)
-      assert :ok = TraceLog.append_jsonl(trace_path, trace_events, private: true)
+      assert :ok = TraceLog.Append.preflight_destination(trace_path, true)
+      assert :ok = TraceLog.Append.append_jsonl(trace_path, trace_events, private: true)
 
       assert Enum.all?([result_path, inspection_path, trace_path], &File.regular?/1)
     end
@@ -691,7 +692,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
     executable = System.find_executable("elixir") || flunk("elixir is required for this test")
 
     code =
-      "IO.puts(inspect(PtcRunner.Kernel.TraceLog.preflight_destination(" <>
+      "IO.puts(inspect(PtcRunner.Kernel.TraceLog.Append.preflight_destination(" <>
         inspect(path) <> ", false)))"
 
     code_paths =

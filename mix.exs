@@ -486,6 +486,10 @@ defmodule PtcRunner.MixProject do
           PtcRunner.Kernel.RunRequest,
           PtcRunner.Kernel.RunAnalysis,
           PtcRunner.Kernel.TraceLog,
+          PtcRunner.Kernel.TraceLog.Capture,
+          PtcRunner.Kernel.TraceLog.Append,
+          PtcRunner.Kernel.TraceLog.Publish,
+          PtcRunner.Kernel.TraceLog.Query,
           PtcRunner.Kernel.WorkflowEnvironment
         ],
         "Kernel internals": [

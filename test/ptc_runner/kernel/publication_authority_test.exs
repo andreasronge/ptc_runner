@@ -420,7 +420,7 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
     next_path = Path.join(dir, "next.jsonl")
     File.write!(abandoned_path, "")
     File.write!(next_path, "")
-    {:ok, reservation_path} = TraceLog.append_reservation_path(abandoned_path)
+    {:ok, reservation_path} = TraceLog.Append.append_reservation_path(abandoned_path)
     executable = System.find_executable("elixir") || flunk("elixir is required")
     code_paths = Enum.flat_map(:code.get_path(), fn path -> ["-pa", List.to_string(path)] end)
 

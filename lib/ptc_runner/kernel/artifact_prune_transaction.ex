@@ -132,7 +132,7 @@ defmodule PtcRunner.Kernel.ArtifactPruneTransaction do
 
   defp unlink_one(path, stat) do
     if Path.basename(Path.dirname(path)) == "traces" do
-      TraceLog.with_append_authority_lock(path, fn -> unlink_if_stable(path, stat) end)
+      TraceLog.Append.with_append_authority_lock(path, fn -> unlink_if_stable(path, stat) end)
     else
       unlink_if_stable(path, stat)
     end
@@ -151,7 +151,9 @@ defmodule PtcRunner.Kernel.ArtifactPruneTransaction do
 
   defp restore_one({path, copy, stat}) do
     if Path.basename(Path.dirname(path)) == "traces" do
-      TraceLog.with_append_authority_lock(path, fn -> restore_unlocked(path, copy, stat) end)
+      TraceLog.Append.with_append_authority_lock(path, fn ->
+        restore_unlocked(path, copy, stat)
+      end)
     else
       restore_unlocked(path, copy, stat)
     end

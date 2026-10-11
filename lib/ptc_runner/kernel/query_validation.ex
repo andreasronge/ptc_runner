@@ -36,4 +36,20 @@ defmodule PtcRunner.Kernel.QueryValidation do
   end
 
   def timestamp(_timestamp), do: {:error, :invalid_query}
+
+  # Inclusive timestamp filters shared by loaded traces and frozen catalogs.
+  @spec after_or_equal?(binary() | nil, binary() | nil) :: boolean()
+  def after_or_equal?(_timestamp, nil), do: true
+  def after_or_equal?(nil, _from), do: false
+  def after_or_equal?(timestamp, from), do: compare_timestamp(timestamp, from) != :lt
+  @spec before_or_equal?(binary() | nil, binary() | nil) :: boolean()
+  def before_or_equal?(_timestamp, nil), do: true
+  def before_or_equal?(nil, _to), do: false
+  def before_or_equal?(timestamp, to), do: compare_timestamp(timestamp, to) != :gt
+
+  defp compare_timestamp(left, right) do
+    {:ok, left_at, 0} = DateTime.from_iso8601(left)
+    {:ok, right_at, 0} = DateTime.from_iso8601(right)
+    DateTime.compare(left_at, right_at)
+  end
 end

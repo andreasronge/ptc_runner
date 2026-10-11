@@ -56,7 +56,8 @@ mark_operator() {
       lib/ptc_runner/kernel/doctor_*|lib/ptc_runner/kernel/cli_*|\
       lib/ptc_runner/kernel/manifest_repl*|lib/ptc_runner/kernel/inspect_only_repl.ex|\
       lib/ptc_runner/kernel/one_shot_frontend.ex|lib/ptc_runner/kernel/transcript_frontend.ex|\
-      lib/ptc_runner/kernel/trace_log.ex|lib/ptc_runner/kernel/inspection_preflight.ex|\
+      lib/ptc_runner/kernel/trace_log.ex|lib/ptc_runner/kernel/trace_log/*|\
+      lib/ptc_runner/kernel/inspection_preflight.ex|\
       lib/ptc_runner/kernel/inspection_lab*|lib/ptc_runner/kernel/application.ex|\
       lib/ptc_runner/kernel/example_*|lib/ptc_runner/kernel/tutorial_*|\
       lib/ptc_runner/kernel/prelude_search*|lib/ptc_runner/kernel/*_catalog.ex)

@@ -203,7 +203,7 @@ defmodule PtcRunner.Kernel.ManifestRepl do
   defp preflight_trace(nil, _private?), do: :ok
 
   defp preflight_trace(path, private?) do
-    case TraceLog.preflight_destination(path, private?) do
+    case TraceLog.Append.preflight_destination(path, private?) do
       :ok -> :ok
       {:error, _reason} -> {:error, :trace_preflight_failed}
     end

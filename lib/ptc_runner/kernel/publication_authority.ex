@@ -640,7 +640,7 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
   defp validate_trace_path(nil, _private?), do: :ok
 
   defp validate_trace_path(path, private?),
-    do: TraceLog.validate_append_path(path, private?)
+    do: TraceLog.Append.validate_append_path(path, private?)
 
   defp validate_inspection_path(nil), do: :ok
   defp validate_inspection_path(path), do: InspectionArtifact.validate_destination_path(path)
