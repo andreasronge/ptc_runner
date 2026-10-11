@@ -16,6 +16,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
   alias PtcRunner.TestSupport.Eventually
   alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.TestSupport.MCPHTTPFixture
+  alias PtcRunner.TestSupport.ReqLLMGeneration
   alias PtcRunner.TestSupport.TLSFixture
   alias ReqLLM.Error.API.Timeout, as: ReqLLMTimeout
 
@@ -389,7 +390,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
              )
 
     assert {:ok, %{content: "ok"}} =
-             ReqLLMAdapter.generate_text(
+             ReqLLMGeneration.generate_text(
                put_test_http_options(target, test),
                [%{role: :user, content: "hi"}],
                api_key: "test",
@@ -436,10 +437,10 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
           [api_key: "test", provider_options: [openrouter: [], openrouter: []]]
         ] do
       assert {:error, %ReqLLM.Error.Invalid.Parameter{} = prepared_error} =
-               ReqLLMAdapter.generate_text(target, messages, opts)
+               ReqLLMGeneration.generate_text(target, messages, opts)
 
       assert {:error, %ReqLLM.Error.Invalid.Parameter{} = direct_error} =
-               ReqLLMAdapter.generate_text(selector, messages, opts)
+               ReqLLMGeneration.generate_text(selector, messages, opts)
 
       assert Exception.message(prepared_error) == Exception.message(direct_error)
     end
@@ -455,7 +456,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     expect_object_request(test, "deepseek/deepseek-v4-flash-0731", ~s({"ok":true}))
 
     assert {:ok, %{object: %{"ok" => true}, tokens: tokens}} =
-             ReqLLMAdapter.generate_object(
+             ReqLLMGeneration.generate_object(
                "openrouter:deepseek/deepseek-v4-flash-0731",
                [%{role: :user, content: "hi"}],
                schema,
@@ -516,7 +517,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     end
 
     assert {:error, :unsupported_model_option} =
-             ReqLLMAdapter.generate_object(
+             ReqLLMGeneration.generate_object(
                "google_vertex:zai-org/glm-4.7-maas",
                [%{role: :user, content: "hi"}],
                %{
@@ -535,7 +536,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     end
 
     assert {:error, :unsupported_model_option} =
-             ReqLLMAdapter.generate_object(
+             ReqLLMGeneration.generate_object(
                "azure:gpt-4o",
                [%{role: :user, content: "hi"}],
                %{
@@ -821,7 +822,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     expect_request(test, "x-ai/grok-4.3")
 
     assert {:ok, %{content: "ok"}} =
-             ReqLLMAdapter.generate_with_tools(
+             ReqLLMGeneration.generate_with_tools(
                "openrouter:x-ai/grok-4.3",
                [%{role: :user, content: "hi"}],
                [
@@ -857,7 +858,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
                 bindings: [:configured]
               }
             }} =
-             ReqLLMAdapter.generate_with_tools(
+             ReqLLMGeneration.generate_with_tools(
                "openrouter:x-ai/grok-4.3",
                [%{role: :user, content: "hi"}],
                [tool_schema()],
@@ -904,7 +905,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     expect_request(test, "x-ai/grok-4.3", finish_reason: "length", content: "")
 
     assert {:ok, %{output_limit: %{value: 4_096, bindings: [:configured]}}} =
-             ReqLLMAdapter.generate_with_tools(
+             ReqLLMGeneration.generate_with_tools(
                "openrouter:x-ai/grok-4.3",
                [%{role: :user, content: "hi"}],
                [tool_schema()],
@@ -928,7 +929,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
              ReqLLMAdapter.prepare_model("openrouter:x-ai/grok-4.3", requirements)
 
     assert {:ok, %{output_limit: %{value: 4_096, bindings: [:application_limit]}}} =
-             ReqLLMAdapter.generate_with_tools(
+             ReqLLMGeneration.generate_with_tools(
                put_test_http_options(target, test),
                [%{role: :user, content: "hi"}],
                [tool_schema()],
@@ -1013,7 +1014,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
               finish_reason: :length,
               output_limit: %{value: 8_192, bindings: [:configured]}
             }} =
-             ReqLLMAdapter.generate_with_tools(
+             ReqLLMGeneration.generate_with_tools(
                "nearai:Qwen/Qwen3-30B-A3B-Instruct-2507",
                [%{role: :user, content: "hi"}],
                [tool_schema()],
@@ -1042,7 +1043,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     expect_request(test, model.id, finish_reason: "length", content: "")
 
     assert {:ok, %{finish_reason: :length} = response} =
-             ReqLLMAdapter.generate_with_tools(
+             ReqLLMGeneration.generate_with_tools(
                prepared,
                [%{role: :user, content: "hi"}],
                [tool_schema()],
@@ -1062,7 +1063,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     )
 
     assert {:ok, %{finish_reason: :length} = response} =
-             ReqLLMAdapter.generate_with_tools(
+             ReqLLMGeneration.generate_with_tools(
                "nearai:Qwen/Qwen3-30B-A3B-Instruct-2507",
                [%{role: :user, content: "hi"}],
                [tool_schema()],
@@ -1096,7 +1097,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     expect_request(test, "google/gemma-2-27b-it")
 
     assert {:ok, %{content: "ok"}} =
-             ReqLLMAdapter.generate_text(
+             ReqLLMGeneration.generate_text(
                "openrouter:google/gemma-2-27b-it",
                [%{role: :user, content: "hi"}],
                api_key: "test",
@@ -1140,7 +1141,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     warnings =
       capture_io(:stderr, fn ->
         assert {:ok, %{content: "ok"}} =
-                 ReqLLMAdapter.generate_text(
+                 ReqLLMGeneration.generate_text(
                    "openrouter:google/gemma-2-27b-it",
                    [%{role: :user, content: "hi"}],
                    api_key: "test",
@@ -1183,7 +1184,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
         AdapterCancellationWitness.run(fn ->
           case @transport do
             :adapter ->
-              ReqLLMAdapter.generate_text(
+              ReqLLMGeneration.generate_text(
                 "openai-compat:#{server.endpoint}|model",
                 [%{role: :user, content: "hi"}],
                 req_http_options: [finch: [name: pool, pool_timeout: 1_000]],
@@ -1364,7 +1365,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     expect_request(test, "Qwen/Qwen3-30B-A3B-Instruct-2507")
 
     assert {:ok, %{content: "ok"}} =
-             ReqLLMAdapter.generate_text(
+             ReqLLMGeneration.generate_text(
                "nearai:Qwen/Qwen3-30B-A3B-Instruct-2507",
                [%{role: :user, content: "hi"}],
                api_key: "test",
@@ -1379,7 +1380,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     expect_request(test, "openai/gpt-3.5-turbo-0613")
 
     assert {:ok, %{content: "ok"}} =
-             ReqLLMAdapter.generate_text(
+             ReqLLMGeneration.generate_text(
                "openrouter:openai/gpt-3.5-turbo-0613",
                [%{role: :user, content: "hi"}],
                api_key: "test",
