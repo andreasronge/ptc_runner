@@ -214,8 +214,8 @@ defmodule PtcRunner.Kernel.CommandEngine do
     {status, outcome, rejection, named_env_file_hint?(preparation, arguments)}
   end
 
-  defp dispatch_preparation(preparation, runtime, _entry, _arguments, false),
-    do: with_rejection(CommandRunDispatch.dispatch(preparation, runtime))
+  defp dispatch_preparation(preparation, runtime, _entry, arguments, false),
+    do: with_rejection(CommandRunDispatch.dispatch(preparation, runtime, arguments.application))
 
   defp named_env_file_hint?(preparation, arguments) do
     names =

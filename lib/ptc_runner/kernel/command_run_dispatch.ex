@@ -13,14 +13,15 @@ defmodule PtcRunner.Kernel.CommandRunDispatch do
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunCoordinator
 
-  @spec dispatch(CommandPreparation.t(), CommandRuntime.t()) ::
+  @spec dispatch(CommandPreparation.t(), CommandRuntime.t(), binary()) ::
           {:ok, CommandOutcome.t()} | {:error, CommandOutcome.t()}
-  def dispatch(%CommandPreparation{} = preparation, %CommandRuntime{} = runtime) do
+  def dispatch(%CommandPreparation{} = preparation, %CommandRuntime{} = runtime, application)
+      when is_binary(application) do
     case dispatch_after_preflight(
            CommandDestination.preflight(preparation),
            preparation,
            runtime,
-           nil
+           application
          ) do
       {status, outcome, _rejection} -> {status, outcome}
     end
