@@ -100,6 +100,35 @@ defmodule PtcRunner.Lisp.OptionsTest do
   end
 
   describe "signature validation (LISP-05)" do
+    test "bounds diagnostics for a large mistyped return" do
+      for run <- [&Lisp.run/2, &Lisp.run_native/2] do
+        assert {:error, %{fail: %{reason: :validation_error, message: message}}} =
+                 run.("data/items",
+                   context: %{"items" => List.duplicate("wrong", 10_000)},
+                   signature: "[:int]"
+                 )
+
+        assert byte_size(message) <= 1024
+        assert message =~ "return.0: expected int, got string"
+        refute message =~ "return.16:"
+        assert message =~ "truncated"
+      end
+    end
+
+    test "bounds diagnostics when one return field has a long name" do
+      field = String.duplicate("field", 300)
+
+      assert {:error, %{fail: %{reason: :validation_error, message: message}}} =
+               Lisp.run("data/item",
+                 context: %{"item" => %{field => "wrong"}},
+                 signature: "{#{field} :int}"
+               )
+
+      assert byte_size(message) <= 1024
+      assert String.valid?(message)
+      assert message =~ "truncated"
+    end
+
     test "validates return value against signature" do
       source = "{:count 5}"
 
