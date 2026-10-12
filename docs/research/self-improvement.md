@@ -233,9 +233,9 @@ yet sufficient for an H1 verdict. b02 does not start until:
 - Decide whether captured prelude-search failures (timeouts, truncation,
   evaluation errors) may enter a debug-efficiency development set. #2028
   currently keeps reports 002–004 outside its cohort.
-- #2056 (b09) and #2057 (seeded-mutation case packets for the
-  debug-efficiency corpus) are ready. Both are no-model captures on the
-  prelude-search Phase 0 mechanism; neither authorizes spend.
+- The 18 seeded-mutation case packets for the debug-efficiency corpus
+  (#2057) are retained and await independent adjudication; see
+  [the corpus inventory](debug-efficiency-corpus.md#retained-seeded-packets).
 
 ## Runtime wants
 
