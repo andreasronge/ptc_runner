@@ -1,42 +1,11 @@
 defmodule PtcRunner.Soak.OAuthLocalFencesSoakTest do
   @moduledoc """
-  `LocalFences` growth characterization (use-case row 17).
+  Non-gating characterization of unresolved OAuth transitions.
 
-  **This row never fails the build.** It exists to answer one question with
-  evidence rather than argument: does the retained `:persistent_term` fence set
-  grow without bound, and therefore does the deferred `LocalFences` slice have
-  a real reproduction?
-
-  Ordinary session churn never writes a fence. A fence is written by a
-  **rejection or scope-requirement transition**, blocked *before* persistence is
-  attempted. A persistence *failure* creates nothing new — it leaves the
-  existing fence unresolved, because `TokenManager` retains the failed operation
-  without calling `LocalFences.resolve/2` and retries reuse the same
-  `operation_ref`. Growth therefore comes from **distinct transitions, not
-  retries**, and the workload drives a distinct generation every time.
-  Repeatedly failing *one* transition would show a flat count and wrongly
-  retire the candidate.
-
-  Two variants, because they bound different things:
-
-    1. **fixed identity** — many distinct transitions under one store and one
-       grant key. Tests whether per-identity coalescing would be enough.
-    2. **churning identity** — a fresh store per transition, so every
-       transition lands on a fresh `local_fence_identity`. Per-identity
-       coalescing cannot bound this by construction; only a global limit can.
-
-  Neither reading is worth anything without proof the workload reached the
-  code, so both count actual `LocalFences.block/3` calls with
-  `:erlang.trace_pattern/3` call counting. A flat fence count means one of two
-  very different things:
-
-    * **blocks observed, count flat** → that variant's growth is already
-      bounded; record it and retire the corresponding half of the slice;
-    * **no blocks observed** → the workload never reached the code and proves
-      nothing. Fix the workload; do not conclude anything about the candidate.
-
-  The only assertion here is the second: that blocks were observed. The slope
-  is printed whatever its sign.
+  Counts store-owned fences while persistence deliberately fails. Live stores
+  retain their transitions; teardown reclaims them without node-global state.
+  The workload independently counts block calls so an unreached path cannot
+  masquerade as a flat fence count.
   """
 
   # async: false — measures VM-wide counters (processes, ETS, atoms, memory) that any concurrent
@@ -57,18 +26,7 @@ defmodule PtcRunner.Soak.OAuthLocalFencesSoakTest do
   alias PtcRunner.TestSupport.LifecycleSoak
   alias PtcRunner.TestSupport.MemorySoak
 
-  @fence_prefix {LocalFences, :fence}
   @batches 4
-
-  setup do
-    # Fences are global `:persistent_term` entries and this test deliberately
-    # creates ones nothing will resolve, so it cleans up after itself in both
-    # directions rather than leaving the VM's fence table poisoned for whatever
-    # runs next.
-    erase_fences()
-    on_exit(&erase_fences/0)
-    :ok
-  end
 
   test "distinct rejections under one fixed identity" do
     started = start_manager()
@@ -77,6 +35,7 @@ defmodule PtcRunner.Soak.OAuthLocalFencesSoakTest do
     report =
       measure("fixed identity", fn generation ->
         _rejected = TokenManager.reject(started.manager, generation, deadline())
+        started.memory.pid
       end)
 
     refute report.blocks == 0, broken_workload_message()
@@ -97,6 +56,7 @@ defmodule PtcRunner.Soak.OAuthLocalFencesSoakTest do
         started = start_manager()
         send(self(), {:started, started})
         _rejected = TokenManager.reject(started.manager, generation, deadline())
+        started.memory.pid
       end)
 
     tear_down(drain_started([]))
@@ -165,15 +125,16 @@ defmodule PtcRunner.Soak.OAuthLocalFencesSoakTest do
     before_blocks = call_count()
     per_batch = transitions_per_batch()
 
-    counts =
-      for batch <- 1..@batches do
-        Enum.each(1..per_batch, fn index ->
-          transition.((batch - 1) * per_batch + index)
-        end)
+    {counts, _stores} =
+      Enum.map_reduce(1..@batches, MapSet.new(), fn batch, stores ->
+        stores =
+          Enum.reduce(1..per_batch, stores, fn index, stores ->
+            MapSet.put(stores, transition.((batch - 1) * per_batch + index))
+          end)
 
         MemorySoak.gc_everywhere()
-        %{transitions: batch * per_batch, fences: fence_count()}
-      end
+        {%{transitions: batch * per_batch, fences: fence_count(stores)}, stores}
+      end)
 
     blocks = call_count() - before_blocks
     :erlang.trace_pattern({LocalFences, :block, 3}, false, [:call_count])
@@ -200,7 +161,7 @@ defmodule PtcRunner.Soak.OAuthLocalFencesSoakTest do
     do: "WORKLOAD BROKEN — no block/3 calls observed; this run proves nothing"
 
   defp verdict(_blocks, slope) when slope > 0.5,
-    do: "GROWTH CONFIRMED — the deferred LocalFences slice has its reproduction"
+    do: "RETAINED — unresolved transitions remain in live stores"
 
   defp verdict(_blocks, _slope),
     do: "BOUNDED — blocks were observed and the fence count stayed flat"
@@ -212,14 +173,10 @@ defmodule PtcRunner.Soak.OAuthLocalFencesSoakTest do
     end
   end
 
-  # Counted by prefix rather than globally: another subsystem's
-  # `:persistent_term` entries are not this row's evidence.
-  defp fence_count,
-    do: LifecycleSoak.count_persistent_terms(&match?({@fence_prefix, _identity, _ref}, &1))
-
-  defp erase_fences do
-    Enum.each(:persistent_term.get(), fn {key, _value} ->
-      if match?({@fence_prefix, _identity, _ref}, key), do: :persistent_term.erase(key)
+  defp fence_count(stores) do
+    Enum.reduce(stores, 0, fn pid, total ->
+      fences = :sys.get_state(pid).local_fences
+      total + Enum.sum(Enum.map(fences, fn {_identity, entries} -> map_size(entries) end))
     end)
   end
 

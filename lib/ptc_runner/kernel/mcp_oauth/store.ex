@@ -2,7 +2,8 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store do
   @moduledoc """
   Atomic authorization-store boundary for MCP OAuth state.
 
-  Store adapters implement one closed transaction callback. The public
+  Store adapters implement a closed transaction callback for durable state
+  and a separate local fence callback for volatile owner state. The public
   functions below define the supported operation vocabulary; callers cannot
   submit arbitrary functions or inspect adapter-owned state. Every operation
   that reads or mutates a grant is fenced by both principal and authority
@@ -36,6 +37,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store do
   @type request_deadline :: Deadline.t()
 
   @callback transact(adapter_state :: term(), operation(), Deadline.t()) :: term()
+  @callback local_fence(adapter_state :: term(), operation :: tuple()) :: term()
   @callback local_identity(adapter_state :: term()) :: term()
   @callback register_manager(adapter_state :: term(), pid()) :: :ok | {:error, atom()}
   @optional_callbacks local_identity: 1, register_manager: 2
@@ -60,6 +62,20 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store do
     if Code.ensure_loaded?(module) and function_exported?(module, :local_identity, 1),
       do: module.local_identity(adapter_state),
       else: store
+  end
+
+  @doc """
+  Applies a local response fence atomically in the backing store owner.
+
+  This boundary is independent of durable transactions: wrappers must delegate
+  it even when persistence fails. Fence state must survive manager replacement
+  and be reclaimed with the store. Unavailable stores fail admission closed.
+  """
+  @spec local_fence(t(), tuple()) :: term()
+  def local_fence({module, adapter_state}, operation) do
+    module.local_fence(adapter_state, operation)
+  catch
+    :exit, _reason -> {:error, :authorization_required}
   end
 
   @doc false
