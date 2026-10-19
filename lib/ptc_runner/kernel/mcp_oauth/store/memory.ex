@@ -21,6 +21,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.Binding
   alias PtcRunner.Kernel.MCPOAuth.GrantKey
+  alias PtcRunner.Kernel.MCPOAuth.LocalFences
   alias PtcRunner.Kernel.MCPOAuth.Primitives
   alias PtcRunner.Kernel.MCPOAuth.Store
 
@@ -151,6 +152,10 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
   end
 
   @impl Store
+  def local_fence(%__MODULE__{pid: pid}, operation),
+    do: GenServer.call(pid, {:local_fence, operation})
+
+  @impl Store
   def local_identity(%__MODULE__{pid: pid}), do: {__MODULE__, pid}
 
   @impl Store
@@ -166,6 +171,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
      %{
        owner_ref: Process.monitor(owner),
        managers: %{},
+       local_fences: %{},
        serial: 0,
        principals: %{},
        authorities: %{},
@@ -179,6 +185,13 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
   end
 
   @impl GenServer
+  def handle_call({:local_fence, operation}, _from, state) do
+    {reply, fences} =
+      LocalFences.transition(state.local_fences, operation)
+
+    {:reply, reply, %{state | local_fences: fences}}
+  end
+
   def handle_call({:transaction, operation, deadline}, from, state) do
     if Deadline.live?(deadline),
       do: handle_call(operation, from, state),

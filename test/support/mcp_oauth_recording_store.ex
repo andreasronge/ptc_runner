@@ -33,6 +33,9 @@ defmodule PtcRunner.Test.MCPOAuthRecordingStore do
   end
 
   @impl Store
+  def local_fence(state, operation), do: Store.local_fence(state.delegate, operation)
+
+  @impl Store
   def local_identity(state), do: Store.local_identity(state.delegate)
 
   @impl Store
