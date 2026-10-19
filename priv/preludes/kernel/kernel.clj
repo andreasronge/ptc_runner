@@ -47,7 +47,7 @@
       response)))
 
 (defn check-terminal-source
-  "Check that bounded dynamic source compiles and consists of exactly one top-level return or fail form, without executing it."
+  "Check that bounded dynamic source compiles and consists of exactly one top-level return, fail, or declared mission terminal export call, without executing it."
   [mission source]
   (let [response (tool/kernel-check-source {:source source
                                             :require :terminal

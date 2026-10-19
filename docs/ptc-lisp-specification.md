@@ -3587,6 +3587,18 @@ public function or constant:
 This uses the supported `defn`/`def` metadata-map position. Clojure reader
 metadata syntax such as `^{:signature "..."}` is not supported.
 
+A public `defn` may also declare `:terminal true` in this metadata map.
+The compiler retains this boolean declaration on the export; it defaults to
+false and is not inherited by wrappers or from namespace metadata. A
+`:terminal` value on a constant or a non-boolean value is invalid metadata.
+For example, `(defn finish {:terminal true} [value] (return value))` declares
+a terminal action. This is a promise by the component author that the function
+completes with `return` or `fail`, not a proof of its body. A mission's terminal
+source check accepts one top-level call to such an export from its own bundle,
+alongside bare `return` and `fail`. Normal compilation still validates the call,
+including arity and capability requirements. The check does not execute code
+or restrict argument expressions.
+
 Contract enforcement has three stages:
 
 1. Component compilation parses the signature/type string and rejects invalid

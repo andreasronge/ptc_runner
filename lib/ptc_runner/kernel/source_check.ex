@@ -55,7 +55,7 @@ defmodule PtcRunner.Kernel.SourceCheck do
     compile_timeout_ms = Keyword.get(opts, :compile_timeout, timeout_ms)
 
     compile_result =
-      case required_shape(source, Keyword.get(opts, :required_shape)) do
+      case required_shape(source, Keyword.get(opts, :required_shape), mission) do
         :ok ->
           Lisp.check_native(source,
             memory: memory,
@@ -150,9 +150,9 @@ defmodule PtcRunner.Kernel.SourceCheck do
   defp bundle_prelude(%{bundle: %{prelude: prelude}}), do: prelude
   defp bundle_prelude(_mission), do: nil
 
-  defp required_shape(_source, nil), do: :ok
+  defp required_shape(_source, nil, _mission), do: :ok
 
-  defp required_shape(source, :terminal) do
+  defp required_shape(source, :terminal, mission) do
     case Parser.parse(source) do
       {:ok, {:list, [{:symbol, head} | _arguments]}} when head in [:return, :fail] ->
         :ok
@@ -161,15 +161,29 @@ defmodule PtcRunner.Kernel.SourceCheck do
         # Preserve the ordinary parser diagnostic from check_native/2.
         :ok
 
-      {:ok, _other} ->
-        {:error,
-         %{
-           reason: :terminal_source_required,
-           message: "expected exactly one top-level return or fail form",
-           details: %{}
-         }}
+      {:ok, form} ->
+        if terminal_export_call?(form, bundle_prelude(mission)) do
+          :ok
+        else
+          {:error,
+           %{
+             reason: :terminal_source_required,
+             message:
+               "expected exactly one top-level return, fail, or declared terminal export call",
+             details: %{}
+           }}
+        end
     end
   end
+
+  defp terminal_export_call?({:list, [{:ns_symbol, namespace, name} | _arguments]}, %{
+         exports: exports
+       }) do
+    ref = "#{namespace}/#{name}"
+    Enum.any?(exports, &(&1.ref == ref and &1.kind == :function and &1.terminal))
+  end
+
+  defp terminal_export_call?(_form, _prelude), do: false
 
   defp after_compile(nil), do: :ok
   defp after_compile(callback) when is_function(callback, 0), do: callback.()

@@ -672,7 +672,7 @@ Check bounded dynamic source against the live mission environment without execut
 (kernel/check-terminal-source mission source)
 ```
 
-Check that bounded dynamic source compiles and consists of exactly one top-level return or fail form, without executing it.
+Check that bounded dynamic source compiles and consists of exactly one top-level return, fail, or declared mission terminal export call, without executing it.
 
 - **Kind:** `function`
 - **Visibility:** `prompt`

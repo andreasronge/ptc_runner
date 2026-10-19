@@ -48,6 +48,8 @@ defmodule PtcRunner.Lisp.Prelude.Export do
       `:constant` for a `def` export (a plain value, even if that value is a
       function). A call `(cfg/answer)` of a constant YIELDS the value rather
       than applying it.
+    * `terminal` — explicit `:terminal true` declaration on a function export;
+      permits a single top-level call in a terminal-only source check.
     * `signature` — optional canonical function contract string.
     * `type` — optional canonical constant type string.
     * `parsed_signature` / `parsed_type` — bounded compiled contract values
@@ -73,6 +75,7 @@ defmodule PtcRunner.Lisp.Prelude.Export do
           tool_refs: [String.t()],
           min_arity: non_neg_integer(),
           kind: kind(),
+          terminal: boolean(),
           signature: String.t() | nil,
           type: String.t() | nil,
           parsed_signature: PtcRunner.Lisp.Signature.signature() | nil,
@@ -93,6 +96,7 @@ defmodule PtcRunner.Lisp.Prelude.Export do
             tool_refs: [],
             min_arity: 0,
             kind: :function,
+            terminal: false,
             signature: nil,
             type: nil,
             parsed_signature: nil,

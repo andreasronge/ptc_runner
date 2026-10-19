@@ -342,7 +342,7 @@
                  "- Built-ins include collections, strings, regex, math, numeric parsing, and date/time, including a bounded Java-compatible API.\n"
                  "- Decoded JSON maps use string keys; read them with get/get-in.\n"
                  (if (true? (get state :terminal-only?))
-                   "- TERMINAL-ONLY PHASE: send exactly one top-level (return value) or (fail value) form. Introspection, definitions, and intermediate evaluation are rejected before execution.\n"
+                   "- TERMINAL-ONLY PHASE: send exactly one top-level (return value), (fail value), or declared terminal export call. Introspection, definitions, and intermediate evaluation are rejected before execution.\n"
                    "- Explore first, return last. Use (println ...) only for concise diagnostics; output previews are bounded.\n")
                  "- Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.\n"
                  "- Value references are values; call only function references.\n"
