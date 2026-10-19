@@ -923,6 +923,82 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
              "terminal-only phase rejected the generated program before evaluation"
   end
 
+  test "terminal-only phases accept declared mission terminal exports" do
+    {:ok, mission} =
+      mission_with_source("decision", """
+      (defn finish {:terminal true} [value] (return value))
+      (defn ordinary [value] (return value))
+      (defn disabled {:terminal false} [value] (return value))
+      (defn- hidden {:terminal true} [value] (return value))
+      """)
+
+    {:ok, other} = mission_with_source("other", "(defn finish {:terminal true} [x] (return x))")
+
+    programs = [
+      "(decision/ordinary 1)",
+      "(decision/disabled 2)",
+      "(other/finish 3)",
+      "(decision/hidden 3)",
+      "(do (decision/finish 4))",
+      "(let [x 5] (decision/finish x))",
+      "(decision/finish 6) (decision/finish 7)",
+      "(decision/finish)",
+      "(decision/finish 42)"
+    ]
+
+    responses =
+      Enum.map(programs, fn program ->
+        %{
+          content: nil,
+          tool_calls: [%{id: "decision", name: "run_ptc_lisp", args: %{"program" => program}}]
+        }
+      end)
+
+    {:ok, config} =
+      agent_config(responses, [], missions: %{"synthesize" => mission, "other" => other})
+
+    assert {:ok, %{value: 42, usage: usage}} =
+             Kernel.run(
+               ~S"""
+               (agent.core/run-phased-result-value "Decide."
+                 {"phases" [{"mission" "synthesize" "max_turns" 9 "terminal_only" true}]})
+               """,
+               config
+             )
+
+    assert usage.subordinate_evaluations == 1
+    assert usage.subordinate_source_checks == 9
+  end
+
+  test "shipped repair terminal actions pass the source check without evaluation" do
+    path = "examples/debug-a-failed-run/repair-agent/"
+    manifest = Jason.decode!(File.read!(path <> "ptc.json"))
+    assert hd(manifest["input"]["value"]["agent"]["phases"])["terminal_only"]
+
+    {:ok, component} =
+      Component.new(
+        id: "repair.terminal",
+        source: File.read!(path <> "repair.terminal.clj"),
+        origin: "test"
+      )
+
+    {:ok, bundle} = Kernel.compile_bundle([component])
+    {:ok, mission} = MissionEnvironment.new(bundle: bundle)
+    {:ok, config} = agent_config([], [], missions: %{"synthesize" => mission})
+
+    assert {:ok, %{value: results, usage: usage}} =
+             Kernel.run(
+               ~S"""
+               (return [(kernel/check-terminal-source "synthesize" "(repair.terminal/propose {})")
+                        (kernel/check-terminal-source "synthesize" "(repair.terminal/abstain \"run\" \"cause\" [\"evidence\"] [\"missing\"])")])
+               """,
+               config
+             )
+
+    assert Enum.all?(results, &(&1["outcome"] == "valid"))
+    assert usage.subordinate_evaluations == 0
+  end
+
   test "default prompt concisely advertises bounded Java interop" do
     response = %{
       content: nil,

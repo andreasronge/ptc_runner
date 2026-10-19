@@ -1448,7 +1448,17 @@ public function or constant:</p><pre><code class="clojure language-clojure">(def
   ...)
 
 (def default-limit {:type &quot;:int&quot;} 10)</code></pre><p>This uses the supported <code class="inline">defn</code>/<code class="inline">def</code> metadata-map position. Clojure reader
-metadata syntax such as <code class="inline">^{:signature &quot;...&quot;}</code> is not supported.</p><p>Contract enforcement has three stages:</p><ol><li>Component compilation parses the signature/type string and rejects invalid
+metadata syntax such as <code class="inline">^{:signature &quot;...&quot;}</code> is not supported.</p><p>A public <code class="inline">defn</code> may also declare <code class="inline">:terminal true</code> in this metadata map.
+The compiler retains this boolean declaration on the export; it defaults to
+false and is not inherited by wrappers or from namespace metadata. A
+<code class="inline">:terminal</code> value on a constant or a non-boolean value is invalid metadata.
+For example, <code class="inline">(defn finish {:terminal true} [value] (return value))</code> declares
+a terminal action. This is a promise by the component author that the function
+completes with <code class="inline">return</code> or <code class="inline">fail</code>, not a proof of its body. A mission's terminal
+source check accepts one top-level call to such an export from its own bundle,
+alongside bare <code class="inline">return</code> and <code class="inline">fail</code>. Normal compilation still validates the call,
+including arity and capability requirements. The check does not execute code
+or restrict argument expressions.</p><p>Contract enforcement has three stages:</p><ol><li>Component compilation parses the signature/type string and rejects invalid
 syntax, duplicate parameter names, normalized shaped-map field collisions,
 and invalid constant values.</li><li>Compilation checks that a function signature has exactly the declared
 function arity.</li><li>Evaluation validates signed function arguments before body entry and every

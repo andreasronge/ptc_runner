@@ -48,6 +48,7 @@
           {
             "mission": "synthesize",
             "max_turns": 2,
+            "terminal_only": true,
             "instruction": "Call exactly one top-level repair.terminal/abstain or repair.terminal/propose action. The action completes the repair report itself; do not wrap it in return."
           }
         ],

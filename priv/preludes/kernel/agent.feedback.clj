@@ -111,7 +111,7 @@
   [check]
   (let [message (get-in check [:diagnostic :message])]
     (str "The terminal-only phase rejected the generated program before evaluation. "
-         "Send exactly one top-level (return value) or (fail value) form"
+         "Send exactly one top-level (return value), (fail value), or declared terminal export call"
          (if (string? message) (str "; diagnostic=" message) "")
          ".")))
 

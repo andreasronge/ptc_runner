@@ -11,6 +11,26 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
   # Happy path
   # ============================================================
 
+  test "terminal declarations survive compilation and reject invalid metadata" do
+    assert {:ok, prelude} =
+             Compiler.compile("""
+             (ns decision)
+             (defn finish {:terminal true} [x] (return x))
+             (defn ordinary [x] x)
+             """)
+
+    assert {:ok, %{terminal: true}} = Prelude.fetch_export(prelude, "decision/finish")
+    assert {:ok, %{terminal: false}} = Prelude.fetch_export(prelude, "decision/ordinary")
+
+    for form <- [
+          "(defn bad {:terminal :yes} [] 1)",
+          "(defn bad {:terminal nil} [] 1)",
+          "(def bad {:terminal true} 1)"
+        ] do
+      assert {:error, %{reason: :invalid_metadata}} = Compiler.compile("(ns decision) " <> form)
+    end
+  end
+
   describe "compile/1 happy path" do
     setup do
       source = """

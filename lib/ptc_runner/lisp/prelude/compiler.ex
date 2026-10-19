@@ -925,6 +925,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     with {:ok, visibility} <- visibility(Map.get(spec.metadata, "visibility", ns_default)),
          {:ok, explicit_requires} <- validate_requires(Map.get(spec.metadata, "requires")),
          {:ok, declared_effect} <- validate_effect(Map.get(spec.metadata, "effect")),
+         {:ok, terminal} <- terminal_declaration(spec),
          {:ok, signature, type, parsed_signature, parsed_type} <- export_contract(spec) do
       graph_entry =
         form_graph
@@ -986,11 +987,29 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
          requires: backing.requires,
          tool_refs: transitive.tool_refs,
          kind: export_kind(spec),
+         terminal: terminal,
          signature: signature,
          type: type,
          parsed_signature: parsed_signature,
          parsed_type: parsed_type
        }}
+    end
+  end
+
+  defp terminal_declaration(%Spec{} = spec) do
+    case Map.fetch(spec.metadata, "terminal") do
+      :error ->
+        {:ok, false}
+
+      {:ok, value} when is_boolean(value) and not is_nil(spec.params_form) ->
+        {:ok, value}
+
+      _other ->
+        {:error,
+         ValidationError.new(
+           :invalid_metadata,
+           ":terminal must be a boolean on a defn export"
+         )}
     end
   end
 

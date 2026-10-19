@@ -171,6 +171,7 @@ defmodule PtcRunner.Lisp.Prelude do
           params: [String.t()],
           visibility: Export.visibility(),
           effect: Export.effect(),
+          terminal: boolean(),
           requires: [String.t()],
           signature: String.t() | nil,
           type: String.t() | nil
@@ -216,6 +217,7 @@ defmodule PtcRunner.Lisp.Prelude do
       params: export.params,
       visibility: export.visibility,
       effect: export.effect,
+      terminal: export.terminal,
       requires: export.requires,
       signature: export.signature,
       type: export.type

@@ -12,7 +12,7 @@
 
 (defn abstain
   "Complete with an insufficient-evidence report. Use this when the evidence does not distinguish one repair."
-  {:signature "(run-id :string, cause :string, evidence [:string], missing-evidence [:string]) -> :map"}
+  {:terminal true :signature "(run-id :string, cause :string, evidence [:string], missing-evidence [:string]) -> :map"}
   [run-id cause evidence missing-evidence]
   (if (and (nonblank-string? run-id)
            (nonblank-string? cause)
@@ -28,7 +28,7 @@
 
 (defn propose
   "Complete with a propose-change report containing run_id, cause, target_environment, component_id, function_id, base_source_hash, candidate_source, and evidence. A mission target requires a nonblank target_mission; a workflow target omits it, and a redundant one is dropped. Any other shape is rejected by the result contract with correction feedback, so a mistake costs a turn, not the run."
-  {:signature "(report :map) -> :map"}
+  {:terminal true :signature "(report :map) -> :map"}
   [report]
   (if (map? report)
     (let [proposal (assoc report "decision" "propose-change")]

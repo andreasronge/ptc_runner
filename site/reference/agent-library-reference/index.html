@@ -239,7 +239,12 @@ contract.</p><p>Set a phase's <code class="inline">terminal_only</code> to <code
 decision; only the final phase may declare it, because an earlier phase that
 exhausted without a terminal action would hand off to the next phase and void
 the obligation. PtcRunner parses each generated program before evaluation and
-accepts only one top-level <code class="inline">return</code> or <code class="inline">fail</code> form. A nonterminal program is
+accepts only one top-level <code class="inline">return</code>, <code class="inline">fail</code>, or call to a public function in
+the selected mission marked <code class="inline">{:terminal true}</code> in its <code class="inline">defn</code> metadata map.
+The declaration is an author promise that the function completes with <code class="inline">return</code>
+or <code class="inline">fail</code>; the check validates source shape and compilation, without proving
+termination or restricting argument expressions. Wrappers such as <code class="inline">do</code> or
+<code class="inline">let</code>, multiple forms, private helpers, and undeclared exports are rejected. A nonterminal program is
 not evaluated and receives bounded correction feedback while a phase turn
 remains; exhausting the phase this way reports the <code class="inline">terminal-source-required</code>
 turn-limit reason.</p><p><code class="inline">run-phased-result-value</code> replaces <code class="inline">mission</code> and <code class="inline">max_turns</code> with a non-empty

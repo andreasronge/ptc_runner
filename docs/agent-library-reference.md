@@ -248,7 +248,12 @@ Set a phase's `terminal_only` to `true` when it may only make the final
 decision; only the final phase may declare it, because an earlier phase that
 exhausted without a terminal action would hand off to the next phase and void
 the obligation. PtcRunner parses each generated program before evaluation and
-accepts only one top-level `return` or `fail` form. A nonterminal program is
+accepts only one top-level `return`, `fail`, or call to a public function in
+the selected mission marked `{:terminal true}` in its `defn` metadata map.
+The declaration is an author promise that the function completes with `return`
+or `fail`; the check validates source shape and compilation, without proving
+termination or restricting argument expressions. Wrappers such as `do` or
+`let`, multiple forms, private helpers, and undeclared exports are rejected. A nonterminal program is
 not evaluated and receives bounded correction feedback while a phase turn
 remains; exhausting the phase this way reports the `terminal-source-required`
 turn-limit reason.
