@@ -283,6 +283,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:execution, :llm_provider_failed, 5, false, "the LLM provider request failed"},
     {:execution, :mission_failed, 5, false, "a subordinate mission failed"},
     {:execution, :capability_quota_exceeded, 6, false, "a capability quota was exceeded"},
+    {:execution, :model_dispatch_forbidden, 6, false,
+     "model dispatch is forbidden by validation policy"},
     {:execution, :runtime_limit_exceeded, 6, false, "a runtime limit was exceeded"},
     {:execution, :turn_limit_exceeded, 6, false, "the agent turn limit was exceeded"},
     {:execution, :model_output_truncated, 6, false,

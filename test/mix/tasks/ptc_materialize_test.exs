@@ -480,7 +480,7 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
   end
 
   @tag :tmp_dir
-  test "validation requires an explicit live-effects acknowledgement", %{tmp_dir: dir} do
+  test "validation runs without model dispatch by default", %{tmp_dir: dir} do
     manifest = write_application(dir)
     report = Path.join(dir, "repair.json")
     suite = Path.join(dir, "suite.json")
@@ -488,7 +488,7 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
     File.write!(report, Jason.encode!(repair_report(ComponentOverride.hash(@placeholder))))
     write_validation_suite(suite, [{"observed", 21, 42}])
 
-    assert_raise Mix.Error, ~r/allow-live-validation/, fn ->
+    output =
       capture_io(fn ->
         Repair.run([
           manifest,
@@ -502,7 +502,120 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
           Path.join(dir, "validation")
         ])
       end)
+
+    assert output =~ "candidate passed 1 host-owned validation cases"
+  end
+
+  @tag :tmp_dir
+  test "a candidate using an already declared model is refused by default", %{tmp_dir: dir} do
+    manifest = write_application(dir)
+
+    base =
+      String.replace(@placeholder, "{:signature", "{:requires [\"tool:llm-request\"] :signature")
+
+    candidate =
+      String.replace(
+        base,
+        "  0)",
+        ~S|  (do (tool/llm-request {"messages" [{"role" "user" "content" "hello"}]}) 42))|
+      )
+
+    File.write!(Path.join(dir, "helper.clj"), base)
+    app = Jason.decode!(File.read!(manifest))
+
+    File.write!(
+      manifest,
+      Jason.encode!(Map.put(app, "providers", %{"workflow" => [%{"name" => "frozen"}]}))
+    )
+
+    File.write!(
+      Path.join(dir, "replay.jsonl"),
+      Jason.encode!(%{
+        "schema_version" => 2,
+        "request_hash" => "sha256:" <> String.duplicate("0", 64),
+        "response" => %{"content" => "frozen"}
+      }) <> "\n"
+    )
+
+    host = Path.join(dir, "host.json")
+
+    File.write!(
+      host,
+      Jason.encode!(%{
+        "install" => %{
+          "frozen" => %{
+            "source" => "llm_replay",
+            "installation_revision" => "test-v1",
+            "fixtures" => "replay.jsonl"
+          }
+        }
+      })
+    )
+
+    report = Path.join(dir, "repair.json")
+    suite = Path.join(dir, "suite.json")
+    validation = Path.join(dir, "validation")
+    File.write!(report, Jason.encode!(repair_report(ComponentOverride.hash(base), candidate)))
+    write_validation_suite(suite, [{"observed", 21, 42}], "input")
+
+    assert_raise Mix.Error, ~r/model_dispatch_forbidden/, fn ->
+      capture_io(fn ->
+        Repair.run([
+          manifest,
+          "--report",
+          report,
+          "--out",
+          Path.join(dir, "candidate"),
+          "--host-config",
+          host,
+          "--validation-suite",
+          suite,
+          "--validation-out",
+          validation
+        ])
+      end)
     end
+
+    aggregate = Jason.decode!(File.read!(Path.join(validation, "report.json")))
+    assert aggregate["outcome"] == "refused"
+    assert [%{"status" => "refused", "reason" => "model_dispatch_forbidden"}] = aggregate["cases"]
+    feedback = Jason.decode!(File.read!(Path.join(validation, "feedback.json")))
+    assert feedback["state"] == "validation-refused"
+    envelope = Jason.decode!(File.read!(Path.join(validation, "01/envelope.private.json")))
+    assert get_in(envelope, ["execution", "usage", "capability_calls"]) == %{}
+    refute File.exists?(Path.join(validation, "01/result.private.json"))
+
+    live_validation = Path.join(dir, "live-validation")
+
+    output =
+      capture_io(fn ->
+        Repair.run([
+          manifest,
+          "--report",
+          report,
+          "--out",
+          Path.join(dir, "live-candidate"),
+          "--host-config",
+          host,
+          "--validation-suite",
+          suite,
+          "--validation-out",
+          live_validation,
+          "--allow-live-validation"
+        ])
+      end)
+
+    assert output =~ "candidate passed 1 host-owned validation cases"
+
+    live_envelope =
+      Jason.decode!(File.read!(Path.join(live_validation, "01/envelope.private.json")))
+
+    assert get_in(live_envelope, [
+             "execution",
+             "usage",
+             "capability_calls",
+             "workflow/llm-request"
+           ]) == 1
   end
 
   # "Exact expected result" means exact: 42 and 42.0 are different JSON

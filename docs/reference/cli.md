@@ -713,6 +713,7 @@ Embedding runtimes can supply authorization targets directly.
 | 5 | `execution` | `replay_fixture_missing` | no | no replay fixture matches the workflow request |
 | 5 | `execution` | `workflow_failed` | no | the workflow failed |
 | 6 | `execution` | `capability_quota_exceeded` | no | a capability quota was exceeded |
+| 6 | `execution` | `model_dispatch_forbidden` | no | model dispatch is forbidden by validation policy |
 | 6 | `execution` | `model_output_truncated` | no | model output was truncated before producing a usable agent action |
 | 6 | `execution` | `run_timeout` | no | the run duration limit was exceeded |
 | 6 | `execution` | `runtime_limit_exceeded` | no | a runtime limit was exceeded |

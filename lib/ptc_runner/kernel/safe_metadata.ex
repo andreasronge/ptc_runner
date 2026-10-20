@@ -122,6 +122,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
     :reservation_bound_exceeded,
     :reservation_held,
     :resolver_unavailable,
+    :model_dispatch_forbidden,
     :run_closed,
     :run_deadline,
     :stale_evaluation,

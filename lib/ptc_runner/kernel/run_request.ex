@@ -51,8 +51,9 @@ defmodule PtcRunner.Kernel.RunRequest do
 
   In addition to `:installed_limits`, `:input_authority`, `:input`, and
   `:component_override_descriptor`, accepts exactly `:inspection_capture`,
-  `:result_projection`, and `:event_identity`. The latter fixes both event
-  IDs and is rejected when the manifest already owns either identity.
+  `:result_projection`, `:forbid_model_dispatch`, and `:event_identity`. The latter
+  fixes both event IDs and is rejected when the manifest already owns either
+  identity.
   `:omit_input` and `:repl_interactive_loop` are package-acquisition flags
   and are rejected here.
   """
@@ -93,9 +94,9 @@ defmodule PtcRunner.Kernel.RunRequest do
 
   In addition to the `PtcRunner.Kernel.ApplicationPackage.acquire_memory/3`
   options, accepts exactly
-  `:inspection_capture`, `:result_projection`, and `:event_identity`. The
-  latter fixes both event IDs and is rejected when the manifest already owns
-  either identity.
+  `:inspection_capture`, `:result_projection`, `:forbid_model_dispatch`, and
+  `:event_identity`. The latter fixes both event IDs and is rejected when the
+  manifest already owns either identity.
   """
   def from_memory(manifest_name, documents, opts \\ [])
 
@@ -112,7 +113,13 @@ defmodule PtcRunner.Kernel.RunRequest do
     do: {:error, :invalid_application_source}
 
   defp acquisition_options(opts),
-    do: Keyword.drop(opts, [:inspection_capture, :result_projection, :event_identity])
+    do:
+      Keyword.drop(opts, [
+        :inspection_capture,
+        :result_projection,
+        :event_identity,
+        :forbid_model_dispatch
+      ])
 
   defp execution_policy(package, opts) do
     with {:ok, run_id, trace_id} <- event_identity(package.events, opts) do
@@ -121,7 +128,8 @@ defmodule PtcRunner.Kernel.RunRequest do
         run_id: run_id,
         trace_id: trace_id,
         inspection_capture: Keyword.get(opts, :inspection_capture, false),
-        result_projection: Keyword.get(opts, :result_projection, :native)
+        result_projection: Keyword.get(opts, :result_projection, :native),
+        forbid_model_dispatch: Keyword.get(opts, :forbid_model_dispatch, false)
       )
     end
   end

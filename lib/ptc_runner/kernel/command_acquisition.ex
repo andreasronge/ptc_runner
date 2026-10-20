@@ -168,15 +168,19 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
 
   @spec prepare_request(CommandArguments.t(), InstallationCatalog.t(), binary()) ::
           {:ok, PreparedRun.t()} | {:error, CommandDiagnostic.t()}
-  def prepare_request(arguments, catalog, run_ref) do
-    with {:ok, request} <- request_arguments(arguments, catalog, run_ref) do
+  @spec prepare_request(CommandArguments.t(), InstallationCatalog.t(), binary(), keyword()) ::
+          {:ok, PreparedRun.t()} | {:error, CommandDiagnostic.t()}
+  def prepare_request(arguments, catalog, run_ref, policy \\ []) do
+    with {:ok, request} <- request_arguments(arguments, catalog, run_ref, policy) do
       RunPreparation.prepare(request, catalog)
     end
   end
 
   defp prepare_with_catalog(arguments, run_ref, destinations, runtime, host, catalog) do
     result =
-      case prepare_request(arguments, catalog, run_ref) do
+      case prepare_request(arguments, catalog, run_ref,
+             forbid_model_dispatch: runtime.forbid_model_dispatch
+           ) do
         {:ok, prepared} ->
           case command_runtime_services(host, runtime) do
             {:ok, runtime_services} ->
@@ -320,6 +324,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
                [
                  installed_limits: catalog.installed_limits,
                  result_projection: :native,
+                 forbid_model_dispatch: runtime.forbid_model_dispatch,
                  input_authority: :normal,
                  inspection_capture: false
                ],
@@ -461,9 +466,9 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
      )}
   end
 
-  defp request_arguments(arguments, catalog, run_ref) do
+  defp request_arguments(arguments, catalog, run_ref, policy) do
     options =
-      [inspection_capture: Map.has_key?(arguments.options, :inspect)]
+      Keyword.put(policy, :inspection_capture, Map.has_key?(arguments.options, :inspect))
       |> maybe_trace_identity(arguments, run_ref)
       |> maybe_input(arguments.options)
       |> maybe_override(arguments.options)

@@ -83,6 +83,7 @@ defmodule PtcRunner.Kernel.Runner do
          {:ok, state} <-
            RunState.start(config.limits,
              provider_session: config.provider_session,
+             forbid_model_dispatch: config.forbid_model_dispatch,
              run_deadline: config.run_deadline
            ) do
       try do

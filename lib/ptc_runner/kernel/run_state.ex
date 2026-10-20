@@ -109,16 +109,21 @@ defmodule PtcRunner.Kernel.RunState do
         }
 
   @spec start(Limits.t(), keyword()) :: {:ok, t()} | {:error, term()}
-  @doc "Starts run state, preserving a supplied active-run deadline when present."
+  @doc "Starts run state, preserving a supplied active-run deadline and model dispatch policy."
   def start(%Limits{} = limits, opts \\ []) do
     token = make_ref()
     owner = Keyword.get(opts, :owner, self())
     provider_session = Keyword.get(opts, :provider_session)
     run_deadline = Keyword.get(opts, :run_deadline)
 
-    if Keyword.keys(opts) -- [:owner, :provider_session, :run_deadline] == [] and
-         valid_provider_session?(provider_session) and valid_run_deadline?(run_deadline) do
-      start_state({limits, token, owner, nil, false, nil, run_deadline})
+    if Keyword.keys(opts) -- [:owner, :provider_session, :run_deadline, :forbid_model_dispatch] ==
+         [] and
+         valid_provider_session?(provider_session) and valid_run_deadline?(run_deadline) and
+         is_boolean(Keyword.get(opts, :forbid_model_dispatch, false)) do
+      start_state(
+        {limits, token, owner, nil, false, nil, run_deadline,
+         Keyword.get(opts, :forbid_model_dispatch, false)}
+      )
     else
       {:error, :invalid_run_state}
     end
@@ -129,7 +134,8 @@ defmodule PtcRunner.Kernel.RunState do
     with true <- EventSink.owner?(event_sink),
          true <- inspection_owner?(inspection_sink),
          true <- Keyword.keyword?(opts),
-         true <- Keyword.keys(opts) -- [:owner, :run_deadline] == [],
+         true <- Keyword.keys(opts) -- [:owner, :run_deadline, :forbid_model_dispatch] == [],
+         true <- is_boolean(Keyword.get(opts, :forbid_model_dispatch, false)),
          owner = Keyword.get(opts, :owner, self()),
          true <- is_pid(owner) and Process.alive?(owner),
          run_deadline = Keyword.get(opts, :run_deadline),
@@ -137,7 +143,8 @@ defmodule PtcRunner.Kernel.RunState do
          token = make_ref(),
          {:ok, state} <-
            start_state(
-             {limits, token, owner, nil, false, {event_sink, inspection_sink}, run_deadline}
+             {limits, token, owner, nil, false, {event_sink, inspection_sink}, run_deadline,
+              Keyword.get(opts, :forbid_model_dispatch, false)}
            ) do
       {:ok, state}
     else
@@ -153,7 +160,7 @@ defmodule PtcRunner.Kernel.RunState do
     with true <- Keyword.keys(opts) -- [:owner] == [],
          {:ok, event_sink, handle} <- EventSink.prepare(:normal, limits, sink_opts),
          {:ok, state} <-
-           start_state({limits, token, owner, event_sink, true, nil, nil}) do
+           start_state({limits, token, owner, event_sink, true, nil, nil, false}) do
       {:ok, state, struct!(EventSink, Map.put(handle, :pid, state.pid))}
     else
       _ -> {:error, :invalid_run_state}
@@ -755,7 +762,10 @@ defmodule PtcRunner.Kernel.RunState do
   def use_provider_session(_state, _session), do: {:error, :invalid_run_state}
 
   @impl GenServer
-  def init({limits, token, owner, event_sink, owner_transferable?, repl_resources, run_deadline}) do
+  def init(
+        {limits, token, owner, event_sink, owner_transferable?, repl_resources, run_deadline,
+         forbid_model_dispatch}
+      ) do
     deadline_ms =
       if Deadline.valid?(run_deadline),
         do: Deadline.expires_at(run_deadline),
@@ -773,6 +783,7 @@ defmodule PtcRunner.Kernel.RunState do
        limits: limits,
        deadline_ms: deadline_ms,
        closed?: false,
+       forbid_model_dispatch: forbid_model_dispatch,
        provider_tasks: 0,
        calls: %{workflow: %{}, mission: %{}},
        route_calls: %{workflow: %{}, mission: %{}},
@@ -1844,6 +1855,12 @@ defmodule PtcRunner.Kernel.RunState do
       # next evaluation's external effects and mislabel provider provenance.
       environment == :mission and not current_mission_lease?(state, lease) ->
         {:error, :stale_evaluation, state}
+
+      name in ["llm-request", "decision-request"] and state.forbid_model_dispatch ->
+        failure = %{kind: :limit_exceeded, reason: :model_dispatch_forbidden}
+
+        {:error, :model_dispatch_forbidden,
+         admit_from_queue(%{state | closed?: true, terminal_failure: failure})}
 
       state.provider_tasks >= state.limits.live_provider_tasks ->
         {:error, :live_task_limit, state}

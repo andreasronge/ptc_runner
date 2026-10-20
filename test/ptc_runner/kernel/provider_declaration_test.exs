@@ -1302,7 +1302,20 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     refute native.effective_application_digest ==
              inline_a_prepared.effective_application_digest
 
+    assert {:ok, forbidden_request} =
+             RunRequest.from_memory("ptc.json", documents(inline_a),
+               forbid_model_dispatch: true,
+               result_projection: :json
+             )
+
+    assert {:ok, forbidden} = RunCoordinator.prepare(forbidden_request, catalog)
+    assert forbidden.effective_application_projection["model_dispatch_forbidden"] == true
+
+    refute forbidden.effective_application_digest ==
+             inline_a_prepared.effective_application_digest
+
     for prepared <- [
+          forbidden,
           inline_a_prepared,
           inline_b_prepared,
           path_prepared,

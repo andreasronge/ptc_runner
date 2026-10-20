@@ -6,13 +6,12 @@ defmodule Mix.Tasks.Ptc.Repair do
 
       mix ptc.repair MANIFEST --report repair.json --out candidate
 
-  Materialization does not execute the candidate. A host may explicitly opt in
-  to a live trial using a bounded validation suite:
+  Materialization does not execute the candidate. A host may run a bounded
+  validation suite with model dispatch forbidden by default:
 
       mix ptc.repair MANIFEST --report repair.json --out candidate \\
         --validation-suite private/suite.json \\
-        --validation-out private/trial \\
-        --allow-live-validation
+        --validation-out private/trial
 
   A suite contains one to 32 host-owned cases. Each case supplies `name`,
   exactly one JSON `input` or `private_input`, and an exact JSON `expected`
@@ -27,9 +26,13 @@ defmodule Mix.Tasks.Ptc.Repair do
   correction run can consume that file as private input without reconstructing
   validation facts in prose.
 
-  `--allow-live-validation` is deliberately explicit: the application is run
-  with its installed providers and can exercise their existing effects. The
-  static candidate gate prevents authority widening; it cannot make a live
+  Without `--allow-live-validation`, the first `llm-request` or
+  `decision-request` terminates the trial with `model_dispatch_forbidden`.
+  The case and suite are reported as
+  `refused`, and feedback has state `validation-refused`; this is not a
+  candidate failure. The flag explicitly permits model dispatch and its costs.
+  Other installed providers can exercise their existing effects in either mode.
+  The static candidate gate prevents authority widening; it cannot make a live
   application run transactional. Passing cases prove only the named inputs and
   providers. Promotion remains a separate human decision.
   """
@@ -37,13 +40,15 @@ defmodule Mix.Tasks.Ptc.Repair do
   use Mix.Task
 
   alias Mix.Tasks.Ptc.Materialize
+  alias PtcRunner.CommandRouter
   alias PtcRunner.Kernel.CandidateArtifact
+  alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.ComponentOverride
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.StrictJSON
-  alias PtcRunner.MixCommandAdapter
+  alias PtcRunner.MixCommandRuntime
 
   @max_report_bytes 1_048_576
   @max_descriptor_bytes 65_536
@@ -67,7 +72,7 @@ defmodule Mix.Tasks.Ptc.Repair do
   @usage "usage: mix ptc.repair MANIFEST --report REPORT.json --out DIR " <>
            "[--origin-run-id DEBUGGER_RUN_ID] [--host-config HOST.json] [--env-file FILE] " <>
            "[--validation-suite SUITE.json --validation-out PRIVATE_DIR " <>
-           "--allow-live-validation]"
+           "[--allow-live-validation]]"
 
   @impl Mix.Task
   def run(argv) do
@@ -97,11 +102,6 @@ defmodule Mix.Tasks.Ptc.Repair do
          :ok <- maybe_validate(manifest, out, report, base_digest, validation, opts) do
       :ok
     else
-      {:error, :validation_requires_allow_live_validation} ->
-        Mix.raise(
-          "ptc.repair failed: --allow-live-validation is required because installed providers may have effects"
-        )
-
       {:error, reason} ->
         Mix.raise("ptc.repair failed: #{inspect(reason)}")
     end
@@ -251,15 +251,12 @@ defmodule Mix.Tasks.Ptc.Repair do
       {nil, nil, false} ->
         {:ok, nil}
 
-      {suite_path, out, true} when is_binary(suite_path) and is_binary(out) ->
+      {suite_path, out, _live?} when is_binary(suite_path) and is_binary(out) ->
         with {:ok, suite} <-
                read_json_map(suite_path, @max_suite_bytes, :invalid_validation_suite),
              :ok <- validate_suite(suite) do
           {:ok, %{suite: suite, out: out}}
         end
-
-      {_suite, _out, false} ->
-        {:error, :validation_requires_allow_live_validation}
 
       _other ->
         {:error, :incomplete_validation_options}
@@ -329,14 +326,23 @@ defmodule Mix.Tasks.Ptc.Repair do
          :ok <- write_validation_feedback(validation.out, feedback) do
       failed = Enum.count(results, &(&1["status"] == "fail"))
 
-      if failed == 0 do
-        Mix.shell().info("candidate passed #{length(results)} host-owned validation cases")
-        :ok
-      else
-        Mix.raise(
-          "#{failed} of #{length(results)} host-owned validation cases failed; " <>
-            "candidate and private evidence retained at #{validation.out}"
-        )
+      refused = Enum.count(results, &(&1["status"] == "refused"))
+
+      cond do
+        refused > 0 ->
+          Mix.raise(
+            "validation refused: model_dispatch_forbidden; private evidence retained at #{validation.out}"
+          )
+
+        failed == 0 ->
+          Mix.shell().info("candidate passed #{length(results)} host-owned validation cases")
+          :ok
+
+        true ->
+          Mix.raise(
+            "#{failed} of #{length(results)} host-owned validation cases failed; " <>
+              "candidate and private evidence retained at #{validation.out}"
+          )
       end
     end
   end
@@ -504,7 +510,27 @@ defmodule Mix.Tasks.Ptc.Repair do
         envelope
       ] ++ host_args(opts)
 
-    presentation = MixCommandAdapter.execute(args)
+    presentation =
+      CommandRouter.execute(
+        args,
+        :mix,
+        fn arguments ->
+          with {:ok, runtime} <- MixCommandRuntime.bootstrap(arguments) do
+            runtime
+            |> Map.from_struct()
+            |> Map.delete(:attestation)
+            |> Map.put(
+              :forbid_model_dispatch,
+              not Keyword.get(opts, :allow_live_validation, false)
+            )
+            |> Map.to_list()
+            |> CommandRuntime.new()
+          end
+        end,
+        fn _arguments, _runtime -> {:error, "unsupported repair trial command"} end,
+        []
+      )
+
     expected = validation_case["expected"]
 
     result = read_json_value(output)
@@ -512,11 +538,12 @@ defmodule Mix.Tasks.Ptc.Repair do
     # Strict equality: 42 and 42.0 are different JSON values, and an exact
     # expected result must not certify a different representation.
     {status, reason} =
-      case {presentation.exit_status, result} do
-        {0, {:ok, value}} when value === expected -> {"pass", nil}
-        {0, {:ok, _value}} -> {"fail", "result_mismatch"}
-        {0, {:error, _reason}} -> {"fail", "result_unavailable"}
-        {exit_status, _result} -> {"fail", "exit_status_#{exit_status}"}
+      case {presentation.exit_status, result, trial_refused?(presentation)} do
+        {_exit_status, _result, true} -> {"refused", "model_dispatch_forbidden"}
+        {0, {:ok, value}, false} when value === expected -> {"pass", nil}
+        {0, {:ok, _value}, false} -> {"fail", "result_mismatch"}
+        {0, {:error, _reason}, false} -> {"fail", "result_unavailable"}
+        {exit_status, _result, false} -> {"fail", "exit_status_#{exit_status}"}
       end
 
     summary = %{
@@ -539,17 +566,30 @@ defmodule Mix.Tasks.Ptc.Repair do
     })
   end
 
+  defp trial_refused?(%{outcome: %{envelope: envelope}}),
+    do: get_in(envelope, ["error", "code"]) == "model_dispatch_forbidden"
+
+  defp trial_refused?(_presentation), do: false
+
+  defp validation_outcome(results) do
+    cond do
+      Enum.any?(results, &(&1["status"] == "refused")) -> "refused"
+      Enum.any?(results, &(&1["status"] == "fail")) -> "fail"
+      true -> "pass"
+    end
+  end
+
   defp validation_input(%{"input" => input}), do: {"--input", "normal", input}
 
   defp validation_input(%{"private_input" => input}),
     do: {"--private-input", "private", input}
 
   defp validation_report(report, opts, base_digest, results) do
-    failed? = Enum.any?(results, &(&1["status"] == "fail"))
+    outcome = validation_outcome(results)
 
     %{
       "version" => 1,
-      "outcome" => if(failed?, do: "fail", else: "pass"),
+      "outcome" => outcome,
       "diagnosed_run_id" => report["run_id"],
       "authoring_run_id" => Keyword.get(opts, :origin_run_id),
       "base_application_content_digest" => base_digest,
@@ -559,13 +599,12 @@ defmodule Mix.Tasks.Ptc.Repair do
   end
 
   defp validation_feedback(report, opts, base_digest, results) do
-    failed? = Enum.any?(results, &(&1["status"] == "fail"))
-    outcome = if(failed?, do: "fail", else: "pass")
+    outcome = validation_outcome(results)
 
     %{
       "version" => 1,
       "kind" => "repair-validation-feedback",
-      "state" => if(failed?, do: "candidate-rejected", else: "candidate-validated"),
+      "state" => feedback_state(outcome),
       "candidate" => %{
         "authority" => "model-authored-untrusted",
         "value" => report
@@ -581,6 +620,10 @@ defmodule Mix.Tasks.Ptc.Repair do
       }
     }
   end
+
+  defp feedback_state("refused"), do: "validation-refused"
+  defp feedback_state("fail"), do: "candidate-rejected"
+  defp feedback_state("pass"), do: "candidate-validated"
 
   defp validation_feedback_case(%{:feedback => comparison} = result) do
     result

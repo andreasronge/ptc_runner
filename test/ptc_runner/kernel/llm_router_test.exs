@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CapabilityInvocation
   alias PtcRunner.Kernel.CommandRunOutcome
+  alias PtcRunner.Kernel.DecisionCapability
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.EventSink
@@ -20,6 +21,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderSnapshot
   alias PtcRunner.Kernel.PublicationAuthority
+  alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.RoutedCapability
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
@@ -29,6 +31,72 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
   alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
   alias PtcRunner.TestSupport.TraceQuery
+
+  test "host dispatch prohibition is terminal in both environments even when ignored" do
+    leaf = capability(self(), :forbidden_provider_called, %{content: "unused"})
+    assert {:ok, router} = LLMRouter.new([route("live", "llm", "live-v1", true, leaf)])
+
+    sources = [
+      ~S|(do (tool/llm-request {"messages" []}) (return 42))|,
+      ~S|(do (tool/kernel-eval {:mission "default" :kind :source :source "(do (tool/llm-request {\"messages\" []}) (return 42))"}) (return 42))|
+    ]
+
+    for {source, index} <- Enum.with_index(sources) do
+      assert {:ok, config} =
+               config(router, "routing-forbidden-#{index}",
+                 forbid_model_dispatch: true,
+                 mission_capabilities: [router]
+               )
+
+      assert {{:error, %{kind: :limit_exceeded, reason: :model_dispatch_forbidden}},
+              {:ok, events}} =
+               Kernel.run_and_events(source, config)
+
+      refute_received {:forbidden_provider_called, _request}
+
+      assert Enum.any?(
+               events,
+               &(&1.type == "limit-exceeded" and &1.data.reason == :model_dispatch_forbidden)
+             )
+    end
+  end
+
+  test "a REPL session preserves a supplied configuration's dispatch prohibition" do
+    leaf = capability(self(), :forbidden_repl_provider_called, %{content: "unused"})
+    assert {:ok, router} = LLMRouter.new([route("live", "llm", "live-v1", true, leaf)])
+    assert {:ok, config} = config(router, "repl-routing-forbidden", forbid_model_dispatch: true)
+    assert {:ok, session} = ReplSession.new(config: config)
+
+    assert {:error, _step, session} =
+             ReplSession.eval(session, ~S|(do (tool/llm-request {"messages" []}) (return 42))|)
+
+    refute_received {:forbidden_repl_provider_called, _request}
+    assert {:error, _step, session} = ReplSession.eval(session, "42")
+    assert {:ok, _events} = ReplSession.close(session)
+  end
+
+  test "host dispatch prohibition also blocks decision model providers" do
+    parent = self()
+
+    assert {:ok, decision} =
+             DecisionCapability.new(
+               requester: fn _request, _opts ->
+                 send(parent, :forbidden_decision_provider_called)
+                 {:ok, %{}}
+               end
+             )
+
+    assert {:ok, config} =
+             run_config(decision, "decision-forbidden", [], forbid_model_dispatch: true)
+
+    assert {:error, %{kind: :limit_exceeded, reason: :model_dispatch_forbidden}} =
+             Kernel.run(
+               ~S|(do (tool/decision-request {"state" {} "questions" {"ready" {"type" "boolean" "instructions" "Ready?"}}}) (return 42))|,
+               config
+             )
+
+    refute_received :forbidden_decision_provider_called
+  end
 
   test "routes by alias, uses the declared default, and strips model before invocation" do
     parent = self()
@@ -1916,7 +1984,9 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
   defp run_config(router, run_id, components, opts) do
     {:ok, bundle} = Kernel.compile_bundle(components)
     {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [router])
-    {:ok, mission} = MissionEnvironment.new([])
+
+    {:ok, mission} =
+      MissionEnvironment.new(capabilities: Keyword.get(opts, :mission_capabilities, []))
 
     limits =
       case Keyword.get(opts, :limits) do
@@ -1937,6 +2007,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
       limits: limits,
       event_sink: sink,
       inspection_sink: Keyword.get(opts, :inspection_sink),
+      forbid_model_dispatch: Keyword.get(opts, :forbid_model_dispatch, false),
       connector_snapshots: Keyword.get(opts, :connector_snapshots, [])
     )
   end

@@ -4,12 +4,15 @@ defmodule PtcRunner.Kernel.ExecutionPolicy do
 
   Artifact paths, object keys, file readers, and publication callbacks are not
   representable. The policy fixes all owner-affecting choices before the first
-  event is emitted.
+  event is emitted. `forbid_model_dispatch` defaults to false; when true, the
+  first `llm-request` or `decision-request` fails the run closed with
+  `:model_dispatch_forbidden`, before invoking any model provider.
   """
 
   alias PtcRunner.Kernel.Attestation
 
   @enforce_keys [
+    :forbid_model_dispatch,
     :event_policy,
     :run_id,
     :trace_id,
@@ -20,6 +23,7 @@ defmodule PtcRunner.Kernel.ExecutionPolicy do
   @field_keys Enum.sort([:__struct__, :attestation | @enforce_keys])
 
   @type t :: %__MODULE__{
+          forbid_model_dispatch: boolean(),
           event_policy: :normal | :private,
           run_id: binary() | nil,
           trace_id: binary() | nil,
@@ -31,10 +35,18 @@ defmodule PtcRunner.Kernel.ExecutionPolicy do
   @spec new(keyword()) :: {:ok, t()} | {:error, :invalid_execution_policy}
   @doc "Validates and seals one destination-free execution policy."
   def new(opts) when is_list(opts) do
-    allowed = [:event_policy, :run_id, :trace_id, :inspection_capture, :result_projection]
+    allowed = [
+      :forbid_model_dispatch,
+      :event_policy,
+      :run_id,
+      :trace_id,
+      :inspection_capture,
+      :result_projection
+    ]
 
     if Keyword.keyword?(opts) do
       policy = %__MODULE__{
+        forbid_model_dispatch: Keyword.get(opts, :forbid_model_dispatch, false),
         event_policy: Keyword.get(opts, :event_policy, :normal),
         run_id: Keyword.get(opts, :run_id),
         trace_id: Keyword.get(opts, :trace_id),
@@ -66,7 +78,8 @@ defmodule PtcRunner.Kernel.ExecutionPolicy do
   def valid?(_policy), do: false
 
   defp valid_shape?(policy) do
-    policy.event_policy in [:normal, :private] and
+    is_boolean(policy.forbid_model_dispatch) and
+      policy.event_policy in [:normal, :private] and
       optional_id?(policy.run_id) and
       optional_id?(policy.trace_id) and
       is_boolean(policy.inspection_capture) and
@@ -82,6 +95,7 @@ defmodule PtcRunner.Kernel.ExecutionPolicy do
 
   defp payload(policy) do
     {
+      policy.forbid_model_dispatch,
       policy.event_policy,
       policy.run_id,
       policy.trace_id,

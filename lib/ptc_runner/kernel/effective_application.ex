@@ -37,6 +37,7 @@ defmodule PtcRunner.Kernel.EffectiveApplication do
       build_package(request.package, workflow_bundle, mission_bundles, providers, %{
         input_authority_class: ServingRequest.input_authority(request),
         inspection_capture: request.policy.inspection_capture,
+        forbid_model_dispatch: request.policy.forbid_model_dispatch,
         result_projection: request.policy.result_projection,
         effective_event_policy: effective_event_policy
       })
@@ -110,7 +111,13 @@ defmodule PtcRunner.Kernel.EffectiveApplication do
       "ptc_semantic_revision" => package.ptc_semantic_revision,
       "result_projection" => Atom.to_string(policy.result_projection)
     }
+    |> model_dispatch_projection(policy)
   end
+
+  defp model_dispatch_projection(projection, %{forbid_model_dispatch: true}),
+    do: Map.put(projection, "model_dispatch_forbidden", true)
+
+  defp model_dispatch_projection(projection, _policy), do: projection
 
   defp mission_projection(missions, bundles) do
     missions
