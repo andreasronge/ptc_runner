@@ -40,25 +40,40 @@
   "Reduces cursor-paginated items into bounded caller-owned state.
 
   `fetch` receives nil for the first page or the opaque cursor supplied in
-  `opts`. `step` receives accumulator then item. Every page must contain
-  `items`, `next_cursor`, and a stable non-empty `snapshot_hash`.
+  `opts`. It must check capability envelopes (for example with cap/unwrap!)
+  before returning a page. `step` receives accumulator then item; every item
+  is reduced before following the page's `next_cursor`.
 
-  `opts` requires a positive `max_pages`. Resuming with `cursor` also requires
-  the expected `snapshot_hash`. A page-bound stop returns `complete?` false and
-  preserves `next_cursor`, so another evaluation can continue without retaining
-  prior pages. Keep the accumulator bounded; pagination does not make an
-  unbounded collection safe. Repeated cursors within one invocation fail instead
-  of looping; a resumed invocation does not retain source-sized cursor history."
+  `opts` requires a positive `max_pages`. `consistency` defaults to
+  \"snapshot\": every page needs a stable non-empty `snapshot_hash`, and
+  resuming with `cursor` requires the expected `snapshot_hash`.
+  Set `consistency` to \"cursor\" only for providers whose opaque cursors
+  enforce change detection. That mode neither requires nor checks snapshot
+  hashes and returns nil `snapshot_hash`; page-local `content_hash` is never
+  a snapshot identity. Provider errors must still fail through `fetch`.
+
+  A page-bound stop returns `complete?` false and preserves `next_cursor`,
+  so another evaluation can continue without retaining prior pages. Keep the
+  accumulator bounded; pagination does not make an unbounded collection safe.
+  Repeated cursors within one invocation fail instead of looping; a resumed
+  invocation does not retain source-sized cursor history.
+  See the MCP reference's bulk-read example for item, byte, time, and call
+  budgeting alongside the helper's page bound."
   [fetch step initial opts]
   (let [max-pages (get opts "max_pages")
         start-cursor (get opts "cursor")
-        expected-hash (get opts "snapshot_hash")]
+        consistency (get opts "consistency" "snapshot")
+        cursor-owned? (= consistency "cursor")
+        expected-hash (if cursor-owned? nil (get opts "snapshot_hash"))]
     (cond
+      (not (contains? #{"snapshot" "cursor"} consistency))
+        (pagination-fail :invalid-request :invalid-consistency)
       (not (and (integer? max-pages) (pos? max-pages)))
         (pagination-fail :invalid-request :invalid-max-pages)
       (and (not (nil? start-cursor)) (not (valid-token? start-cursor)))
         (pagination-fail :invalid-request :invalid-cursor)
-      (and (not (nil? start-cursor)) (not (valid-token? expected-hash)))
+      (and (not cursor-owned?) (not (nil? start-cursor))
+           (not (valid-token? expected-hash)))
         (pagination-fail :invalid-request :missing-snapshot-hash)
       :else
         (loop [cursor start-cursor
@@ -69,11 +84,11 @@
           (let [page (fetch cursor)
                 items (get page "items" :absent)
                 next-cursor (get page "next_cursor" :absent)
-                page-hash (get page "snapshot_hash" :absent)]
+                page-hash (if cursor-owned? nil (get page "snapshot_hash" :absent))]
             (cond
               (not (sequential? items))
                 (pagination-fail :invalid-response :invalid-items)
-              (not (valid-token? page-hash))
+              (and (not cursor-owned?) (not (valid-token? page-hash)))
                 (pagination-fail :invalid-response :missing-snapshot-hash)
               (and (not (nil? snapshot-hash)) (not= snapshot-hash page-hash))
                 (pagination-fail :invalid-response :snapshot-changed)

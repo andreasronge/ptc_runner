@@ -922,15 +922,25 @@ Returns the installed description for one capability name.
 Reduces cursor-paginated items into bounded caller-owned state.
 
 `fetch` receives nil for the first page or the opaque cursor supplied in
-`opts`. `step` receives accumulator then item. Every page must contain
-`items`, `next_cursor`, and a stable non-empty `snapshot_hash`.
+`opts`. It must check capability envelopes (for example with cap/unwrap!)
+before returning a page. `step` receives accumulator then item; every item
+is reduced before following the page's `next_cursor`.
 
-`opts` requires a positive `max_pages`. Resuming with `cursor` also requires
-the expected `snapshot_hash`. A page-bound stop returns `complete?` false and
-preserves `next_cursor`, so another evaluation can continue without retaining
-prior pages. Keep the accumulator bounded; pagination does not make an
-unbounded collection safe. Repeated cursors within one invocation fail instead
-of looping; a resumed invocation does not retain source-sized cursor history.
+`opts` requires a positive `max_pages`. `consistency` defaults to
+"snapshot": every page needs a stable non-empty `snapshot_hash`, and
+resuming with `cursor` requires the expected `snapshot_hash`.
+Set `consistency` to "cursor" only for providers whose opaque cursors
+enforce change detection. That mode neither requires nor checks snapshot
+hashes and returns nil `snapshot_hash`; page-local `content_hash` is never
+a snapshot identity. Provider errors must still fail through `fetch`.
+
+A page-bound stop returns `complete?` false and preserves `next_cursor`,
+so another evaluation can continue without retaining prior pages. Keep the
+accumulator bounded; pagination does not make an unbounded collection safe.
+Repeated cursors within one invocation fail instead of looping; a resumed
+invocation does not retain source-sized cursor history.
+See the MCP reference's bulk-read example for item, byte, time, and call
+budgeting alongside the helper's page bound.
 
 - **Kind:** `function`
 - **Visibility:** `discoverable`

@@ -2,6 +2,205 @@
   {
     "input": {
       "opts": {
+        "consistency": "cursor",
+        "max_pages": 2
+      },
+      "pages": {
+        "first": {
+          "content_hash": "first",
+          "items": [
+            1,
+            2
+          ],
+          "next_cursor": "second"
+        },
+        "second": {
+          "content_hash": "second",
+          "items": [
+            3
+          ],
+          "next_cursor": null
+        }
+      }
+    },
+    "split": "visible",
+    "branch": "cursor-owned-complete",
+    "trace_path": "artifacts/traces/cmd-7v7gccm8kne4t7anfcsap4gtcr.jsonl",
+    "result_hash": "sha256:4fada472a34a7cf44c0c203cd90c20ae3d651f01fb3d5c208bee267845adbcc9",
+    "reached_mutation": false,
+    "run_ref": "cmd-7v7gccm8kne4t7anfcsap4gtcr",
+    "variant": "oracle",
+    "duration_ms": 22,
+    "kernel_usage": {
+      "subordinate_source_checks": 0,
+      "protocol_errors": 0,
+      "evaluation_history_bytes": 0,
+      "subordinate_evaluations": 0,
+      "evaluation_memory_bytes": 0,
+      "closed?": true,
+      "events_dropped": {},
+      "agent_protocol_errors": 0,
+      "capability_calls": {
+        "mission": {},
+        "workflow": {}
+      },
+      "capability_denials": {},
+      "capability_refusals": {},
+      "evaluation_busy?": false,
+      "evaluation_continuation_bytes": 0,
+      "evaluation_missions": [],
+      "evaluations_by_mission": {},
+      "llm_budget": {
+        "cost": null,
+        "total_tokens": null
+      },
+      "llm_spend": {
+        "state": "empty"
+      },
+      "remaining_ms": 9996
+    },
+    "failure_envelope": null,
+    "bundle_hash": "f3901b7192fa7e46517debffd552b881ce9d65d68872fe511a3bc880b81625bc",
+    "inspection_hash": "36d1d03de7888e844c731c26625f1bf2241778c20540fd987577efb7ce8b9bf2",
+    "inspection_path": "artifacts/inspection/cmd-7v7gccm8kne4t7anfcsap4gtcr.ptcins"
+  },
+  {
+    "input": {
+      "opts": {
+        "consistency": "cursor",
+        "cursor": "second",
+        "max_pages": 1
+      },
+      "pages": {
+        "second": {
+          "items": [
+            3
+          ],
+          "next_cursor": null
+        }
+      }
+    },
+    "split": "withheld",
+    "branch": "cursor-owned-resume",
+    "trace_path": "artifacts/traces/cmd-4zk5c38exw5qngfvydxxv715bz.jsonl",
+    "result_hash": "sha256:db4498cf897eab288505adcef14584b412874a2d54c52475d9368c0687810990",
+    "reached_mutation": false,
+    "run_ref": "cmd-4zk5c38exw5qngfvydxxv715bz",
+    "variant": "oracle",
+    "duration_ms": 18,
+    "kernel_usage": {
+      "subordinate_source_checks": 0,
+      "protocol_errors": 0,
+      "evaluation_history_bytes": 0,
+      "subordinate_evaluations": 0,
+      "evaluation_memory_bytes": 0,
+      "closed?": true,
+      "events_dropped": {},
+      "agent_protocol_errors": 0,
+      "capability_calls": {
+        "mission": {},
+        "workflow": {}
+      },
+      "capability_denials": {},
+      "capability_refusals": {},
+      "evaluation_busy?": false,
+      "evaluation_continuation_bytes": 0,
+      "evaluation_missions": [],
+      "evaluations_by_mission": {},
+      "llm_budget": {
+        "cost": null,
+        "total_tokens": null
+      },
+      "llm_spend": {
+        "state": "empty"
+      },
+      "remaining_ms": 9998
+    },
+    "failure_envelope": null,
+    "bundle_hash": "f3901b7192fa7e46517debffd552b881ce9d65d68872fe511a3bc880b81625bc",
+    "inspection_hash": "70d9df5be66521638935bfb4336322449fa1f372abdb8b76b3081d7ca1829667",
+    "inspection_path": "artifacts/inspection/cmd-4zk5c38exw5qngfvydxxv715bz.ptcins"
+  },
+  {
+    "input": {
+      "opts": {
+        "consistency": "unknown",
+        "max_pages": 2
+      },
+      "pages": {
+        "first": {
+          "items": [
+            1,
+            2
+          ],
+          "next_cursor": "second",
+          "snapshot_hash": "sha256:same"
+        },
+        "second": {
+          "items": [
+            3
+          ],
+          "next_cursor": null,
+          "snapshot_hash": "sha256:same"
+        }
+      }
+    },
+    "split": "visible",
+    "branch": "invalid-consistency",
+    "trace_path": "artifacts/traces/cmd-3km8fyggkmtx2va5s5yp9mds8z.jsonl",
+    "result_hash": "sha256:de6d8551275c1604cafcb6995ca34261735cd3d5200a0b985f321c0b2331c3be",
+    "reached_mutation": false,
+    "run_ref": "cmd-3km8fyggkmtx2va5s5yp9mds8z",
+    "variant": "oracle",
+    "duration_ms": 19,
+    "kernel_usage": {
+      "subordinate_source_checks": 0,
+      "protocol_errors": 0,
+      "evaluation_history_bytes": 0,
+      "subordinate_evaluations": 0,
+      "evaluation_memory_bytes": 0,
+      "closed?": true,
+      "events_dropped": {},
+      "agent_protocol_errors": 0,
+      "capability_calls": {
+        "mission": {},
+        "workflow": {}
+      },
+      "capability_denials": {},
+      "capability_refusals": {},
+      "evaluation_busy?": false,
+      "evaluation_continuation_bytes": 0,
+      "evaluation_missions": [],
+      "evaluations_by_mission": {},
+      "llm_budget": {
+        "cost": null,
+        "total_tokens": null
+      },
+      "llm_spend": {
+        "state": "empty"
+      },
+      "remaining_ms": 9997
+    },
+    "failure_envelope": {
+      "details": {
+        "explicit_failure_retention": "retained",
+        "failure_kind_fingerprint": "sha256:60b874f9588005d3de8a205cab2b1d0253e38a98903094c669e57fcacb42544a"
+      },
+      "explicit_value": {
+        "kind": "invalid-request",
+        "reason": "invalid-consistency",
+        "status": "error"
+      },
+      "kind": "workflow_failed",
+      "reason": "explicit_failure"
+    },
+    "bundle_hash": "f3901b7192fa7e46517debffd552b881ce9d65d68872fe511a3bc880b81625bc",
+    "inspection_hash": "d515e93f9307b1cc2e60091a543af7ca80e0be6f713daf232ffb7305b1e98087",
+    "inspection_path": "artifacts/inspection/cmd-3km8fyggkmtx2va5s5yp9mds8z.ptcins"
+  },
+  {
+    "input": {
+      "opts": {
         "max_pages": 2
       },
       "pages": {
@@ -24,21 +223,20 @@
     },
     "split": "visible",
     "branch": "complete",
-    "trace_path": "artifacts/traces/cmd-1z4f5pn6z91qb76zcten5tmh4b.jsonl",
+    "trace_path": "artifacts/traces/cmd-1qjxjdh7ewdr2d0hnydx2t1d3p.jsonl",
     "result_hash": "sha256:e863b2d311149188878c725b5769575bb59f45952ff36b439ddfa43fd0257923",
     "reached_mutation": false,
-    "run_ref": "cmd-1z4f5pn6z91qb76zcten5tmh4b",
+    "run_ref": "cmd-1qjxjdh7ewdr2d0hnydx2t1d3p",
     "variant": "oracle",
-    "duration_ms": 30,
+    "duration_ms": 16,
     "kernel_usage": {
       "subordinate_source_checks": 0,
-      "evaluation_history_bytes": 0,
-      "evaluation_memory_bytes": 0,
       "protocol_errors": 0,
+      "evaluation_history_bytes": 0,
       "subordinate_evaluations": 0,
+      "evaluation_memory_bytes": 0,
       "closed?": true,
       "events_dropped": {},
-      "evaluations_by_mission": {},
       "agent_protocol_errors": 0,
       "capability_calls": {
         "mission": {},
@@ -49,6 +247,7 @@
       "evaluation_busy?": false,
       "evaluation_continuation_bytes": 0,
       "evaluation_missions": [],
+      "evaluations_by_mission": {},
       "llm_budget": {
         "cost": null,
         "total_tokens": null
@@ -56,12 +255,12 @@
       "llm_spend": {
         "state": "empty"
       },
-      "remaining_ms": 9997
+      "remaining_ms": 9999
     },
     "failure_envelope": null,
-    "bundle_hash": "7d0cbb497d6c689b0ddfef8e5ffea8d621b06cc1175db6279c8bab4d7915b410",
-    "inspection_hash": "9535f0090b81f5e98719342b899d81ed9a1d53aa4b77b32d3bc30123b2aa075e",
-    "inspection_path": "artifacts/inspection/cmd-1z4f5pn6z91qb76zcten5tmh4b.ptcins"
+    "bundle_hash": "f3901b7192fa7e46517debffd552b881ce9d65d68872fe511a3bc880b81625bc",
+    "inspection_hash": "614b3536112b7cbeb4ce48d9a4912485db8ed4ffceecdf5291c2529b90c3b3ec",
+    "inspection_path": "artifacts/inspection/cmd-1qjxjdh7ewdr2d0hnydx2t1d3p.ptcins"
   },
   {
     "input": {
@@ -88,21 +287,20 @@
     },
     "split": "visible",
     "branch": "page-bound",
-    "trace_path": "artifacts/traces/cmd-61dvx22z58rpvs8erxmwpdwxys.jsonl",
+    "trace_path": "artifacts/traces/cmd-4c9h2xvs6vk8e7wgyee9shxs3v.jsonl",
     "result_hash": "sha256:e1b582e675f2b6e904e1c29212a110b7ed76d66917c03d975b5514d113bb5d77",
     "reached_mutation": false,
-    "run_ref": "cmd-61dvx22z58rpvs8erxmwpdwxys",
+    "run_ref": "cmd-4c9h2xvs6vk8e7wgyee9shxs3v",
     "variant": "oracle",
-    "duration_ms": 28,
+    "duration_ms": 12,
     "kernel_usage": {
       "subordinate_source_checks": 0,
-      "evaluation_history_bytes": 0,
-      "evaluation_memory_bytes": 0,
       "protocol_errors": 0,
+      "evaluation_history_bytes": 0,
       "subordinate_evaluations": 0,
+      "evaluation_memory_bytes": 0,
       "closed?": true,
       "events_dropped": {},
-      "evaluations_by_mission": {},
       "agent_protocol_errors": 0,
       "capability_calls": {
         "mission": {},
@@ -113,6 +311,7 @@
       "evaluation_busy?": false,
       "evaluation_continuation_bytes": 0,
       "evaluation_missions": [],
+      "evaluations_by_mission": {},
       "llm_budget": {
         "cost": null,
         "total_tokens": null
@@ -120,12 +319,12 @@
       "llm_spend": {
         "state": "empty"
       },
-      "remaining_ms": 9998
+      "remaining_ms": 9999
     },
     "failure_envelope": null,
-    "bundle_hash": "7d0cbb497d6c689b0ddfef8e5ffea8d621b06cc1175db6279c8bab4d7915b410",
-    "inspection_hash": "9451704bfe0256f013a3949ad3ebf1b4cb08cc3d92d53496cc266bd0fc2d2871",
-    "inspection_path": "artifacts/inspection/cmd-61dvx22z58rpvs8erxmwpdwxys.ptcins"
+    "bundle_hash": "f3901b7192fa7e46517debffd552b881ce9d65d68872fe511a3bc880b81625bc",
+    "inspection_hash": "7697990cf8dcdd914426447c10d82c76621e002e6249dad56c4faa8cebea9f92",
+    "inspection_path": "artifacts/inspection/cmd-4c9h2xvs6vk8e7wgyee9shxs3v.ptcins"
   },
   {
     "input": {
@@ -152,21 +351,20 @@
     },
     "split": "visible",
     "branch": "invalid-max-pages",
-    "trace_path": "artifacts/traces/cmd-083nmq5xftwh3cd4tm7cm2v8r0.jsonl",
+    "trace_path": "artifacts/traces/cmd-6z0vrm8pbn1nxp702pazhaa66x.jsonl",
     "result_hash": "sha256:81c2399ca8cbd600bb5a731ce9412f67d37296f8b97ef22326643c2549840fd4",
     "reached_mutation": false,
-    "run_ref": "cmd-083nmq5xftwh3cd4tm7cm2v8r0",
+    "run_ref": "cmd-6z0vrm8pbn1nxp702pazhaa66x",
     "variant": "oracle",
-    "duration_ms": 28,
+    "duration_ms": 19,
     "kernel_usage": {
       "subordinate_source_checks": 0,
-      "evaluation_history_bytes": 0,
-      "evaluation_memory_bytes": 0,
       "protocol_errors": 0,
+      "evaluation_history_bytes": 0,
       "subordinate_evaluations": 0,
+      "evaluation_memory_bytes": 0,
       "closed?": true,
       "events_dropped": {},
-      "evaluations_by_mission": {},
       "agent_protocol_errors": 0,
       "capability_calls": {
         "mission": {},
@@ -177,6 +375,7 @@
       "evaluation_busy?": false,
       "evaluation_continuation_bytes": 0,
       "evaluation_missions": [],
+      "evaluations_by_mission": {},
       "llm_budget": {
         "cost": null,
         "total_tokens": null
@@ -184,7 +383,7 @@
       "llm_spend": {
         "state": "empty"
       },
-      "remaining_ms": 9996
+      "remaining_ms": 9998
     },
     "failure_envelope": {
       "details": {
@@ -199,9 +398,9 @@
       "kind": "workflow_failed",
       "reason": "explicit_failure"
     },
-    "bundle_hash": "7d0cbb497d6c689b0ddfef8e5ffea8d621b06cc1175db6279c8bab4d7915b410",
-    "inspection_hash": "50980aec3ead17e502901f04687079dda4187fd0f730edb6c5df6ccdd84a6718",
-    "inspection_path": "artifacts/inspection/cmd-083nmq5xftwh3cd4tm7cm2v8r0.ptcins"
+    "bundle_hash": "f3901b7192fa7e46517debffd552b881ce9d65d68872fe511a3bc880b81625bc",
+    "inspection_hash": "845af40ea50219c198a3bb4800d89aaf22645fe847ab31fb8482d5d363e4669d",
+    "inspection_path": "artifacts/inspection/cmd-6z0vrm8pbn1nxp702pazhaa66x.ptcins"
   },
   {
     "input": {
@@ -230,21 +429,20 @@
     },
     "split": "withheld",
     "branch": "resume",
-    "trace_path": "artifacts/traces/cmd-61271w07vgmgpfsy3zmv0rxg2v.jsonl",
+    "trace_path": "artifacts/traces/cmd-26j62a7ak00vb4dc2w8xwtvmec.jsonl",
     "result_hash": "sha256:bb985efa49ff6dff7c6e1aaf1f025706e4d70463e42618b6ba826448e76269ef",
     "reached_mutation": false,
-    "run_ref": "cmd-61271w07vgmgpfsy3zmv0rxg2v",
+    "run_ref": "cmd-26j62a7ak00vb4dc2w8xwtvmec",
     "variant": "oracle",
-    "duration_ms": 27,
+    "duration_ms": 35,
     "kernel_usage": {
       "subordinate_source_checks": 0,
-      "evaluation_history_bytes": 0,
-      "evaluation_memory_bytes": 0,
       "protocol_errors": 0,
+      "evaluation_history_bytes": 0,
       "subordinate_evaluations": 0,
+      "evaluation_memory_bytes": 0,
       "closed?": true,
       "events_dropped": {},
-      "evaluations_by_mission": {},
       "agent_protocol_errors": 0,
       "capability_calls": {
         "mission": {},
@@ -255,6 +453,7 @@
       "evaluation_busy?": false,
       "evaluation_continuation_bytes": 0,
       "evaluation_missions": [],
+      "evaluations_by_mission": {},
       "llm_budget": {
         "cost": null,
         "total_tokens": null
@@ -262,12 +461,12 @@
       "llm_spend": {
         "state": "empty"
       },
-      "remaining_ms": 9996
+      "remaining_ms": 9998
     },
     "failure_envelope": null,
-    "bundle_hash": "7d0cbb497d6c689b0ddfef8e5ffea8d621b06cc1175db6279c8bab4d7915b410",
-    "inspection_hash": "547a0266d6f41e166563dff9aad90f806418dc740e60fb80fb4f6b0e5da0cccf",
-    "inspection_path": "artifacts/inspection/cmd-61271w07vgmgpfsy3zmv0rxg2v.ptcins"
+    "bundle_hash": "f3901b7192fa7e46517debffd552b881ce9d65d68872fe511a3bc880b81625bc",
+    "inspection_hash": "158eb2ea8a423c951ecb96b65cc0b12ec3027b188ca6a23ced696571f501d632",
+    "inspection_path": "artifacts/inspection/cmd-26j62a7ak00vb4dc2w8xwtvmec.ptcins"
   },
   {
     "input": {
@@ -295,21 +494,20 @@
     },
     "split": "withheld",
     "branch": "missing-snapshot-hash",
-    "trace_path": "artifacts/traces/cmd-08xxfzbdebzzxga31t6847v873.jsonl",
+    "trace_path": "artifacts/traces/cmd-5eyqwa9f8pf0n98cnknnc3zhsb.jsonl",
     "result_hash": "sha256:6fc309233a92cf352affae1899694887f0f5a2ba5f7403d5efc7aa910bee09b8",
     "reached_mutation": false,
-    "run_ref": "cmd-08xxfzbdebzzxga31t6847v873",
+    "run_ref": "cmd-5eyqwa9f8pf0n98cnknnc3zhsb",
     "variant": "oracle",
-    "duration_ms": 28,
+    "duration_ms": 29,
     "kernel_usage": {
       "subordinate_source_checks": 0,
-      "evaluation_history_bytes": 0,
-      "evaluation_memory_bytes": 0,
       "protocol_errors": 0,
+      "evaluation_history_bytes": 0,
       "subordinate_evaluations": 0,
+      "evaluation_memory_bytes": 0,
       "closed?": true,
       "events_dropped": {},
-      "evaluations_by_mission": {},
       "agent_protocol_errors": 0,
       "capability_calls": {
         "mission": {},
@@ -320,6 +518,7 @@
       "evaluation_busy?": false,
       "evaluation_continuation_bytes": 0,
       "evaluation_missions": [],
+      "evaluations_by_mission": {},
       "llm_budget": {
         "cost": null,
         "total_tokens": null
@@ -342,9 +541,9 @@
       "kind": "workflow_failed",
       "reason": "explicit_failure"
     },
-    "bundle_hash": "7d0cbb497d6c689b0ddfef8e5ffea8d621b06cc1175db6279c8bab4d7915b410",
-    "inspection_hash": "f6e10be9dad520e477f2b2093e749bd8ff49bee3d422b02e13ba3089bcab93e0",
-    "inspection_path": "artifacts/inspection/cmd-08xxfzbdebzzxga31t6847v873.ptcins"
+    "bundle_hash": "f3901b7192fa7e46517debffd552b881ce9d65d68872fe511a3bc880b81625bc",
+    "inspection_hash": "acc2bad7131e2fa538253ef9ce04b8ead293eb9e54376e7c1b4a14642db4ab4f",
+    "inspection_path": "artifacts/inspection/cmd-5eyqwa9f8pf0n98cnknnc3zhsb.ptcins"
   },
   {
     "input": {
@@ -361,21 +560,20 @@
     },
     "split": "withheld",
     "branch": "cursor-cycle",
-    "trace_path": "artifacts/traces/cmd-20hz5f57pxp9ktgcw1vhnj6yck.jsonl",
+    "trace_path": "artifacts/traces/cmd-1wqvxxjg4tc7101evrd8gn3fdx.jsonl",
     "result_hash": "sha256:3eda203e3547524db2fc15b70fa8a92f5eaee727c3293bc739b7732d2a7ff7ab",
     "reached_mutation": false,
-    "run_ref": "cmd-20hz5f57pxp9ktgcw1vhnj6yck",
+    "run_ref": "cmd-1wqvxxjg4tc7101evrd8gn3fdx",
     "variant": "oracle",
-    "duration_ms": 36,
+    "duration_ms": 23,
     "kernel_usage": {
       "subordinate_source_checks": 0,
-      "evaluation_history_bytes": 0,
-      "evaluation_memory_bytes": 0,
       "protocol_errors": 0,
+      "evaluation_history_bytes": 0,
       "subordinate_evaluations": 0,
+      "evaluation_memory_bytes": 0,
       "closed?": true,
       "events_dropped": {},
-      "evaluations_by_mission": {},
       "agent_protocol_errors": 0,
       "capability_calls": {
         "mission": {},
@@ -386,6 +584,7 @@
       "evaluation_busy?": false,
       "evaluation_continuation_bytes": 0,
       "evaluation_missions": [],
+      "evaluations_by_mission": {},
       "llm_budget": {
         "cost": null,
         "total_tokens": null
@@ -393,7 +592,7 @@
       "llm_spend": {
         "state": "empty"
       },
-      "remaining_ms": 9997
+      "remaining_ms": 9998
     },
     "failure_envelope": {
       "details": {
@@ -408,9 +607,9 @@
       "kind": "workflow_failed",
       "reason": "explicit_failure"
     },
-    "bundle_hash": "7d0cbb497d6c689b0ddfef8e5ffea8d621b06cc1175db6279c8bab4d7915b410",
-    "inspection_hash": "6b7df28dd91d3ed3a0f0409fd07d7f153e378fac712517896744dcf7cae56269",
-    "inspection_path": "artifacts/inspection/cmd-20hz5f57pxp9ktgcw1vhnj6yck.ptcins"
+    "bundle_hash": "f3901b7192fa7e46517debffd552b881ce9d65d68872fe511a3bc880b81625bc",
+    "inspection_hash": "5e603e807c580ca507d863d337696d9e26bb74119ee92816fda1ec92229b4d9f",
+    "inspection_path": "artifacts/inspection/cmd-1wqvxxjg4tc7101evrd8gn3fdx.ptcins"
   },
   {
     "input": {
@@ -425,21 +624,20 @@
     },
     "split": "withheld",
     "branch": "missing-page-hash",
-    "trace_path": "artifacts/traces/cmd-71af3jtpy90gfwzhafbc9cf94e.jsonl",
+    "trace_path": "artifacts/traces/cmd-3p6v6cs1thcn2ck2vf6p4htvyb.jsonl",
     "result_hash": "sha256:4b626d99b48200d73a5908132f5fac4cd258c711a7c7202cb079db7a708eb1c3",
     "reached_mutation": false,
-    "run_ref": "cmd-71af3jtpy90gfwzhafbc9cf94e",
+    "run_ref": "cmd-3p6v6cs1thcn2ck2vf6p4htvyb",
     "variant": "oracle",
-    "duration_ms": 31,
+    "duration_ms": 17,
     "kernel_usage": {
       "subordinate_source_checks": 0,
-      "evaluation_history_bytes": 0,
-      "evaluation_memory_bytes": 0,
       "protocol_errors": 0,
+      "evaluation_history_bytes": 0,
       "subordinate_evaluations": 0,
+      "evaluation_memory_bytes": 0,
       "closed?": true,
       "events_dropped": {},
-      "evaluations_by_mission": {},
       "agent_protocol_errors": 0,
       "capability_calls": {
         "mission": {},
@@ -450,6 +648,7 @@
       "evaluation_busy?": false,
       "evaluation_continuation_bytes": 0,
       "evaluation_missions": [],
+      "evaluations_by_mission": {},
       "llm_budget": {
         "cost": null,
         "total_tokens": null
@@ -457,7 +656,7 @@
       "llm_spend": {
         "state": "empty"
       },
-      "remaining_ms": 9997
+      "remaining_ms": 9998
     },
     "failure_envelope": {
       "details": {
@@ -472,9 +671,9 @@
       "kind": "workflow_failed",
       "reason": "explicit_failure"
     },
-    "bundle_hash": "7d0cbb497d6c689b0ddfef8e5ffea8d621b06cc1175db6279c8bab4d7915b410",
-    "inspection_hash": "268ecc5850b43e1eecbaf0aecbf4268029f5b66383969a3a272330fbbc21761c",
-    "inspection_path": "artifacts/inspection/cmd-71af3jtpy90gfwzhafbc9cf94e.ptcins"
+    "bundle_hash": "f3901b7192fa7e46517debffd552b881ce9d65d68872fe511a3bc880b81625bc",
+    "inspection_hash": "35d5073ed4089779cd78f47cd7fc7091e009e67bd58f57e4c1288db2322e4f1b",
+    "inspection_path": "artifacts/inspection/cmd-3p6v6cs1thcn2ck2vf6p4htvyb.ptcins"
   },
   {
     "input": {
@@ -493,21 +692,20 @@
     },
     "split": "visible",
     "branch": "generated-complete",
-    "trace_path": "artifacts/traces/cmd-5sz9zkkrb4qs2gj9agp615957y.jsonl",
+    "trace_path": "artifacts/traces/cmd-7cdz9fhwn5tgcv6476k8z100qk.jsonl",
     "result_hash": "sha256:24f73f2155a7e489967332b5215ba36de94a68342e6e7331454a1c9ac26ade7b",
     "reached_mutation": false,
-    "run_ref": "cmd-5sz9zkkrb4qs2gj9agp615957y",
+    "run_ref": "cmd-7cdz9fhwn5tgcv6476k8z100qk",
     "variant": "oracle",
-    "duration_ms": 20,
+    "duration_ms": 17,
     "kernel_usage": {
       "subordinate_source_checks": 0,
-      "evaluation_history_bytes": 0,
-      "evaluation_memory_bytes": 0,
       "protocol_errors": 0,
+      "evaluation_history_bytes": 0,
       "subordinate_evaluations": 0,
+      "evaluation_memory_bytes": 0,
       "closed?": true,
       "events_dropped": {},
-      "evaluations_by_mission": {},
       "agent_protocol_errors": 0,
       "capability_calls": {
         "mission": {},
@@ -518,6 +716,7 @@
       "evaluation_busy?": false,
       "evaluation_continuation_bytes": 0,
       "evaluation_missions": [],
+      "evaluations_by_mission": {},
       "llm_budget": {
         "cost": null,
         "total_tokens": null
@@ -528,9 +727,9 @@
       "remaining_ms": 9999
     },
     "failure_envelope": null,
-    "bundle_hash": "7d0cbb497d6c689b0ddfef8e5ffea8d621b06cc1175db6279c8bab4d7915b410",
-    "inspection_hash": "84bdd46a37ce653fe114b4081a7add08dadab357d1bab18bd586913810de0ca8",
-    "inspection_path": "artifacts/inspection/cmd-5sz9zkkrb4qs2gj9agp615957y.ptcins"
+    "bundle_hash": "f3901b7192fa7e46517debffd552b881ce9d65d68872fe511a3bc880b81625bc",
+    "inspection_hash": "8c5700618fb0fffec0490e329da6f812b82f92a01473a658e8fba2de382f5149",
+    "inspection_path": "artifacts/inspection/cmd-7cdz9fhwn5tgcv6476k8z100qk.ptcins"
   },
   {
     "input": {
@@ -550,21 +749,20 @@
     },
     "split": "withheld",
     "branch": "generated-complete",
-    "trace_path": "artifacts/traces/cmd-4yc0dafmnd6073asbb8h7m3hbd.jsonl",
+    "trace_path": "artifacts/traces/cmd-49xz19szk4z86ky4gjgq6gc74x.jsonl",
     "result_hash": "sha256:81a33f800b9e9af27bc27659fcbe5d732cc2355ed92ef726ffa3b809c2bc89fa",
     "reached_mutation": false,
-    "run_ref": "cmd-4yc0dafmnd6073asbb8h7m3hbd",
+    "run_ref": "cmd-49xz19szk4z86ky4gjgq6gc74x",
     "variant": "oracle",
-    "duration_ms": 34,
+    "duration_ms": 15,
     "kernel_usage": {
       "subordinate_source_checks": 0,
-      "evaluation_history_bytes": 0,
-      "evaluation_memory_bytes": 0,
       "protocol_errors": 0,
+      "evaluation_history_bytes": 0,
       "subordinate_evaluations": 0,
+      "evaluation_memory_bytes": 0,
       "closed?": true,
       "events_dropped": {},
-      "evaluations_by_mission": {},
       "agent_protocol_errors": 0,
       "capability_calls": {
         "mission": {},
@@ -575,6 +773,7 @@
       "evaluation_busy?": false,
       "evaluation_continuation_bytes": 0,
       "evaluation_missions": [],
+      "evaluations_by_mission": {},
       "llm_budget": {
         "cost": null,
         "total_tokens": null
@@ -582,12 +781,12 @@
       "llm_spend": {
         "state": "empty"
       },
-      "remaining_ms": 9998
+      "remaining_ms": 9999
     },
     "failure_envelope": null,
-    "bundle_hash": "7d0cbb497d6c689b0ddfef8e5ffea8d621b06cc1175db6279c8bab4d7915b410",
-    "inspection_hash": "3d286d4e8bc7aec6de733b639e5daf5cc44f2bcbfe769ee22965538569a66699",
-    "inspection_path": "artifacts/inspection/cmd-4yc0dafmnd6073asbb8h7m3hbd.ptcins"
+    "bundle_hash": "f3901b7192fa7e46517debffd552b881ce9d65d68872fe511a3bc880b81625bc",
+    "inspection_hash": "59b923dc30b3a5da63197bd0d8c826bacc8d4eea56171267b498993b8a07cf00",
+    "inspection_path": "artifacts/inspection/cmd-49xz19szk4z86ky4gjgq6gc74x.ptcins"
   },
   {
     "input": {
@@ -608,21 +807,20 @@
     },
     "split": "visible",
     "branch": "generated-complete",
-    "trace_path": "artifacts/traces/cmd-5nk67hcyre1x0dwkkj73hzkaf6.jsonl",
+    "trace_path": "artifacts/traces/cmd-2hwzaxs43js03gb8kxfjref3je.jsonl",
     "result_hash": "sha256:678784abd20b3a42f0826df6cf8f0d91716cf36cda4cdbc81512de0483411d77",
     "reached_mutation": false,
-    "run_ref": "cmd-5nk67hcyre1x0dwkkj73hzkaf6",
+    "run_ref": "cmd-2hwzaxs43js03gb8kxfjref3je",
     "variant": "oracle",
-    "duration_ms": 24,
+    "duration_ms": 14,
     "kernel_usage": {
       "subordinate_source_checks": 0,
-      "evaluation_history_bytes": 0,
-      "evaluation_memory_bytes": 0,
       "protocol_errors": 0,
+      "evaluation_history_bytes": 0,
       "subordinate_evaluations": 0,
+      "evaluation_memory_bytes": 0,
       "closed?": true,
       "events_dropped": {},
-      "evaluations_by_mission": {},
       "agent_protocol_errors": 0,
       "capability_calls": {
         "mission": {},
@@ -633,6 +831,7 @@
       "evaluation_busy?": false,
       "evaluation_continuation_bytes": 0,
       "evaluation_missions": [],
+      "evaluations_by_mission": {},
       "llm_budget": {
         "cost": null,
         "total_tokens": null
@@ -643,9 +842,9 @@
       "remaining_ms": 9998
     },
     "failure_envelope": null,
-    "bundle_hash": "7d0cbb497d6c689b0ddfef8e5ffea8d621b06cc1175db6279c8bab4d7915b410",
-    "inspection_hash": "6c29dc130d5abc93943890920a01eee6be24bef79257647da030d035c31d194b",
-    "inspection_path": "artifacts/inspection/cmd-5nk67hcyre1x0dwkkj73hzkaf6.ptcins"
+    "bundle_hash": "f3901b7192fa7e46517debffd552b881ce9d65d68872fe511a3bc880b81625bc",
+    "inspection_hash": "c613e0f40b00cc6a0b11060c4c914f9b27f24d68cb0f00463b7d9796f6d79255",
+    "inspection_path": "artifacts/inspection/cmd-2hwzaxs43js03gb8kxfjref3je.ptcins"
   },
   {
     "input": {
@@ -667,21 +866,20 @@
     },
     "split": "withheld",
     "branch": "generated-complete",
-    "trace_path": "artifacts/traces/cmd-0vaafebjtxhacfg7cceces0n17.jsonl",
+    "trace_path": "artifacts/traces/cmd-5y3ak62c5x5xqnag70t3dcwbxn.jsonl",
     "result_hash": "sha256:4ee1af49a9e3f7a8c1e12bed0e6534f7d4c0648934ad8b3ccbaba92bea02a4aa",
     "reached_mutation": false,
-    "run_ref": "cmd-0vaafebjtxhacfg7cceces0n17",
+    "run_ref": "cmd-5y3ak62c5x5xqnag70t3dcwbxn",
     "variant": "oracle",
-    "duration_ms": 32,
+    "duration_ms": 15,
     "kernel_usage": {
       "subordinate_source_checks": 0,
-      "evaluation_history_bytes": 0,
-      "evaluation_memory_bytes": 0,
       "protocol_errors": 0,
+      "evaluation_history_bytes": 0,
       "subordinate_evaluations": 0,
+      "evaluation_memory_bytes": 0,
       "closed?": true,
       "events_dropped": {},
-      "evaluations_by_mission": {},
       "agent_protocol_errors": 0,
       "capability_calls": {
         "mission": {},
@@ -692,6 +890,7 @@
       "evaluation_busy?": false,
       "evaluation_continuation_bytes": 0,
       "evaluation_missions": [],
+      "evaluations_by_mission": {},
       "llm_budget": {
         "cost": null,
         "total_tokens": null
@@ -699,11 +898,11 @@
       "llm_spend": {
         "state": "empty"
       },
-      "remaining_ms": 9997
+      "remaining_ms": 9998
     },
     "failure_envelope": null,
-    "bundle_hash": "7d0cbb497d6c689b0ddfef8e5ffea8d621b06cc1175db6279c8bab4d7915b410",
-    "inspection_hash": "5c8f090b7c4d3e4401bf93a0625e747285fed2deb5dfaad785ee8fc85af4c490",
-    "inspection_path": "artifacts/inspection/cmd-0vaafebjtxhacfg7cceces0n17.ptcins"
+    "bundle_hash": "f3901b7192fa7e46517debffd552b881ce9d65d68872fe511a3bc880b81625bc",
+    "inspection_hash": "23dd161c87662239baee6e6d85a9d97f8c452f943a6e2a544ed63ebd96a33b52",
+    "inspection_path": "artifacts/inspection/cmd-5y3ak62c5x5xqnag70t3dcwbxn.ptcins"
   }
 ]

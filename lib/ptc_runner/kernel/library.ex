@@ -44,8 +44,10 @@ defmodule PtcRunner.Kernel.Library do
   with `(doc "cap/fold-pages")`. `unwrap!` fails the program on an error
   envelope rather than returning it. `fold-pages` is the one traversal helper:
   it reduces page items into bounded caller state, preserves a resumable cursor
-  at its explicit page bound, and rejects changed snapshots or cursor cycles
-  observed within one invocation without retaining source-sized resume history.
+  at its explicit page bound, and rejects cursor cycles within one invocation.
+  Its default snapshot mode rejects changed hashes; cursor-owned mode delegates
+  change detection to the provider without treating page-local hashes as
+  snapshot identities. Neither mode retains source-sized resume history.
 
   `agent.failure` is also `:discoverable`. It is generated from
   `PtcRunner.Kernel.LLMFailureCatalog` and exports one pure `classify`

@@ -161,6 +161,122 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
       assert run(cycle) =~ ":cursor-cycle"
     end
 
+    test "cursor-owned pages resume without treating page-local hashes as snapshots" do
+      source = ~S"""
+      (cap/fold-pages
+        (fn [cursor]
+          (cap/unwrap!
+            {:status :ok :value
+             (if (= cursor "second")
+               {"items" ["c" "d"] "next_cursor" nil "content_hash" "different"}
+               {"items" ["a" "b"] "next_cursor" "second" "content_hash" "first"})}))
+        str
+        ""
+        {"max_pages" 2 "consistency" "cursor"})
+      """
+
+      assert run(source) ==
+               ~S|{"complete?" true "next_cursor" nil "pages" 2 "snapshot_hash" nil "value" "abcd"}|
+
+      resumed =
+        String.replace(
+          source,
+          ~S|{"max_pages" 2 "consistency" "cursor"}|,
+          ~S|{"max_pages" 1 "consistency" "cursor" "cursor" "second"}|
+        )
+
+      assert run(resumed) =~ ~S|"value" "cd"|
+
+      assert run(String.replace(source, ~S|"max_pages" 2|, ~S|"max_pages" 1|)) =~
+               ~S|"complete?" false "next_cursor" "second"|
+
+      assert run(String.replace(source, ":status :ok", ":status :denied")) =~
+               ":__ptc_fail__"
+
+      assert run(String.replace(source, ~S|"consistency" "cursor"|, ~S|"consistency" "unknown"|)) =~
+               ":invalid-consistency"
+    end
+
+    test "cursor-owned traversal still validates pages and detects cursor cycles" do
+      for {page, reason} <- [
+            {~S|{"items" []}|, ":missing-next-cursor"},
+            {~S|{"items" 1 "next_cursor" nil}|, ":invalid-items"},
+            {~S|{"items" [] "next_cursor" ""}|, ":invalid-cursor"},
+            {~S|{"items" [] "next_cursor" "same"}|, ":cursor-cycle"}
+          ] do
+        source = """
+        (cap/fold-pages (fn [_] #{page}) + 0
+          {"max_pages" 2 "consistency" "cursor" "cursor" "same"})
+        """
+
+        assert run(source) =~ reason
+      end
+    end
+
+    test "MCP reference program consumes eight then two items and keeps bounded evidence" do
+      reference = File.read!("docs/reference/mcp.md")
+      [_, source] = Regex.run(~r/\x60{3}clojure\n(\(let \[deadline.*?)\n\x60{3}/s, reference)
+
+      tools =
+        Map.put(discovery_tools(), "read-text-file", %TrustedTool{
+          function: fn arguments ->
+            {offsets, cursor} =
+              if arguments["cursor"] == "second",
+                do: {[16_384, 18_432], nil},
+                else: {Enum.map(0..7, &(&1 * 2048)), "second"}
+
+            items =
+              Enum.map(offsets, fn offset ->
+                %{
+                  "byte_offset" => offset,
+                  "text" => String.duplicate("x", min(2048, 20_000 - offset))
+                }
+              end)
+
+            %{
+              status: :ok,
+              value: %{
+                "items" => items,
+                "next_cursor" => cursor,
+                "content_hash" => if(cursor, do: "first", else: "second")
+              }
+            }
+          end
+        })
+
+      result = run(source, tools: tools)
+      assert result =~ ~S|"complete?" true|
+      assert result =~ ~S|"items" 10|
+      assert result =~ ~S|"text_units" 20000|
+      assert result =~ ~S|"offsets" [0 2048 4096 6144 8192 10240 12288 14336]|
+
+      assert run(String.replace(source, ~S|"max_pages" 80|, ~S|"max_pages" 1|), tools: tools) =~
+               ~S|"complete?" false "next_cursor" "second"|
+
+      assert run(String.replace(source, "(> items 640)", "(> items 9)"), tools: tools) =~
+               ":reducer-bound"
+
+      assert run(String.replace(source, "(> byte-bound 5242880)", "(> byte-bound 1)"),
+               tools: tools
+             ) =~
+               ":reducer-bound"
+
+      assert run(String.replace(source, "20000)", "0)"), tools: tools) =~ ":time-bound"
+
+      fetch = tools["read-text-file"].function
+
+      denied =
+        Map.put(tools, "read-text-file", %TrustedTool{
+          function: fn arguments ->
+            if arguments["cursor"],
+              do: %{status: :denied, reason: :quota},
+              else: fetch.(arguments)
+          end
+        })
+
+      assert run(source, tools: denied) =~ ":__ptc_fail__"
+    end
+
     test "traverses data larger than the old eager collector with constant accumulator state" do
       payload = String.duplicate("x", 1_100)
 

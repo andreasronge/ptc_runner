@@ -113,7 +113,10 @@ version public surface changes.
 
 `cap/fold-pages` is the single shipped traversal helper. It reduces page items
 into caller-owned bounded state, stops at `max_pages`, and returns the opaque
-`next_cursor` plus `snapshot_hash` needed to resume in another evaluation.
+`next_cursor` needed to resume in another evaluation. The default snapshot mode
+also requires a stable `snapshot_hash`; cursor-owned consistency delegates change
+detection to the provider. See [bulk MCP reads](mcp.md#reduce-bulk-reads-inside-one-evaluation)
+for a worked bounded reducer and the two consistency contracts.
 Callers must keep the reducer state bounded; collecting every item merely moves
 the source-size heap problem into the accumulator. Cursor-cycle detection covers
 each bounded invocation; the helper deliberately does not retain an unbounded

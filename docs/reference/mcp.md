@@ -715,6 +715,111 @@ claim. Install the field when the server actually publishes a whole-corpus
 digest; [`ptc-fs-mcp`](https://www.npmjs.com/package/ptc-fs-mcp) does not,
 because it serves live bytes and reports a per-call `content_hash` instead.
 
+## Reduce bulk reads inside one evaluation
+
+Let the model choose the computation, then traverse pages inside one PTC-Lisp
+evaluation. A default `ptc-fs-mcp@0.1.0` `read_text_file` response contains up
+to eight 2,048-byte items. Consume every item before following `next_cursor`;
+the cursor advances past the whole response. Keeping only `(first items)`
+skips bytes.
+
+Select the shipped `cap` component in the mission. Assuming the mission exposes
+the installed tool as `tool/read-text-file`, this program counts text units and
+retains only the first eight evidence offsets. It discards each item's text
+after reduction:
+
+```clojure
+(let [deadline (+ (System/currentTimeMillis) 20000)]
+  (cap/fold-pages
+    (fn [cursor]
+      (if (>= (System/currentTimeMillis) deadline)
+        (fail {:complete? false :kind :incomplete :reason :time-bound})
+        (cap/unwrap!
+          (tool/read-text-file
+            {:path "input.txt" :cursor cursor}))))
+    (fn [state item]
+      (let [text (get item "text")
+            units (.length text)
+            items (inc (get state "items"))
+            byte-bound (+ (get state "byte_upper_bound") (* 4 units))]
+        (if (or (> items 640) (> byte-bound 5242880)
+                (>= (System/currentTimeMillis) deadline))
+          (fail {:complete? false :kind :incomplete :reason :reducer-bound})
+          {"items" items
+           "text_units" (+ (get state "text_units") units)
+           "byte_upper_bound" byte-bound
+           "offsets" (if (< (count (get state "offsets")) 8)
+                       (conj (get state "offsets") (get item "byte_offset"))
+                       (get state "offsets"))})))
+    {"items" 0 "text_units" 0 "byte_upper_bound" 0 "offsets" []}
+    {"max_pages" 80 "consistency" "cursor"}))
+```
+
+Use your installed public name and argument signature. Every fetch unwraps its
+capability envelope before consuming its value, so quota refusal fails the
+program rather than appearing to be end of input. The reducer processes all
+items in order. For a small, declared fixture, replacing the reducer with
+`(fn [text item] (str text (get item "text")))` and initial state `""`
+reconstructs the text across multi-item pages. Do not use that accumulator for
+an unbounded source.
+
+The example's byte counter is a conservative UTF-8 upper bound: four bytes per
+UTF-16 code unit. It is not an exact byte count. State has fixed-size counters
+and at most eight offsets. The helper also retains cursor-cycle history bounded
+by `max_pages`. A page-bound stop returns `"complete?" false` and
+`"next_cursor"`; return that small structured result and treat it as incomplete.
+Resume only while the provider still accepts that cursor, carrying the reduced
+state and remaining budgets forward. Item, byte, or time bounds fail with an
+incomplete reason; they do not offer a cursor for a partially reduced page.
+A host evaluation timeout may interrupt a fetch before the next time check.
+
+### Cursor consistency
+
+`cap/fold-pages` defaults to `"consistency" "snapshot"`: pages must supply a
+stable `snapshot_hash`, and resumption requires the expected hash.
+Use `"consistency" "cursor"` only when the provider's opaque cursor owns change
+detection. In that mode the helper validates cursor shape and cycles, but
+delegates cross-call consistency to the provider and returns a nil
+`snapshot_hash`. Provider failures must still pass through `cap/unwrap!`.
+
+For `ptc-fs-mcp`, `content_hash` covers the bytes returned by one call.
+Its state-bound opaque cursor owns change detection across calls. Never relabel
+that page-local hash as `snapshot_hash`, compare it across pages as a file
+identity, or manufacture a constant snapshot hash.
+
+### Budget calls, live memory, and retained results
+
+At up to 16,384 source bytes per response, 1,280,000 bytes needs roughly
+`ceil(1280000 / 16384) = 79` calls, rather than 625 single-chunk calls.
+UTF-8 boundaries and response fitting can reduce each response, so allow
+headroom and report incomplete traversal at the declared bound.
+
+- `mission_capability_calls` counts all mission calls in the run;
+  `mission_capability_calls_per_name` counts calls to one public name.
+  Defaults are 256 and 128. Reserve calls for other work and earlier evaluations.
+  A selected limit of 60 cannot cover 79 reads.
+- `evaluation_heap_words` bounds live evaluator heap, including the current
+  page, temporary values, reducer state, and cursor history. Its default and
+  installed ceiling are both 1,250,000 words. Raising that ceiling requires
+  both a higher host ceiling and a matching manifest request.
+- `evaluation_memory_bytes` bounds retained mission definitions across
+  successful turns; `evaluation_history_bytes` bounds retained turn history.
+  Defaults are 2,000,000 and 1,000,000 bytes. Avoid binding or returning the
+  entire source; retain only reduced state.
+- `capability_result_bytes` bounds each capability result, including the page
+  envelope and serialization overhead. Its default is 1,000,000 bytes.
+  Size provider pages to fit it; source-byte counts alone are insufficient.
+- `terminal_result_bytes` bounds the encoded terminal workflow or mission-session result. Its default is
+  1,000,000 bytes, so a 1.28 MB source cannot be returned whole at that limit.
+  Return the small aggregate, evidence offsets, completeness, and cursor.
+
+Manifest `limits` may raise defaults only within installed ceilings.
+Increasing any installed ceiling requires the host document's `limits`;
+memory resource decisions belong there. Coordinate page size, call quotas,
+`evaluation_timeout_ms`, and the run deadline before starting the traversal.
+See [Kernel limits](../kernel-limits-reference.md) for exact units and ceilings
+and [host configuration](host-installation.md) for installed policy.
+
 ## Next steps
 
 - [Manifests and capabilities](application-manifest.md) covers mission
