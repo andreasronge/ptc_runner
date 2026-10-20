@@ -157,7 +157,10 @@ backing capability requirements.</p><p><code class="inline">analysis</code> depe
 surface, so fixed profiles pin the complete resolved component list and must
 version public surface changes.</p><p><code class="inline">cap/fold-pages</code> is the single shipped traversal helper. It reduces page items
 into caller-owned bounded state, stops at <code class="inline">max_pages</code>, and returns the opaque
-<code class="inline">next_cursor</code> plus <code class="inline">snapshot_hash</code> needed to resume in another evaluation.
+<code class="inline">next_cursor</code> needed to resume in another evaluation. The default snapshot mode
+also requires a stable <code class="inline">snapshot_hash</code>; cursor-owned consistency delegates change
+detection to the provider. See <a href="/reference/mcp/#reduce-bulk-reads-inside-one-evaluation">bulk MCP reads</a>
+for a worked bounded reducer and the two consistency contracts.
 Callers must keep the reducer state bounded; collecting every item merely moves
 the source-size heap problem into the accumulator. Cursor-cycle detection covers
 each bounded invocation; the helper deliberately does not retain an unbounded

@@ -107,6 +107,34 @@ defmodule PtcRunner.Labs.HelperCorpus do
 
     fold_cases =
       [
+        case_row(
+          %{
+            "pages" => %{
+              "first" => %{
+                "items" => [1, 2],
+                "next_cursor" => "second",
+                "content_hash" => "first"
+              },
+              "second" => %{"items" => [3], "next_cursor" => nil, "content_hash" => "second"}
+            },
+            "opts" => %{"max_pages" => 2, "consistency" => "cursor"}
+          },
+          "cursor-owned-complete",
+          "visible"
+        ),
+        case_row(
+          %{
+            "pages" => %{"second" => %{"items" => [3], "next_cursor" => nil}},
+            "opts" => %{"max_pages" => 1, "consistency" => "cursor", "cursor" => "second"}
+          },
+          "cursor-owned-resume",
+          "withheld"
+        ),
+        case_row(
+          %{"pages" => pages, "opts" => %{"max_pages" => 2, "consistency" => "unknown"}},
+          "invalid-consistency",
+          "visible"
+        ),
         case_row(%{"pages" => pages, "opts" => %{"max_pages" => 2}}, "complete", "visible"),
         case_row(%{"pages" => pages, "opts" => %{"max_pages" => 1}}, "page-bound", "visible"),
         case_row(
