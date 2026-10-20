@@ -1313,6 +1313,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
              get_in(package.manifest, ["contracts", "result_schema", "path"]),
            phase_return_contracts: phase_return_contract_bindings(package),
            result_projection: request.policy.result_projection,
+           forbid_model_dispatch: request.policy.forbid_model_dispatch,
            inspection_sink: inspection_sink,
            provider_session: providers.provider_session,
            connector_snapshots: providers.snapshots,

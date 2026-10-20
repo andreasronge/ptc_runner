@@ -9,9 +9,19 @@ defmodule PtcRunner.Kernel.ApplicationOptions do
                                    [:repl_interactive_loop, :omit_input]
   @memory_acquisition_options @common_acquisition_options ++ [:component_override]
   @directory_request_options @directory_shared_options ++
-                               [:inspection_capture, :result_projection, :event_identity]
+                               [
+                                 :inspection_capture,
+                                 :result_projection,
+                                 :event_identity,
+                                 :forbid_model_dispatch
+                               ]
   @memory_request_options @memory_acquisition_options ++
-                            [:inspection_capture, :result_projection, :event_identity]
+                            [
+                              :inspection_capture,
+                              :result_projection,
+                              :event_identity,
+                              :forbid_model_dispatch
+                            ]
 
   def validate(opts, kind) do
     allowed = allowed(kind)

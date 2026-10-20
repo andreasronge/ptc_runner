@@ -335,7 +335,8 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
   defp adopt_config(state, config) do
     case RunState.start_repl(config.limits, config.event_sink, config.inspection_sink,
            owner: state.repl_pid,
-           run_deadline: config.run_deadline
+           run_deadline: config.run_deadline,
+           forbid_model_dispatch: config.forbid_model_dispatch
          ) do
       {:ok, run_state} -> adopt_started_config(state, config, run_state)
       {:error, reason} -> {:error, reason, state}

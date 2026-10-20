@@ -707,7 +707,8 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   defp start_claimed_session(config, trace_path, owner, token, mode) do
     case RunState.start_repl(config.limits, config.event_sink, config.inspection_sink,
-           run_deadline: config.run_deadline
+           run_deadline: config.run_deadline,
+           forbid_model_dispatch: config.forbid_model_dispatch
          ) do
       {:ok, state} ->
         start_session_with_state(config, state, trace_path, owner, token, mode)

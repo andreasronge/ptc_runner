@@ -4,6 +4,8 @@ defmodule PtcRunner.Kernel.CommandRuntime do
 
   The value contains only VM policy and callbacks. It never contains a host
   document, application source, provider credential, or artifact destination.
+  `forbid_model_dispatch` is a host-only restriction propagated into the sealed
+  request policy. It defaults to false and does not change installed providers.
   Environment setup is invoked only when inert preparation proves that a
   selected installation uses an environment credential.
 
@@ -19,6 +21,7 @@ defmodule PtcRunner.Kernel.CommandRuntime do
   alias PtcRunner.Kernel.Progress
 
   @enforce_keys [
+    :forbid_model_dispatch,
     :provider_application_mode,
     :authorization_targets,
     :authorization_notifier,
@@ -30,6 +33,7 @@ defmodule PtcRunner.Kernel.CommandRuntime do
   @field_keys Enum.sort([:__struct__ | @enforce_keys])
 
   @type t :: %__MODULE__{
+          forbid_model_dispatch: boolean(),
           provider_application_mode: :host_owned | :command_vm,
           authorization_targets: [binary()],
           authorization_notifier: (binary() -> any()) | nil,
@@ -53,6 +57,7 @@ defmodule PtcRunner.Kernel.CommandRuntime do
     if Keyword.keyword?(opts) and
          keys --
            [
+             :forbid_model_dispatch,
              :provider_application_mode,
              :authorization_targets,
              :authorization_notifier,
@@ -60,6 +65,7 @@ defmodule PtcRunner.Kernel.CommandRuntime do
              :progress_setup
            ] == [] and length(keys) == MapSet.size(MapSet.new(keys)) do
       runtime = %__MODULE__{
+        forbid_model_dispatch: Keyword.get(opts, :forbid_model_dispatch, false),
         provider_application_mode: Keyword.get(opts, :provider_application_mode, :host_owned),
         authorization_targets: Keyword.get(opts, :authorization_targets, []),
         authorization_notifier: Keyword.get(opts, :authorization_notifier),
@@ -153,6 +159,7 @@ defmodule PtcRunner.Kernel.CommandRuntime do
       end
 
       new(
+        forbid_model_dispatch: runtime.forbid_model_dispatch,
         provider_application_mode: runtime.provider_application_mode,
         authorization_targets: runtime.authorization_targets,
         authorization_notifier: runtime.authorization_notifier,
@@ -172,6 +179,7 @@ defmodule PtcRunner.Kernel.CommandRuntime do
   def with_progress(%__MODULE__{} = runtime, target) when is_function(target, 2) do
     if valid?(runtime) do
       new(
+        forbid_model_dispatch: runtime.forbid_model_dispatch,
         provider_application_mode: runtime.provider_application_mode,
         authorization_targets: runtime.authorization_targets,
         authorization_notifier: runtime.authorization_notifier,
@@ -187,6 +195,7 @@ defmodule PtcRunner.Kernel.CommandRuntime do
 
   defp fields_valid?(runtime) do
     Enum.sort(Map.keys(runtime)) == @field_keys and
+      is_boolean(runtime.forbid_model_dispatch) and
       runtime.provider_application_mode in [:host_owned, :command_vm] and
       is_list(runtime.authorization_targets) and
       length(runtime.authorization_targets) <= 128 and
@@ -211,6 +220,7 @@ defmodule PtcRunner.Kernel.CommandRuntime do
 
   defp payload(runtime),
     do:
-      {runtime.provider_application_mode, runtime.authorization_targets,
-       runtime.authorization_notifier, runtime.environment_setup, runtime.progress_setup}
+      {runtime.forbid_model_dispatch, runtime.provider_application_mode,
+       runtime.authorization_targets, runtime.authorization_notifier, runtime.environment_setup,
+       runtime.progress_setup}
 end

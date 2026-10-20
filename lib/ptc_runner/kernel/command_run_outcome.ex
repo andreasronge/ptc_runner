@@ -629,6 +629,12 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
     end
   end
 
+  defp failure_diagnostic(
+         %Error{kind: :limit_exceeded, reason: :model_dispatch_forbidden},
+         provider_activity
+       ),
+       do: diagnostic(:execution, :model_dispatch_forbidden, provider_activity)
+
   defp failure_diagnostic(%Error{kind: :limit_exceeded}, provider_activity),
     do: diagnostic(:execution, :runtime_limit_exceeded, provider_activity)
 

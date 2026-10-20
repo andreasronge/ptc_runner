@@ -257,6 +257,15 @@ defmodule PtcRunner.Kernel.Dispatcher do
             invocation.error_attributes
           )
 
+        {:error, :model_dispatch_forbidden} ->
+          Result.limit_error(
+            state,
+            event_sink,
+            :model_dispatch_forbidden,
+            environment,
+            mission_name
+          )
+
         {:error, :live_task_limit} ->
           Result.limit_error(state, event_sink, :live_provider_tasks, environment, mission_name)
 

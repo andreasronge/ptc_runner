@@ -67,6 +67,12 @@ defmodule PtcRunner.Kernel.RunConfig do
   objects but performs no execution and grants no authority beyond the supplied
   environments.
 
+  `forbid_model_dispatch` defaults to false. When true, the first `llm-request`
+  or `decision-request` in either environment ends the run with
+  `:model_dispatch_forbidden` before
+  provider dispatch, even if Lisp ignores the returned capability envelope.
+  Other capability effects remain available.
+
   `inspect_only` is a compile-and-inspect session flag. When true, Kernel,
   provider, and capability routes fail closed; public `PtcRunner.Lisp.run/2`
   cannot set it. An environment assembled with `inspect_only: true` is
@@ -129,6 +135,7 @@ defmodule PtcRunner.Kernel.RunConfig do
     labels: %{},
     run_started_metadata: %{},
     progress_sink: nil,
+    forbid_model_dispatch: false,
     inspect_only: false
   ]
 
@@ -155,6 +162,7 @@ defmodule PtcRunner.Kernel.RunConfig do
           labels: map(),
           run_started_metadata: map(),
           progress_sink: Progress.sink() | nil,
+          forbid_model_dispatch: boolean(),
           inspect_only: boolean()
         }
 
@@ -188,6 +196,7 @@ defmodule PtcRunner.Kernel.RunConfig do
                :labels,
                :component_overrides,
                :progress_sink,
+               :forbid_model_dispatch,
                :inspect_only
              ] !=
              [],
@@ -226,6 +235,7 @@ defmodule PtcRunner.Kernel.RunConfig do
            is_nil(Keyword.get(opts, :progress_sink)) or
              is_function(Keyword.get(opts, :progress_sink), 2),
          true <- Keyword.get(opts, :inspect_only, false) in [true, false],
+         true <- is_boolean(Keyword.get(opts, :forbid_model_dispatch, false)),
          true <-
            inspect_only_environments_allowed?(
              Keyword.get(opts, :inspect_only, false),
@@ -271,6 +281,7 @@ defmodule PtcRunner.Kernel.RunConfig do
          labels: labels,
          run_started_metadata: run_started_metadata,
          progress_sink: Keyword.get(opts, :progress_sink),
+         forbid_model_dispatch: Keyword.get(opts, :forbid_model_dispatch, false),
          inspect_only: Keyword.get(opts, :inspect_only, false)
        }}
     else

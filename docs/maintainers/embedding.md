@@ -270,9 +270,12 @@ mix ptc.repair ptc.json \
   --origin-run-id debugger-run-id
 ```
 
-Materialization executes nothing. To run a bounded behavioral trial, the host
-must separately supply exact cases and acknowledge that installed providers may
-have effects:
+Materialization executes nothing. To run a bounded behavioral trial, supply
+exact cases. Trials forbid model dispatch by default: the first `llm-request`
+or `decision-request` ends the trial with `model_dispatch_forbidden`, reported
+as `refused` rather
+than a candidate failure. Other installed provider effects remain possible.
+Add `--allow-live-validation` only to opt in to model calls and their costs:
 
 ```console
 mix ptc.repair ptc.json \

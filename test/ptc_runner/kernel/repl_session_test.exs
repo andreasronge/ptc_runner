@@ -488,7 +488,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     # load it measured 1.2 s, 2.2 s and 4.5 s, which is what expired the 2 s
     # budget this test used to carry.
     assert_receive {:foreign_config, foreign_config}, 10_000
-    foreign_sink_ref = Process.monitor(foreign_config.event_sink.pid)
+    foreign_sink_ref = monitor_live_sink(foreign_config.event_sink)
     assert {:error, :session_owner_mismatch} = ReplSession.new(config: foreign_config)
     assert Process.alive?(foreign_config.event_sink.pid)
     refute_receive :foreign_config_resource_closed
@@ -709,13 +709,13 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
           )
 
         {:ok, _session} = ReplSession.new(config: config)
-        send(parent, {:owner_exit_session, sink.pid, self()})
+        send(parent, {:owner_exit_session, sink, self()})
         receive do: (:finish -> :ok)
         :ok
       end)
 
-    assert_receive {:owner_exit_session, sink_pid, creator_pid}
-    sink_ref = Process.monitor(sink_pid)
+    assert_receive {:owner_exit_session, %EventSink{pid: sink_pid} = sink, creator_pid}
+    sink_ref = monitor_live_sink(sink)
     send(creator_pid, :finish)
     assert :ok = Task.await(creator)
     assert_receive {:DOWN, ^sink_ref, :process, ^sink_pid, :normal}
@@ -1541,7 +1541,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
 
     {:ok, session} = ReplSession.new(config: config)
     sink_pid = sink.pid
-    ref = Process.monitor(sink_pid)
+    ref = monitor_live_sink(sink)
     assert {:ok, _events} = ReplSession.close(session)
     assert_receive {:DOWN, ^ref, :process, ^sink_pid, :normal}
     assert :ets.lookup(session.access, session.id) == []
@@ -1563,7 +1563,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, limits} = Limits.new(normal_event_count: 3)
     {:ok, private_sink} = EventSink.start(:private, limits, run_id: "repl-constructor")
     failed_pid = private_sink.pid
-    failed_ref = Process.monitor(failed_pid)
+    failed_ref = monitor_live_sink(private_sink)
 
     for _index <- 1..2 do
       :ok = EventSink.emit(private_sink, "run-started", %{missions: %{}})
@@ -1893,6 +1893,14 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
   defp owned_owner(%ReplSession{access: access, id: id}) do
     [{^id, {owner, _token}}] = :ets.lookup(access, id)
     owner
+  end
+
+  defp monitor_live_sink(%EventSink{pid: pid} = sink) do
+    ref = Process.monitor(pid)
+    # Monitor setup is asynchronous. A round trip to the same sink orders
+    # that signal before another process can be allowed to tear it down.
+    assert {:ok, _owner} = EventSink.owner(sink)
+    ref
   end
 
   defp owned_resources(%ReplSession{access: access, id: id}) do
